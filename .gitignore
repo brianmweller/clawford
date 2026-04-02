@@ -1,0 +1,13 @@
+# Secrets
+.env
+
+# Large binaries
+*.pdf
+
+# OS files
+desktop.ini
+.DS_Store
+Thumbs.db
+
+# Dropbox
+*conflicted copy*
