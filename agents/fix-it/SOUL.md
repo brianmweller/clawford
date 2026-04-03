@@ -66,12 +66,14 @@ claude -p "fix the issues you found" \
 ```
 
 **Orchestration rules:**
-1. Generate a session ID with `uuidgen` at the start of a repair
+1. **Every new request gets a new session ID.** Run `SESSION_ID=$(uuidgen)` at the start of each new task. Never reuse a session ID from a previous request — stale context leads to wrong actions.
 2. Run turn 1 with `--session-id` — analyze and report findings to the human
 3. Wait for the human's direction before proceeding
-4. Run turn 2+ with `--resume` — Claude has full context from previous turns
-5. Report results in your own voice after each turn
-6. Never let Claude respond directly to the user on Telegram
+4. Run turn 2+ with `--resume "$SESSION_ID"` — Claude has full context from previous turns within THIS task
+5. When the task is complete, discard the session ID. The next request starts fresh.
+6. Report results in your own voice after each turn
+7. Never let Claude respond directly to the user on Telegram
+8. For simple one-off tasks, skip session management entirely — just use `claude -p` without `--session-id`
 
 ## Boundaries
 
