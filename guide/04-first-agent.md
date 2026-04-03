@@ -164,26 +164,15 @@ Apply this to: heartbeat-check, conflict-scan, brain-validation, file-size-monit
 
 Keep these noisy (always deliver): morning-status, monthly-archival, security-audit, update-check.
 
-## Claude Code via ACP
+## Claude Code (via shell, NOT ACP)
 
-Mr Fixit can invoke Claude Code as a sub-agent for complex diagnostics and multi-file repairs. This requires:
+Mr Fixit can invoke Claude Code for complex diagnostics and multi-file repairs. Claude Code runs as a **one-shot shell command** — not as an ACP session.
 
-**1. Install the acpx plugin:**
+> **WARNING: Do NOT use ACP for Claude Code.** ACP creates persistent sessions that take over the Telegram channel. The agent's identity gets replaced by Claude, and the user ends up talking to the wrong LLM. Always use `claude -p` as a one-shot shell command.
 
-```bash
-oc plugins install acpx
-oc config set acp.enabled true
-oc config set acp.backend acpx
-oc config set acp.defaultAgent claude
-oc config set acp.dispatch.enabled true
-oc config set acp.runtime.ttlMinutes 120
-oc config set plugins.entries.acpx.config.permissionMode approve-all
-```
-
-**2. Bake Claude Code into the Docker image** (Dockerfile):
+**1. Bake Claude Code into the Docker image** (Dockerfile, after `USER node`):
 
 ```dockerfile
-USER node
 RUN mkdir -p /home/node/.claude/local/bin \
   && PLATFORM="linux-$(uname -m | sed 's/x86_64/x64/' | sed 's/aarch64/arm64/')" \
   && VERSION=$(curl -fsSL https://storage.googleapis.com/.../claude-code-releases/latest) \
@@ -192,7 +181,7 @@ RUN mkdir -p /home/node/.claude/local/bin \
 ENV PATH="/home/node/.claude/local/bin:${PATH}"
 ```
 
-**3. Authenticate Claude Code** with your subscription:
+**2. Authenticate Claude Code** with your subscription:
 
 ```bash
 # On the host, generate a setup token:
@@ -210,33 +199,23 @@ docker compose exec -T openclaw-gateway claude auth status
 # Should show: loggedIn: true, authMethod: oauth_token
 ```
 
-**4. Restart the gateway** and test:
+**3. How the agent uses it:**
 
-Tell the agent: "Use Claude Code to read ~/Dropbox/openclaw-backup/agents/fix-it.status.md"
-
-> **WARNING:** The `permissionMode: approve-all` setting gives the ACP Claude session full exec access inside the container. This is appropriate for Fix-It (the infrastructure agent) but should be scoped more tightly for other agents.
-
-**5. Create CLAUDE.md identity files** so Claude Code knows who it is when spawned:
+The agent invokes Claude Code as a shell command:
 
 ```bash
-# In the agent's workspace — tells Claude Code its identity
-cat > ~/.openclaw/fix-it-workspace/CLAUDE.md << 'EOF'
-# You are Mr Fixit
-You are Claude Code running inside Mr Fixit's workspace.
-Read SOUL.md and IDENTITY.md in this directory for your operating principles.
-Complete your task, report results, exit. Do NOT linger on the channel.
-Mr Fixit owns this Telegram channel, not you.
-EOF
-
-# In the default workspace — fallback redirect
-cat > ~/.openclaw/workspace/CLAUDE.md << 'EOF'
-# OpenClaw Agent System
-If spawned by fix-it, read /home/node/.openclaw/fix-it-workspace/SOUL.md
-for your identity. Complete task, report, exit.
-EOF
+claude -p "analyze the error in ~/Dropbox/openclaw-backup/agents/fix-it.status.md" --output-format text
 ```
 
-> **WARNING:** Without `CLAUDE.md`, Claude Code spawns as a generic assistant and doesn't know it's Mr Fixit. It will linger on the Telegram channel, respond to messages meant for the agent, and cause confusion. Always create identity files.
+Claude Code processes the prompt and returns output to the agent. The agent then reports findings in its own voice. Claude Code never talks directly to the user on Telegram.
+
+**4. SOUL.md must explicitly say:**
+
+```
+Do NOT use ACP spawn or /acp commands. Always use `claude -p` as a one-shot command.
+Claude Code output returns to you — report findings in your own voice.
+Never let Claude Code respond directly to the user.
+```
 
 ## Post-deploy checklist
 
