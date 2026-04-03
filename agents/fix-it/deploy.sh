@@ -113,16 +113,17 @@ echo ""
 
 echo "Step 5: Registering 9 crons..."
 
-# 1. Heartbeat — every 30 minutes
+# 1. Heartbeat — every 30 minutes (SILENT on all-clear)
 oc cron add \
   --agent fix-it \
   --name "heartbeat-check" \
   --cron "*/30 * * * *" \
   --to "$TELEGRAM_CHAT_ID" \
   --account "$TELEGRAM_ACCOUNT" \
-  --announce \
-  --message "Read all agent status files in ~/Dropbox/openclaw-backup/agents/. For each agent, check if last_heartbeat is older than 90 minutes. If any agent is unhealthy, check their process with openclaw agents list and attempt restart. Update your own status file with current heartbeat. Only message me on Telegram if an agent is down."
-echo "  [1/9] heartbeat-check"
+  --no-deliver \
+  --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
+  --message "Read all agent status files in ~/Dropbox/openclaw-backup/agents/. For each agent, check if last_heartbeat is older than 90 minutes. Update your own status file with current heartbeat. If ALL agents are healthy: update the status file silently and produce NO output — do not send any message. If any agent is unhealthy or down: send me a Telegram message describing which agent is unhealthy and what you found."
+echo "  [1/9] heartbeat-check (silent on all-clear)"
 
 # 2. Morning status — daily at 06:00 UTC
 oc cron add \
@@ -135,38 +136,41 @@ oc cron add \
   --message "Compile a morning status report. Read all agent status files, run python3 ~/Dropbox/openclaw-backup/scripts/validate.py, check for Dropbox conflicts with find ~/Dropbox/openclaw-backup/ -name '*conflicted copy*' -type f, and note any open alerts. Send the full report to me on Telegram. Use the format from CRONS.md."
 echo "  [2/9] morning-status"
 
-# 3. Brain validation — every 6 hours
+# 3. Brain validation — every 6 hours (SILENT on pass)
 oc cron add \
   --agent fix-it \
   --name "brain-validation" \
   --cron "0 */6 * * *" \
   --to "$TELEGRAM_CHAT_ID" \
   --account "$TELEGRAM_ACCOUNT" \
-  --announce \
-  --message "Run: python3 ~/Dropbox/openclaw-backup/scripts/validate.py. If it passes, log success to your status file silently. If it fails, log the errors and send me the failures on Telegram immediately."
-echo "  [3/9] brain-validation"
+  --no-deliver \
+  --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
+  --message "Run: python3 ~/Dropbox/openclaw-backup/scripts/validate.py. If validation PASSES: update your status file silently and produce NO output. If validation FAILS: send me a Telegram message with the specific failures immediately."
+echo "  [3/9] brain-validation (silent on pass)"
 
-# 4. Dropbox conflict scan — every 2 hours
+# 4. Dropbox conflict scan — every 2 hours (SILENT on clean)
 oc cron add \
   --agent fix-it \
   --name "conflict-scan" \
   --cron "0 */2 * * *" \
   --to "$TELEGRAM_CHAT_ID" \
   --account "$TELEGRAM_ACCOUNT" \
-  --announce \
-  --message "Run: find ~/Dropbox/openclaw-backup/ -name '*conflicted copy*' -type f. If any files are found, alert me on Telegram immediately with the filenames. Do NOT attempt to merge. If none found, log clean to status file silently."
-echo "  [4/9] conflict-scan"
+  --no-deliver \
+  --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
+  --message "Run: find ~/Dropbox/openclaw-backup/ -name '*conflicted copy*' -type f. If NO conflicts found: update your status file silently and produce NO output. If conflicts ARE found: send me a Telegram message with the filenames. Do NOT attempt to merge."
+echo "  [4/9] conflict-scan (silent on clean)"
 
-# 5. File size monitor — daily at 12:00 UTC
+# 5. File size monitor — daily at 12:00 UTC (SILENT on clean)
 oc cron add \
   --agent fix-it \
   --name "file-size-monitor" \
   --cron "0 12 * * *" \
   --to "$TELEGRAM_CHAT_ID" \
   --account "$TELEGRAM_ACCOUNT" \
-  --announce \
-  --message "Run: find ~/Dropbox/openclaw-backup/ -type f -size +500k. If any files exceed 500KB, send me the filenames and sizes on Telegram. Otherwise, silent."
-echo "  [5/9] file-size-monitor"
+  --no-deliver \
+  --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
+  --message "Run: find ~/Dropbox/openclaw-backup/ -type f -size +500k. If NO large files found: update your status file silently and produce NO output. If large files ARE found: send me a Telegram message with the filenames and sizes."
+echo "  [5/9] file-size-monitor (silent on clean)"
 
 # 6. Monthly archival — 1st of each month at 03:00 UTC
 oc cron add \
@@ -201,16 +205,17 @@ oc cron add \
   --message "Run: openclaw update. Report current version and whether an update is available on Telegram. Do NOT apply updates automatically. Wait for my confirmation."
 echo "  [8/9] update-check"
 
-# 9. Self-check — daily at midnight UTC
+# 9. Self-check — daily at midnight UTC (SILENT on pass)
 oc cron add \
   --agent fix-it \
   --name "cron-self-check" \
   --cron "0 0 * * *" \
   --to "$TELEGRAM_CHAT_ID" \
   --account "$TELEGRAM_ACCOUNT" \
-  --announce \
-  --message "Run: openclaw cron list. Verify all 9 fix-it crons are registered (heartbeat-check, morning-status, brain-validation, conflict-scan, file-size-monitor, monthly-archival, security-audit, update-check, cron-self-check). If any are missing, attempt to re-register them. If self-repair fails, alert me on Telegram."
-echo "  [9/9] cron-self-check"
+  --no-deliver \
+  --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
+  --message "Run: openclaw cron list. Verify all 9 fix-it crons are registered (heartbeat-check, morning-status, brain-validation, conflict-scan, file-size-monitor, monthly-archival, security-audit, update-check, cron-self-check). Filter the output visually for fix-it entries. If all 9 are present: update your status file silently and produce NO output. If any are missing: attempt to re-register them and send me a Telegram message."
+echo "  [9/9] cron-self-check (silent on pass)"
 
 echo ""
 

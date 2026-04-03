@@ -8,17 +8,19 @@ Your first agent will hit every obstacle. That's why Fix-It is first — it moni
 
 Mr Fixit is the IT admin of your agent network. It runs 9 scheduled cron jobs:
 
-| Cron | Frequency | Purpose |
-|------|-----------|---------|
-| Heartbeat check | Every 30 min | Monitor all agent status files |
-| Morning status | Daily 06:00 UTC | Full status report on Telegram |
-| Brain validation | Every 6 hours | Run `validate.py` |
-| Dropbox conflict scan | Every 2 hours | Find conflict files |
-| File size monitor | Daily 12:00 UTC | Flag files >500KB |
-| Monthly archival | 1st of month | Archive stale facts and done tasks |
-| Security audit | Weekly Sunday | Run `openclaw security audit --deep` |
-| Update check | Weekly Wednesday | Check for OpenClaw updates |
-| Cron self-check | Daily midnight | Verify all 9 crons are registered |
+| Cron | Frequency | Telegram |
+|------|-----------|----------|
+| Heartbeat check | Every 30 min | Silent on all-clear, alerts on unhealthy agent |
+| Morning status | Daily 06:00 UTC | Always (your daily briefing) |
+| Brain validation | Every 6 hours | Silent on pass, alerts on failure |
+| Dropbox conflict scan | Every 2 hours | Silent on clean, alerts on conflict |
+| File size monitor | Daily 12:00 UTC | Silent on clean, alerts on large file |
+| Monthly archival | 1st of month | Always (reports what was archived) |
+| Security audit | Weekly Sunday | Always (reports findings) |
+| Update check | Weekly Wednesday | Always (reports version) |
+| Cron self-check | Daily midnight | Silent on pass, alerts on missing crons |
+
+Routine checks use `--no-deliver` + `--failure-alert` so you only get notified when something needs attention. Reports (morning status, archival, security, updates) always deliver.
 
 ## Step 1: Create a Telegram bot
 
