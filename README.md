@@ -42,14 +42,18 @@ openclaw-agents/
     └── setup-tests.sh
 ```
 
-## Setup
+## Setup Guide
+
+Start here: **[guide/index.md](guide/index.md)** — a 10-chapter field manual covering VPS provisioning, shared brain, Dropbox sync, agent deployment, testing, and security hardening. Every command battle-tested.
+
+Quick start:
 
 ```bash
 cp .env.example .env
 # Fill in Telegram bot tokens and chat ID
 ```
 
-See [DEPLOY.md](DEPLOY.md) for the full deployment walkthrough.
+See also [DEPLOY.md](DEPLOY.md) for the per-agent deployment reference.
 
 ## Security
 
