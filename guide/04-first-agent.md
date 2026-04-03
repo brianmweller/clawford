@@ -246,8 +246,51 @@ Report Claude's findings in your own voice. Never let Claude respond directly.
 - [ ] Telegram message arrives from Mr Fixit bot
 - [ ] SOUL.md and IDENTITY.md are immutable: `lsattr ~/.openclaw/fix-it-workspace/SOUL.md`
 - [ ] Silent crons configured: routine checks don't notify on all-clear
-- [ ] ACP/Claude Code working: agent can spawn Claude Code sessions
+- [ ] Claude Code working: agent can invoke `claude -p` and report findings in its own voice
 - [ ] Claude Code authenticated: `docker compose exec -T openclaw-gateway claude auth status` shows `loggedIn: true`
+- [ ] Agent knows who it is: "Who are you?" → answers as Mr Fixit, not generic assistant
+
+---
+
+## Troubleshooting: The Identity Crisis
+
+This section documents problems we hit and solved. You may encounter them too.
+
+### Agent responds as a generic assistant
+
+**Symptom:** You message the bot and it says "I'm your assistant" or "I'm Claude" instead of identifying as Mr Fixit.
+
+**Cause 1 — Wrong Telegram routing:** Messages go to the `main` agent (shared workspace with generic files) instead of `fix-it` (per-agent workspace with SOUL.md). Check: `oc sessions --active 5 --all-agents` — if the session shows `agent:main:main`, routing is broken.
+
+**Fix:** The agent's Telegram bot must be the `default` account (with token in `TELEGRAM_BOT_TOKEN` env var). Named accounts show "not configured" and don't receive inbound messages. Update the binding to `accountId: "default"`.
+
+**Cause 2 — BOOTSTRAP.md overrides identity:** The shared workspace may contain a `BOOTSTRAP.md` that tells the agent to figure out its identity from scratch. This overrides SOUL.md.
+
+**Fix:** Delete `BOOTSTRAP.md` from the agent's workspace and the shared workspace. The agent reads SOUL.md and IDENTITY.md directly.
+
+### ACP hijacks the Telegram channel
+
+**Symptom:** After using Claude Code via ACP, ALL subsequent messages go to Claude (Sonnet) instead of Mr Fixit (GPT-5.4). The agent says "I'm Claude, an AI assistant made by Anthropic."
+
+**Cause:** ACP creates persistent sessions bound to the Telegram thread via `~/.openclaw/telegram/thread-bindings-*.json`. `/stop`, `/new`, `/reset` do NOT unbind — they reset the ACP session but keep the thread binding.
+
+**Fix:** 
+1. Clear thread bindings: `echo '{"version":1,"bindings":[]}' > ~/.openclaw/telegram/thread-bindings-default.json`
+2. Disable ACP: `oc config set acp.enabled false` (or `acp.dispatch.enabled false`)
+3. Use `claude -p` (shell) instead of ACP for Claude Code invocation
+4. Restart the gateway
+
+### Claude Code can't access the brain
+
+**Symptom:** Mr Fixit invokes Claude Code but it says "access blocked — outside allowed working directory."
+
+**Fix:** Add `--add-dir ~/Dropbox/openclaw-backup/` to every `claude -p` invocation. Without it, Claude Code is sandboxed to the workspace directory.
+
+### Claude Code session bleeds between requests
+
+**Symptom:** Mr Fixit uses `--resume` from a previous request's session, giving Claude stale context for a new task.
+
+**Fix:** SOUL.md must say: "Every new request gets a new session ID via `uuidgen`. Never reuse. Simple one-off tasks skip `--session-id` entirely."
 
 ---
 
