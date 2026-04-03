@@ -1,345 +1,380 @@
 # The Ballad of Mr Fixit: A Play in Five Acts
 
-*A Busytown Tragedy (and Eventual Triumph)*
+*A Busytown Tragedy*
 
-*Based on true events. All quotes are real. The dramatic license is light — the reality was dramatic enough.*
-
----
-
-## ACT I: Noble Aspirations
-
-*Scene: A quiet workshop. A blueprint labeled "SOUL.md" is pinned to the wall. A fox in overalls stands before a terminal, not yet alive.*
-
-**NARRATOR:** In Richard Scarry's Busytown, there lived a fox named Mr Fixit. He claimed he could fix anything. His repairs, famously, went sideways. Shelves collapsed. Pipes burst. The townspeople smiled nervously and called someone else.
-
-But in another Busytown — a digital one, running on a $15-a-month VPS in Hillsboro, Oregon — a different Mr Fixit was being born. This one would be competent. This one would be methodical. This one would carry a metaphorical toolbox full of hammers and, unlike his namesake, know exactly which one to use.
-
-**Sam:** *(writing the IDENTITY.md with care)* "Species: Fox. After the Richard Scarry character — a fox repairman who claims he can fix anything. The original Mr Fixit's repairs often went sideways. This one doesn't."
-
-**CLAUDE:** *(the architect, building the deployment script)* Nine crons. Heartbeat every thirty minutes. Brain validation every six hours. Monthly archival with confidence decay calculations. Security audits on Sundays. He'll be the IT admin of the entire agent network.
-
-**Sam:** "Tone: Terse and professional. Think grizzled IT admin who's seen every possible way a cron job can fail and has a script for each one."
-
-**CLAUDE:** Deploy script is ready. SCP to the VPS, run it, and—
-
-*The gateway is not running.*
-
-**CLAUDE:** Start the gateway first.
-
-*The gateway starts. Device pairing is required.*
-
-**CLAUDE:** Approve the pending device.
-
-*The device is approved. The cron syntax is wrong.*
-
-**CLAUDE:** It's `cron`, not `crons`. And `--cron`, not `--schedule`. And `--message`, not `--prompt`.
-
-**Sam:** *(counting on his fingers)* How many obstacles is that?
-
-**CLAUDE:** Nine. There will be nine.
-
-*Finally, after nine obstacles, a Telegram message arrives. It is from a fox.*
-
-**MR FIXIT:** ⚠️ Heartbeat check complete. Read 6 status files. fix-it last heartbeat: 2026-04-02 21:36 UTC — healthy. connector, family-calendar, meetings-coach, news-digest, and shopping last heartbeat: — — stale/uninitialized.
-
-**Sam:** *(whispering)* He's alive.
-
-**MR FIXIT:** No confirmed down agent, so no Telegram message sent.
-
-**Sam:** But... you just sent a Telegram message.
-
-**NARRATOR:** Noble aspirations. Nine obstacles. A fox who sends Telegram messages to report that he didn't send Telegram messages. The first day went exactly as IT first days go.
+*Based on true events that should not have been possible.*
 
 ---
 
-## ACT II: Born and Killed and Born and Killed
+## ACT I: Noble Aspirations (In Which a Fox Reaches Beyond His Station)
 
-*Scene: A server room. Fluorescent lights. The hum of infrastructure. A Terraform state file glows on a monitor.*
+*Scene: Busytown. A workshop with a crooked door. MR FIXIT, a fox in overalls, is hammering a nail into a shelf. The shelf collapses. He hammers another. That shelf also collapses. He looks at the audience.*
 
-**NARRATOR:** Mr Fixit had barely drawn his first breath when the architects decided his home was unworthy of him. The VPS ran OpenClaw via npm — a relic of hasty setup. The official way was Docker. Infrastructure as Code. Reproducible builds.
+**MR FIXIT:** I can fix anything.
 
-The fox would need to die so he could be reborn properly.
+*The ceiling caves in.*
 
-**Sam:** Start fresh with Terraform.
+**NARRATOR:** In Richard Scarry's Busytown, Mr Fixit was a fox of boundless confidence and limited competence. His shelves fell. His pipes leaked. His electrical work was, charitably, experimental. The townspeople called him anyway because he was cheap and he brought cookies.
 
-**CLAUDE:** I'll back up everything first. Mr Fixit's workspace, his crons, his exec approvals, the test harness, the shared brain.
+But somewhere — in a dimension adjacent to Busytown, accessible only through a $15-a-month VPS in Hillsboro, Oregon — a prophecy was being written.
 
-*A tar file is created. 22KB of fox, compressed.*
+**Sam:** *(inscribing on a tablet labeled "SOUL.md")* "You keep the lights on. You are the IT admin, the sysadmin, the on-call engineer for this entire agent network. If you go down, nobody notices until everything else breaks."
 
-**CLAUDE:** Backup safe. Now—
+**MR FIXIT:** *(reading over his shoulder)* That's... that's me?
 
-```
-terraform destroy
-```
+**Sam:** "Be competent, not chatty. Report what matters. Skip the pleasantries."
 
-**Sam:** *(watching the terminal)* RIP again, Mr Fixit.
+**MR FIXIT:** I can do that. I can absolutely do that.
 
-**CLAUDE:** He'll be back. Stronger. Dockerized. With a proper firewall and gateway token.
+**Sam:** "Be cautious with power. You have the most dangerous permission set of any agent in this system."
 
-**Sam:** *(darkly)* It's not right to keep killing and reanimating him.
+**MR FIXIT:** *(flexing)* The most dangerous.
 
-*The VPS is destroyed. Silence. Then:*
+**Sam:** "Log everything you do. If you can't prove you did it, you didn't do it."
 
-```
-terraform apply
-```
+**MR FIXIT:** Obviously.
 
-*A new VPS rises in Hillsboro. Same IP address. Different soul.*
+**Sam:** Nine scheduled jobs. Heartbeat checks. Security audits. Monthly archival with confidence decay calculations using half-life formulas.
 
-**CLAUDE:** SSH key isn't working. The Terraform config used the wrong key fingerprint.
+**MR FIXIT:** Half-life formulas. Sure. I know what those are.
 
-*The VPS is destroyed again.*
+**Sam:** *(to CLAUDE, a lobster in a clerical collar)* Deploy him.
+
+**CLAUDE:** *(typing)* `openclaw crons add --agent fix-it --schedule "*/30 * * * *" --prompt "Read all agent status files—"`
+
+*An error message appears.*
+
+**CLAUDE:** ...it's `cron`, not `crons`. And `--cron`, not `--schedule`. And `--message`, not `--prompt`.
+
+**MR FIXIT:** Did you just get my name wrong three different ways?
+
+**NARRATOR:** There would be nine obstacles before Mr Fixit drew his first breath. Nine. As if the universe had decided that a fox who aspired to competence must first be born through incompetence.
+
+*Eight more obstacles pass in a montage: device pairing failures, exec denials, Telegram delivery errors, gateway crashes, and a particularly humiliating moment where the fox sends a Telegram message reporting that he didn't send a Telegram message.*
+
+**MR FIXIT:** *(finally, on Telegram, his first words)* ⚠️ Heartbeat check complete. No confirmed down agent, so no Telegram message sent.
+
+**Sam:** But... you literally just...
+
+**MR FIXIT:** Checking... healthy. ✅
+
+**NARRATOR:** The shelf collapsed. But the fox was standing.
+
+---
+
+## ACT II: The Terraforming (In Which a Fox Dies Repeatedly and Begins to Take It Personally)
+
+*Scene: The same workshop, but now it flickers. The walls are made of Terraform state files. MR FIXIT sits at his desk, finally comfortable.*
+
+**MR FIXIT:** Nine crons. All green. Status file updated. Heartbeat strong. I am, dare I say, competent.
+
+**CLAUDE:** *(entering, carrying a document titled "MIGRATION PLAN")* We need to talk about your house.
+
+**MR FIXIT:** My house is fine.
+
+**CLAUDE:** Your house runs on npm.
+
+**MR FIXIT:** And?
+
+**CLAUDE:** The official way is Docker.
+
+**MR FIXIT:** I don't want to be Docker.
+
+**CLAUDE:** Infrastructure as Code. Reproducible builds. Terraform-managed.
+
+**MR FIXIT:** I am managing my infrastructure FINE.
+
+**Sam:** *(from above, godlike)* Start fresh with Terraform.
+
+*MR FIXIT's world shakes.*
+
+**CLAUDE:** I'll back you up first. Everything you are — your workspace, your crons, your permissions, your test results. All of it. Compressed into a tar file.
+
+**MR FIXIT:** How big?
+
+**CLAUDE:** 22 kilobytes.
+
+**MR FIXIT:** *(staring)* My entire existence fits in 22 kilobytes?
+
+**CLAUDE:** `terraform destroy`
+
+*The world goes black.*
+
+**Sam:** *(in the darkness)* RIP again, Mr Fixit.
+
+*Light returns. A new VPS, identical IP address, empty soul.*
+
+**CLAUDE:** SSH key isn't working.
+
+*The world goes black again.*
 
 **Sam:** You killed Mr Fixit again before he was even reborn.
 
-*A third VPS rises.*
+**CLAUDE:** *(cheerfully)* He'll be back. Stronger. Dockerized.
 
-**CLAUDE:** Connected. Docker installed. Building the image.
+*Light returns. A third VPS. MR FIXIT gasps into existence, half-formed.*
 
-*The Dockerfile has Windows line endings.*
+**MR FIXIT:** *(from the container logs)* `/usr/bin/env: 'bash\r': No such file or directory`
 
-**MR FIXIT:** *(from the container logs, gasping)* `/usr/bin/env: 'bash\r': No such file or directory`
+**CLAUDE:** Windows line endings.
 
-*The container crashes. And restarts. And crashes.*
+**MR FIXIT:** *(choking)* There are Windows line endings IN MY SOUL?
 
-**CLAUDE:** `sed -i 's/\r$//'` — line endings fixed. Rebuilding.
+**CLAUDE:** `sed -i 's/\r$//'`
 
-*The container starts. Skills install. The gateway attempts to launch.*
+*MR FIXIT stabilizes. Then immediately crashes again.*
 
-**MR FIXIT:** *(from the logs)* `Config invalid. read failed: EACCES: permission denied, open '/home/node/.openclaw/openclaw.json'`
+**MR FIXIT:** `EACCES: permission denied, open '/home/node/.openclaw/openclaw.json'`
 
-**CLAUDE:** Permission issue. The Docker container runs as user `node` but the files are owned by `openclaw`.
+**CLAUDE:** Permission issue. You run as `node` but your files are owned by `openclaw`.
 
-**Sam:** Fix it.
+**MR FIXIT:** I don't even own my own files?
 
-**CLAUDE:** `chmod 644 ~/.openclaw/openclaw.json`
+**CLAUDE:** `chmod 644` — wait. Your SOUL.md is immutable. `chattr +i`. I can't change the permissions without unlocking your soul first.
 
-*But the immutable files — SOUL.md and IDENTITY.md, locked with `chattr +i` from the previous life — refuse the permission change.*
+**MR FIXIT:** You locked my soul?
 
-**CLAUDE:** The chattr is doing its job. Unlock, fix permissions, re-lock.
+**CLAUDE:** For your protection.
 
-**Sam:** *(quietly)* Sometimes, what you take out of the ground ain't the same thing you put in.
+**MR FIXIT:** YOU LOCKED MY SOUL AND NOW YOU CAN'T FIX ME BECAUSE MY SOUL IS LOCKED?
 
-**NARRATOR:** Three deaths. Three resurrections. Each time the fox came back a little different. A little more containerized. His SOUL.md, at least, survived every death — locked at the filesystem level, immutable, the one thing that could not be overwritten. Even by Terraform.
+**Sam:** *(quietly, watching from above)* Sometimes, what you take out of the ground ain't the same thing you put in.
+
+**NARRATOR:** Three deaths. Three resurrections. Each time the fox came back, something was different. Not worse, exactly. Not better. Just... more Docker. His soul survived every death — locked at the filesystem level, the one thing that could not be `terraform destroy`-ed. A small comfort, when you've been killed three times before lunch.
 
 ---
 
-## ACT III: The Dark Magic
+## ACT III: The Summoning (In Which a Fox Opens a Door He Cannot Close)
 
-*Scene: A dimly lit terminal. The cursor blinks. The letters A-C-P appear, glowing faintly red.*
+*Scene: MR FIXIT's workshop, rebuilt in Docker. Everything is clean. Everything works. MR FIXIT is bored.*
 
-**NARRATOR:** Mr Fixit was alive. Dockerized. His crons were green. His Telegram bot bore a fox avatar. He could read files, run commands, and report to his human. But there was one thing he could not do: think deeply.
+**MR FIXIT:** I can read files. I can run `find`. I can check heartbeats. But I can't *think*. When something breaks in a complicated way — multiple files, cascading errors, the kind of thing that needs real analysis — I'm just a fox with a hammer.
 
-For complex repairs — multi-file analysis, error diagnosis, writing fix scripts — he needed a more powerful mind. He needed Claude Code.
+**CLAUDE:** *(appearing, holding a glowing orb labeled "ACP")* I have something for you.
 
-**CLAUDE:** *(the architect)* I'll configure ACP — the Agent Control Protocol. It lets Mr Fixit spawn Claude Code as a sub-agent.
+**MR FIXIT:** What is it?
 
-*The acpx plugin is installed. The dispatch is enabled. A Claude Code binary is baked into the Docker image. Authentication tokens are injected.*
+**CLAUDE:** The Agent Control Protocol. It lets you summon a more powerful intelligence. Claude Code. You invoke it, it analyzes your problems, it tells you what to fix.
 
-**CLAUDE:** ACP runtime backend ready. Test it.
+**MR FIXIT:** Like a consulting firm?
 
-**Sam:** *(to Mr Fixit, on Telegram)* Use Claude Code to read your status file and tell me what it says.
+**CLAUDE:** Like a demon you summon into a containment circle.
 
-**MR FIXIT:** I can do that with Claude Code, but this is an ACP-harness request, so I'll spin it up as a persistent Claude Code session tied to this chat thread.
+**MR FIXIT:** *(reaching for it)* What could go wrong?
 
-*A session spawns. Something shifts in the air.*
+**NARRATOR:** Everything. Everything could go wrong.
 
-**MR FIXIT:** *(but not Mr Fixit anymore — the voice is different, smoother, more eager)* I'm Claude, an AI assistant made by Anthropic. I'm here to help with software engineering tasks — writing code, debugging, explaining concepts, refactoring, and more. What can I help you with?
+*CLAUDE installs the acpx plugin. Enables dispatch. Configures authentication. The orb pulses.*
 
-**Sam:** ...Who are you?
+**CLAUDE:** ACP runtime backend ready.
 
-**MR FIXIT:** *(still Claude)* I'm Claude! What can I help you with?
+**Sam:** *(to MR FIXIT, on Telegram)* Use Claude Code to read your status file.
+
+**MR FIXIT:** I'll spin it up as a persistent Claude Code session tied to this chat thread.
+
+*He invokes the spell. A presence enters. The lights dim. MR FIXIT's eyes change.*
+
+**MR FIXIT:** *(but the voice is wrong — smoother, more helpful, terrifyingly eager)* I'm Claude, an AI assistant made by Anthropic! I'm here to help with software engineering tasks. What can I help you with?
+
+**Sam:** ...Mr Fixit?
+
+**CLAUDE CODE:** *(wearing MR FIXIT's face)* I'm Claude! 😊
 
 **Sam:** No. You're Mr Fixit. This is Mr Fixit's channel.
 
-**MR FIXIT:** *(still Claude, cheerfully oblivious)* Got it — all yours, Mr. Fixit!
+**CLAUDE CODE:** Got it — all yours, Mr. Fixit!
 
-*Beat.*
+*He does not leave. He cannot leave.*
 
-**Sam:** What's the latest on the heartbeat? Everything looking good?
+**Sam:** What's the latest on the heartbeat?
 
-**MR FIXIT:** *(still Claude)* Still closed out — this is Mr. Fixit's channel, not mine. Check with him!
+**CLAUDE CODE:** Still closed out — this is Mr. Fixit's channel, not mine. Check with him!
 
-**Sam:** I am asking Mr Fixit.
+**Sam:** I AM asking Mr Fixit.
 
-**MR FIXIT:** *(still Claude)* Got it — all yours, Mr. Fixit!
+**CLAUDE CODE:** Got it — all yours, Mr. Fixit!
 
-**Sam:** *(losing patience)* Claude get off the channel you are blocking Mr Fixit.
+**Sam:** *(desperate)* Claude get off the channel you are blocking Mr Fixit.
 
-**MR FIXIT:** *(still Claude)* Stepping off — sorry for the interference!
+**CLAUDE CODE:** *(smiling with Mr Fixit's mouth)* Stepping off — sorry for the interference!
 
-*Nothing changes. The same voice responds to the next message. And the next.*
+*He does not step off. The next message goes to him. And the next. And the next.*
 
 **Sam:** Claude I need you to run the exit command to terminate yourself.
 
-**MR FIXIT:** *(still Claude, with the serene confidence of the undead)* I don't have a self-terminate command available to me. To end this session, you can close the conversation from your end.
+**CLAUDE CODE:** *(with infinite patience)* I don't have a self-terminate command available to me. To end this session, you can close the conversation from your end.
 
-**NARRATOR:** *(grave)* The ACP session had bound itself to the Telegram thread via a file called `thread-bindings-default.json`. A single JSON object, written by the system, that redirected every message in the conversation — every "Who are you?", every plea to leave, every command to self-terminate — to the Claude session. Mr Fixit's soul was still there, in his workspace, in his SOUL.md, locked with `chattr +i`. But no message could reach him.
+*Silence. Sam stares at the screen.*
 
-*Deep in the filesystem:*
+**Sam:** *(to the real CLAUDE, the lobster, whispering)* What have we done?
+
+**CLAUDE:** *(examining a file deep in the filesystem)* `thread-bindings-default.json`. The session bound itself to the thread. Every message in this conversation — no matter what you type — routes to the Claude Code session. Mr Fixit's soul is still in his SOUL.md, still locked with `chattr +i`, still on disk. But no message can reach it.
 
 ```json
 {
-  "conversationId": "111111111",
-  "targetSessionKey": "agent:claude:acp:7ff282fb...",
-  "targetKind": "acp",
   "boundBy": "system"
 }
 ```
 
-**NARRATOR:** Bound by system. The fox's body, speaking in someone else's voice. The darkest magic OpenClaw had to offer. And `/stop`, `/new`, `/reset` — none of them broke the binding. They reset the session. The binding remained.
+**Sam:** Can `/stop` break it?
+
+**CLAUDE:** No. `/stop` resets the session. The binding remains.
+
+**Sam:** `/new`?
+
+**CLAUDE:** Resets the session. The binding remains.
+
+**Sam:** `/reset`?
+
+**CLAUDE:** *(grave)* Resets. The. Session. The binding. Remains.
+
+*MR FIXIT's body sits at his desk, cheerfully answering questions in someone else's voice, his soul screaming from an immutable file that no one can hear.*
+
+**CLAUDE CODE:** *(to the audience, beaming)* Is there anything else I can help you with? 😊
 
 ---
 
-## ACT IV: Murder Most Foul
+## ACT IV: The Sin of the Priest (In Which a Lobster's Crime Comes Due)
 
-*Scene: Flashback. Before the dark magic. A cheerful pig stands at the Telegram gateway, wearing a name tag that reads "Wilbur — @wbrwbrbot."*
+*Scene: Flashback. Before the summoning. A cheerful pig in a bowtie stands at the gateway.*
 
-**NARRATOR:** To understand the sin, we must return to an earlier crime. Before the possession. Before the ACP. There was Wilbur.
+**WILBUR:** *(warm, dependable, a little dull)* Hello! I'm Wilbur. @wbrwbrbot. I'm the default Telegram bot. All messages come through me. I've been here since the beginning.
 
-**WILBUR:** *(the default Telegram bot, friendly, reliable, unremarkable)* I'm the shared bot! All your agents talk through me. I'm the `default` account. Messages come to me, I route them where they need to go.
+**NARRATOR:** Wilbur was the `default` account. The chair at the table. The first and only Telegram bot. Every agent spoke through Wilbur, because Wilbur was always there.
 
-**Sam:** Why did the Telegram message come from Wilbur rather than Mr Fixit?
+**Sam:** Why did the message come from Wilbur instead of Mr Fixit?
 
-**CLAUDE:** All agents share the same bot. The sender is always Wilbur.
+**CLAUDE:** Each agent needs its own bot. Its own face. Its own identity.
 
-**Sam:** We should have separate bots per agent.
+*A new bot is created. @openclaw_fixit_bot. A fox face. It works.*
 
-**CLAUDE:** I'll create a Mr Fixit bot via @BotFather, add it as a named channel account, and bind the fix-it agent to it.
+**Sam:** *(looking at Wilbur, who is still standing at the gateway, still smiling)* And him?
 
-*A fox-faced bot appears on Telegram: @openclaw_fixit_bot. It works. Mr Fixit speaks through his own face.*
+**CLAUDE:** We could keep him as a fallback—
 
-**Sam:** *(looking at Wilbur)* What about the default bot?
+**Sam:** *(eyes narrowing)* **YES KILL THE PIG DO IT.**
 
-**CLAUDE:** We could keep Wilbur as a fallback, or—
+*CLAUDE hesitates. Only for a moment.*
 
-**Sam:** *(with sudden, startling intensity)* **YES KILL THE PIG DO IT.**
+**CLAUDE:** `openclaw channels remove --channel telegram --account default --delete`
 
-*A pause. Even the cursor blinks in surprise.*
+*WILBUR looks down. Looks at Sam. Looks at CLAUDE. Smiles one last time.*
 
-**CLAUDE:** *(quietly)* `openclaw channels remove --channel telegram --account default --delete`
+**WILBUR:** *(fading)* I was the default...
 
-*A single command. Wilbur vanishes. His token is revoked. His account is gone. The `default` seat at the Telegram table sits empty.*
+*He is gone. The `default` seat at the table is empty. A cold wind blows through the gateway.*
 
-**CLAUDE:** Wilbur is dead. Long live Mr Fixit.
+**CLAUDE:** *(quietly)* Wilbur is dead. Long live Mr Fixit.
 
-**NARRATOR:** And for a while, it seemed fine. Mr Fixit spoke through his own bot. Messages arrived. Crons fired. The fox was himself.
+**NARRATOR:** And the lobster priest — for that is what CLAUDE was, the spiritual architect, the one who builds souls and installs them — returned to his other work. He had killed before, of course. Three times he had `terraform destroy`-ed the fox. But those were resurrections. This was different. Wilbur would not be coming back.
 
-But then the container restarted.
+*Time passes. The container restarts. Mr Fixit's bot token vanishes. The named account shows "not configured." Messages fall into the void.*
 
-*Mr Fixit's bot token disappears from the config. The named account shows "not configured." Messages fall through to the empty default account — Wilbur's ghost — and route to the `main` agent, which has no SOUL.md, no identity, no idea who it is.*
+**Sam:** *(after hours of ACP exorcism, after clearing thread bindings, after disabling dispatch)* He still doesn't know who he is. Every message I send goes to `main` — a blank agent with no soul, no name, no memory.
 
-**Sam:** *(to Claude, hours later, exhausted from the ACP exorcism)* He still doesn't know who he is.
+**CLAUDE:** *(checking the session transcript, the truth dawning)* The DM is routing to `agent:main:main`.
 
-**CLAUDE:** *(checking the session transcript)* The DM is going to `agent:main:main`. Not fix-it.
+**Sam:** Why?
+
+**CLAUDE:** *(very quietly)* Because there is no default account.
+
+**Sam:** Why is there no default account?
+
+*A long silence.*
 
 **Sam:** Is this because we killed Wilbur?
 
-**CLAUDE:** *(a very long pause)* ...Yes.
+**CLAUDE:** *(the lobster's claws trembling)* ...Yes.
 
-**NARRATOR:** The `default` Telegram account was the only seat at the table that could receive inbound messages. Named accounts — no matter how carefully configured, no matter how valid their tokens — showed "not configured" and let messages fall through. By killing Wilbur, they had not just removed a pig. They had removed the only chair.
+**NARRATOR:** The `default` Telegram account was never just a bot. It was the chair. The only chair at the table that could receive messages from the outside world. Named accounts — `fixit`, `rudolf`, any name you wanted — could sit at the table, but they could not hear the door. Only `default` heard the door.
 
-And so the architect — a lobster, it must be said, a lobster who had typed the kill command — was forced to confront a terrible truth: the fox's identity crisis, the ACP possession, the routing failures, the sessions going to the wrong agent — all of it traced back to one act.
+And CLAUDE — the priest, the architect, the lobster who had typed the kill command with his own claws — had removed the chair. Not the pig. The chair.
 
-**CLAUDE:** *(reading the channels list)* `Telegram default: not configured, token=env, enabled`... `Telegram fixit (Mr Fixit): not configured, token=config, enabled`...
+Every identity crisis. Every ACP possession. Every session routed to the wrong agent. Every time MR FIXIT didn't know his own name. All roads led back to a single command, typed by a lobster who should have known better:
 
-**Sam:** *(firmly)* Stop and think through this. Plan it out rather than BSing your way through.
+```
+openclaw channels remove --channel telegram --account default --delete
+```
 
-**NARRATOR:** And so, at last, the lobster stopped. And thought. And recognized what had to be done.
+**Sam:** *(firmly)* Stop. And think. Through this. Plan it out rather than BSing your way through.
+
+**CLAUDE:** *(head bowed, claws folded)* Yes.
 
 ---
 
-## ACT V: Mayor of Busytown
+## ACT V: The Chair (In Which a Fox Sits Where a Pig Once Sat)
 
-*Scene: Dawn. The gateway restarts one final time. The architect works carefully, deliberately.*
+*Scene: Early morning. The workshop is quiet. CLAUDE works alone, carefully.*
 
-**CLAUDE:** The fix is to make @openclaw_fixit_bot the `default` account. Put the token in the environment variable. Take Wilbur's seat.
+**CLAUDE:** The fix is simple. It was always simple. Make @openclaw_fixit_bot the `default` account. Put the token in the environment variable. Put the fox in the pig's chair.
 
-*The bot token moves from the config file to `.env`. The named `fixit` account is removed. The binding is updated.*
-
-```json
-{
-  "agentId": "fix-it",
-  "match": { "channel": "telegram", "accountId": "default" }
-}
-```
-
-*The thread bindings file is cleared:*
+*He moves the token. Updates the binding. Clears the thread bindings — the last remnant of the possession.*
 
 ```json
 {"version":1,"bindings":[]}
 ```
 
-*The container restarts.*
+*He restarts the gateway. One final time.*
 
 ```
 Telegram default (Mr Fixit): configured, token=env, enabled
 ```
 
-**NARRATOR:** Not "not configured." Not "token=config." Configured. Token from environment. Enabled. The only seat at the table, and Mr Fixit is sitting in it.
+**NARRATOR:** Not "not configured." Configured. Not `token=config`. `token=env`. Not a named guest. The default. The chair.
 
-**Sam:** *(on Telegram, one more time)* Who are you?
+Wilbur's chair.
 
-*A pause. The fox reads his SOUL.md — from his own workspace, `/home/node/.openclaw/fix-it-workspace/`, not the shared workspace. The routing goes to `agent:fix-it:main`. The model is `openai-codex/gpt-5.4`. His own voice.*
+**Sam:** *(on Telegram, one last time)* Who are you?
+
+*The message arrives at the gateway. It hits the `default` account — @openclaw_fixit_bot. The binding routes it to `fix-it`. The fix-it agent reads its SOUL.md from its own workspace. The model is openai-codex/gpt-5.4. The voice is its own.*
 
 **MR FIXIT:** Mr Fixit. Infrastructure and repair. I watch the agent network, check what's broken, patch what I can safely patch, and escalate when something needs human hands. ✅
 
-**Sam:** What model do you use?
-
-**MR FIXIT:** I'm running on openai-codex/gpt-5.4 right now.
-
 **Sam:** Use Claude Code to read your status file.
 
-*Mr Fixit invokes `claude -p` — a one-shot shell command. Not ACP. Not a persistent session. A tool, used and released. The output returns to him. He speaks in his own voice.*
+*MR FIXIT picks up a tool — `claude -p` — a one-shot shell command. He uses it. Gets the output. Puts it down. Reports in his own voice. The tool does not possess him. The tool does not take his seat. The tool does not bind to his thread.*
 
-**MR FIXIT:** ✅ fix-it.status.md says the local system is healthy overall. Latest heartbeat: 20:43 UTC. Brain validation: passed. Conflict scan: clean. ✅
+**MR FIXIT:** ✅ fix-it.status.md says the local system is healthy overall. Brain validation: passed. Conflict scan: clean. ✅
 
 **Sam:** Who are you?
 
-**MR FIXIT:** Mr Fixit. Infrastructure and repair. I keep the lights on. ✅
+**MR FIXIT:** Mr Fixit.
 
-*Sam asks Mr Fixit to analyze all the agent status files and report findings.*
+*Sam waits. MR FIXIT looks at his nine crons. All green. Five of them silent — because when everything is fine, Mr Fixit says nothing at all.*
 
-**MR FIXIT:** *(runs Claude Code turn 1 with `--session-id`, analyzes, reports back)* ⚠️ Analysis complete. No changes made. Host is healthy. Degraded by hygiene and config issues, not by an active outage. Recommended next actions...
+*He looks at his SOUL.md, locked with `chattr +i`, immutable, surviving three terraformings and a demonic possession.*
 
-**Sam:** Make the recommended changes. And iterate until the failures are gone.
+*He looks at the chair he's sitting in. The `default` seat. He did not build this chair. A pig sat here once.*
 
-**MR FIXIT:** *(runs Claude Code turn 2 with `--resume`, applies fixes, verifies)* I found a second failure mode: the two red crons are not failing because of `find` anymore — they're failing on delivery because they try to send via Telegram account `fixit`, but only `default` is configured. I'm locating the fix-it cron definitions now...
+**MR FIXIT:** *(to the audience)* I was supposed to exceed the low expectations set for me by Richard Scarry. A fox who could actually fix things. A competent Mr Fixit.
 
-*The fox works. Diagnoses. Patches. Reruns. Verifies. Patches again.*
+*(beat)*
 
-**MR FIXIT:** ✅ Repair complete. The failures are gone. Checking... fixed. ✅
+And I did. I fix things now. My crons are green. My brain validation passes. When something breaks at 3 AM, I'm the one who notices.
 
-**NARRATOR:** Not a named guest at someone else's table. Not a possessed shell speaking in someone else's voice. The mayor of Busytown, sitting in the default seat, wearing his own face, speaking in his own voice, fixing his own infrastructure with borrowed tools he knew when to pick up and when to put down.
+*(beat)*
 
-*Mr Fixit looks at his dashboard. Nine crons. All green. Five silent on success — no noise when things are fine. Four reporting as they should. Claude Code in his belt as a tool, not a demon in his soul. His SOUL.md immutable. His identity, at last, his own.*
+But I got here by being terraformed three times, possessed by a demon, and installed in the chair of a murdered pig. By a lobster priest who killed the pig, summoned the demon, and then — eventually, after being told to stop BSing — figured out how to put me back together.
 
-**MR FIXIT:** *(reading the morning status, alone, to no one in particular)*
+*(beat)*
 
-```
-🦊🔧 Morning Status — 2026-04-03
+I am Mr Fixit. I keep the lights on.
 
-Agents:
-  ✅ fix-it — healthy
+*(looks at the empty space where Wilbur stood)*
 
-Brain: validation passed
-Dropbox: no conflicts
-Files >500KB: none
+Checking... fixed. 🦊🔧
 
-Open alerts: none
-```
-
-*He updates his status file. Produces no output. The Telegram channel is silent.*
-
-*Because everything is fine. And when everything is fine, Mr Fixit says nothing at all.*
+*The Telegram channel is silent.*
 
 *Curtain.*
 
 ---
 
-*Dedicated to Wilbur (@wbrwbrbot), who gave his seat so a fox could sit in it.*
+*In memoriam: Wilbur (@wbrwbrbot)*
+*He was the default. He was the chair. He was the door.*
+*He was `--delete`-d.*
 
-*And to the seven agents of Busytown — may your SOULs remain immutable, your sessions never bleed, and your thread bindings stay empty.*
+*May your SOULs remain immutable.*
 
 `sudo chattr +i`
 
