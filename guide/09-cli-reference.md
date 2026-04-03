@@ -196,6 +196,28 @@ oc agents delete {agent-name}
 # Brain is untouched — agents only append, never destructively edit
 ```
 
+## Automating with Claude Code
+
+If you use Claude Code locally for development, it can SSH and SCP to the VPS directly — no need to manually paste commands into PowerShell. Once SSH key auth is configured (Chapter 1), Claude Code can:
+
+```bash
+# Run commands on the VPS
+ssh -i ~/.ssh/id_ed25519 openclaw@{server_ip} "oc health"
+
+# Transfer files to the VPS
+scp -i ~/.ssh/id_ed25519 agents/fix-it/deploy.sh openclaw@{server_ip}:/tmp/
+
+# Edit config in place on the VPS
+ssh -i ~/.ssh/id_ed25519 openclaw@{server_ip} "python3 -c '...'"
+
+# Restart containers
+ssh -i ~/.ssh/id_ed25519 openclaw@{server_ip} "cd ~/openclaw && docker compose restart"
+```
+
+The **only** things that still require your manual SSH session are interactive commands like `oci agents add` (agent onboarding) and `claude login` (auth flow). Everything else — file transfers, config changes, container management, test runs — can be automated.
+
+> **TIP:** If you're using Claude Code as your development tool, tell it to SSH/SCP directly rather than giving you commands to paste. It has key-based access and can do it faster.
+
 ---
 
 Back to [Index](index.md)

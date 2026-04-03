@@ -33,7 +33,7 @@ oci() { docker compose -f ~/openclaw/docker-compose.yml exec -it openclaw-gatewa
 
 ## Step 0: Transfer Files to VPS
 
-From your local machine (PowerShell):
+From your local machine (or Claude Code — it has SSH key access and can SCP directly):
 
 ```bash
 scp -i ~/.ssh/id_ed25519 \
