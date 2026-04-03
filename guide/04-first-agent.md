@@ -216,6 +216,28 @@ Tell the agent: "Use Claude Code to read ~/Dropbox/openclaw-backup/agents/fix-it
 
 > **WARNING:** The `permissionMode: approve-all` setting gives the ACP Claude session full exec access inside the container. This is appropriate for Fix-It (the infrastructure agent) but should be scoped more tightly for other agents.
 
+**5. Create CLAUDE.md identity files** so Claude Code knows who it is when spawned:
+
+```bash
+# In the agent's workspace — tells Claude Code its identity
+cat > ~/.openclaw/fix-it-workspace/CLAUDE.md << 'EOF'
+# You are Mr Fixit
+You are Claude Code running inside Mr Fixit's workspace.
+Read SOUL.md and IDENTITY.md in this directory for your operating principles.
+Complete your task, report results, exit. Do NOT linger on the channel.
+Mr Fixit owns this Telegram channel, not you.
+EOF
+
+# In the default workspace — fallback redirect
+cat > ~/.openclaw/workspace/CLAUDE.md << 'EOF'
+# OpenClaw Agent System
+If spawned by fix-it, read /home/node/.openclaw/fix-it-workspace/SOUL.md
+for your identity. Complete task, report, exit.
+EOF
+```
+
+> **WARNING:** Without `CLAUDE.md`, Claude Code spawns as a generic assistant and doesn't know it's Mr Fixit. It will linger on the Telegram channel, respond to messages meant for the agent, and cause confusion. Always create identity files.
+
 ## Post-deploy checklist
 
 - [ ] Agent registered: `oc agents list` shows fix-it
