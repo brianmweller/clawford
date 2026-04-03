@@ -81,6 +81,38 @@ oc approvals allowlist add --agent fix-it "/usr/local/bin/*"
 
 Without an allowlist, agents cannot execute any shell commands in cron context.
 
+### Telegram exec approvals (safe mode)
+
+Agents can request shell command approval via Telegram DM. Two config layers prevent a race condition between the allowlist and the approval UI:
+
+1. **`exec-approvals.json`** — allowlist with `security: "allowlist"`, `ask: "on-miss"`. Crons auto-approve from the allowlist. No Telegram prompt.
+
+2. **`openclaw.json`** — `approvals.exec` with `sessionFilter: ["telegram"]`. Only interactive Telegram sessions trigger approval prompts. Cron sessions (ID contains "cron") are excluded.
+
+```json
+{
+  "approvals": {
+    "exec": {
+      "enabled": true,
+      "mode": "targets",
+      "sessionFilter": ["telegram"],
+      "targets": [{"channel": "telegram", "to": "{chatId}", "accountId": "{agent-id}"}]
+    }
+  }
+}
+```
+
+Also add to `channels.telegram`:
+
+```json
+"allowFrom": ["{chatId}"],
+"execApprovals": {"enabled": true, "approvers": ["{chatId}"]}
+```
+
+> **WARNING:** Without `sessionFilter`, the allowlist and Telegram approval fire simultaneously for the same command, causing a "Failed to submit approval" race condition ([OpenClaw #30924](https://github.com/openclaw/openclaw/issues/30924)). Always use `sessionFilter` to separate cron and interactive contexts.
+
+> **WARNING:** `execApprovals.enabled` must be boolean `true`, not string `"auto"` — a string value crashes the gateway.
+
 ### Per-agent Telegram bots
 
 Each agent has its own bot (Chapter 5). This prevents one agent from impersonating another and makes it clear which agent sent each message.
