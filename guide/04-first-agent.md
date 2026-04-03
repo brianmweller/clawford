@@ -146,6 +146,76 @@ These are the obstacles we hit during the first deployment. You may hit them too
 9. **Gateway not running** — All operations fail. Check: `oc health`. Fix: `cd ~/openclaw && docker compose up -d`
 10. **SCP'ing `openclaw.json` wipes agent registrations** — Agent registrations, bindings, and channel accounts are stored in `openclaw.json`. Never overwrite it from a local copy after agents are registered. Always pull the live version first: `ssh ... "cat ~/.openclaw/openclaw.json" > local.json`
 
+## Silent crons
+
+Routine health checks shouldn't wake you up. Use `--no-deliver` + `--failure-alert` on crons where "all clear" is boring:
+
+```bash
+oc cron edit {heartbeat-id} \
+  --no-deliver \
+  --failure-alert \
+  --failure-alert-to {chatId} \
+  --failure-alert-account-id {agent-id} \
+  --failure-alert-channel telegram \
+  --message "...If ALL agents are healthy: update the status file silently and produce NO output. If any agent is unhealthy: send me a Telegram message..."
+```
+
+Apply this to: heartbeat-check, conflict-scan, brain-validation, file-size-monitor, cron-self-check.
+
+Keep these noisy (always deliver): morning-status, monthly-archival, security-audit, update-check.
+
+## Claude Code via ACP
+
+Mr Fixit can invoke Claude Code as a sub-agent for complex diagnostics and multi-file repairs. This requires:
+
+**1. Install the acpx plugin:**
+
+```bash
+oc plugins install acpx
+oc config set acp.enabled true
+oc config set acp.backend acpx
+oc config set acp.defaultAgent claude
+oc config set acp.dispatch.enabled true
+oc config set acp.runtime.ttlMinutes 120
+oc config set plugins.entries.acpx.config.permissionMode approve-all
+```
+
+**2. Bake Claude Code into the Docker image** (Dockerfile):
+
+```dockerfile
+USER node
+RUN mkdir -p /home/node/.claude/local/bin \
+  && PLATFORM="linux-$(uname -m | sed 's/x86_64/x64/' | sed 's/aarch64/arm64/')" \
+  && VERSION=$(curl -fsSL https://storage.googleapis.com/.../claude-code-releases/latest) \
+  && curl -fsSL -o /home/node/.claude/local/bin/claude ".../releases/${VERSION}/${PLATFORM}/claude" \
+  && chmod +x /home/node/.claude/local/bin/claude
+ENV PATH="/home/node/.claude/local/bin:${PATH}"
+```
+
+**3. Authenticate Claude Code** with your subscription:
+
+```bash
+# On the host, generate a setup token:
+claude setup-token
+
+# Add to .env (on VPS):
+echo 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oXXX' >> ~/openclaw/.env
+
+# Add to docker-compose.yml environment:
+CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+
+# Restart and verify:
+docker compose up -d
+docker compose exec -T openclaw-gateway claude auth status
+# Should show: loggedIn: true, authMethod: oauth_token
+```
+
+**4. Restart the gateway** and test:
+
+Tell the agent: "Use Claude Code to read ~/Dropbox/openclaw-backup/agents/fix-it.status.md"
+
+> **WARNING:** The `permissionMode: approve-all` setting gives the ACP Claude session full exec access inside the container. This is appropriate for Fix-It (the infrastructure agent) but should be scoped more tightly for other agents.
+
 ## Post-deploy checklist
 
 - [ ] Agent registered: `oc agents list` shows fix-it
@@ -156,6 +226,9 @@ These are the obstacles we hit during the first deployment. You may hit them too
 - [ ] Cron fires and updates status file
 - [ ] Telegram message arrives from Mr Fixit bot
 - [ ] SOUL.md and IDENTITY.md are immutable: `lsattr ~/.openclaw/fix-it-workspace/SOUL.md`
+- [ ] Silent crons configured: routine checks don't notify on all-clear
+- [ ] ACP/Claude Code working: agent can spawn Claude Code sessions
+- [ ] Claude Code authenticated: `docker compose exec -T openclaw-gateway claude auth status` shows `loggedIn: true`
 
 ---
 
