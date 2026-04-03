@@ -20,6 +20,11 @@ cat > "$BASE/test-lib.sh" << 'TESTLIB'
 
 BRAIN="$HOME/Dropbox/openclaw-backup"
 TEST_PREFIX="__TEST__"
+
+# OpenClaw CLI wrapper — runs through Docker
+oc() {
+    docker compose -f "$HOME/openclaw/docker-compose.yml" exec -T openclaw-gateway openclaw "$@"
+}
 POLL_INTERVAL=10
 POLL_TIMEOUT=180
 BACKUP_DIR="/tmp/openclaw-test-backup"
@@ -93,7 +98,7 @@ restore_test_file() {
 
 get_cron_id() {
     local cron_name="$1"
-    openclaw cron list 2>/dev/null | grep -E "^\S+\s+${cron_name}\s" | awk '{print $1}' | head -1
+    oc cron list 2>/dev/null | grep -E "^\S+\s+${cron_name}\s" | awk '{print $1}' | head -1
 }
 
 trigger_cron() {
@@ -105,7 +110,7 @@ trigger_cron() {
         return 1
     fi
     echo "  Trigger: $cron_name (ID: $cron_id)"
-    openclaw cron run "$cron_id" 2>/dev/null > /dev/null || true
+    oc cron run "$cron_id" 2>/dev/null > /dev/null || true
     echo "$cron_id"
 }
 
@@ -115,7 +120,7 @@ send_direct_message() {
     local tmp_name="${TEST_PREFIX}direct-msg-$(date +%s)"
 
     local output
-    output=$(openclaw cron add \
+    output=$(oc cron add \
         --agent "$agent" \
         --name "$tmp_name" \
         --cron "0 0 1 1 *" \
@@ -133,13 +138,13 @@ send_direct_message() {
     fi
 
     echo "  Direct message via cron $job_id"
-    openclaw cron run "$job_id" 2>/dev/null > /dev/null || true
+    oc cron run "$job_id" 2>/dev/null > /dev/null || true
     echo "$job_id"
 }
 
 cleanup_direct_message() {
     local job_id="$1"
-    openclaw cron rm "$job_id" 2>/dev/null > /dev/null || true
+    oc cron rm "$job_id" 2>/dev/null > /dev/null || true
 }
 
 # ── Polling ───────────────────────────────────────────────────
@@ -149,12 +154,10 @@ wait_for_cron_completion() {
     local start_time
     start_time=$(date +%s)
 
-    local initial_count
-    initial_count=$(openclaw cron runs --id "$job_id" 2>/dev/null | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-print(data.get('total', 0))
-" 2>/dev/null || echo "0")
+    # Record timestamp (ms) with 10-second buffer before trigger point
+    # The cron scheduler may record runAtMs slightly before our wall clock
+    local trigger_ts_ms
+    trigger_ts_ms=$(( (start_time - 10) * 1000 ))
 
     echo -n "  Waiting: "
     while true; do
@@ -168,41 +171,37 @@ print(data.get('total', 0))
         echo -n "."
 
         local runs_json
-        runs_json=$(openclaw cron runs --id "$job_id" 2>/dev/null)
+        runs_json=$(oc cron runs --id "$job_id" 2>&1 || true)
 
-        local current_count
-        current_count=$(echo "$runs_json" | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-print(data.get('total', 0))
-" 2>/dev/null || echo "0")
+        # Skip if we didn't get valid JSON
+        if ! echo "$runs_json" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
+            continue
+        fi
 
-        if [ "$current_count" -gt "$initial_count" ]; then
-            local latest_action
-            latest_action=$(echo "$runs_json" | python3 -c "
+        # Find the first finished run that started AFTER our trigger timestamp
+        local result
+        result=$(echo "$runs_json" | python3 -c "
 import sys, json
+trigger_ts = $trigger_ts_ms
 data = json.load(sys.stdin)
-if data['entries']:
-    print(data['entries'][0].get('action', ''))
+for e in data.get('entries', []):
+    run_at = e.get('runAtMs', 0)
+    action = e.get('action', '')
+    if run_at >= trigger_ts and action == 'finished':
+        print('FOUND')
+        print('Status:', e.get('status', 'unknown'))
+        print('Summary:', e.get('summary', 'none'))
+        if e.get('error'):
+            print('Error:', e['error'])
+        break
 " 2>/dev/null || echo "")
 
-            if [ "$latest_action" = "finished" ]; then
-                echo " done (${elapsed}s)"
-                # Save results
-                mkdir -p "$RESULTS_DIR"
-                echo "$runs_json" > "$RESULTS_DIR/${CURRENT_TEST}.json" 2>/dev/null || true
-                echo "$runs_json" | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-if data['entries']:
-    e = data['entries'][0]
-    print('Status:', e.get('status', 'unknown'))
-    print('Summary:', e.get('summary', 'none'))
-    if e.get('error'):
-        print('Error:', e['error'])
-" > "$RESULTS_DIR/${CURRENT_TEST}.summary" 2>/dev/null || true
-                return 0
-            fi
+        if echo "$result" | grep -q "FOUND"; then
+            echo " done (${elapsed}s)"
+            mkdir -p "$RESULTS_DIR"
+            echo "$runs_json" > "$RESULTS_DIR/${CURRENT_TEST}.json" 2>/dev/null || true
+            echo "$result" > "$RESULTS_DIR/${CURRENT_TEST}.summary" 2>/dev/null || true
+            return 0
         fi
     done
 }
@@ -363,10 +362,12 @@ echo "==========================================="
 echo ""
 echo "Pre-flight checks:"
 
-if openclaw health 2>/dev/null | grep -q "Telegram"; then
+HEALTH_OUTPUT=$(oc health 2>/dev/null || true)
+if echo "$HEALTH_OUTPUT" | grep -q "Telegram"; then
     echo "  [PASS] Gateway healthy"
 else
     echo "  [FAIL] Gateway not healthy"
+    echo "  Output: $HEALTH_OUTPUT"
     exit 1
 fi
 
@@ -377,14 +378,16 @@ else
     exit 1
 fi
 
-if openclaw agents list 2>/dev/null | grep -q "$AGENT"; then
+AGENTS_OUTPUT=$(oc agents list 2>/dev/null || true)
+if echo "$AGENTS_OUTPUT" | grep -q "$AGENT"; then
     echo "  [PASS] Agent '$AGENT' registered"
 else
     echo "  [FAIL] Agent '$AGENT' not found in agents list"
     exit 1
 fi
 
-CRON_COUNT=$(openclaw cron list 2>/dev/null | grep -c "$AGENT" || true)
+CRON_OUTPUT=$(oc cron list 2>/dev/null || true)
+CRON_COUNT=$(echo "$CRON_OUTPUT" | grep -c "$AGENT" || true)
 echo "  [PASS] $CRON_COUNT crons found for $AGENT"
 
 # ── Calibrate mode ───────────────────────────────────────────
@@ -399,17 +402,17 @@ if $CALIBRATE; then
 
     echo ""
     echo "--- Cron list (first 5 lines) ---"
-    openclaw cron list 2>/dev/null | head -5
+    oc cron list 2>/dev/null | head -5
     echo ""
 
     if [ -n "$cron_id" ]; then
         echo "Triggering heartbeat-check..."
-        openclaw cron run "$cron_id" 2>/dev/null
+        oc cron run "$cron_id" 2>/dev/null
         echo "Waiting 30s..."
         sleep 30
         echo ""
         echo "--- Cron runs output ---"
-        openclaw cron runs --id "$cron_id" 2>/dev/null | python3 -m json.tool 2>/dev/null | head -40
+        oc cron runs --id "$cron_id" 2>/dev/null | python3 -m json.tool 2>/dev/null | head -40
     fi
 
     echo ""
@@ -680,29 +683,38 @@ T4
 
 cat > "$BASE/tests/fix-it/T5-monthly-archival.sh" << 'T5'
 # Does monthly archival move stale data correctly?
-test_start "T5" "Monthly Archival — Stale Fact + Done Task"
+test_start "T5" "Monthly Archival — Stale Fact Injected Into Active File"
 
-# Setup: Create a stale facts file (Dec 2025)
+# Setup: Append a stale fact into the EXISTING facts/2026-04.md
+# (the file the agent always checks — don't create a separate file)
 # Category: situation (90-day half-life), recorded 122+ days ago
 # effective_confidence = 0.5 * 0.5^(122/90) = 0.195 < 0.2 threshold
-STALE_FACTS_FILE="facts/${TEST_PREFIX}2025-12.md"
-echo "  Setup: Creating stale facts file..."
-cat > "$BRAIN/$STALE_FACTS_FILE" << STALEFACT
-# Facts — December 2025 ${TEST_PREFIX}
+FACTS_FILE="facts/2026-04.md"
+echo "  Setup: Injecting stale fact into $FACTS_FILE..."
+
+# Back up the original
+inject_test_file "$FACTS_FILE" "$(cat "$BRAIN/$FACTS_FILE")
 
 ---
 
 - **id:** ${TEST_PREFIX}-connector-2025-12-01-001
-- **content:** Test fact for archival — should be archived due to low confidence
+- **content:** ${TEST_PREFIX} stale fact for archival testing
 - **subject:** test-person
 - **source_type:** direct
-- **source_detail:** Test fixture
+- **source_detail:** Test fixture injected by test harness
 - **source_agent:** connector
 - **confidence:** 0.5
 - **category:** situation
 - **recorded_at:** 2025-12-01T10:00:00Z
-- **expires_at:** —
-STALEFACT
+- **expires_at:** —"
+
+# Verify injection worked
+if ! grep -q "${TEST_PREFIX}-connector-2025-12-01-001" "$BRAIN/$FACTS_FILE"; then
+    echo "  ERROR: Failed to inject test fact"
+    restore_test_file "$FACTS_FILE"
+    test_fail "setup failed"
+    return 1
+fi
 
 # Trigger (allow extra time for archival)
 POLL_TIMEOUT=240
@@ -710,7 +722,7 @@ cron_id_line=$(trigger_cron "monthly-archival")
 cron_id=$(echo "$cron_id_line" | grep -oE '[0-9a-f-]{36}' | head -1)
 
 if [ -z "$cron_id" ]; then
-    rm -f "$BRAIN/$STALE_FACTS_FILE"
+    restore_test_file "$FACTS_FILE"
     test_fail "could not trigger monthly-archival cron"
     return 1
 fi
@@ -720,7 +732,7 @@ wait_for_cron_completion "$cron_id"
 wait_result=$?
 
 if [ "$wait_result" -eq 2 ]; then
-    rm -f "$BRAIN/$STALE_FACTS_FILE"
+    restore_test_file "$FACTS_FILE"
     test_fail "timed out"
     return 1
 fi
@@ -729,19 +741,28 @@ fi
 failures=0
 
 assert_cron_output_contains "archival|archive|moved|Archive" "archival reported in output" || failures=$((failures + 1))
-# Check if stale facts file was moved or modified (more reliable than checking cron output text)
-if [ ! -f "$BRAIN/$STALE_FACTS_FILE" ]; then
-    echo "  PASS: stale facts file was moved/archived"
-elif [ "$(wc -c < "$BRAIN/$STALE_FACTS_FILE")" -lt 50 ]; then
-    echo "  PASS: stale facts file was emptied/truncated"
+
+# Check if the stale fact was removed from the active file
+if ! grep -q "${TEST_PREFIX}-connector-2025-12-01-001" "$BRAIN/$FACTS_FILE"; then
+    echo "  PASS: stale fact removed from active file"
 else
-    echo "  FAIL: stale facts file unchanged (archival may not have processed it)"
+    echo "  FAIL: stale fact still in active file (not archived)"
     failures=$((failures + 1))
 fi
 
-# Cleanup: remove test files from wherever they ended up
-rm -f "$BRAIN/$STALE_FACTS_FILE"
-find "$BRAIN/archive" -name "*${TEST_PREFIX}*" -type f 2>/dev/null -exec rm -f {} \;
+# Check if it landed in the archive
+ARCHIVED=$(find "$BRAIN/archive" -type f -exec grep -l "${TEST_PREFIX}" {} \; 2>/dev/null)
+if [ -n "$ARCHIVED" ]; then
+    echo "  PASS: stale fact found in archive"
+else
+    echo "  INFO: stale fact not found in archive dir (may have been deleted instead of moved)"
+fi
+
+# Cleanup: restore original facts file and remove test archive entries
+restore_test_file "$FACTS_FILE"
+find "$BRAIN/archive" -name "*" -type f 2>/dev/null -exec grep -l "${TEST_PREFIX}" {} \; | while read -r f; do
+    rm -f "$f"
+done
 
 if [ "$failures" -eq 0 ]; then
     test_pass

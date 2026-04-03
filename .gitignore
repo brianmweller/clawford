@@ -11,3 +11,10 @@ Thumbs.db
 
 # Dropbox
 *conflicted copy*
+
+# Cloned repos (managed separately)
+infra/
+openclaw-docker-config/
+
+# Backups
+*.tar.gz
