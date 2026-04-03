@@ -142,6 +142,7 @@ These are the obstacles we hit during the first deployment. You may hit them too
 7. **Telegram delivery fails** — Every cron needs `--to {chatId} --account {agent-id} --announce`
 8. **`cron run` takes UUID, not name** — Get the UUID from `oc cron list`
 9. **Gateway not running** — All operations fail. Check: `oc health`. Fix: `cd ~/openclaw && docker compose up -d`
+10. **SCP'ing `openclaw.json` wipes agent registrations** — Agent registrations, bindings, and channel accounts are stored in `openclaw.json`. Never overwrite it from a local copy after agents are registered. Always pull the live version first: `ssh ... "cat ~/.openclaw/openclaw.json" > local.json`
 
 ## Post-deploy checklist
 

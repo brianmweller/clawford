@@ -171,7 +171,27 @@ npm install -g @anthropic-ai/claude-code
 claude --version
 ```
 
-### Step 11: Access from your local machine
+### Step 11: Install Tailscale (recommended)
+
+Tailscale creates an encrypted mesh VPN between your VPS, local machine, and phone. It's required for Rudolf Von Flugel (the Telegram relay agent) and provides a safer alternative to public SSH.
+
+```bash
+# On the VPS
+curl -fsSL https://tailscale.com/install.sh | sudo sh
+sudo tailscale up
+```
+
+If it prints an auth URL, open it in your browser and log in. If your Tailscale account is already linked, it auto-authenticates.
+
+Verify:
+
+```bash
+sudo tailscale status
+```
+
+You should see your VPS (`<your-tailscale-host>`) and your local machine (`thinkpadbri`) on the same tailnet.
+
+### Step 12: Access from your local machine
 
 Open an SSH tunnel to access the gateway UI:
 
