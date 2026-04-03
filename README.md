@@ -51,3 +51,7 @@ Start here: **[guide/index.md](guide/index.md)** — a 10-chapter field manual c
 - Exec commands restricted via `openclaw approvals allowlist`
 - Per-agent Telegram bots prevent cross-agent impersonation
 - Secrets stored in `.env` (gitignored), never in code
+
+## Lore
+
+- **[The Ballad of Mr Fixit](docs/ballad-of-mr-fixit.md)** — A play in five acts. A fox terraformed three times, possessed by dark magic, and installed in the chair of a murdered pig. Based on true events.
