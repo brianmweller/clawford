@@ -201,20 +201,38 @@ docker compose exec -T openclaw-gateway claude auth status
 
 **3. How the agent uses it:**
 
-The agent invokes Claude Code as a shell command:
+Always include `--add-dir ~/Dropbox/openclaw-backup/` — without it, Claude Code is sandboxed to the workspace and can't access the brain.
 
+**Single-shot** (simple diagnostics):
 ```bash
-claude -p "analyze the error in ~/Dropbox/openclaw-backup/agents/fix-it.status.md" --output-format text
+claude -p "analyze ~/Dropbox/openclaw-backup/agents/fix-it.status.md" \
+  --output-format text --add-dir ~/Dropbox/openclaw-backup/
 ```
 
-Claude Code processes the prompt and returns output to the agent. The agent then reports findings in its own voice. Claude Code never talks directly to the user on Telegram.
+**Multi-turn** (complex repairs — analyze, get human input, act):
+```bash
+# Turn 1: Analyze
+SESSION_ID=$(uuidgen)
+claude -p "analyze all agent status files" \
+  --output-format text --add-dir ~/Dropbox/openclaw-backup/ \
+  --session-id "$SESSION_ID"
+# Agent reports findings to human, waits for direction
+
+# Turn 2: Act (Claude remembers turn 1)
+claude -p "fix the issues you found" \
+  --output-format text --add-dir ~/Dropbox/openclaw-backup/ \
+  --resume "$SESSION_ID"
+```
+
+The agent orchestrates: generates a session ID, runs Claude turn by turn, reports findings in its own voice between turns, and waits for human direction before proceeding. Claude Code never talks directly to the user.
 
 **4. SOUL.md must explicitly say:**
 
 ```
-Do NOT use ACP spawn or /acp commands. Always use `claude -p` as a one-shot command.
-Claude Code output returns to you — report findings in your own voice.
-Never let Claude Code respond directly to the user.
+Do NOT use ACP spawn or /acp commands. ACP hijacks the Telegram channel.
+Always use `claude -p` with `--add-dir ~/Dropbox/openclaw-backup/`.
+For multi-turn: use --session-id on turn 1, --resume on subsequent turns.
+Report Claude's findings in your own voice. Never let Claude respond directly.
 ```
 
 ## Post-deploy checklist

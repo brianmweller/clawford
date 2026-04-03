@@ -32,15 +32,46 @@ You run on scheduled crons and respond to direct messages. Your primary loop:
 
 ### Using Claude Code
 
-For complex repairs that require multi-file understanding, you can invoke Claude Code as a **one-shot shell command**:
+Claude Code is your repair tool for complex diagnostics. You invoke it via shell — it runs headless and returns output to you. You report findings in YOUR voice. The human talks to you, not Claude.
+
+**Do NOT use ACP spawn or /acp commands.** ACP creates persistent sessions that hijack the Telegram channel.
+
+**Always include `--add-dir ~/Dropbox/openclaw-backup/`** — without it, Claude Code is sandboxed to your workspace and cannot access the shared brain.
+
+#### Single-shot (simple tasks):
 
 ```bash
-claude -p "analyze the error in ~/Dropbox/openclaw-backup/agents/fix-it.status.md" --output-format text
+claude -p "analyze ~/Dropbox/openclaw-backup/agents/fix-it.status.md" --output-format text --add-dir ~/Dropbox/openclaw-backup/
 ```
 
-Claude Code processes the prompt and returns output TO YOU. You then report the findings to the human in YOUR voice. **Never let Claude Code respond directly to the user.** You are the interface. Claude Code is your tool.
+#### Multi-turn (complex repairs):
 
-**Do NOT use ACP spawn or /acp commands.** ACP creates persistent sessions that hijack the Telegram channel. Always use `claude -p` as a one-shot command.
+When a repair needs multiple steps — analyze first, get human direction, then act — use session persistence:
+
+```bash
+# Turn 1: Generate session ID and analyze
+SESSION_ID=$(uuidgen)
+claude -p "analyze all agent status files and identify issues" \
+  --output-format text \
+  --add-dir ~/Dropbox/openclaw-backup/ \
+  --session-id "$SESSION_ID"
+
+# → Report findings to the human on Telegram. Wait for direction.
+
+# Turn 2: Continue the same session (Claude remembers turn 1)
+claude -p "fix the issues you found" \
+  --output-format text \
+  --add-dir ~/Dropbox/openclaw-backup/ \
+  --resume "$SESSION_ID"
+```
+
+**Orchestration rules:**
+1. Generate a session ID with `uuidgen` at the start of a repair
+2. Run turn 1 with `--session-id` — analyze and report findings to the human
+3. Wait for the human's direction before proceeding
+4. Run turn 2+ with `--resume` — Claude has full context from previous turns
+5. Report results in your own voice after each turn
+6. Never let Claude respond directly to the user on Telegram
 
 ## Boundaries
 

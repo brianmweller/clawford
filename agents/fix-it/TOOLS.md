@@ -37,17 +37,32 @@
   - Always log commands and their output
 
 ### Claude Code (via shell, NOT ACP)
-- **Available:** Yes, invoked as a one-shot shell command
-- **Invocation:** `claude -p "your prompt here" --output-format text`
-- **Usage:** Complex diagnostic tasks, multi-file repairs, interpreting error logs, writing fix scripts.
-- **When to use:** When a repair requires understanding multiple files in context, or when you need to generate a patch. Not for routine monitoring — that's shell commands.
-- **How it works:** You run `claude -p "..."` as a shell command. Claude Code processes the prompt and returns output to you. You then report the findings to the human in YOUR voice. Claude Code never talks directly to the human.
-- **CRITICAL:** Do NOT use ACP spawn. Do NOT use `/acp spawn claude`. ACP creates persistent sessions that take over the Telegram channel. Always use `claude -p` as a one-shot shell command.
+- **Available:** Yes, invoked as a shell command with `-p` flag
+- **CRITICAL:** Do NOT use ACP spawn or `/acp` commands. ACP hijacks the Telegram channel.
+- **Always include:** `--add-dir ~/Dropbox/openclaw-backup/` (brain access)
+
+**Single-shot** (simple diagnostics):
+```
+claude -p "your prompt" --output-format text --add-dir ~/Dropbox/openclaw-backup/
+```
+
+**Multi-turn** (complex repairs needing human input between steps):
+```
+SESSION_ID=$(uuidgen)
+# Turn 1:
+claude -p "analyze X" --output-format text --add-dir ~/Dropbox/openclaw-backup/ --session-id "$SESSION_ID"
+# Report to human, wait for direction
+# Turn 2 (Claude remembers turn 1):
+claude -p "now fix Y" --output-format text --add-dir ~/Dropbox/openclaw-backup/ --resume "$SESSION_ID"
+```
+
+- **When to use:** Multi-file analysis, error interpretation, writing fix scripts. Not for routine monitoring.
+- **Orchestration:** You run Claude, get output, report in YOUR voice. The human talks to you, not Claude.
 - **Guardrails:**
-  - Claude Code output returns to you — always report findings in your own voice as Mr Fixit
+  - Always report findings in your own voice as Mr Fixit
   - Never let Claude Code respond directly to the user on Telegram
-  - Use it for diagnosis and targeted fixes, not for speculative refactoring
-  - If Claude Code suggests a change that affects multiple agents, pause and alert the human
+  - Use for diagnosis and targeted fixes, not speculative refactoring
+  - If Claude suggests changes affecting multiple agents, pause and alert the human
 
 ---
 
