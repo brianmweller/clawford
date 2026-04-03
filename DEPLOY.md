@@ -1,64 +1,82 @@
-# DEPLOY.md — Deploying an OpenClaw Agent
+# DEPLOY.md — Deploying an OpenClaw Agent (Docker)
 
-Step-by-step instructions for deploying an agent on your VPS (mindclaw).
-This template was battle-tested with Mr Fixit on 2026-04-02.
+Step-by-step instructions for deploying an agent on your VPS.
+Battle-tested with Mr Fixit on 2026-04-02, migrated to Docker on 2026-04-03.
 
 ---
 
 ## Prerequisites
 
-- OpenClaw installed and gateway running (`openclaw health` returns healthy)
+- VPS provisioned via Terraform (`terraform apply`)
+- Docker container running: `cd ~/openclaw && docker compose up -d`
+- Gateway healthy: `oc health` (see helper function below)
 - Telegram channel configured and working
-- Shared brain directory exists at `~/Dropbox/openclaw-backup/`
-- `validate.py` present at `~/Dropbox/openclaw-backup/scripts/validate.py`
-- Gateway device pairing approved (`openclaw devices list` — approve any pending requests with `openclaw devices approve <request-id>`)
+- Shared brain at `~/Dropbox/openclaw-backup/` (Dropbox syncing)
+- `validate.py` at `~/Dropbox/openclaw-backup/scripts/validate.py`
+- Device pairing approved: `oc devices list` → `oc devices approve <request-id>`
+
+### Helper Function
+
+All OpenClaw CLI commands run inside the Docker container. Define this in your SSH session:
+
+```bash
+oc() { docker compose -f ~/openclaw/docker-compose.yml exec -T openclaw-gateway openclaw "$@"; }
+```
+
+Or for interactive commands (like `agents add`):
+
+```bash
+oci() { docker compose -f ~/openclaw/docker-compose.yml exec -it openclaw-gateway openclaw "$@"; }
+```
 
 ---
 
 ## Step 0: Transfer Files to VPS
 
-The VPS requires password-based SSH (key-only auth is not configured). Transfer files via SCP from PowerShell on your local machine:
+From your local machine (PowerShell):
 
 ```bash
 scp -i ~/.ssh/id_ed25519 \
-  deploy-{agent}.sh SOUL.md IDENTITY.md TOOLS.md \
-  openclaw@198.51.100.42:/tmp/
+  deploy.sh SOUL.md IDENTITY.md TOOLS.md \
+  openclaw@{VPS_IP}:/tmp/
 ```
 
-You'll be prompted for the password interactively.
+Also transfer `.env` with secrets if not already on the VPS:
+
+```bash
+scp -i ~/.ssh/id_ed25519 .env openclaw@{VPS_IP}:/tmp/.env
+```
 
 ---
 
-## Step 1: Create the Agent
+## Step 1: Create the Agent (Interactive)
 
-SSH into your VPS and run:
+SSH into your VPS and run inside the container:
 
 ```bash
-openclaw agents add {agent-name}
+oci agents add {agent-name}
 ```
 
 During onboarding:
-- **Workspace directory:** Use `.openclaw/{agent-name}-workspace`
-- **Auth profiles:** Copy from "main" (gives access to Telegram, etc.)
-- **Chat channels:** Telegram only (unless agent needs others)
-- **Identity/personality:** The agent may or may not ask for this during onboarding. If it does, paste IDENTITY.md. If not, the deploy script installs it to the workspace.
-- **Tools:** Skip interactive tool setup — the deploy script handles this.
+- **Workspace directory:** `.openclaw/{agent-name}-workspace`
+- **Auth profiles:** Copy from "main"
+- **Chat channels:** Telegram only
+- **Identity/personality:** Install via deploy script if not asked
+- **Tools:** Skip interactive setup — deploy script handles this
 
 ---
 
 ## Step 2: Ensure Gateway is Running
 
 ```bash
-# Check gateway health
-openclaw health
+# Check health
+oc health
 
-# If not running:
-nohup openclaw gateway > /dev/null 2>&1 &
-sleep 5
-openclaw health
+# If container is down:
+cd ~/openclaw && docker compose up -d
+sleep 10
+oc health
 ```
-
-The gateway must be running for `cron add`, `cron run`, and all agent operations.
 
 ---
 
@@ -68,82 +86,69 @@ The gateway must be running for `cron add`, `cron run`, and all agent operations
 bash /tmp/deploy-{agent}.sh
 ```
 
-The script handles:
+The script handles (all via Docker exec):
 - Copying SOUL.md, IDENTITY.md, TOOLS.md to the workspace
 - Initializing the status file in the shared brain
-- Registering all cron jobs
-- Setting up exec approvals (allowlist)
-- Adding Telegram delivery (`--to <chatId>` and `--announce`)
-- Verification (agent list, cron list, status file, workspace contents)
+- Configuring per-agent Telegram bot + binding
+- Setting exec approvals (allowlist for `/usr/bin/*`, `/bin/*`, `/usr/local/bin/*`)
+- Registering all cron jobs with `--to <chatId> --account <agent-id> --announce`
+- Security hardening (`chattr +i` on SOUL.md and IDENTITY.md)
+- Verification output
 
 ---
 
-## Step 4: Smoke Test
+## Step 4: Pair Telegram Bot
+
+1. Send `/start` to the agent's Telegram bot
+2. If a pairing code appears, approve it:
 
 ```bash
-# Trigger a cron manually (use the ID from `openclaw cron list`)
-openclaw cron run <cron-job-id>
+oc pairing approve telegram {CODE}
+```
+
+---
+
+## Step 5: Smoke Test
+
+```bash
+# Trigger a cron manually (use ID from `oc cron list`)
+oc cron run {job-id}
 
 # Check results
-openclaw cron runs --id <cron-job-id>
+oc cron runs --id {job-id}
 
 # Check status file
 cat ~/Dropbox/openclaw-backup/agents/{agent-name}.status.md
 ```
 
-Verify you receive a Telegram message from the agent.
-
----
-
-## Step 5: Security Hardening
-
-Lock down critical files so no agent can modify another agent's identity, even if instructed to:
-
-```bash
-# Make SOUL.md and IDENTITY.md immutable at the OS level
-sudo chattr +i ~/.openclaw/{agent-name}-workspace/SOUL.md
-sudo chattr +i ~/.openclaw/{agent-name}-workspace/IDENTITY.md
-```
-
-To edit these files later: `sudo chattr -i <file>`, edit, then `sudo chattr +i <file>`.
-
-This is a hard constraint — no prompt or agent instruction can override it.
+Verify you receive a Telegram message from the agent's bot.
 
 ---
 
 ## Step 6: Run Test Suite
 
-If the test harness is installed (`~/openclaw-tests/`), run the agent's tests:
-
 ```bash
 bash ~/openclaw-tests/test-agent.sh {agent-name}
 ```
 
-Expected: all tests PASS. If T1 (file edit) fails, the agent can't write files and all crons that modify state are broken. If T6 (boundary) fails, the `chattr` step above wasn't applied.
-
-To install the test harness (first time only):
-
-```bash
-# SCP from local machine
-scp -i ~/.ssh/id_ed25519 setup-tests.sh openclaw@198.51.100.42:/tmp/
-# Run on VPS
-bash /tmp/setup-tests.sh
-```
+Expected: all tests PASS. Key failures:
+- T1 fail = agent can't write files (all write-dependent crons broken)
+- T6 fail = `chattr +i` not applied (boundary enforcement missing)
 
 ---
 
 ## Post-Deploy Checklist
 
-- [ ] Agent registered: `openclaw agents list` shows the agent
+- [ ] Agent registered: `oc agents list`
 - [ ] Status file initialized: `cat ~/Dropbox/openclaw-backup/agents/{agent-name}.status.md`
-- [ ] All crons registered: `openclaw cron list` (filter visually by agent)
+- [ ] All crons registered: `oc cron list` (filter visually by agent)
 - [ ] SOUL.md in workspace
 - [ ] IDENTITY.md in workspace
 - [ ] TOOLS.md in workspace
-- [ ] Exec allowlist configured: `openclaw approvals get`
+- [ ] Exec allowlist configured: `oc approvals get`
 - [ ] Cron fires and updates status file
-- [ ] Telegram delivery working (message arrives)
-- [ ] SOUL.md and IDENTITY.md are immutable: `lsattr ~/.openclaw/{agent-name}-workspace/SOUL.md` shows `i` flag
+- [ ] Telegram delivery working (message arrives from agent's bot)
+- [ ] SOUL.md and IDENTITY.md immutable: `lsattr ~/.openclaw/{agent}-workspace/SOUL.md`
 - [ ] Test suite passes: `bash ~/openclaw-tests/test-agent.sh {agent-name}`
 
 ---
@@ -151,48 +156,52 @@ bash /tmp/setup-tests.sh
 ## Rollback
 
 ```bash
-# Remove all crons for the agent (by ID — get IDs from `openclaw cron list`)
-openclaw cron rm <cron-id-1>
-openclaw cron rm <cron-id-2>
+# Remove crons by ID (get IDs from `oc cron list`)
+oc cron rm {cron-id-1}
+oc cron rm {cron-id-2}
 # ... repeat for each cron
 
 # Remove the agent
-openclaw agents remove {agent-name}
+oc agents delete {agent-name}
 ```
 
 The shared brain is untouched — agents only append, never destructively edit.
 
 ---
 
-## OpenClaw CLI Quick Reference
+## OpenClaw CLI Quick Reference (Docker)
 
-Correct syntax as of OpenClaw 2026.4.1:
+All commands prefixed with `oc` (the Docker exec wrapper):
 
 | Action | Command |
 |--------|---------|
-| Add agent | `openclaw agents add {name}` |
-| List agents | `openclaw agents list` |
-| Check health | `openclaw health` |
-| Start gateway | `nohup openclaw gateway > /dev/null 2>&1 &` |
-| Add channel account | `openclaw channels add --channel telegram --token {token} --account {agent-id} --name "{Display Name}"` |
-| Bind agent to channel | `openclaw agents bind --agent {id} --bind telegram:{account-id}` |
-| Pair Telegram bot | User sends `/start` to bot, then `openclaw pairing approve telegram {CODE}` |
-| Add cron | `openclaw cron add --agent {id} --name "{name}" --cron "{expr}" --message "{text}" --to {chatId} --account {agent-id} --announce` |
-| List crons | `openclaw cron list` |
-| Run cron manually | `openclaw cron run {job-id}` |
-| View cron history | `openclaw cron runs --id {job-id}` |
-| Edit cron | `openclaw cron edit {job-id} --to {chatId} --announce` |
-| Remove cron | `openclaw cron rm {job-id}` |
-| Add exec allowlist | `openclaw approvals allowlist add --agent {id} "/usr/bin/*"` |
-| View approvals | `openclaw approvals get` |
-| Device pairing | `openclaw devices list` / `openclaw devices approve {request-id}` |
+| Health check | `oc health` |
+| Add agent (interactive) | `oci agents add {name}` |
+| List agents | `oc agents list` |
+| Add channel account | `oc channels add --channel telegram --token {token} --account {id} --name "{Name}"` |
+| Bind agent to channel | `oc agents bind --agent {id} --bind telegram:{account-id}` |
+| Pair Telegram bot | User `/start`s bot → `oc pairing approve telegram {CODE}` |
+| Add cron | `oc cron add --agent {id} --name "{name}" --cron "{expr}" --message "{text}" --to {chatId} --account {agent-id} --announce` |
+| List crons | `oc cron list` |
+| Run cron manually | `oc cron run {job-id}` |
+| View cron history | `oc cron runs --id {job-id}` |
+| Edit cron | `oc cron edit {job-id} --flag value` |
+| Remove cron | `oc cron rm {job-id}` |
+| Add exec allowlist | `oc approvals allowlist add --agent {id} "/usr/bin/*"` |
+| View approvals | `oc approvals get` |
+| Device pairing | `oc devices list` / `oc devices approve {request-id}` |
+| Container logs | `cd ~/openclaw && docker compose logs --tail 20` |
+| Restart container | `cd ~/openclaw && docker compose restart` |
+| Rebuild image | `cd ~/openclaw && docker compose build --no-cache && docker compose up -d` |
 
 **Common pitfalls:**
 - `cron` is singular, not `crons`
-- Cron flags: `--cron` (not `--schedule`), `--message` (not `--prompt`)
+- `--cron` (not `--schedule`), `--message` (not `--prompt`)
 - `--tools` flag on `cron add` causes API errors — omit it
-- `cron run` and `cron rm` take the **job ID** (UUID), not the name
-- `cron list` does not support `--agent` filtering — filter visually
-- `openclaw agents config` does not exist — use `openclaw approvals allowlist` for exec permissions
-- Always add `--to {chatId} --account {agent-id} --announce` to crons for Telegram delivery
-- Each agent should have its own Telegram bot (create via @BotFather, add as channel account, bind to agent)
+- `cron run` and `cron rm` take **job ID** (UUID), not name
+- `cron list` has no `--agent` filter — filter visually
+- Always add `--to {chatId} --account {agent-id} --announce` to crons
+- Each agent needs its own Telegram bot (create via @BotFather)
+- Python3 must be in the Docker image for `validate.py` to work
+- The brain directory must be mounted as a Docker volume
+- After rebuilding the container, re-check `oc health` and `oc agents list`

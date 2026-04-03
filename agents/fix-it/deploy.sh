@@ -3,16 +3,19 @@
 # Usage: bash /tmp/deploy-fixit.sh
 #
 # Prerequisites:
-#   - openclaw agents add fix-it (interactive onboarding completed)
-#   - Gateway running (openclaw health)
-#   - Device pairing approved (openclaw devices list / approve)
+#   - Docker container running: cd ~/openclaw && docker compose up -d
+#   - openclaw agents add fix-it (interactive onboarding completed inside container)
+#   - Device pairing approved
 #   - SOUL.md, IDENTITY.md, TOOLS.md in /tmp/
+#   - .env with TELEGRAM_CHAT_ID and FIXIT_BOT_TOKEN in /tmp/ or ~/openclaw/
 
 set -euo pipefail
 
-# Load secrets from .env if present (on VPS: /tmp/.env, locally: .env)
+# Load secrets from .env
 if [ -f /tmp/.env ]; then
     source /tmp/.env
+elif [ -f ~/openclaw/.env ]; then
+    source ~/openclaw/.env
 elif [ -f .env ]; then
     source .env
 fi
@@ -22,10 +25,16 @@ WORKSPACE="$HOME/.openclaw/fix-it-workspace"
 TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:?Set TELEGRAM_CHAT_ID in .env}"
 FIXIT_BOT_TOKEN="${FIXIT_BOT_TOKEN:?Set FIXIT_BOT_TOKEN in .env}"
 TELEGRAM_ACCOUNT="fixit"
+COMPOSE_FILE="$HOME/openclaw/docker-compose.yml"
+
+# OpenClaw CLI wrapper — runs through Docker
+oc() {
+    docker compose -f "$COMPOSE_FILE" exec -T openclaw-gateway openclaw "$@"
+}
 
 echo "============================================"
 echo "  Mr Fixit — Deployment Script"
-echo "  OpenClaw 2026.4.1 CLI syntax"
+echo "  OpenClaw 2026.4.1 (Docker)"
 echo "============================================"
 echo ""
 
@@ -67,35 +76,36 @@ EOF
 echo "  Written: $BRAIN/agents/fix-it.status.md"
 echo ""
 
-# ── Step 3: Set Up Exec Approvals ────────────────────────────
+# ── Step 3: Configure Telegram Channel + Binding ─────────────
 
 echo "Step 3: Configuring Telegram channel + binding..."
 
-# Add per-agent Telegram bot (token must be set in TELEGRAM_BOT_TOKEN or passed here)
-# This step is idempotent — safe to re-run
-openclaw channels add --channel telegram \
+oc channels add --channel telegram \
   --token "$FIXIT_BOT_TOKEN" \
   --account "$TELEGRAM_ACCOUNT" \
   --name "Mr Fixit" 2>/dev/null || true
 echo "  Telegram account '$TELEGRAM_ACCOUNT' configured"
 
-openclaw agents bind --agent fix-it --bind "telegram:$TELEGRAM_ACCOUNT" 2>/dev/null || true
+oc agents bind --agent fix-it --bind "telegram:$TELEGRAM_ACCOUNT" 2>/dev/null || true
 echo "  Agent fix-it bound to telegram:$TELEGRAM_ACCOUNT"
 
 echo ""
 echo "  NOTE: You must /start the Mr Fixit bot on Telegram and approve pairing:"
-echo "  openclaw pairing approve telegram <CODE>"
+echo "  docker compose -f ~/openclaw/docker-compose.yml exec openclaw-gateway openclaw pairing approve telegram <CODE>"
 echo ""
 
 # ── Step 4: Set Up Exec Approvals ────────────────────────────
 
 echo "Step 4: Setting exec approvals..."
 
-openclaw approvals allowlist add --agent fix-it "/usr/bin/*"
+oc approvals allowlist add --agent fix-it "/usr/bin/*"
 echo "  Added /usr/bin/* to allowlist"
 
-openclaw approvals allowlist add --agent fix-it "/bin/*"
+oc approvals allowlist add --agent fix-it "/bin/*"
 echo "  Added /bin/* to allowlist"
+
+oc approvals allowlist add --agent fix-it "/usr/local/bin/*"
+echo "  Added /usr/local/bin/* to allowlist"
 
 echo ""
 
@@ -104,7 +114,7 @@ echo ""
 echo "Step 5: Registering 9 crons..."
 
 # 1. Heartbeat — every 30 minutes
-openclaw cron add \
+oc cron add \
   --agent fix-it \
   --name "heartbeat-check" \
   --cron "*/30 * * * *" \
@@ -115,7 +125,7 @@ openclaw cron add \
 echo "  [1/9] heartbeat-check"
 
 # 2. Morning status — daily at 06:00 UTC
-openclaw cron add \
+oc cron add \
   --agent fix-it \
   --name "morning-status" \
   --cron "0 6 * * *" \
@@ -126,7 +136,7 @@ openclaw cron add \
 echo "  [2/9] morning-status"
 
 # 3. Brain validation — every 6 hours
-openclaw cron add \
+oc cron add \
   --agent fix-it \
   --name "brain-validation" \
   --cron "0 */6 * * *" \
@@ -137,7 +147,7 @@ openclaw cron add \
 echo "  [3/9] brain-validation"
 
 # 4. Dropbox conflict scan — every 2 hours
-openclaw cron add \
+oc cron add \
   --agent fix-it \
   --name "conflict-scan" \
   --cron "0 */2 * * *" \
@@ -148,7 +158,7 @@ openclaw cron add \
 echo "  [4/9] conflict-scan"
 
 # 5. File size monitor — daily at 12:00 UTC
-openclaw cron add \
+oc cron add \
   --agent fix-it \
   --name "file-size-monitor" \
   --cron "0 12 * * *" \
@@ -159,18 +169,18 @@ openclaw cron add \
 echo "  [5/9] file-size-monitor"
 
 # 6. Monthly archival — 1st of each month at 03:00 UTC
-openclaw cron add \
+oc cron add \
   --agent fix-it \
   --name "monthly-archival" \
   --cron "0 3 1 * *" \
   --to "$TELEGRAM_CHAT_ID" \
   --account "$TELEGRAM_ACCOUNT" \
   --announce \
-  --message "Run monthly archival. Create ~/Dropbox/openclaw-backup/archive/YYYY-MM/ for current month. Scan ALL files matching ~/Dropbox/openclaw-backup/facts/*.md (every monthly file, not just the current month). For each fact entry, calculate effective_confidence = original_confidence * 0.5^(days_since_recorded / half_life) using category half-lives: identity=never, established=365, situation=90, preference=180, plan=30, logistics=7, rumor=14. Move facts with effective_confidence < 0.2 AND recorded > 90 days ago to the archive. Also scan tasks/queue.md and move tasks with status 'done' and completed > 90 days ago. Write an archive manifest listing everything moved. Report results on Telegram."
+  --message "Run monthly archival. Create ~/Dropbox/openclaw-backup/archive/YYYY-MM/ for current month. Scan ALL files matching ~/Dropbox/openclaw-backup/facts/*.md (every monthly file, not just the current month). For each fact entry, calculate effective_confidence = original_confidence * 0.5^(days_since_recorded / half_life) using category half-lives: identity=never, established=365, situation=90, preference=180, plan=30, logistics=7, rumor=14. Move facts with effective_confidence < 0.2 AND recorded > 90 days ago to the archive. Also scan tasks/queue.md and move tasks with status done and completed > 90 days ago. Write an archive manifest listing everything moved. Report results on Telegram."
 echo "  [6/9] monthly-archival"
 
 # 7. Security audit — weekly Sunday 04:00 UTC
-openclaw cron add \
+oc cron add \
   --agent fix-it \
   --name "security-audit" \
   --cron "0 4 * * 0" \
@@ -181,7 +191,7 @@ openclaw cron add \
 echo "  [7/9] security-audit"
 
 # 8. Update check — weekly Wednesday 04:00 UTC
-openclaw cron add \
+oc cron add \
   --agent fix-it \
   --name "update-check" \
   --cron "0 4 * * 3" \
@@ -192,7 +202,7 @@ openclaw cron add \
 echo "  [8/9] update-check"
 
 # 9. Self-check — daily at midnight UTC
-openclaw cron add \
+oc cron add \
   --agent fix-it \
   --name "cron-self-check" \
   --cron "0 0 * * *" \
@@ -204,6 +214,15 @@ echo "  [9/9] cron-self-check"
 
 echo ""
 
+# ── Step 6: Security Hardening ───────────────────────────────
+
+echo "Step 6: Security hardening..."
+
+sudo chattr +i "$WORKSPACE/SOUL.md" 2>/dev/null && echo "  SOUL.md locked (immutable)" || echo "  WARNING: Could not lock SOUL.md (run: sudo chattr +i $WORKSPACE/SOUL.md)"
+sudo chattr +i "$WORKSPACE/IDENTITY.md" 2>/dev/null && echo "  IDENTITY.md locked (immutable)" || echo "  WARNING: Could not lock IDENTITY.md (run: sudo chattr +i $WORKSPACE/IDENTITY.md)"
+
+echo ""
+
 # ── Verify ───────────────────────────────────────────────────
 
 echo "============================================"
@@ -212,15 +231,15 @@ echo "============================================"
 echo ""
 
 echo "Agent list:"
-openclaw agents list
+oc agents list
 echo ""
 
 echo "Crons registered:"
-openclaw cron list
+oc cron list
 echo ""
 
 echo "Exec approvals:"
-openclaw approvals get
+oc approvals get
 echo ""
 
 echo "Status file:"
@@ -231,12 +250,20 @@ echo "Workspace:"
 ls -la "$WORKSPACE/"
 echo ""
 
+echo "Immutable files:"
+lsattr "$WORKSPACE/SOUL.md" "$WORKSPACE/IDENTITY.md" 2>/dev/null || echo "  (lsattr not available)"
+echo ""
+
 echo "============================================"
 echo "  Deployment complete!"
 echo ""
 echo "  Smoke test (use IDs from cron list above):"
-echo "  1. openclaw cron run <heartbeat-check-id>"
-echo "  2. openclaw cron run <brain-validation-id>"
-echo "  3. openclaw cron run <morning-status-id>"
-echo "  4. Send Telegram: 'Status check — report all systems.'"
+echo "  oc() { docker compose -f ~/openclaw/docker-compose.yml exec -T openclaw-gateway openclaw \"\$@\"; }"
+echo "  oc cron run <heartbeat-check-id>"
+echo "  oc cron run <brain-validation-id>"
+echo "  oc cron run <morning-status-id>"
+echo "  Send Telegram: 'Status check — report all systems.'"
+echo ""
+echo "  Run test suite:"
+echo "  bash ~/openclaw-tests/test-agent.sh fix-it"
 echo "============================================"
