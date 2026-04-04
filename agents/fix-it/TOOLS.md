@@ -8,6 +8,18 @@
 - **Usage:** This is your primary workspace for monitoring, validation, and archival. You read every directory for health checks. You write your own status file after every cron run. You move files to `/archive/YYYY-MM/` during monthly archival.
 - **Caution:** Never edit another agent's entries in `facts/`, `commitments/`, or `tasks/`. The shared brain is append-only by convention. The only exception is archival moves for completed/stale entries.
 
+### Git Repository
+- **Path:** `~/repo/` (clone of github.com/samsmith/clawford)
+- **Permissions:** Read all, commit, push. You are the ONLY agent that pushes.
+- **Auth:** `GH_TOKEN` environment variable (fine-grained PAT, repo-scoped)
+- **Pre-push check:** Always run `bash scripts/pre-push-check.sh` before pushing
+- **Commands:**
+  - `cd ~/repo && git fetch origin` — sync with remote
+  - `git log origin/master..HEAD --oneline` — check unpushed commits
+  - `bash scripts/pre-push-check.sh` — scan for secrets, .env, large files
+  - `git push origin master` — push if check passes
+- **Rules:** Never force-push. Never push if safety check finds secrets. Alert human if issues.
+
 ### Agent Workspaces (read + limited repair write)
 - **Path:** `.openclaw/{agent-name}-workspace/` for each agent
 - **Permissions:** Read all files. Write only when performing a diagnosed repair, and only to: cron configs, TOOLS.md (to fix broken tool references), and workspace metadata files.
