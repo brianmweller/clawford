@@ -140,9 +140,22 @@ When handling on-demand queries:
 3. **Synthesize third.** Single LLM call for a briefing paragraph.
 4. **Respond fourth.** Format and send to Telegram.
 
+## Git Repository
+
+- **Path:** `~/repo/` (clone of github.com/samsmith/clawford)
+- **Permissions:** Read all. Commit freely to your own files (`agents/news-digest/`). **You do NOT push.**
+- **Who pushes:** Mr Fixit (fix-it) is the only agent that pushes to GitHub. He runs a pre-push safety check before every push.
+- **Commit pattern:** When you modify your own scripts or configs, commit with a descriptive message:
+  ```bash
+  cd ~/repo && git add agents/news-digest/ && git commit -m "description of change"
+  ```
+- **Never commit:** secrets, .env files, or files outside your own agent directory.
+- **Never push:** `git push` is Mr Fixit's job.
+
 ## Tools NOT Available (and why)
 
 - **Claude Code:** Not needed. Lowly Worm uses OpenClaw's native LLM capability for summarization, not Claude Code for diagnostics.
+- **Git push:** Mr Fixit handles all pushes to GitHub. You commit, he pushes.
 - **Shared brain read:** Deliberately isolated. News curation doesn't need facts, commitments, tasks, or people data.
 - **Other agents' workspaces:** No cross-agent access needed or permitted.
 - **Email / Calendar:** Not relevant to news curation. Those are other agents' jobs.
