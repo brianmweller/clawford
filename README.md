@@ -1,6 +1,6 @@
-# OpenClaw Agents — Welcome to Busytown
+# Clawford — Welcome to Busytown
 
-A seven-agent personal AI system running on OpenClaw, themed after Richard Scarry's Busytown. Each agent has its own Telegram bot, a defined role, and a Busytown character identity.
+A seven-agent personal AI system themed after Richard Scarry's Busytown. Each agent has its own Telegram bot, a defined role, and a Busytown character identity. Runs on OpenClaw.
 
 ## The Agents
 
@@ -28,15 +28,21 @@ A seven-agent personal AI system running on OpenClaw, themed after Richard Scarr
 
 ```
 clawford/
+├── CHANGELOG.md           # Release history
 ├── DEPLOY.md              # Generic agent deployment template (Docker)
-├── guide/                 # 10-chapter setup field manual
-│   └── index.md           # Start here
-├── docs/                  # Design docs and specs
-├── brain/                 # Shared brain setup
-│   └── setup-brain.sh
+├── VERSION                # Current version
 ├── agents/                # Per-agent packages
 │   ├── fix-it/            # 🦊 Mr Fixit (deployed)
 │   └── rudolf/            # ✈️ Rudolf Von Flugel (next)
+├── brain/                 # Shared brain setup
+│   └── setup-brain.sh
+├── docs/                  # Design docs and specs
+│   ├── ballad-of-mr-fixit.md
+│   └── shared-brain-schema.md
+├── guide/                 # 10-chapter setup field manual
+│   └── index.md           # Start here
+├── infra/                 # Infrastructure config
+├── openclaw-docker-config/ # Docker config for OpenClaw
 └── tests/                 # Test harness
     └── setup-tests.sh
 ```
