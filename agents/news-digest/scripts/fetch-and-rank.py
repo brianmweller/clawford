@@ -18,6 +18,9 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import urllib.request
+import urllib.error
+
 import feedparser
 
 WORKSPACE = Path(os.path.expanduser("~/.openclaw/news-digest-workspace"))
@@ -57,6 +60,28 @@ def article_id(url):
     return hashlib.md5(url.encode()).hexdigest()[:12]
 
 
+def resolve_google_news_url(url):
+    """Follow Google News redirect to get the real article URL."""
+    if "news.google.com/rss/articles/" not in url:
+        return url
+    try:
+        req = urllib.request.Request(url, method="HEAD", headers={
+            "User-Agent": "Mozilla/5.0"
+        })
+        # Follow redirects manually to get final URL
+        opener = urllib.request.build_opener(urllib.request.HTTPRedirectHandler)
+        resp = opener.open(req, timeout=5)
+        return resp.url
+    except Exception:
+        # If redirect fails, try GET as fallback
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            resp = urllib.request.urlopen(req, timeout=5)
+            return resp.url
+        except Exception:
+            return url
+
+
 def parse_pub_date(entry):
     """Extract publication datetime from a feed entry."""
     for field in ("published_parsed", "updated_parsed"):
@@ -94,6 +119,10 @@ def fetch_single_feed(feed_config):
             if not title or not link:
                 continue
 
+            # Resolve Google News redirect URLs to real article URLs
+            if source == "google_news":
+                link = resolve_google_news_url(link)
+
             pub_date = parse_pub_date(entry)
             articles.append({
                 "id": article_id(link),
@@ -113,79 +142,83 @@ def fetch_single_feed(feed_config):
 
 
 def fetch_linkedin():
-    """Fetch LinkedIn feed updates and notifications. Returns list of article dicts."""
-    articles = []
-    linkedin_user = os.environ.get("LINKEDIN_USER")
-    linkedin_pass = os.environ.get("LINKEDIN_PASS")
+    """Fetch LinkedIn posts via Apify's LinkedIn Posts Search Scraper.
 
-    if not linkedin_user or not linkedin_pass:
-        return articles, {"source": "LinkedIn", "error": "credentials not configured"}
+    Uses the apimaestro/linkedin-posts-search-scraper-no-cookies actor
+    which requires no LinkedIn auth — runs on Apify's infrastructure.
+    Costs ~$0.02/day for 20 posts. Free tier gives $5/month.
+    """
+    apify_token = os.environ.get("APIFY_API_TOKEN")
+    if not apify_token:
+        return [], {"source": "LinkedIn", "error": "APIFY_API_TOKEN not configured"}
+
+    articles = []
+    queries = ["artificial intelligence", "startup venture capital", "tech leadership"]
 
     try:
-        from linkedin_api import Linkedin
+        from apify_client import ApifyClient
+        client = ApifyClient(apify_token)
 
-        api = Linkedin(linkedin_user, linkedin_pass)
+        for query in queries:
+            try:
+                result = client.actor("apimaestro/linkedin-posts-search-scraper-no-cookies").call(
+                    run_input={
+                        "searchQuery": query,
+                        "limit": 7,
+                        "sort_type": "date_posted",
+                    }
+                )
+                items = client.dataset(result["defaultDatasetId"]).list_items().items
 
-        # Fetch network updates (feed posts)
-        updates = api.get_network_updates(limit=20)
-        for update in updates:
-            # Extract what we can from the update structure
-            text = ""
-            link = "https://www.linkedin.com"
-            actor_name = "LinkedIn"
+                for item in items:
+                    author = item.get("author", {})
+                    author_name = author.get("name", "LinkedIn")
+                    text = item.get("text", "")
+                    post_url = item.get("post_url", "https://www.linkedin.com")
+                    stats = item.get("stats", {})
+                    posted_at = item.get("posted_at", {})
 
-            if isinstance(update, dict):
-                # Try to extract post text
-                value = update.get("value", {})
-                activity = value.get("activity", {})
-                text = activity.get("text", "") or value.get("text", "")
+                    if not text:
+                        continue
 
-                # Try to get the actor name
-                actor = value.get("actor", {})
-                actor_name = actor.get("name", "LinkedIn connection")
+                    # Build a headline from author + first line of text
+                    first_line = text.split("\n")[0][:120]
+                    title = f"{author_name}: {first_line}{'...' if len(first_line) >= 120 else ''}"
 
-                # Try to get permalink
-                link = activity.get("permalink", link)
+                    # Parse posted_at timestamp
+                    ts = posted_at.get("timestamp")
+                    if ts:
+                        pub_date = datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
+                    else:
+                        pub_date = datetime.now(timezone.utc)
 
-            if text:
-                title = f"{actor_name}: {text[:120]}{'...' if len(text) > 120 else ''}"
-                articles.append({
-                    "id": article_id(link + text[:50]),
-                    "title": title,
-                    "link": link,
-                    "summary": text[:300] if len(text) > 300 else text,
-                    "source": "linkedin",
-                    "source_label": "LinkedIn",
-                    "pub_date": datetime.now(timezone.utc).isoformat(),
-                    "fetched_at": datetime.now(timezone.utc).isoformat(),
-                })
+                    likes = stats.get("num_likes", 0)
+                    comments = stats.get("num_comments", 0)
 
-        # Fetch notifications (profile views, etc.)
-        try:
-            notifications = api.get_notifications(limit=10)
-            for notif in notifications:
-                if isinstance(notif, dict):
-                    text = notif.get("text", notif.get("headline", ""))
-                    if text:
-                        articles.append({
-                            "id": article_id("notif-" + text[:50]),
-                            "title": text[:200],
-                            "link": "https://www.linkedin.com/notifications/",
-                            "summary": text,
-                            "source": "linkedin",
-                            "source_label": "LinkedIn Notification",
-                            "pub_date": datetime.now(timezone.utc).isoformat(),
-                            "fetched_at": datetime.now(timezone.utc).isoformat(),
-                        })
-        except Exception:
-            pass  # Notifications are best-effort
-
-        return articles, None
+                    articles.append({
+                        "id": article_id(post_url),
+                        "title": title,
+                        "link": post_url,
+                        "summary": text[:300] if len(text) > 300 else text,
+                        "source": "linkedin",
+                        "source_label": f"LinkedIn ({likes} likes)",
+                        "pub_date": pub_date.isoformat(),
+                        "fetched_at": datetime.now(timezone.utc).isoformat(),
+                    })
+            except Exception as e:
+                # Log per-query failures but continue with other queries
+                print(f"LinkedIn query '{query}' failed: {e}", file=sys.stderr)
+                continue
 
     except ImportError:
-        return [], {"source": "LinkedIn", "error": "linkedin-api not installed"}
+        return [], {"source": "LinkedIn", "error": "apify-client not installed"}
     except Exception as e:
         return [], {"source": "LinkedIn", "error": str(e)}
+
+    if not articles:
+        return [], {"source": "LinkedIn", "error": "no posts found"}
+
+    return articles, None
 
 
 def normalize_title(title):
