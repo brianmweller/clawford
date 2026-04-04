@@ -11,7 +11,7 @@ A seven-agent personal AI system themed after Richard Scarry's Busytown. Each ag
 | 🐭📅 **Mistress Mouse** | family-calendar | Not deployed | — | Logistics, scheduling, family comms |
 | 🐷🔍 **Sergeant Murphy** | meetings-coach | Not deployed | — | Meeting prep, debrief, follow-ups |
 | 🦛🛒 **Hilda Hippo** | shopping | Not deployed | — | Multi-channel purchasing |
-| 🐛📰 **Lowly Worm** | news-digest | Not deployed | — | Media curation and delivery |
+| 🐛📰 **Lowly Worm** | news-digest | Next up | @openclaw_lowly_worm_bot | Media curation and delivery |
 | 🐱🤝 **Huckle Cat** | connector | Not deployed | — | Relationship management, social nudges |
 
 *And if anything breaks catastrophically: **Mr Frumble** is waiting in the wings.*
@@ -33,7 +33,8 @@ clawford/
 ├── VERSION                # Current version
 ├── agents/                # Per-agent packages
 │   ├── fix-it/            # 🦊 Mr Fixit (deployed)
-│   └── rudolf/            # ✈️ Rudolf Von Flugel (next)
+│   ├── news-digest/       # 🐛 Lowly Worm (next)
+│   └── rudolf/            # ✈️ Rudolf Von Flugel (spec)
 ├── brain/                 # Shared brain setup
 │   └── setup-brain.sh
 ├── docs/                  # Design docs and specs
