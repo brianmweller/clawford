@@ -1,4 +1,4 @@
-# Clawford — Welcome to Busytown
+# Clawford — A Busytown for OpenClaw Agents
 
 A seven-agent personal AI system themed after Richard Scarry's Busytown. Each agent has its own Telegram bot, a defined role, and a Busytown character identity. Runs on OpenClaw.
 
