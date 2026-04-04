@@ -27,7 +27,7 @@ A seven-agent personal AI system running on OpenClaw, themed after Richard Scarr
 ## Directory Structure
 
 ```
-openclaw-agents/
+clawford/
 ├── DEPLOY.md              # Generic agent deployment template (Docker)
 ├── guide/                 # 10-chapter setup field manual
 │   └── index.md           # Start here
