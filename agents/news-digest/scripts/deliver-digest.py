@@ -58,7 +58,7 @@ def clean_html_entities(text):
             .replace("&quot;", '"'))
 
 
-def send_telegram(text, reply_markup=None):
+def send_telegram(text, reply_markup=None, silent=True):
     """Send a message via Telegram Bot API with previews disabled."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print(f"[dry-run] {text[:100]}...", file=sys.stderr)
@@ -70,6 +70,7 @@ def send_telegram(text, reply_markup=None):
         "chat_id": TELEGRAM_CHAT_ID,
         "text": text,
         "disable_web_page_preview": True,
+        "disable_notification": silent,
     }
     if reply_markup:
         msg["reply_markup"] = reply_markup
@@ -130,7 +131,8 @@ def load_sent_history():
 
 def save_sent_history(history):
     """Save sent history, pruning entries older than HISTORY_MAX_DAYS."""
-    cutoff = (datetime.now(timezone.utc) - __import__("datetime").timedelta(days=HISTORY_MAX_DAYS)).isoformat()
+    from datetime import timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=HISTORY_MAX_DAYS)).isoformat()
     # Keep only recent entries
     entries = list(zip(history.get("ids", []), history.get("titles", []), history.get("timestamps", [])))
     fresh = [(i, t, ts) for i, t, ts in entries if ts > cutoff]
@@ -358,7 +360,7 @@ def main():
         error_note += "\n🔑 LinkedIn session expired — re-run linkedin-auth.py to fix"
 
     footer = f"🐛 {sent_count} items · {len(sources_seen)} sources · React 👍/👎 to shape future editions{error_note}"
-    send_telegram(footer)
+    send_telegram(footer, silent=False)  # Only the footer dings
 
     # Update sent history for cross-day deduplication
     now_iso = datetime.now(timezone.utc).isoformat()

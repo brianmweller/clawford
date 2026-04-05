@@ -68,18 +68,18 @@
 
 ## LinkedIn
 
-### Feed & Notifications (via linkedin-api)
-- **Library:** `linkedin-api` (Python, Voyager API)
-- **Capabilities:** Network feed updates, notifications, profile views
-- **Auth:** LinkedIn credentials in `.env` (`LINKEDIN_USER`, `LINKEDIN_PASS`)
-- **Frequency:** Once daily during the morning digest cron only
-- **Status:** Available — install via `pip install linkedin-api`
+### Feed & Notifications (via Playwright browser scrape)
+- **Script:** `linkedin-scrape.py` using Playwright + persistent Chromium profile
+- **Auth:** One-time browser login via `linkedin-auth.py` (session saved to `linkedin-profile/`)
+- **Capabilities:** Feed posts (as LinkedIn ranked them), notifications with click-through (profile viewers with names + timestamps)
+- **Frequency:** Once daily during the morning digest cron
+- **Dedup:** `linkedin-seen.json` tracks previously seen items; only fresh content is included
+- **Status:** Available — authenticated session on VPS
 - **Caution:**
+  - NEVER write to LinkedIn — all access is strictly read-only (SOUL boundary)
   - Never fetch more than once per cron run
-  - Never store credentials outside `.env`
-  - Never include credentials in LLM prompts or logs
-  - If the library breaks or LinkedIn blocks access, skip LinkedIn silently and note the failure in the status file
-- **Fallback:** If linkedin-api becomes unreliable, switch to Google News with `site:linkedin.com` queries to catch publicly indexed posts.
+  - If session expires, alert is sent via Telegram and LinkedIn section is skipped
+  - Session may need re-authentication periodically via `linkedin-auth.py`
 
 ---
 

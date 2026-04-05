@@ -13,7 +13,7 @@ Workspace: .openclaw/news-digest-workspace/
 
 1. Run `python3 ~/.openclaw/news-digest-workspace/scripts/fetch-and-rank.py`
    - Fetches all RSS feeds (NYT, WSJ, WaPo, Slate, Google News)
-   - Fetches LinkedIn feed updates and notifications via linkedin-api
+   - Fetches LinkedIn feed and notifications via Playwright browser scrape
    - Deduplicates by URL and title similarity
    - Extracts topics via keyword matching against the preference model vocabulary
    - Ranks by: recency × topic_relevance × source_weight × diversity_bonus
@@ -108,10 +108,25 @@ Write current UTC time to `last_heartbeat` in `~/Dropbox/openclaw-backup/agents/
 
 ---
 
+## Engagement Poll — Every 5 Minutes
+
+**Schedule:** `*/5 * * * *`
+**Command:** Process pending engagement signals from agent session transcripts.
+
+Run `python3 ~/.openclaw/news-digest-workspace/scripts/engagement-poller.py`. This reads the agent's session transcripts, finds `/like N` and `/dislike N` messages, looks up articles in the item-map, and appends engagement events to `preferences/engagement.jsonl`.
+
+**On success:** Silent.
+**On failure:** Silent (errors logged to stderr only).
+
+**Telegram output:** Silent always.
+
+---
+
 ## Summary Table
 
 | Cron | Frequency | Telegram | Auto-action |
 |------|-----------|----------|-------------|
 | Morning edition | Daily 12:00 UTC | Always | Fetch, rank, summarize, deliver |
-| Preference update | Daily 23:00 UTC | On failure only | Update preference weights |
+| Preference update | Daily 23:00 UTC | On failure only | Update preference weights + virtual judge |
 | Heartbeat | Every 30 min | On failure only | Write heartbeat to status file |
+| Engagement poll | Every 5 min | Never | Parse session transcripts for /like /dislike |
