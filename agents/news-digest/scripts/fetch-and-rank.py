@@ -295,6 +295,20 @@ def fetch_linkedin_browser():
         text = post.get("text", "")
         if not text:
             continue
+        # Clean the text: remove lines that are just the author name or tagline
+        clean_lines = []
+        for line in text.split("\n"):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped == author:
+                continue
+            if stripped.count("|") >= 2:
+                continue
+            clean_lines.append(stripped)
+        text = "\n".join(clean_lines)
+        if not text:
+            continue
         first_line = text.split("\n")[0][:120]
         title = f"{author}: {first_line}{'...' if len(first_line) >= 120 else ''}"
         articles.append({
