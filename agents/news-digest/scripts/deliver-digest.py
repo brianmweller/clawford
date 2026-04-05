@@ -104,20 +104,65 @@ def get_source_name(source):
     }.get(source, source)
 
 
-def load_sent_ids(date_str):
-    """Load previously sent article IDs for deduplication across runs."""
-    sent_file = CACHE_DIR / f"sent-{date_str}.json"
-    if sent_file.exists():
-        with open(sent_file) as f:
-            return set(json.load(f).get("ids", []))
-    return set()
+SENT_HISTORY_FILE = CACHE_DIR / "sent-history.json"
+HISTORY_MAX_DAYS = 3  # Keep titles from last 3 days for cross-day dedup
 
 
-def save_sent_ids(date_str, sent_ids):
-    """Save the set of article IDs that have been sent today."""
-    sent_file = CACHE_DIR / f"sent-{date_str}.json"
-    with open(sent_file, "w") as f:
-        json.dump({"ids": sorted(sent_ids), "updated_at": datetime.now(timezone.utc).isoformat()}, f)
+def normalize_title(title):
+    """Normalize a title for fuzzy matching."""
+    import re
+    t = title.lower()
+    t = re.sub(r"[^\w\s]", "", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def load_sent_history():
+    """Load sent article IDs + normalized titles across days."""
+    if SENT_HISTORY_FILE.exists():
+        try:
+            with open(SENT_HISTORY_FILE) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"ids": [], "titles": [], "updated_at": ""}
+
+
+def save_sent_history(history):
+    """Save sent history, pruning entries older than HISTORY_MAX_DAYS."""
+    cutoff = (datetime.now(timezone.utc) - __import__("datetime").timedelta(days=HISTORY_MAX_DAYS)).isoformat()
+    # Keep only recent entries
+    entries = list(zip(history.get("ids", []), history.get("titles", []), history.get("timestamps", [])))
+    fresh = [(i, t, ts) for i, t, ts in entries if ts > cutoff]
+    history["ids"] = [e[0] for e in fresh]
+    history["titles"] = [e[1] for e in fresh]
+    history["timestamps"] = [e[2] for e in fresh]
+    history["updated_at"] = datetime.now(timezone.utc).isoformat()
+    with open(SENT_HISTORY_FILE, "w") as f:
+        json.dump(history, f)
+
+
+def is_duplicate(article, history):
+    """Check if an article was already sent (by ID or similar title)."""
+    article_id = article.get("id", "")
+    if article_id in history.get("ids", []):
+        return True
+
+    # Fuzzy title match — catch same story from different outlets
+    norm = normalize_title(article.get("title", ""))
+    if len(norm) < 10:
+        return False
+    norm_words = set(norm.split())
+    for prev_title in history.get("titles", []):
+        prev_words = set(prev_title.split())
+        if not norm_words or not prev_words:
+            continue
+        # Jaccard similarity on words
+        intersection = len(norm_words & prev_words)
+        union = len(norm_words | prev_words)
+        if union > 0 and intersection / union > 0.5:
+            return True
+    return False
 
 
 def save_item_mapping(date_str, mapping):
@@ -155,19 +200,23 @@ def main():
         print(json.dumps({"status": "error", "message": "No articles to deliver"}))
         sys.exit(1)
 
-    # Load previously sent IDs for deduplication
-    previously_sent = load_sent_ids(date_str)
-    is_refresh = len(previously_sent) > 0
+    # Load sent history for cross-day deduplication
+    history = load_sent_history()
+    is_refresh = len(history.get("ids", [])) > 0
 
-    # Select top 20 items, filtering out already-sent ones if refreshing
+    # Select top 20 items, filtering out duplicates (same ID or similar title)
     top_articles = []
+    skipped = 0
     for article in articles:
         if len(top_articles) >= 20:
             break
-        article_id = article.get("id", "")
-        if is_refresh and article_id in previously_sent:
+        if is_duplicate(article, history):
+            skipped += 1
             continue
         top_articles.append(article)
+
+    if skipped:
+        print(f"Skipped {skipped} duplicate articles", file=sys.stderr)
 
     if not top_articles:
         if is_refresh:
@@ -207,7 +256,6 @@ def main():
     item_num = 0
     sent_count = 0
     sources_seen = set()
-    new_sent_ids = set(previously_sent)  # Start with existing, add new
     item_mapping = {}  # item_num -> article metadata for preference learning
 
     for section in section_order:
@@ -252,7 +300,6 @@ def main():
 
             send_telegram(msg, reply_markup=buttons)
             sent_count += 1
-            new_sent_ids.add(article_id)
 
             # Save mapping for preference learning
             item_mapping[str(item_num)] = {
@@ -313,8 +360,13 @@ def main():
     footer = f"🐛 {sent_count} items · {len(sources_seen)} sources · React 👍/👎 to shape future editions{error_note}"
     send_telegram(footer)
 
-    # Save sent IDs for deduplication
-    save_sent_ids(date_str, new_sent_ids)
+    # Update sent history for cross-day deduplication
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for article in top_articles:
+        history["ids"] = history.get("ids", []) + [article.get("id", "")]
+        history["titles"] = history.get("titles", []) + [normalize_title(article.get("title", ""))]
+        history["timestamps"] = history.get("timestamps", []) + [now_iso]
+    save_sent_history(history)
 
     # Save item mapping for preference learning
     save_item_mapping(date_str, item_mapping)
