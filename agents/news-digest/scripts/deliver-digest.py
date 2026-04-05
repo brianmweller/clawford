@@ -197,6 +197,37 @@ def main():
             sent_count += 1
             time.sleep(0.3)  # Rate limit
 
+    # LinkedIn notifications section (separate from feed posts)
+    # Read the LinkedIn scrape data directly for notifications
+    linkedin_file = CACHE_DIR / f"linkedin-{date_str}.json"
+    if linkedin_file.exists():
+        with open(linkedin_file) as f:
+            li_data = json.load(f)
+
+        notifs = li_data.get("notifications", [])
+        if notifs:
+            send_telegram("🔔 LINKEDIN NOTIFICATIONS\n━━━━━━━━━━━━━━━")
+            time.sleep(0.3)
+
+            for notif in notifs:
+                text = notif.get("text", "")
+                time_ago = notif.get("time_ago", "")
+                detail = notif.get("detail", "")
+                notif_type = notif.get("type", "other")
+
+                if not text:
+                    continue
+
+                msg = text
+                if detail:
+                    msg += f"\n→ {detail}"
+                if time_ago:
+                    msg += f"\n{time_ago}"
+
+                send_telegram(msg)
+                sent_count += 1
+                time.sleep(0.3)
+
     # Send footer
     error_note = ""
     if errors:

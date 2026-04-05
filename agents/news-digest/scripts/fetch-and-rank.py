@@ -243,6 +243,94 @@ def fetch_linkedin():
     return articles, None
 
 
+def fetch_linkedin_browser():
+    """Fetch LinkedIn content by running the Playwright scraper script.
+
+    Calls linkedin-scrape.py which uses a persistent Chromium profile
+    (authenticated via linkedin-auth.py) to scrape the user's actual
+    LinkedIn feed and notifications.
+    """
+    import subprocess
+
+    scraper = WORKSPACE / "scripts" / "linkedin-scrape.py"
+    if not scraper.exists():
+        return [], {"source": "LinkedIn", "error": "linkedin-scrape.py not found"}
+
+    profile_dir = WORKSPACE / "linkedin-profile"
+    if not profile_dir.exists():
+        return [], {"source": "LinkedIn", "error": "no authenticated session — run linkedin-auth.py"}
+
+    try:
+        result = subprocess.run(
+            ["python3", str(scraper)],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr[:200] if result.stderr else "unknown error"
+            return [], {"source": "LinkedIn", "error": stderr}
+
+        output = json.loads(result.stdout)
+        if output.get("status") != "ok":
+            return [], {"source": "LinkedIn", "error": output.get("message", "scrape failed")}
+
+    except subprocess.TimeoutExpired:
+        return [], {"source": "LinkedIn", "error": "scraper timed out"}
+    except Exception as e:
+        return [], {"source": "LinkedIn", "error": str(e)}
+
+    # Read the scraped data
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    linkedin_file = CACHE_DIR / f"linkedin-{today}.json"
+    if not linkedin_file.exists():
+        return [], {"source": "LinkedIn", "error": "scraper ran but no output file"}
+
+    with open(linkedin_file) as f:
+        data = json.load(f)
+
+    articles = []
+
+    # Convert feed posts to article format
+    for post in data.get("posts", []):
+        author = post.get("author", "LinkedIn")
+        text = post.get("text", "")
+        if not text:
+            continue
+        first_line = text.split("\n")[0][:120]
+        title = f"{author}: {first_line}{'...' if len(first_line) >= 120 else ''}"
+        articles.append({
+            "id": article_id(post.get("url", "") + text[:50]),
+            "title": title,
+            "link": clean_url(post.get("url", "https://www.linkedin.com")),
+            "summary": text[:300],
+            "source": "linkedin",
+            "source_label": f"LinkedIn ({post.get('likes', '0')} likes)",
+            "pub_date": datetime.now(timezone.utc).isoformat(),
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    # Convert notifications to article format (separate category)
+    for notif in data.get("notifications", []):
+        text = notif.get("text", "")
+        if not text:
+            continue
+        articles.append({
+            "id": article_id("notif-" + text[:50]),
+            "title": text[:200],
+            "link": "https://www.linkedin.com/notifications/",
+            "summary": text,
+            "source": "linkedin",
+            "source_label": "LinkedIn Notification",
+            "pub_date": datetime.now(timezone.utc).isoformat(),
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "_is_notification": True,
+        })
+
+    if not articles:
+        return [], {"source": "LinkedIn", "error": "no feed posts or notifications found"}
+
+    return articles, None
+
+
 def normalize_title(title):
     """Normalize a title for deduplication comparison."""
     title = title.lower()
@@ -433,12 +521,11 @@ def main():
             # Small delay to be polite
             time.sleep(0.5)
 
-    # LinkedIn disabled — Apify keyword search returns random public posts,
-    # not the user's feed. Needs authenticated access or browser automation.
-    # linkedin_articles, linkedin_error = fetch_linkedin()
-    # all_articles.extend(linkedin_articles)
-    # if linkedin_error:
-    #     errors.append(linkedin_error)
+    # LinkedIn via Playwright browser scrape (uses persistent authenticated session)
+    linkedin_articles, linkedin_error = fetch_linkedin_browser()
+    all_articles.extend(linkedin_articles)
+    if linkedin_error:
+        errors.append(linkedin_error)
 
     fetch_duration = round(time.time() - start_time, 1)
     print(f"Fetched {len(all_articles)} raw articles in {fetch_duration}s", file=sys.stderr)
