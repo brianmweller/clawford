@@ -14,7 +14,6 @@ Usage: python3 update-preferences.py
 import json
 import os
 import sys
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -81,7 +80,10 @@ def load_new_events(last_updated):
 
 
 def call_judge_llm(title, summary, topics, source, action):
-    """Call a cheap LLM to analyze WHY the user reacted this way.
+    """Call a cheap LLM via Claude Code to analyze WHY the user reacted.
+
+    Uses `claude -p` with --model haiku (cheap, fast) which is already
+    authenticated via the container's OAuth token. No API key needed.
 
     Returns a dict with:
     - reason: one of IRRELEVANT_SUBTOPIC, LOW_QUALITY, STALE, WRONG_FRAMING, TOO_NICHE
@@ -89,69 +91,48 @@ def call_judge_llm(title, summary, topics, source, action):
     - quality_signal: -1 (bad), 0 (neutral), 1 (good) for the source
     - explanation: brief human-readable reason
     """
-    # Use OpenAI API via the gateway's configured provider
-    # The agent runs on openai-codex/gpt-5.4, but for the judge we want cheap
-    # Use the Brave API as a proxy indicator — actually, let's call the OpenAI API directly
-    # since the Docker container has the auth configured
-
-    api_key = os.environ.get("OPENAI_API_KEY", "")
-    if not api_key:
-        # Try reading from the OpenClaw auth config
-        try:
-            conf_path = Path(os.path.expanduser("~/.openclaw/openclaw.json"))
-            conf = json.load(open(conf_path))
-            # Look for OAuth token
-            profiles = conf.get("auth", {}).get("profiles", {})
-            for k, v in profiles.items():
-                if "openai" in k and v.get("mode") == "oauth":
-                    # Can't extract OAuth token programmatically — skip LLM judge
-                    return None
-        except Exception:
-            pass
-        return None
+    import subprocess
 
     action_word = "liked" if action == "thumbs_up" else "disliked"
 
-    prompt = f"""The user {action_word} this news article in their morning digest.
-
-Title: {title}
-Summary: {summary[:300]}
-Current topics: {', '.join(topics)}
-Source: {source}
-
-Analyze why the user probably {action_word} this. Return JSON only:
-{{
-  "reason": "IRRELEVANT_SUBTOPIC|LOW_QUALITY|STALE|WRONG_FRAMING|TOO_NICHE|GOOD_CONTENT|IMPORTANT_TOPIC",
-  "subtopics": ["specific_tag_1", "specific_tag_2"],
-  "quality_signal": -1 or 0 or 1,
-  "explanation": "one sentence why"
-}}"""
+    prompt = (
+        f'The user {action_word} this news article in their morning digest.\n\n'
+        f'Title: {title}\n'
+        f'Summary: {summary[:300]}\n'
+        f'Current topics: {", ".join(topics)}\n'
+        f'Source: {source}\n\n'
+        f'Analyze why the user probably {action_word} this. '
+        f'Return ONLY valid JSON with these fields:\n'
+        f'{{"reason": "IRRELEVANT_SUBTOPIC|LOW_QUALITY|STALE|WRONG_FRAMING|TOO_NICHE|GOOD_CONTENT|IMPORTANT_TOPIC", '
+        f'"subtopics": ["specific_tag_1", "specific_tag_2"], '
+        f'"quality_signal": -1, '
+        f'"explanation": "one sentence why"}}'
+    )
 
     try:
-        payload = json.dumps({
-            "model": "gpt-4o-mini",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.3,
-            "max_tokens": 200,
-            "response_format": {"type": "json_object"},
-        }).encode("utf-8")
-
-        req = urllib.request.Request(
-            "https://api.openai.com/v1/chat/completions",
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-            },
+        result = subprocess.run(
+            ["claude", "-p", prompt, "--output-format", "text", "--model", "haiku"],
+            capture_output=True, text=True, timeout=30,
         )
+        if result.returncode != 0:
+            print(f"  Judge LLM failed: {result.stderr[:100]}", file=sys.stderr)
+            return None
 
-        resp = urllib.request.urlopen(req, timeout=15)
-        result = json.loads(resp.read())
-        content = result["choices"][0]["message"]["content"]
-        return json.loads(content)
+        # Parse JSON from the response (may be wrapped in markdown code block)
+        output = result.stdout.strip()
+        if output.startswith("```"):
+            output = output.split("```")[1]
+            if output.startswith("json"):
+                output = output[4:]
+        output = output.strip()
 
-    except Exception as e:
-        print(f"  Judge LLM call failed: {e}", file=sys.stderr)
+        return json.loads(output)
+
+    except subprocess.TimeoutExpired:
+        print("  Judge LLM timed out", file=sys.stderr)
+        return None
+    except (json.JSONDecodeError, Exception) as e:
+        print(f"  Judge LLM parse error: {e}", file=sys.stderr)
         return None
 
 
