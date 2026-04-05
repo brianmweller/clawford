@@ -206,12 +206,11 @@ def main():
     history = load_sent_history()
     is_refresh = len(history.get("ids", [])) > 0
 
-    # Select top 20 items, filtering out duplicates (same ID or similar title)
-    # Only scan the top 40 ranked articles — don't dig into low-ranked backfill
+    # Select up to 20 unseen items from the ranked list
+    # Fresh fetch + dedup: skip anything already sent, take the next 20
     top_articles = []
     skipped = 0
-    scan_limit = 40  # Don't look past rank 40 for new items
-    for article in articles[:scan_limit]:
+    for article in articles:
         if len(top_articles) >= 20:
             break
         if is_duplicate(article, history):
