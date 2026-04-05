@@ -58,7 +58,7 @@ def clean_html_entities(text):
             .replace("&quot;", '"'))
 
 
-def send_telegram(text):
+def send_telegram(text, reply_markup=None):
     """Send a message via Telegram Bot API with previews disabled."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print(f"[dry-run] {text[:100]}...", file=sys.stderr)
@@ -66,12 +66,15 @@ def send_telegram(text):
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
-    # Try plain text first (most reliable)
-    payload = json.dumps({
+    msg = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": text,
         "disable_web_page_preview": True,
-    }).encode("utf-8")
+    }
+    if reply_markup:
+        msg["reply_markup"] = reply_markup
+
+    payload = json.dumps(msg).encode("utf-8")
 
     req = urllib.request.Request(url, data=payload, headers={
         "Content-Type": "application/json",
@@ -239,7 +242,15 @@ def main():
             else:
                 msg = f"{item_num}. {title}\n{link}"
 
-            send_telegram(msg)
+            # Inline 👍/👎 buttons for engagement
+            buttons = {
+                "inline_keyboard": [[
+                    {"text": "\ud83d\udc4d", "callback_data": f"like:{item_num}"},
+                    {"text": "\ud83d\udc4e", "callback_data": f"dislike:{item_num}"},
+                ]]
+            }
+
+            send_telegram(msg, reply_markup=buttons)
             sent_count += 1
             new_sent_ids.add(article_id)
 
