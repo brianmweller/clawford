@@ -69,10 +69,11 @@ def resolve_google_news_url(url):
         result = new_decoderv1(url, interval=1)
         if result.get("status") and result.get("decoded_url"):
             return result["decoded_url"]
+        print(f"  Google News URL resolution failed (no decoded_url): {url[:80]}", file=sys.stderr)
     except ImportError:
-        pass
-    except Exception:
-        pass
+        print("  googlenewsdecoder not installed — Google News URLs will not be resolved", file=sys.stderr)
+    except Exception as e:
+        print(f"  Google News URL resolution error: {e} for {url[:80]}", file=sys.stderr)
     return url
 
 
