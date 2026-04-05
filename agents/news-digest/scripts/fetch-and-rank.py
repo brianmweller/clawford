@@ -61,25 +61,40 @@ def article_id(url):
 
 
 def resolve_google_news_url(url):
-    """Follow Google News redirect to get the real article URL."""
+    """Decode Google News redirect URL to the real publisher URL."""
     if "news.google.com/rss/articles/" not in url:
         return url
     try:
-        req = urllib.request.Request(url, method="HEAD", headers={
-            "User-Agent": "Mozilla/5.0"
-        })
-        # Follow redirects manually to get final URL
-        opener = urllib.request.build_opener(urllib.request.HTTPRedirectHandler)
-        resp = opener.open(req, timeout=5)
-        return resp.url
+        from googlenewsdecoder import new_decoderv1
+        result = new_decoderv1(url, interval=1)
+        if result.get("status") and result.get("decoded_url"):
+            return result["decoded_url"]
+    except ImportError:
+        pass
     except Exception:
-        # If redirect fails, try GET as fallback
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            resp = urllib.request.urlopen(req, timeout=5)
-            return resp.url
-        except Exception:
-            return url
+        pass
+    return url
+
+
+def clean_url(url):
+    """Strip tracking parameters from URLs."""
+    from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+    parsed = urlparse(url)
+    # Parameters to strip
+    tracking_params = {
+        "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
+        "utm_reader", "utm_cid", "utm_pubreferrer",
+        "ref", "reflink", "source", "via", "rcm",
+        "oc", "ucbcb", "ceid", "gl", "hl",
+        "mod", "cx_testId", "cx_testVariant",
+        "smid", "smtyp", "smprod",
+        "fbclid", "gclid", "msclkid", "dclid",
+        "mc_cid", "mc_eid",
+    }
+    params = parse_qs(parsed.query, keep_blank_values=False)
+    cleaned = {k: v for k, v in params.items() if k.lower() not in tracking_params}
+    clean_query = urlencode(cleaned, doseq=True)
+    return urlunparse(parsed._replace(query=clean_query, fragment=""))
 
 
 def parse_pub_date(entry):
@@ -123,6 +138,9 @@ def fetch_single_feed(feed_config):
             if source == "google_news":
                 link = resolve_google_news_url(link)
 
+            # Clean tracking params from all URLs
+            link = clean_url(link)
+
             pub_date = parse_pub_date(entry)
             articles.append({
                 "id": article_id(link),
@@ -153,7 +171,11 @@ def fetch_linkedin():
         return [], {"source": "LinkedIn", "error": "APIFY_API_TOKEN not configured"}
 
     articles = []
-    queries = ["artificial intelligence", "startup venture capital", "tech leadership"]
+    queries = [
+        "artificial intelligence agents LLM",
+        "startup founder venture capital funding",
+        "economics policy regulation tech",
+    ]
 
     try:
         from apify_client import ApifyClient
@@ -198,7 +220,7 @@ def fetch_linkedin():
                     articles.append({
                         "id": article_id(post_url),
                         "title": title,
-                        "link": post_url,
+                        "link": clean_url(post_url),
                         "summary": text[:300] if len(text) > 300 else text,
                         "source": "linkedin",
                         "source_label": f"LinkedIn ({likes} likes)",
@@ -411,11 +433,12 @@ def main():
             # Small delay to be polite
             time.sleep(0.5)
 
-    # Fetch LinkedIn (separate, not in thread pool)
-    linkedin_articles, linkedin_error = fetch_linkedin()
-    all_articles.extend(linkedin_articles)
-    if linkedin_error:
-        errors.append(linkedin_error)
+    # LinkedIn disabled — Apify keyword search returns random public posts,
+    # not the user's feed. Needs authenticated access or browser automation.
+    # linkedin_articles, linkedin_error = fetch_linkedin()
+    # all_articles.extend(linkedin_articles)
+    # if linkedin_error:
+    #     errors.append(linkedin_error)
 
     fetch_duration = round(time.time() - start_time, 1)
     print(f"Fetched {len(all_articles)} raw articles in {fetch_duration}s", file=sys.stderr)
