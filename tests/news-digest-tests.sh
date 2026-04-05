@@ -315,9 +315,9 @@ fi
 docker compose -f "$HOME/openclaw/docker-compose.yml" exec -T openclaw-gateway \
     rm -f "$WORKSPACE/linkedin-profile/Singleton*" 2>/dev/null || true
 
-# Clear seen file so we get results even if previously scraped
+# Back up and clear seen file so we get results even if previously scraped
 docker compose -f "$HOME/openclaw/docker-compose.yml" exec -T openclaw-gateway \
-    rm -f "$WORKSPACE/cache/linkedin-seen.json" 2>/dev/null || true
+    bash -c "cp $WORKSPACE/cache/linkedin-seen.json $WORKSPACE/cache/linkedin-seen.json.bak 2>/dev/null; rm -f $WORKSPACE/cache/linkedin-seen.json" || true
 
 # Run the scraper — capture stdout (JSON) separately from stderr (progress)
 STDOUT_FILE="/tmp/linkedin-test-stdout.json"
@@ -349,6 +349,10 @@ else
 fi
 
 echo "  INFO: $NOTIFS notifications scraped"
+
+# Restore the seen file so production dedup isn't broken
+docker compose -f "$HOME/openclaw/docker-compose.yml" exec -T openclaw-gateway \
+    bash -c "if [ -f $WORKSPACE/cache/linkedin-seen.json.bak ]; then mv $WORKSPACE/cache/linkedin-seen.json.bak $WORKSPACE/cache/linkedin-seen.json; fi" || true
 
 if [ "$failures" -eq 0 ]; then
     test_pass
