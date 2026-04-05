@@ -247,8 +247,49 @@ def main():
 
     model, changes = apply_updates(model, events)
 
+    # Decay stale topic weights toward 1.0
+    # Topics with no engagement in 30+ days drift back to neutral,
+    # preventing old signals from permanently skewing the digest.
+    topic_weights = model.get("topic_weights", {})
+    last_engaged = model.get("topic_last_engaged", {})
+    now = datetime.now(timezone.utc)
+    decayed = []
+
+    for topic, weight in list(topic_weights.items()):
+        last_ts = last_engaged.get(topic)
+        if last_ts:
+            try:
+                last_dt = datetime.fromisoformat(last_ts)
+                days_idle = (now - last_dt).days
+            except (ValueError, TypeError):
+                days_idle = 0
+        else:
+            days_idle = 0
+
+        # After 30 days idle, decay 5% toward 1.0 per day
+        if days_idle > 30:
+            decay_days = days_idle - 30
+            # Move 5% of the distance to 1.0 per idle day (exponential decay)
+            for _ in range(min(decay_days, 60)):
+                weight = weight + (1.0 - weight) * 0.05
+            weight = round(clamp(weight, TOPIC_WEIGHT_MIN, TOPIC_WEIGHT_MAX), 3)
+            if weight != topic_weights[topic]:
+                topic_weights[topic] = weight
+                decayed.append(topic)
+
+    # Update last_engaged timestamps for topics in today's events
+    for event in events:
+        for topic in event.get("topics", []):
+            last_engaged[topic] = now.isoformat()
+        # Also update judge subtopics
+        # (already handled in apply_updates via topic_weights keys)
+
+    model["topic_weights"] = topic_weights
+    model["topic_last_engaged"] = last_engaged
+    changes["decayed"] = decayed
+
     # Update metadata
-    model["updated_at"] = datetime.now(timezone.utc).isoformat()
+    model["updated_at"] = now.isoformat()
     model["version"] = model.get("version", 0) + 1
 
     # Write updated model
@@ -261,6 +302,7 @@ def main():
         "topics_updated": sorted(changes["topics_updated"]),
         "sources_updated": sorted(changes["sources_updated"]),
         "judged_by_llm": changes["judged"],
+        "decayed": changes.get("decayed", []),
         "model_version": model["version"],
     }
 
