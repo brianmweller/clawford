@@ -2,8 +2,9 @@
 """
 update-preferences.py — Process engagement signals and update the preference model.
 
-Reads new entries from preferences/engagement.jsonl, applies multiplicative
-weight updates, clamps to safe ranges, and writes updated model.json.
+Reads new entries from preferences/engagement.jsonl, runs a virtual judge
+LLM on thumbs-down articles to understand WHY, applies weight updates
+with finer-grained topic tags, and writes updated model.json.
 
 Runs as the nightly preference-update cron.
 
@@ -13,14 +14,16 @@ Usage: python3 update-preferences.py
 import json
 import os
 import sys
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
 WORKSPACE = Path(os.path.expanduser("~/.openclaw/news-digest-workspace"))
 ENGAGEMENT_FILE = WORKSPACE / "preferences" / "engagement.jsonl"
 MODEL_FILE = WORKSPACE / "preferences" / "model.json"
+JUDGE_LOG = WORKSPACE / "preferences" / "judge-log.jsonl"
 
-# Weight update multipliers
+# Weight update multipliers (base — judge can override)
 WEIGHT_RULES = {
     "thumbs_up":   {"topic_mult": 1.10, "source_mult": 1.05},
     "thumbs_down": {"topic_mult": 0.85, "source_mult": 0.95},
@@ -32,6 +35,9 @@ TOPIC_WEIGHT_MIN = 0.1
 TOPIC_WEIGHT_MAX = 3.0
 SOURCE_WEIGHT_MIN = 0.5
 SOURCE_WEIGHT_MAX = 2.0
+
+# Brave Search API key for the judge (reuse existing env var)
+BRAVE_API_KEY = os.environ.get("BRAVE_API_KEY", "")
 
 
 def clamp(value, lo, hi):
@@ -65,7 +71,6 @@ def load_new_events(last_updated):
                 continue
             try:
                 event = json.loads(line)
-                # Only process events newer than last update
                 if last_updated and event.get("ts", "") <= last_updated:
                     continue
                 events.append(event)
@@ -75,12 +80,89 @@ def load_new_events(last_updated):
     return events
 
 
+def call_judge_llm(title, summary, topics, source, action):
+    """Call a cheap LLM to analyze WHY the user reacted this way.
+
+    Returns a dict with:
+    - reason: one of IRRELEVANT_SUBTOPIC, LOW_QUALITY, STALE, WRONG_FRAMING, TOO_NICHE
+    - subtopics: list of finer-grained topic tags to adjust
+    - quality_signal: -1 (bad), 0 (neutral), 1 (good) for the source
+    - explanation: brief human-readable reason
+    """
+    # Use OpenAI API via the gateway's configured provider
+    # The agent runs on openai-codex/gpt-5.4, but for the judge we want cheap
+    # Use the Brave API as a proxy indicator — actually, let's call the OpenAI API directly
+    # since the Docker container has the auth configured
+
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    if not api_key:
+        # Try reading from the OpenClaw auth config
+        try:
+            conf_path = Path(os.path.expanduser("~/.openclaw/openclaw.json"))
+            conf = json.load(open(conf_path))
+            # Look for OAuth token
+            profiles = conf.get("auth", {}).get("profiles", {})
+            for k, v in profiles.items():
+                if "openai" in k and v.get("mode") == "oauth":
+                    # Can't extract OAuth token programmatically — skip LLM judge
+                    return None
+        except Exception:
+            pass
+        return None
+
+    action_word = "liked" if action == "thumbs_up" else "disliked"
+
+    prompt = f"""The user {action_word} this news article in their morning digest.
+
+Title: {title}
+Summary: {summary[:300]}
+Current topics: {', '.join(topics)}
+Source: {source}
+
+Analyze why the user probably {action_word} this. Return JSON only:
+{{
+  "reason": "IRRELEVANT_SUBTOPIC|LOW_QUALITY|STALE|WRONG_FRAMING|TOO_NICHE|GOOD_CONTENT|IMPORTANT_TOPIC",
+  "subtopics": ["specific_tag_1", "specific_tag_2"],
+  "quality_signal": -1 or 0 or 1,
+  "explanation": "one sentence why"
+}}"""
+
+    try:
+        payload = json.dumps({
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+            "max_tokens": 200,
+            "response_format": {"type": "json_object"},
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            "https://api.openai.com/v1/chat/completions",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            },
+        )
+
+        resp = urllib.request.urlopen(req, timeout=15)
+        result = json.loads(resp.read())
+        content = result["choices"][0]["message"]["content"]
+        return json.loads(content)
+
+    except Exception as e:
+        print(f"  Judge LLM call failed: {e}", file=sys.stderr)
+        return None
+
+
 def apply_updates(model, events):
-    """Apply engagement events to the preference model."""
+    """Apply engagement events to the preference model, using judge LLM for richer inference."""
     topic_weights = model.get("topic_weights", {})
     source_weights = model.get("source_weights", {})
+    topic_vocabulary = model.get("topic_vocabulary", {})
 
-    changes = {"topics_updated": set(), "sources_updated": set()}
+    changes = {"topics_updated": set(), "sources_updated": set(), "judged": 0}
+    judge_results = []
 
     for event in events:
         action = event.get("action", "")
@@ -90,8 +172,55 @@ def apply_updates(model, events):
 
         topics = event.get("topics", [])
         source = event.get("source", "")
+        title = event.get("title", "")
+        summary = event.get("summary", "")
 
-        # Update topic weights
+        # For thumbs_up/thumbs_down, call the virtual judge for richer signals
+        judge = None
+        if action in ("thumbs_up", "thumbs_down"):
+            judge = call_judge_llm(title, summary, topics, source, action)
+            if judge:
+                changes["judged"] += 1
+
+                # Log the judge result
+                judge_results.append({
+                    "ts": event.get("ts"),
+                    "title": title,
+                    "action": action,
+                    "judge": judge,
+                })
+
+                # Use judge's subtopics for finer-grained adjustment
+                subtopics = judge.get("subtopics", [])
+                if subtopics:
+                    for st in subtopics:
+                        st_key = st.lower().replace(" ", "_").replace("-", "_")
+                        old = topic_weights.get(st_key, 1.0)
+                        new = old * rules["topic_mult"]
+                        topic_weights[st_key] = round(clamp(new, TOPIC_WEIGHT_MIN, TOPIC_WEIGHT_MAX), 3)
+                        changes["topics_updated"].add(st_key)
+
+                        # Add to vocabulary if new
+                        if st_key not in topic_vocabulary:
+                            topic_vocabulary[st_key] = [st.lower()]
+
+                # If judge says LOW_QUALITY or WRONG_FRAMING, hit the source harder
+                reason = judge.get("reason", "")
+                quality = judge.get("quality_signal", 0)
+                if reason in ("LOW_QUALITY", "WRONG_FRAMING") and action == "thumbs_down":
+                    # Extra source penalty for quality issues
+                    old = source_weights.get(source, 1.0)
+                    new = old * 0.90  # Extra 10% penalty on top of normal
+                    source_weights[source] = round(clamp(new, SOURCE_WEIGHT_MIN, SOURCE_WEIGHT_MAX), 3)
+                    changes["sources_updated"].add(source)
+
+                # If judge says IRRELEVANT_SUBTOPIC, don't penalize the broad topic
+                # — only the subtopics were adjusted above
+                if reason == "IRRELEVANT_SUBTOPIC":
+                    # Skip broad topic adjustment for this event
+                    topics = []  # Clear so the loop below skips it
+
+        # Apply standard broad topic + source weight updates
         for topic in topics:
             old_weight = topic_weights.get(topic, 1.0)
             new_weight = old_weight * rules["topic_mult"]
@@ -100,7 +229,6 @@ def apply_updates(model, events):
             if old_weight != new_weight:
                 changes["topics_updated"].add(topic)
 
-        # Update source weight
         if source and rules["source_mult"] != 1.0:
             old_weight = source_weights.get(source, 1.0)
             new_weight = old_weight * rules["source_mult"]
@@ -111,6 +239,13 @@ def apply_updates(model, events):
 
     model["topic_weights"] = topic_weights
     model["source_weights"] = source_weights
+    model["topic_vocabulary"] = topic_vocabulary
+
+    # Save judge log
+    if judge_results:
+        with open(JUDGE_LOG, "a") as f:
+            for jr in judge_results:
+                f.write(json.dumps(jr) + "\n")
 
     return model, changes
 
@@ -144,6 +279,7 @@ def main():
         "events_processed": len(events),
         "topics_updated": sorted(changes["topics_updated"]),
         "sources_updated": sorted(changes["sources_updated"]),
+        "judged_by_llm": changes["judged"],
         "model_version": model["version"],
     }
 
