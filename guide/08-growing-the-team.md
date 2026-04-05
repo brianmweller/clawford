@@ -66,6 +66,22 @@ IDENTITY.md defines the agent's personality for Telegram messages:
 
 The emoji and name make Telegram messages instantly recognizable. Each agent should have a distinct visual identity.
 
+## Five rules (learned the hard way)
+
+1. **Use the deploy script template.** Copy `agents/fix-it/deploy.sh` and customize. The correct CLI syntax is baked in. Never write OpenClaw commands from scratch — the docs are wrong in several places.
+
+2. **Red/green TDD.** Write test scripts (`tests/{agent-name}/T1-*.sh`) BEFORE deploying. Confirm they fail. Deploy the agent. Confirm they pass. Don't discover bugs after deployment.
+
+3. **Never touch `openclaw.json` directly.** Use `openclaw config set` inside the container. SCP'ing a local copy wipes agent registrations, channel accounts, and bindings.
+
+4. **Never experiment on the live channel.** Test new features (ACP, hooks, plugins) on a scratch bot first. ACP was tested on Mr Fixit's live channel and hijacked it for hours.
+
+5. **Follow [AGENTS-PATTERN.md](../AGENTS-PATTERN.md).** All patterns are codified there. When a pattern changes, update the doc.
+
+## Git workflow
+
+Agents commit freely to `~/repo/` (their own directory only). Only Mr Fixit pushes to GitHub. Before every push, he runs `scripts/pre-push-check.sh` which scans for secrets, `.env` files, large files, and empty commit messages. If issues are found, he alerts the human instead of pushing.
+
 ## Cross-agent coordination
 
 Agents coordinate through the shared brain, not by messaging each other. The rules:
