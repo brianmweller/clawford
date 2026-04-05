@@ -125,8 +125,9 @@ def fetch_single_feed(feed_config):
             title = getattr(entry, "title", "").strip()
             link = getattr(entry, "link", "").strip()
             summary = getattr(entry, "summary", getattr(entry, "description", "")).strip()
-            # Strip HTML tags from summary
+            # Strip HTML tags and entities from summary
             summary = re.sub(r"<[^>]+>", "", summary).strip()
+            summary = summary.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&#39;", "'")
             # Truncate overly long summaries
             if len(summary) > 500:
                 summary = summary[:497] + "..."
@@ -260,10 +261,19 @@ def fetch_linkedin_browser():
     if not profile_dir.exists():
         return [], {"source": "LinkedIn", "error": "no authenticated session — run linkedin-auth.py"}
 
+    # Clean stale browser locks before scraping
+    for lock in ["SingletonLock", "SingletonCookie", "SingletonSocket"]:
+        lock_file = profile_dir / lock
+        if lock_file.exists():
+            try:
+                lock_file.unlink()
+            except OSError:
+                pass
+
     try:
         result = subprocess.run(
             ["python3", str(scraper)],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, text=True, timeout=120,
         )
         if result.returncode != 0:
             stderr = result.stderr[:200] if result.stderr else "unknown error"

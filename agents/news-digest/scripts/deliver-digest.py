@@ -185,13 +185,25 @@ def main():
             source_label = get_source_name(source)
             sources_seen.add(source)
 
-            # Build a concise context line from summary
-            context = summary.split(".")[0] + "." if summary else ""
-            if len(context) > 200:
-                context = context[:197] + "..."
+            # Clean HTML entities from title and summary
+            title = title.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+            summary = summary.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
 
-            # Format: number, headline, context, clean link
-            msg = f"{item_num}. {title}\n{context}\n{link}"
+            # Build context line from summary, but skip if it's just repeating the title
+            context = ""
+            if summary:
+                first_sentence = summary.split(".")[0] + "."
+                # Only use summary if it's substantially different from the title
+                if first_sentence.strip().lower() not in title.lower() and len(first_sentence) > 20:
+                    context = first_sentence
+                    if len(context) > 200:
+                        context = context[:197] + "..."
+
+            # Format: number, headline, optional context, clean link
+            if context:
+                msg = f"{item_num}. {title}\n{context}\n{link}"
+            else:
+                msg = f"{item_num}. {title}\n{link}"
 
             send_telegram(msg)
             sent_count += 1
