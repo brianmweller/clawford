@@ -207,9 +207,11 @@ def main():
     is_refresh = len(history.get("ids", [])) > 0
 
     # Select top 20 items, filtering out duplicates (same ID or similar title)
+    # Only scan the top 40 ranked articles — don't dig into low-ranked backfill
     top_articles = []
     skipped = 0
-    for article in articles:
+    scan_limit = 40  # Don't look past rank 40 for new items
+    for article in articles[:scan_limit]:
         if len(top_articles) >= 20:
             break
         if is_duplicate(article, history):

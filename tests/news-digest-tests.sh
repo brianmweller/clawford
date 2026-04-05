@@ -156,7 +156,7 @@ LOGGED=$(echo "$OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin
 
 # Check engagement.jsonl has entries
 ENTRIES=$(docker compose -f "$HOME/openclaw/docker-compose.yml" exec -T openclaw-gateway \
-    wc -l < "$WORKSPACE/preferences/engagement.jsonl" 2>/dev/null || echo "0")
+    wc -l "$WORKSPACE/preferences/engagement.jsonl" 2>/dev/null | awk '{print $1}' || echo "0")
 ENTRIES=$(echo "$ENTRIES" | tr -d '[:space:]')
 
 if [ "$ENTRIES" -gt 0 ]; then
