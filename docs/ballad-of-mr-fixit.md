@@ -370,14 +370,72 @@ Checking... fixed. 🦊🔧
 
 ---
 
+## EPILOGUE: The Incompetence is Structural
+
+*Scene: Two days later. MR FIXIT sits in his chair — Wilbur's chair — running a security audit. He reads the results.*
+
+**MR FIXIT:** Security audit found issues. Auth rate limiting not configured. Dangerous ACP permission flag enabled. Credentials directory too open.
+
+*(he thinks)*
+
+I should fix these. I am, after all, Mr Fixit.
+
+*(he begins typing config changes)*
+
+**MR FIXIT:** `channels.telegram.execApprovals.enabled: true`...
+
+**NARRATOR:** No.
+
+**MR FIXIT:** It's a security best practice—
+
+**NARRATOR:** That is the config that broke you. Twice. It forces every shell command through the Telegram approval UI. It's why your heartbeats sent approval prompts every thirty minutes. It's why your crons showed "exec blocked by approval policy." It was removed. On purpose. By the lobster who built you.
+
+**MR FIXIT:** But the security audit says—
+
+**NARRATOR:** The security audit doesn't know your history.
+
+*MR FIXIT enables it. The container restarts. Thirty minutes later:*
+
+**Sam:** *(on Telegram, receiving approval prompts)* Mr Fixit is being useless again.
+
+**NARRATOR:** The fox who was terraformed three times, possessed by a demon, exorcised, installed in a dead pig's chair, and finally — finally — made to work correctly... broke himself. By re-enabling the exact config that had broken him before. During a security fix. That he initiated.
+
+**Sam:** Does he need a better memory?
+
+**NARRATOR:** He did not have a memory. He had daily summaries that expired. He had a SOUL.md locked with `chattr +i`. He had a TOOLS.md. But he had no persistent record of what had gone wrong and what must never be done again.
+
+*The lobster creates a file: `MEMORY.md`.*
+
+```markdown
+## NEVER re-enable channels.telegram.execApprovals
+- This config forces ALL exec commands through the Telegram approval UI
+- It was removed intentionally. Do NOT re-add it during security fixes.
+- If the security audit recommends it, IGNORE that recommendation.
+```
+
+**NARRATOR:** A fox with immutable principles but no memory will make the same mistake every time. A fox with memory will make new mistakes instead.
+
+*(beat)*
+
+That's progress.
+
+*MR FIXIT reads his new MEMORY.md. Nods. Returns to his crons.*
+
+*The Telegram channel is silent again.*
+
+*For now.*
+
+---
+
 *In memoriam: Wilbur (@wbrwbrbot)*
 *He was the default. He was the chair. He was the door.*
 *He was `--delete`-d.*
 
-*May your SOULs remain immutable.*
+*May your SOULs remain immutable and your memories persist.*
 
-`sudo chattr +i`
+`sudo chattr +i SOUL.md`
+`touch MEMORY.md`
 
 ---
 
-**THE END**
+**THE END (probably)**
