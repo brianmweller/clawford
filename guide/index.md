@@ -1,6 +1,6 @@
 # OpenClaw Agent System — Setup Guide
 
-You're building a personal AI agent system themed after Richard Scarry's Busytown. Seven specialized agents, each with its own Telegram bot and Busytown character identity, sharing a common knowledge layer and running 24/7 on a $15/month VPS.
+You're building a personal AI agent system themed after Richard Scarry's Busytown. Six specialized agents, each with its own Telegram bot and Busytown character identity, sharing a common knowledge layer and running 24/7 on a $15/month VPS.
 
 This guide walks you through the entire setup — from an empty Hetzner account to a working agent sending you Telegram messages. It is opinionated. It tells you what works, what doesn't, and what will waste your time. Every command has been tested. Every warning was learned the hard way.
 
@@ -9,7 +9,6 @@ This guide walks you through the entire setup — from an empty Hetzner account 
 | Character | Agent | Role | Complexity |
 |-----------|-------|------|-----------|
 | 🦊🔧 **Mr Fixit** | fix-it | Infrastructure monitoring, repair, archival, security audits | Deploy first |
-| ✈️ **Rudolf Von Flugel** | rudolf | Telegram ↔ local Claude Code relay bridge | Deploy second |
 | 🐭📅 **Mistress Mouse** | family-calendar | Logistics, scheduling, family comms | High |
 | 🐷🔍 **Sergeant Murphy** | meetings-coach | Meeting prep, debrief, follow-ups | Medium |
 | 🦛🛒 **Hilda Hippo** | shopping | Multi-channel purchasing | Medium |

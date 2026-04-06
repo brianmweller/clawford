@@ -1,13 +1,12 @@
 # Clawford — A Busytown for OpenClaw Agents
 
-A seven-agent personal AI system themed after Richard Scarry's Busytown. Each agent has its own Telegram bot, a defined role, and a Busytown character identity. Runs on OpenClaw.
+A six-agent personal AI system themed after Richard Scarry's Busytown. Each agent has its own Telegram bot, a defined role, and a Busytown character identity. Runs on OpenClaw.
 
 ## The Agents
 
 | Character | Agent | Status | Bot | Role |
 |-----------|-------|--------|-----|------|
 | 🦊🔧 **Mr Fixit** | fix-it | Deployed | @openclaw_fixit_bot | Infrastructure, monitoring, repair, archival |
-| ✈️ **Rudolf Von Flugel** | rudolf | Next up | — | Telegram ↔ local Claude Code relay bridge |
 | 🐭📅 **Mistress Mouse** | family-calendar | Not deployed | — | Logistics, scheduling, family comms |
 | 🐷🔍 **Sergeant Murphy** | meetings-coach | Not deployed | — | Meeting prep, debrief, follow-ups |
 | 🦛🛒 **Hilda Hippo** | shopping | Not deployed | — | Multi-channel purchasing |
@@ -16,12 +15,25 @@ A seven-agent personal AI system themed after Richard Scarry's Busytown. Each ag
 
 *And if anything breaks catastrophically: **Mr Frumble** is waiting in the wings.*
 
+## Telegram Relay
+
+`telegram-relay/` is a lightweight local bot that replaces the VPS-based relay agent. It runs on your desktop and bridges Telegram to your local Claude Code CLI — no VPS, no Tailscale, no exposed ports.
+
+```bash
+pip install -r telegram-relay/requirements.txt
+export TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="..." OPENAI_API_KEY="..."
+python telegram-relay/bot.py --cwd /path/to/project
+```
+
+Features: text relay, voice messages (Whisper transcription), `/ping`, `/status`, `/cwd`.
+
 ## Architecture
 
 - **VPS:** <your-tailscale-host> (Hetzner cpx31, Hillsboro OR) — Terraform-managed, Docker-based
 - **Shared Brain:** `~/Dropbox/openclaw-backup/` — file-based knowledge layer (facts, commitments, tasks, notes, people)
 - **Sync:** Dropbox (VPS ↔ cloud ↔ local)
 - **Messaging:** Per-agent Telegram bots (one bot per character)
+- **Local relay:** `telegram-relay/bot.py` — Telegram ↔ Claude Code on desktop
 - **LLM:** OpenAI Codex (gpt-5.4) via OpenClaw gateway
 
 ## Directory Structure
@@ -33,8 +45,8 @@ clawford/
 ├── VERSION                # Current version
 ├── agents/                # Per-agent packages
 │   ├── fix-it/            # 🦊 Mr Fixit (deployed)
-│   ├── news-digest/       # 🐛 Lowly Worm (next)
-│   └── rudolf/            # ✈️ Rudolf Von Flugel (spec)
+│   └── news-digest/       # 🐛 Lowly Worm (next)
+├── telegram-relay/        # Local Telegram ↔ Claude Code bot
 ├── brain/                 # Shared brain setup
 │   └── setup-brain.sh
 ├── docs/                  # Design docs and specs

@@ -9,14 +9,13 @@ You've deployed one agent. The rest follow the same pattern.
 | Order | Character | Agent | Why this order |
 |-------|-----------|-------|---------------|
 | 1 | 🦊 **Mr Fixit** | fix-it | Monitors everything else. Already done. |
-| 2 | ✈️ **Rudolf Von Flugel** | rudolf | Telegram ↔ local Claude Code bridge. Lightweight, high utility. |
-| 3 | 🐛 **Lowly Worm** | news-digest | Simplest — reads web, delivers summary. No bidirectional APIs. |
-| 4 | 🐭 **Mistress Mouse** | family-calendar | Highest daily impact. Needs Google Calendar, WhatsApp/WeChat. |
-| 5 | 🐷 **Sergeant Murphy** | meetings-coach | Needs Krisp transcripts, Workflowy, calendar. |
-| 6 | 🦛 **Hilda Hippo** | shopping | Needs Amazon/Costco integrations. |
-| 7 | 🐱 **Huckle Cat** | connector | Most ambitious — relationship management, heaviest Flux dependency. |
+| 2 | 🐛 **Lowly Worm** | news-digest | Simplest — reads web, delivers summary. No bidirectional APIs. |
+| 3 | 🐭 **Mistress Mouse** | family-calendar | Highest daily impact. Needs Google Calendar, WhatsApp/WeChat. |
+| 4 | 🐷 **Sergeant Murphy** | meetings-coach | Needs Krisp transcripts, Workflowy, calendar. |
+| 5 | 🦛 **Hilda Hippo** | shopping | Needs Amazon/Costco integrations. |
+| 6 | 🐱 **Huckle Cat** | connector | Most ambitious — relationship management, heaviest Flux dependency. |
 
-Start with Rudolf after Fix-It — he's a lightweight relay agent that gives you remote access to Claude Code on your desktop via Telegram. Then Lowly Worm for news delivery.
+Start with Lowly Worm after Fix-It — simplest agent with no bidirectional APIs. The Telegram ↔ Claude Code relay is now handled locally (see `telegram-relay/`), not as a VPS agent.
 
 ## The reusable deployment pattern
 

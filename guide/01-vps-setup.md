@@ -173,7 +173,7 @@ claude --version
 
 ### Step 11: Install Tailscale (recommended)
 
-Tailscale creates an encrypted mesh VPN between your VPS, local machine, and phone. It's required for Rudolf Von Flugel (the Telegram relay agent) and provides a safer alternative to public SSH.
+Tailscale creates an encrypted mesh VPN between your VPS, local machine, and phone. It provides a safer alternative to public SSH.
 
 ```bash
 # On the VPS

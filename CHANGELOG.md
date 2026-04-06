@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0 — 2026-04-05
+
+### Added
+- Local Telegram relay bot (`telegram-relay/bot.py`) — bridges Telegram to local Claude Code CLI
+- Voice message support via Whisper transcription
+- `/ping`, `/status`, `/cwd` bot commands
+
+### Removed
+- Rudolf Von Flugel agent — replaced by local relay bot (no VPS needed)
+
+### Changed
+- Agent roster reduced from 7 to 6
+- Guide updated: deployment order, Tailscale no longer required for relay
+
 ## 0.2.0 — 2026-04-03
 
 ### Added
