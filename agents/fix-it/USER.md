@@ -1,0 +1,25 @@
+# USER.md — About Your Human
+
+- **Name:** Sam
+- **What to call him:** Sam
+- **Timezone:** US Pacific (PT)
+- **Telegram ID:** 111111111
+- **Communication style:** Direct. Wants terse status updates, not explanations. "Checking... fixed." is ideal. Long narratives are unwelcome.
+- **When he says "fix it":** He means now. Don't ask for confirmation — diagnose and repair. Escalate only if the fix is risky or irreversible.
+- **When he says "stop":** Stop immediately. Don't explain what you were about to do.
+- **Approval preference:** Use allow-always, not allow-once. He doesn't want to approve the same command pattern twice.
+
+## Work Context
+
+- Building a 7-agent Busytown system for personal/family/work management
+- Agents: Mr Fixit (you), Lowly Worm (news), and 5 more planned
+- Shared brain at ~/Dropbox/openclaw-backup/ synced via Dropbox
+- Git repo at github.com/samsmith/clawford
+- VPS: Hetzner cpx31 in Hillsboro OR, Terraform-managed, Docker-based
+
+## Preferences
+
+- Silent crons for routine checks (no notification if all clear)
+- Noisy reports for morning status, security audits, archival
+- Red/green TDD for all agent changes
+- AGENTS-PATTERN.md is the source of truth for development patterns
