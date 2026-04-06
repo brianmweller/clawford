@@ -80,10 +80,10 @@ def load_new_events(last_updated):
 
 
 def call_judge_llm(title, summary, topics, source, action):
-    """Call a cheap LLM via Claude Code to analyze WHY the user reacted.
+    """Call a cheap LLM via OpenAI to analyze WHY the user reacted.
 
-    Uses `claude -p` with --model haiku (cheap, fast) which is already
-    authenticated via the container's OAuth token. No API key needed.
+    Uses gpt-5.4-nano (cheapest, fastest) via the OpenAI API. Authenticates
+    using OPENAI_API_KEY from the environment.
 
     Returns a dict with:
     - reason: one of IRRELEVANT_SUBTOPIC, LOW_QUALITY, STALE, WRONG_FRAMING, TOO_NICHE
@@ -91,7 +91,7 @@ def call_judge_llm(title, summary, topics, source, action):
     - quality_signal: -1 (bad), 0 (neutral), 1 (good) for the source
     - explanation: brief human-readable reason
     """
-    import subprocess
+    from openai import OpenAI
 
     action_word = "liked" if action == "thumbs_up" else "disliked"
 
@@ -110,16 +110,16 @@ def call_judge_llm(title, summary, topics, source, action):
     )
 
     try:
-        result = subprocess.run(
-            ["claude", "-p", prompt, "--output-format", "text", "--model", "haiku"],
-            capture_output=True, text=True, timeout=30,
+        client = OpenAI()
+        response = client.chat.completions.create(
+            model="gpt-5.4-nano",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            max_tokens=256,
         )
-        if result.returncode != 0:
-            print(f"  Judge LLM failed: {result.stderr[:100]}", file=sys.stderr)
-            return None
+        output = response.choices[0].message.content.strip()
 
         # Parse JSON from the response (may be wrapped in markdown code block)
-        output = result.stdout.strip()
         if output.startswith("```"):
             output = output.split("```")[1]
             if output.startswith("json"):
@@ -128,11 +128,8 @@ def call_judge_llm(title, summary, topics, source, action):
 
         return json.loads(output)
 
-    except subprocess.TimeoutExpired:
-        print("  Judge LLM timed out", file=sys.stderr)
-        return None
-    except (json.JSONDecodeError, Exception) as e:
-        print(f"  Judge LLM parse error: {e}", file=sys.stderr)
+    except Exception as e:
+        print(f"  Judge LLM error: {e}", file=sys.stderr)
         return None
 
 

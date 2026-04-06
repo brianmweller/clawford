@@ -9,7 +9,7 @@
 #   - SOUL.md, IDENTITY.md, TOOLS.md in /tmp/
 #   - scripts/ directory with fetch-and-rank.py, update-preferences.py, on-demand.py in /tmp/
 #   - .env with TELEGRAM_CHAT_ID, NEWSDIGEST_BOT_TOKEN, LINKEDIN_USER, LINKEDIN_PASS in /tmp/ or ~/openclaw/
-#   - feedparser and linkedin-api pip packages installed in Docker image
+#   - feedparser, linkedin-api, and openai pip packages installed in Docker image
 
 set -euo pipefail
 
