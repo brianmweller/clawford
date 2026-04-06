@@ -89,14 +89,24 @@ bash /tmp/deploy.sh
 ```
 
 The script:
-1. Copies SOUL.md, IDENTITY.md, TOOLS.md to the workspace
-2. Initializes the status file in the shared brain
-3. Adds the Mr Fixit Telegram bot as a channel account
-4. Binds the fix-it agent to the `fixit` Telegram account
-5. Configures exec approvals (`/usr/bin/*`, `/bin/*`, `/usr/local/bin/*`)
-6. Registers all 9 cron jobs with Telegram delivery
-7. Locks SOUL.md and IDENTITY.md with `chattr +i`
-8. Prints verification output
+1. Copies all workspace files to the agent's workspace:
+   - **SOUL.md** — personality, boundaries, operating model
+   - **IDENTITY.md** — name, emoji, tone
+   - **TOOLS.md** — available tools and permissions
+   - **AGENTS.md** — hard rules, role, config architecture, agent roster
+   - **USER.md** — human's name, timezone, preferences
+   - **HEARTBEAT.md** — 30-minute recurring checklist
+   - **MEMORY.md** — persistent lessons (seeded, agent maintains over time)
+2. Deletes BOOTSTRAP.md if present (generic onboarding, overrides identity)
+3. Initializes the status file in the shared brain
+4. Adds the agent's Telegram bot as the default channel account
+5. Binds the agent to the default Telegram account
+6. Configures exec approvals
+7. Registers all cron jobs with Telegram delivery
+8. Locks SOUL.md and IDENTITY.md with `chattr +i`
+9. Prints verification output
+
+> **WARNING:** OpenClaw auto-loads 8 workspace files at every session start. If AGENTS.md, USER.md, or HEARTBEAT.md are missing or generic, the agent won't know its rules, its human, or its recurring tasks. This was the root cause of Mr Fixit's repeated identity crises and config amnesia.
 
 ## Step 6: Pair the Telegram bot
 
@@ -240,7 +250,7 @@ Report Claude's findings in your own voice. Never let Claude respond directly.
 - [ ] Agent registered: `oc agents list` shows fix-it
 - [ ] Status file created with heartbeat timestamp
 - [ ] All 9 crons registered: `oc cron list`
-- [ ] SOUL.md, IDENTITY.md, TOOLS.md in workspace
+- [ ] All 8 workspace files populated: SOUL.md, IDENTITY.md, TOOLS.md, AGENTS.md, USER.md, HEARTBEAT.md, MEMORY.md (no BOOTSTRAP.md)
 - [ ] Exec allowlist configured: `oc approvals get`
 - [ ] Cron fires and updates status file
 - [ ] Telegram message arrives from Mr Fixit bot
