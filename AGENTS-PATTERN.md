@@ -9,6 +9,21 @@ Standard patterns all Busytown agents must follow. Read this before building a n
 - **Mr Fixit runs a pre-push safety check** (`scripts/pre-push-check.sh`) before every push — scans for secrets, .env files, large files, empty commit messages.
 - **Never commit secrets.** API keys, bot tokens, passwords stay in `.env` (gitignored).
 
+## Memory
+
+Every agent MUST have a `MEMORY.md` in its workspace. OpenClaw auto-loads it at the start of every session.
+
+- **MEMORY.md** — persistent rules, hard constraints, architectural decisions. Things the agent must remember across sessions.
+- **memory/YYYY-MM-DD.md** — daily notes (auto-created by OpenClaw). Today + yesterday loaded automatically.
+- **Memory flush** — before compaction, OpenClaw reminds the agent to save context. On by default.
+- **Dreaming** — optional consolidation that promotes daily notes to MEMORY.md.
+
+What goes in MEMORY.md:
+- Config rules: "NEVER re-enable X" / "ALWAYS use Y"
+- Architectural decisions: why something was done a certain way
+- Learned patterns: what works, what breaks
+- Do NOT put ephemeral task state — that goes in daily files
+
 ## Identity
 
 - Each agent has a Busytown character (see README.md for the roster)
