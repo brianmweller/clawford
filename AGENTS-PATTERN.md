@@ -5,7 +5,7 @@ Standard patterns all Busytown agents must follow. Read this before building a n
 ## Git
 
 - **Only Mr Fixit pushes to GitHub.** All other agents can `git commit` to the repo at `~/repo/` but NEVER `git push`.
-- **Commit to your own directory only.** Lowly Worm commits to `agents/news-digest/`, Rudolf to `agents/rudolf/`, etc.
+- **Commit to your own directory only.** Lowly Worm commits to `agents/news-digest/`, Hilda to `agents/shopping/`, etc.
 - **Mr Fixit runs a pre-push safety check** (`scripts/pre-push-check.sh`) before every push — scans for secrets, .env files, large files, empty commit messages.
 - **Never commit secrets.** API keys, bot tokens, passwords stay in `.env` (gitignored).
 
@@ -24,10 +24,24 @@ What goes in MEMORY.md:
 - Learned patterns: what works, what breaks
 - Do NOT put ephemeral task state — that goes in daily files
 
-## Identity
+## Workspace Files (All 8 Required)
 
-- Each agent has a Busytown character (see README.md for the roster)
-- Identity files: SOUL.md, IDENTITY.md, TOOLS.md, CRONS.md in `agents/{agent-name}/`
+OpenClaw auto-loads exactly 8 files at every session start. ALL must exist in the agent's workspace:
+
+| File | Purpose | Create at deploy? |
+|------|---------|-------------------|
+| SOUL.md | Personality, values, boundaries, operating model | Yes (immutable via chattr) |
+| IDENTITY.md | Name, emoji, tone, catchphrase | Yes (immutable via chattr) |
+| TOOLS.md | Available tools, permissions, commands | Yes |
+| AGENTS.md | Hard rules, role, config architecture, agent roster | Yes |
+| USER.md | Human's name, timezone, preferences, communication style | Yes |
+| HEARTBEAT.md | 30-minute checklist (lightweight recurring checks) | Yes |
+| MEMORY.md | Persistent lessons, hard constraints learned from experience | Seed at deploy, agent maintains |
+| BOOTSTRAP.md | First-run onboarding (DELETE after initial setup) | No (delete if present) |
+
+**If any of these are missing or generic, the agent won't know its role, its rules, or its human.**
+
+## Identity
 - SOUL.md and IDENTITY.md are made immutable on the VPS after deployment (`chattr +i`)
 - Each agent gets its own Telegram bot via @BotFather
 
