@@ -248,6 +248,18 @@ def main():
         "📋 ALSO NOTED",
     ]
 
+    # Wait until the top of the hour (12:00 UTC / 5:00 AM PT) before sending
+    # This allows the cron to trigger early (e.g., 11:55) for fetch+rank,
+    # then hold delivery until the target time
+    DELIVERY_MINUTE = 0  # Deliver at :00 of the current hour
+    now = datetime.now(timezone.utc)
+    if now.minute < DELIVERY_MINUTE:
+        # We're before the target minute — wait
+        wait_seconds = (DELIVERY_MINUTE - now.minute) * 60 - now.second
+        if wait_seconds > 0:
+            print(f"Holding delivery for {wait_seconds}s until :{DELIVERY_MINUTE:02d}", file=sys.stderr)
+            time.sleep(wait_seconds)
+
     # Send header
     today_display = datetime.strptime(date_str, "%Y-%m-%d").strftime("%B %d, %Y")
     header = f"🐛📰 Morning Edition — {today_display}"
