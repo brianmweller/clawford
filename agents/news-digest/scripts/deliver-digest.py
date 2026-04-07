@@ -248,16 +248,14 @@ def main():
         "📋 ALSO NOTED",
     ]
 
-    # Wait until the top of the hour (12:00 UTC / 5:00 AM PT) before sending
-    # This allows the cron to trigger early (e.g., 11:55) for fetch+rank,
-    # then hold delivery until the target time
-    DELIVERY_MINUTE = 0  # Deliver at :00 of the current hour
+    # Wait until the top of the next hour (12:00 UTC / 5:00 AM PT) before sending
+    # Cron triggers at :55, fetch+rank takes ~3 min, then hold until :00
     now = datetime.now(timezone.utc)
-    if now.minute < DELIVERY_MINUTE:
-        # We're before the target minute — wait
-        wait_seconds = (DELIVERY_MINUTE - now.minute) * 60 - now.second
-        if wait_seconds > 0:
-            print(f"Holding delivery for {wait_seconds}s until :{DELIVERY_MINUTE:02d}", file=sys.stderr)
+    if now.minute >= 50:
+        # We're in the :55-:59 window — wait until the top of the next hour
+        wait_seconds = (60 - now.minute) * 60 - now.second
+        if wait_seconds > 0 and wait_seconds <= 600:  # Cap at 10 min
+            print(f"Holding delivery for {wait_seconds}s until :{0:02d}", file=sys.stderr)
             time.sleep(wait_seconds)
 
     # Send header
