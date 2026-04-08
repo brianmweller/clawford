@@ -1,32 +1,35 @@
 #!/usr/bin/env python3
 """
-activity-email-check.py — Monitor emails from Avery's activity providers.
+activity-email-check.py — Fetch emails from Avery's activity providers.
 
 Searches Gmail for emails from Example Preschool (school), Example Swim School (swimming),
-and Example Ballet Studio (ballet). Uses LLM (gpt-5.4-nano) to parse
-for schedule changes, cancellations, closures, and action items
-(Room 3 needs to bring/prep/wear something).
+and Example Ballet Studio (ballet). Returns raw email content as JSON
+for the agent's LLM to parse.
 
-Usage: python3 activity-email-check.py [--hours N] [--dry-run]
+Usage: python3 activity-email-check.py [--hours N]
 
 Output JSON:
   [
     {
       "source": "Example Preschool",
-      "type": "action_item",
-      "summary": "Room 3: bring a stuffed animal for Teddy Bear Day on Friday",
-      "action_by": "2026-04-10",
-      "urgency": "normal",
-      "original_subject": "Weekly Newsletter - Room 3",
+      "subject": "Weekly Newsletter - Room 3",
+      "body": "Dear Room 3 families...",
+      "from": "newsletter@ExamplePreschool.com",
+      "date": "2026-04-08",
       "message_id": "..."
     }
   ]
 
-Requires: google-api-python-client (gmail.readonly scope), openai
+The agent's LLM parses these for action items, closures, cancellations.
+This script does I/O only — no LLM calls.
+
+Requires: google-api-python-client (gmail.readonly scope)
 """
 
+import base64
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -38,58 +41,19 @@ TOKEN_PATH = os.environ.get(
 CACHE_DIR = os.path.join(WORKSPACE, "cache")
 SEEN_PATH = os.path.join(CACHE_DIR, "seen-activity-emails.json")
 
-# Activity providers — search terms for Gmail
 PROVIDERS = [
-    {
-        "name": "Example Preschool",
-        "query": "from:ExamplePreschool newer_than:2d",
-        "context": "Example Preschool is Avery's school. She is in Room 3. Watch for: closures, early dismissals, spirit days, field trips, items to bring/prep/wear, parent events, schedule changes. Room 3-specific items are highest priority.",
-    },
-    {
-        "name": "Example Swim School",
-        "query": "from:ExampleSwim newer_than:2d",
-        "context": "Example Swim School is Avery's Monday swimming class (4:30-5:00 PM). Watch for: class cancellations, reschedules, pool closures, makeup classes.",
-    },
-    {
-        "name": "Example Ballet Studio",
-        "query": "(from:tutu OR from:tutuschool) newer_than:2d",
-        "context": "Example Ballet Studio is Avery's Sunday ballet class (9:00 AM). Watch for: class cancellations, recital dates, costume requirements, schedule changes.",
-    },
+    {"name": "Example Preschool", "query": "from:ExamplePreschool newer_than:2d"},
+    {"name": "Example Swim School", "query": "from:ExampleSwim newer_than:2d"},
+    {"name": "Example Ballet Studio", "query": "(from:tutu OR from:tutuschool) newer_than:2d"},
 ]
-
-LLM_PROMPT = """You are parsing an email from {provider_name} about a child's activity.
-
-Context: {context}
-Today's date: {today}
-
-Email subject: {subject}
-Email body (first 2000 chars):
-{body}
-
-Extract any schedule-relevant items. For each item, output JSON:
-{{
-  "type": "closure" | "cancellation" | "schedule_change" | "action_item" | "event" | "none",
-  "summary": "one-line description of what's happening",
-  "action_by": "YYYY-MM-DD if there's a deadline, else null",
-  "urgency": "urgent" | "normal" | "fyi",
-  "details": "any extra context"
-}}
-
-If the email has NO schedule-relevant content (marketing, general newsletters without action items), return:
-{{"type": "none"}}
-
-Return a JSON array of items. Be concise. Focus on things the parent needs to act on or know about."""
 
 
 def parse_args():
     hours = 48
-    dry_run = False
     for i, arg in enumerate(sys.argv):
         if arg == "--hours" and i + 1 < len(sys.argv):
             hours = int(sys.argv[i + 1])
-        if arg == "--dry-run":
-            dry_run = True
-    return hours, dry_run
+    return hours
 
 
 def get_credentials():
@@ -141,79 +105,30 @@ def get_email_body(msg):
     """Extract plain text body from Gmail message."""
     payload = msg.get("payload", {})
 
-    # Simple message
     if payload.get("mimeType", "").startswith("text/plain"):
-        import base64
         data = payload.get("body", {}).get("data", "")
         if data:
             return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
 
-    # Multipart
     parts = payload.get("parts", [])
     for part in parts:
         if part.get("mimeType") == "text/plain":
-            import base64
             data = part.get("body", {}).get("data", "")
             if data:
                 return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
 
-    # Fallback: try HTML
     for part in parts:
         if part.get("mimeType") == "text/html":
-            import base64
             data = part.get("body", {}).get("data", "")
             if data:
                 html = base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
-                # Strip HTML tags (rough)
-                import re
-                return re.sub(r"<[^>]+>", " ", html)[:2000]
+                return re.sub(r"<[^>]+>", " ", html)[:3000]
 
     return ""
 
 
-def parse_with_llm(provider, subject, body, today, dry_run=False):
-    """Use gpt-5.4-nano to extract schedule items from email."""
-    if dry_run:
-        return [{"type": "none", "summary": "dry run"}]
-
-    prompt = LLM_PROMPT.format(
-        provider_name=provider["name"],
-        context=provider["context"],
-        today=today,
-        subject=subject,
-        body=body[:2000],
-    )
-
-    try:
-        import openai
-        client = openai.OpenAI()
-        response = client.chat.completions.create(
-            model="gpt-5.4-nano",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-            max_tokens=500,
-            response_format={"type": "json_object"},
-        )
-        content = response.choices[0].message.content
-        parsed = json.loads(content)
-
-        # Normalize: could be a single object or array
-        if isinstance(parsed, dict):
-            if "items" in parsed:
-                return parsed["items"]
-            return [parsed]
-        if isinstance(parsed, list):
-            return parsed
-        return [{"type": "none"}]
-
-    except Exception as e:
-        print(f"LLM parse failed: {e}", file=sys.stderr)
-        return [{"type": "none", "error": str(e)}]
-
-
 def main():
-    hours, dry_run = parse_args()
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    hours = parse_args()
 
     creds, err = get_credentials()
     if err:
@@ -250,21 +165,22 @@ def main():
                 headers = {h["name"].lower(): h["value"]
                            for h in msg.get("payload", {}).get("headers", [])}
                 subject = headers.get("subject", "")
+                from_addr = headers.get("from", "")
+                date_str = headers.get("date", "")
                 body = get_email_body(msg)
 
                 if not body.strip():
                     seen.add(msg_id)
                     continue
 
-                items = parse_with_llm(provider, subject, body, today, dry_run)
-
-                for item in items:
-                    if item.get("type") == "none":
-                        continue
-                    item["source"] = provider["name"]
-                    item["original_subject"] = subject
-                    item["message_id"] = msg_id
-                    results.append(item)
+                results.append({
+                    "source": provider["name"],
+                    "subject": subject,
+                    "from": from_addr,
+                    "date": date_str,
+                    "body": body[:3000],
+                    "message_id": msg_id,
+                })
 
                 seen.add(msg_id)
 
