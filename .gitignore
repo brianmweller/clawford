@@ -19,6 +19,10 @@ openclaw-docker-config/
 # Backups
 *.tar.gz
 
+# Python
+__pycache__/
+*.pyc
+
 # Google OAuth secrets
 credentials.json
 token.json
