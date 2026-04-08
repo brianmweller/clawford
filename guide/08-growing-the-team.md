@@ -77,6 +77,40 @@ The emoji and name make Telegram messages instantly recognizable. Each agent sho
 
 5. **Follow [AGENTS-PATTERN.md](../AGENTS-PATTERN.md).** All patterns are codified there. When a pattern changes, update the doc.
 
+## Timed delivery: fetch at T-5, deliver at T
+
+When an agent needs to deliver at a specific time (e.g., 5:00 AM), don't schedule the cron at 5:00 — the agent takes 3-5 minutes to process, so delivery arrives late.
+
+Instead:
+
+1. **Schedule the cron 5 minutes early** (e.g., `55 11 * * *` for 5:00 AM PT / 12:00 UTC)
+2. **Set `--no-deliver`** on the cron so the agent's response isn't sent directly
+3. **Agent writes output to a file** using its write tool
+4. **Agent runs `timed-deliver.py`** which holds until :00 then sends via Telegram Bot API
+
+```python
+# timed-deliver.py — core logic
+now = datetime.now(timezone.utc)
+if now.minute >= 50:
+    wait_seconds = (60 - now.minute) * 60 - now.second
+    if 0 < wait_seconds <= 600:
+        time.sleep(wait_seconds)
+# then send via Bot API with disable_web_page_preview, disable_notification
+```
+
+The script lives at `{workspace}/scripts/timed-deliver.py`. Each agent has its own copy with the correct bot token env var. Usage:
+
+```bash
+python3 scripts/timed-deliver.py cache/morning-report.txt
+```
+
+This pattern is used by all agents with timed delivery:
+- **Lowly Worm:** built into `deliver-digest.py` (same hold logic)
+- **Mr Fixit:** `fix-it-workspace/scripts/timed-deliver.py`
+- **Hilda Hippo:** `shopping-workspace/scripts/timed-deliver.py`
+
+**Why not just schedule at :00 and accept late delivery?** Because the user expects messages at a consistent time. A 5:00 AM digest arriving at 5:03 feels sloppy. The T-5 pattern makes delivery predictable.
+
 ## Git workflow
 
 Agents commit freely to `~/repo/` (their own directory only). Only Mr Fixit pushes to GitHub. Before every push, he runs `scripts/pre-push-check.sh` which scans for secrets, `.env` files, large files, and empty commit messages. If issues are found, he alerts the human instead of pushing.
