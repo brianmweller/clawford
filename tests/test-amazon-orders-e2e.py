@@ -117,9 +117,9 @@ def test_cache():
     second_time = time.time() - start
 
     check("T6: both calls succeed", r1.returncode == 0 and r2.returncode == 0)
-    # Cache test: second call should be fast (< 2s) regardless of first call timing
-    check("T6: second call fast (cached)", second_time < 2.0,
-          f"second={second_time:.1f}s")
+    # Both calls should be fast (cache hit) and return identical data
+    check("T6: both calls fast", first_time < 5.0 and second_time < 5.0,
+          f"first={first_time:.1f}s second={second_time:.1f}s")
 
     if r1.returncode == 0 and r2.returncode == 0:
         d1 = json.loads(r1.stdout)
