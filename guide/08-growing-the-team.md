@@ -129,6 +129,20 @@ This pattern is used by all agents with timed delivery:
 
 10. **deploy.sh `set -euo pipefail` + `.env` sourcing is fragile.** If `.env` has variables that reference other unset variables, `set -u` kills the script. Copy `.env` to `/tmp/.env` before running deploy.sh, or source it explicitly in the script's working directory.
 
+11. **Scripts do I/O, agent does thinking.** Never `import openai` in agent Python scripts. The agent's LLM (via OpenClaw's codex OAuth) handles all parsing and composition. Scripts fetch data and return JSON; the cron message tells the agent what to do with it.
+
+12. **Native channels > third-party APIs.** OpenClaw's built-in WhatsApp (Baileys) was far simpler than Green API would have been. Same pattern as Telegram — configure, QR pair, bind. Always check `openclaw plugins list` before reaching for external services.
+
+13. **Don't auto-post to family groups.** Proactive messages go to the human on Telegram. They're the gatekeeper for what reaches family members. Bots in family group chats are intrusive.
+
+14. **WhatsApp group JIDs aren't resolvable via CLI.** `openclaw channels resolve` doesn't support WhatsApp. Find group JIDs in the Baileys credential store: `find ~/.openclaw/credentials/whatsapp/<account>/ -name "*@g.us*"`.
+
+15. **Enable each Google API separately.** Calendar API and Gmail API are different toggles in the Cloud Console. Enable both under APIs & Services > Library if the agent needs both.
+
+16. **WeChat ClawBot rollout is gradual.** Can't force it. Human bridge (compose Chinese on Telegram, user forwards to WeChat) works for low-volume family updates. Install the `openclaw-weixin` plugin so it's ready when Tencent flips the switch.
+
+17. **Phase incrementally.** Each phase should be independently deployable and useful. Phase 1 alone (morning briefing) delivered value on day one. Later phases layered on without breaking earlier ones.
+
 ## Git workflow
 
 Agents commit freely to `~/repo/` (their own directory only). Only Mr Fixit pushes to GitHub. Before every push, he runs `scripts/pre-push-check.sh` which scans for secrets, `.env` files, large files, and empty commit messages. If issues are found, he alerts the human instead of pushing.
