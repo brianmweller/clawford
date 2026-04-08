@@ -125,7 +125,21 @@ Verify you receive a Telegram message from the agent's bot.
 
 ---
 
-## Step 6: Run Test Suite
+## Step 6: Set Telegram Bot Commands
+
+```bash
+# Add the new agent's commands to the script first:
+vim ~/openclaw/scripts/set-bot-commands.sh
+
+# Then run it (re-applies commands for ALL agents):
+bash ~/openclaw/scripts/set-bot-commands.sh
+```
+
+OpenClaw overwrites bot commands with its own 48 slash commands on every gateway start. This script must be run after every deploy and every `docker compose restart`.
+
+---
+
+## Step 7: Run Test Suite
 
 ```bash
 bash ~/openclaw-tests/test-agent.sh {agent-name}
@@ -149,6 +163,7 @@ Expected: all tests PASS. Key failures:
 - [ ] Cron fires and updates status file
 - [ ] Telegram delivery working (message arrives from agent's bot)
 - [ ] SOUL.md and IDENTITY.md immutable: `lsattr ~/.openclaw/{agent}-workspace/SOUL.md`
+- [ ] Bot commands set: `bash ~/openclaw/scripts/set-bot-commands.sh`
 - [ ] Test suite passes: `bash ~/openclaw-tests/test-agent.sh {agent-name}`
 
 ---

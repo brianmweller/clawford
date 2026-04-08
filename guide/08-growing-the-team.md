@@ -30,9 +30,10 @@ Every agent follows the same sequence:
 5. **Create agent:** `oci agents add {name}`
 6. **Run deploy script:** `bash /tmp/deploy.sh`
 7. **Pair Telegram bot:** `/start` → `oc pairing approve telegram {CODE}`
-8. **Smoke test:** `oc cron run {id}`, check Telegram
-9. **Harden:** `sudo chattr +i SOUL.md IDENTITY.md`
-10. **Test:** `bash ~/openclaw-tests/test-agent.sh {name}`
+8. **Set bot commands:** add to `~/openclaw/scripts/set-bot-commands.sh`, then `bash ~/openclaw/scripts/set-bot-commands.sh` (OpenClaw overwrites commands on every restart — this script re-applies all agents)
+9. **Smoke test:** `oc cron run {id}`, check Telegram
+10. **Harden:** `sudo chattr +i SOUL.md IDENTITY.md`
+11. **Test:** `bash ~/openclaw-tests/test-agent.sh {name}`
 
 ## Writing a SOUL.md
 
