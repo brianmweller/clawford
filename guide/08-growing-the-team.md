@@ -10,12 +10,14 @@ You've deployed one agent. The rest follow the same pattern.
 |-------|-----------|-------|---------------|
 | 1 | 🦊 **Mr Fixit** | fix-it | Monitors everything else. Already done. |
 | 2 | 🐛 **Lowly Worm** | news-digest | Simplest — reads web, delivers summary. No bidirectional APIs. |
-| 3 | 🐭 **Mistress Mouse** | family-calendar | Highest daily impact. Needs Google Calendar, WhatsApp/WeChat. |
-| 4 | 🐷 **Sergeant Murphy** | meetings-coach | Needs Krisp transcripts, Workflowy, calendar. |
-| 5 | 🦛 **Hilda Hippo** | shopping | Needs Amazon/Costco integrations. |
+| 3 | 🦛 **Hilda Hippo** | shopping | Amazon/Costco order tracking, grocery list. |
+| 4 | 🐭 **Mistress Mouse** | family-calendar | Google Calendar, family logistics. Deployed 2026-04-08. |
+| 5 | 🐷 **Sergeant Murphy** | meetings-coach | Needs Krisp transcripts, Workflowy, calendar. |
 | 6 | 🐱 **Huckle Cat** | connector | Most ambitious — relationship management, heaviest Flux dependency. |
 
 Start with Lowly Worm after Fix-It — simplest agent with no bidirectional APIs. The Telegram ↔ Claude Code relay is now handled locally (see `telegram-relay/`), not as a VPS agent.
+
+**Actual deploy order (as of 2026-04-08):** Mr Fixit → Lowly Worm → Hilda Hippo → Mistress Mouse.
 
 ## The reusable deployment pattern
 
@@ -114,6 +116,18 @@ This pattern is used by all agents with timed delivery:
 - **Hilda Hippo:** `shopping-workspace/scripts/timed-deliver.py`
 
 **Why not just schedule at :00 and accept late delivery?** Because the user expects messages at a consistent time. A 5:00 AM digest arriving at 5:03 feels sloppy. The T-5 pattern makes delivery predictable.
+
+## Lessons from Mistress Mouse (Google Calendar agent)
+
+6. **Google OAuth for personal calendars: use "User data", not "Application data."** Service accounts can't access personal Google Calendar data. Create OAuth2 Desktop credentials, add yourself as a test user (the app doesn't need Google verification), and run the auth flow locally — the VPS can't open a browser. SCP the resulting `token.json` to the VPS workspace. The refresh token auto-renews indefinitely.
+
+7. **Run the OAuth flow on your local machine, not the VPS.** The auth flow opens a browser for consent. Run it locally with `InstalledAppFlow.run_local_server(port=8080)`, save `token.json`, then SCP to VPS. Don't try to run it inside Docker.
+
+8. **Multiple agents share cron names — filter by agent.** If three agents have a cron named "heartbeat", `openclaw cron list | grep heartbeat` returns all of them. Use the cron UUID directly, or grep for the agent name in the same line.
+
+9. **Dockerfile pip changes require image rebuild.** Adding packages with `pip install` at runtime is lost on container restart. Edit the Dockerfile, `docker compose build --no-cache`, `docker compose up -d`. Existing agents survive the restart — their data is on host volumes.
+
+10. **deploy.sh `set -euo pipefail` + `.env` sourcing is fragile.** If `.env` has variables that reference other unset variables, `set -u` kills the script. Copy `.env` to `/tmp/.env` before running deploy.sh, or source it explicitly in the script's working directory.
 
 ## Git workflow
 

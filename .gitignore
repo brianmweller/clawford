@@ -18,3 +18,7 @@ openclaw-docker-config/
 
 # Backups
 *.tar.gz
+
+# Google OAuth secrets
+credentials.json
+token.json
