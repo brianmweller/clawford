@@ -82,5 +82,18 @@ set_commands "Mistress Mouse" "$FAMILYCAL_BOT_TOKEN" '{
   ]
 }'
 
+# ── Sergeant Murphy ──────────────────────────────────────────
+set_commands "Sergeant Murphy" "$MEETINGS_BOT_TOKEN" '{
+  "commands": [
+    {"command": "today", "description": "Today'\''s meetings with prep status"},
+    {"command": "prep", "description": "Generate prep for a meeting"},
+    {"command": "debrief", "description": "Process debrief for a meeting"},
+    {"command": "commitments", "description": "List open commitments"},
+    {"command": "week", "description": "This week'\''s meeting overview"},
+    {"command": "confirm", "description": "Approve extracted action items"},
+    {"command": "dismiss", "description": "Dismiss an extracted item"}
+  ]
+}'
+
 echo ""
 echo "Done. When adding a new agent, add its commands to this script."

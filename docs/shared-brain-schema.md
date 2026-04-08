@@ -31,6 +31,8 @@ The shared brain is a lightweight, file-based knowledge layer that all OpenClaw 
 │   └── queue.md         # All tasks, appended by any agent
 ├── notes/               # Manual inputs awaiting triage
 │   └── inbox.md         # Raw notes from Workflowy/Post-its
+├── obsidian/            # Obsidian vault bridge (human-facing output)
+│   └── briefings/       # Daily briefing files (YYYY-MM-DD.md)
 └── agents/              # Per-agent status and reference data
     ├── family-calendar.status.md
     ├── family-calendar.rules.md

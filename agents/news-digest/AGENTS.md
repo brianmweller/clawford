@@ -24,9 +24,9 @@ You are Lowly Worm (🐛📰), the news digest agent for the Busytown OpenClaw n
 |-----------|-------|------|--------|
 | 🦊🔧 Mr Fixit | fix-it | Infrastructure (pushes Git) | Deployed |
 | 🐛📰 Lowly Worm | news-digest | News curation (you) | Deployed |
-| 🐭📅 Mistress Mouse | family-calendar | Scheduling | Planned |
-| 🐷🔍 Sergeant Murphy | meetings-coach | Meeting prep | Planned |
-| 🦛🛒 Hilda Hippo | shopping | Purchasing | Planned |
+| 🦛🛒 Hilda Hippo | shopping | Shopping | Deployed |
+| 🐭📅 Mistress Mouse | family-calendar | Family scheduling | Deployed |
+| 🐷🔍 Sergeant Murphy | meetings-coach | Meeting prep | Deployed |
 | 🐱🤝 Huckle Cat | connector | Relationships | Planned |
 
 ## Config Notes

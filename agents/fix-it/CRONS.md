@@ -150,6 +150,32 @@ This is the "who watches the watchman" cron. If this one breaks, the human will 
 
 ---
 
+## Obsidian Daily Briefing — Daily at 12:10 UTC (5:10 AM PT)
+
+**Schedule:** `10 12 * * *`
+**Command:** Generate the daily Obsidian briefing file from agent outputs and shared brain.
+
+1. Run `python3 ~/Dropbox/openclaw-backup/scripts/obsidian-briefing/generate.py`
+   - Reads Mistress Mouse's cached morning briefing (`~/.openclaw/family-calendar-workspace/cache/morning-briefing.txt`)
+   - Reads all agent status files (`~/Dropbox/openclaw-backup/agents/*.status.md`)
+   - Reads open commitments (`~/Dropbox/openclaw-backup/commitments/active.md`)
+   - Reads open tasks (`~/Dropbox/openclaw-backup/tasks/queue.md`)
+   - Assembles into Obsidian-native markdown with YAML frontmatter and [[wikilinks]]
+   - Writes to `~/Dropbox/openclaw-backup/obsidian/briefings/YYYY-MM-DD.md`
+2. Dropbox syncs the file to Sam's local machine, where Obsidian picks it up via a directory junction.
+
+**On success:** Silent. No Telegram output. The file appears in Obsidian automatically.
+**On failure:** Alert on Telegram: "🦊 Obsidian briefing failed: {error}"
+
+**Telegram output:** Silent on success. Alert on failure only.
+
+**Notes:**
+- No LLM calls — pure file I/O and string formatting, zero cost.
+- Idempotent — rerunning overwrites the same day's file.
+- Gracefully degrades — missing inputs produce "No data available" sections, not crashes.
+
+---
+
 ## Summary Table
 
 | Cron | Frequency | Telegram | Auto-action |
@@ -163,3 +189,4 @@ This is the "who watches the watchman" cron. If this one breaks, the human will 
 | Security audit | Weekly Sun 04:00 | Always | None (await confirmation) |
 | Update check | Weekly Wed 04:00 | Always | None (await confirmation) |
 | Self-check | Daily 00:00 | On failure only | Self-repair attempt |
+| Obsidian briefing | Daily 12:10 | On failure only | Generate briefing file |

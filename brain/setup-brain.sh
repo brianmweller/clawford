@@ -8,7 +8,7 @@ set -euo pipefail
 BRAIN="$HOME/Dropbox/openclaw-backup"
 
 echo "Creating directories..."
-mkdir -p "$BRAIN"/{people,facts,commitments,tasks,notes,agents,archive,scripts}
+mkdir -p "$BRAIN"/{people,facts,commitments,tasks,notes,agents,archive,scripts,obsidian/briefings}
 
 echo "Writing README.md..."
 cat > "$BRAIN/README.md" << 'ENDOFFILE'

@@ -4,7 +4,7 @@
 
 ### Shared Brain (full read/write)
 - **Path:** `~/Dropbox/openclaw-backup/`
-- **Permissions:** Read all directories. Write to: `agents/fix-it.status.md`, `archive/`, `tasks/queue.md` (append only), `facts/` (append only for system health facts).
+- **Permissions:** Read all directories. Write to: `agents/fix-it.status.md`, `archive/`, `tasks/queue.md` (append only), `facts/` (append only for system health facts), `obsidian/briefings/` (daily briefing output).
 - **Usage:** This is your primary workspace for monitoring, validation, and archival. You read every directory for health checks. You write your own status file after every cron run. You move files to `/archive/YYYY-MM/` during monthly archival.
 - **Caution:** Never edit another agent's entries in `facts/`, `commitments/`, or `tasks/`. The shared brain is append-only by convention. The only exception is archival moves for completed/stale entries.
 
@@ -112,6 +112,19 @@ claude -p "now fix Y" --output-format text --add-dir ~/Dropbox/openclaw-backup/ 
 - **What it checks:** Directory structure integrity, file format compliance, ID uniqueness, required fields, date format validity, broken subject references in facts.
 - **When to run:** Every 6 hours via cron. Also run on-demand when you suspect brain corruption.
 - **On failure:** Log the specific validation errors. If critical (missing directories, corrupted files), alert human via Telegram immediately. If minor (formatting issues), log and include in next status report.
+
+### Obsidian Daily Briefing
+- **Path:** `~/Dropbox/openclaw-backup/scripts/obsidian-briefing/generate.py`
+- **What it does:** Generates a daily markdown briefing file for Sam's Obsidian vault. Reads Mistress Mouse's morning briefing cache, all agent status files, open commitments, and open tasks. Assembles into Obsidian-native markdown with YAML frontmatter and `[[wikilinks]]` to people files.
+- **Output:** `~/Dropbox/openclaw-backup/obsidian/briefings/YYYY-MM-DD.md`
+- **When to run:** Daily at 12:10 UTC via cron (10 min after Mistress Mouse's morning briefing). Also run on-demand if asked.
+- **No LLM calls.** Pure Python, stdlib only, zero cost. Idempotent — safe to rerun.
+- **On failure:** Report the error to Sam on Telegram. Common causes: Mistress Mouse's cache missing (her cron failed first), or a brain file has unexpected format. The script degrades gracefully — missing inputs produce "No data available" sections, not crashes.
+- **Inputs it reads:**
+  - `~/.openclaw/family-calendar-workspace/cache/morning-briefing.txt` (Mistress Mouse)
+  - `~/Dropbox/openclaw-backup/agents/*.status.md` (all agents, first 8 lines only)
+  - `~/Dropbox/openclaw-backup/commitments/active.md`
+  - `~/Dropbox/openclaw-backup/tasks/queue.md`
 
 ### Dropbox Conflict Detection
 - **Method:** `find ~/Dropbox/openclaw-backup/ -name "*conflicted copy*" -type f`

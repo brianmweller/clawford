@@ -39,5 +39,6 @@ This guide walks you through the entire setup — from an empty Hetzner account 
 | 7 | [Hardening](07-hardening.md) | Fix the security gap you don't know you have | 15 min |
 | 8 | [Growing the Team](08-growing-the-team.md) | Add more agents using the same pattern | varies |
 | 9 | [CLI Reference](09-cli-reference.md) | The corrected command reference | bookmark |
+| 10 | [Obsidian Bridge](10-obsidian-bridge.md) | Connect your vault to the agent brain | 15 min |
 
 Start with [Chapter 0](00-before-you-start.md).

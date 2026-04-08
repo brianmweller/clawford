@@ -1,0 +1,19 @@
+{
+  "calendars": [
+    {"id": "sam.smith@example.com", "label": "Sam (Work)", "emoji": "👨"}
+  ],
+  "timezone": "America/Los_Angeles",
+  "meeting_filters": {
+    "skip_titles": ["Focus Time", "Lunch", "Block"],
+    "require_attendees_or_video": true
+  },
+  "workflowy": {
+    "enabled": true,
+    "ai_bullet_prefix": "[AI]",
+    "node_template": ["Pre / during", "📔 Agenda", "📝 Notes", "Post-meeting", "✅ Takeaways"]
+  },
+  "krisp": {
+    "enabled": true,
+    "mcp_url": "https://mcp.krisp.ai/mcp"
+  }
+}
