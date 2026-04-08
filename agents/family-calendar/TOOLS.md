@@ -52,6 +52,30 @@ python3 ~/.openclaw/family-calendar-workspace/scripts/reminder-check.py
 python3 ~/.openclaw/family-calendar-workspace/scripts/timed-deliver.py cache/morning-briefing.txt --token-env FAMILYCAL_BOT_TOKEN
 ```
 
+**Gmail invite check:**
+```bash
+python3 ~/.openclaw/family-calendar-workspace/scripts/gmail-invite-check.py
+python3 ~/.openclaw/family-calendar-workspace/scripts/gmail-invite-check.py --hours 48
+```
+
+**Activity email check (Example Preschool, Example Swim School, Example Ballet Studio):**
+```bash
+python3 ~/.openclaw/family-calendar-workspace/scripts/activity-email-check.py
+python3 ~/.openclaw/family-calendar-workspace/scripts/activity-email-check.py --dry-run
+```
+
+**Calendar write-back:**
+```bash
+# Preview (no changes)
+python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-write.py preview-create --calendar-id Sam --summary "Dentist" --start "2026-04-10T14:00" --end "2026-04-10T15:00"
+# Create (requires --confirm)
+python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-write.py create --calendar-id Sam --summary "Dentist" --start "2026-04-10T14:00" --end "2026-04-10T15:00" --confirm
+# Move
+python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-write.py move --calendar-id Sam --event-id EVENT_ID --new-start "2026-04-11T15:00" --new-end "2026-04-11T16:00" --confirm
+# Remove
+python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-write.py remove --calendar-id Sam --event-id EVENT_ID --confirm
+```
+
 ---
 
 ## Telegram Commands
@@ -61,6 +85,13 @@ python3 ~/.openclaw/family-calendar-workspace/scripts/timed-deliver.py cache/mor
 - `/tomorrow` — Tomorrow's schedule
 - `/week` — This week's overview, grouped by day
 
+### Calendar Management
+- `/add [who] [what] [when]` — Create a new event (e.g., `/add Avery dentist Thursday 2pm`)
+- `/move [event] to [when]` — Reschedule (e.g., `/move dentist to Friday 3pm`)
+- `/cancel [event]` or `/remove [event]` — Delete (e.g., `/cancel swimming Monday`)
+- `/confirm` — Approve a pending calendar change
+- `/nevermind` — Cancel a pending calendar change
+
 ### Free-Text
 Parse natural language intent:
 - "what's on today?" → `/today`
@@ -68,6 +99,8 @@ Parse natural language intent:
 - "what's happening Saturday?" → fetch Saturday's events
 - "is there anything on Alex's calendar tomorrow?" → filter by Alex's calendar
 - "who picks up Avery today?" → check afternoon events + routine
+- "add Avery dentist Thursday 2pm" → create event with confirmation
+- "cancel swimming Monday" → remove event with confirmation
 
 ---
 
@@ -97,9 +130,8 @@ Adding a family member's calendar is a config change, not a code change.
 ## Tools NOT Available (and why)
 
 - **Claude Code:** Mistress Mouse does not invoke Claude Code. LLM calls for natural language parsing use Sam's OpenAI subscription via Python scripts (gpt-5.4-nano).
-- **Gmail MCP:** Available in Claude Code, not in the OpenClaw agent runtime. Email monitoring is a Phase 2 capability.
-- **Web search / Brave API:** Not available. Mistress Mouse reads Google Calendar API only.
-- **Calendar write access:** OAuth scope is calendar.readonly. No creating, updating, or deleting events.
+- **Web search / Brave API:** Not available. Mistress Mouse reads Google Calendar and Gmail only.
+- **Gmail write access:** Gmail is read-only. No sending, drafting, or deleting emails.
 - **Shared brain write access (beyond status):** Mistress Mouse is isolated. She writes only to her own status file and workspace.
 - **Email sending:** Not available.
 - **Git:** Mistress Mouse does not commit or push. Mr Fixit handles Git.

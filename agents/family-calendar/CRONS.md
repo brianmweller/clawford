@@ -114,6 +114,56 @@ Write current UTC time to `last_heartbeat` in `~/Dropbox/openclaw-backup/agents/
 
 ---
 
+## Activity Email Check — Every 2 Hours
+
+**Schedule:** `15 */2 * * *`
+**Command:** Check Gmail for emails from Example Preschool, Example Swim School, and Example Ballet Studio.
+
+1. Run `python3 ~/.openclaw/family-calendar-workspace/scripts/activity-email-check.py`
+   - Searches Gmail for emails from activity providers (last 48 hours)
+   - Uses gpt-5.4-nano to parse email content for schedule-relevant items
+   - Outputs JSON array of action items, cancellations, closures
+2. Read the JSON output.
+3. For each item that is NOT "none": send a Telegram message:
+   - Closures/cancellations (urgent): "🐭 ⚠️ {source}: {summary}"
+   - Action items (Room 3 needs X): "🐭 📋 {source}: {summary} (by {date})"
+   - Events/FYI: "🐭 📌 {source}: {summary}"
+4. If the output is empty or all items are "none": produce NO output.
+5. Update your status file.
+
+**Telegram output:** Only when actionable items are found. Silent otherwise.
+
+---
+
+## Gmail Invite Check — Every 3 Hours
+
+**Schedule:** `30 */3 * * *`
+**Command:** Check Gmail for calendar invites.
+
+1. Run `python3 ~/.openclaw/family-calendar-workspace/scripts/gmail-invite-check.py`
+   - Searches for ICS attachments and Google Calendar notifications
+   - Outputs JSON array of new invites
+2. For each invite: send a Telegram message:
+   "🐭 New invite: {subject} on {date} from {organizer}. Accept?"
+3. If no new invites: produce NO output.
+
+**Telegram output:** Only when new invites are found. Silent otherwise.
+
+---
+
+## Weekly Overview — Sunday at 01:00 UTC (6 PM PT)
+
+**Schedule:** `0 1 * * 1`
+**Command:** Generate a week-ahead schedule overview.
+
+1. Run `python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 7`
+2. Format as a day-by-day overview with key events, conflicts, and pickup arrangements.
+3. Deliver to Telegram.
+
+**Telegram output:** Always (Sunday evening).
+
+---
+
 ## Summary Table
 
 | Cron | Frequency | Telegram | Auto-action |
@@ -121,3 +171,6 @@ Write current UTC time to `last_heartbeat` in `~/Dropbox/openclaw-backup/agents/
 | Morning briefing | Daily 11:55 UTC (deliver at 12:00) | Always | Fetch calendars, format, timed-deliver |
 | Reminder check | Every 5 min | On events found | Poll calendars, send per-event reminders |
 | Heartbeat | Every 30 min | On failure only | Write heartbeat, prune stale reminders |
+| Activity email check | Every 2 hours | On items found | Parse Example Preschool/Example Swim School/Tutu emails via LLM |
+| Gmail invite check | Every 3 hours | On invites found | Parse ICS attachments, surface invites |
+| Weekly overview | Sunday 01:00 UTC | Always | Full week-ahead schedule |
