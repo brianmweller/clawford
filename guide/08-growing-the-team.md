@@ -98,11 +98,15 @@ if now.minute >= 50:
 # then send via Bot API with disable_web_page_preview, disable_notification
 ```
 
-The script lives at `{workspace}/scripts/timed-deliver.py`. Each agent has its own copy with the correct bot token env var. Usage:
+The script lives at `{workspace}/scripts/timed-deliver.py`. Usage:
 
 ```bash
-python3 scripts/timed-deliver.py cache/morning-report.txt
+python3 scripts/timed-deliver.py cache/morning-report.txt --token-env SHOPPING_BOT_TOKEN
 ```
+
+The `--token-env` flag is **required** — it specifies which env var holds the bot token for this agent. The script fails loudly if the token is missing. Never omit this flag or use a fallback — that sends messages to the wrong bot.
+
+Each agent's bot token must be in both the `.env` file and `docker-compose.yml` `environment` block.
 
 This pattern is used by all agents with timed delivery:
 - **Lowly Worm:** built into `deliver-digest.py` (same hold logic)

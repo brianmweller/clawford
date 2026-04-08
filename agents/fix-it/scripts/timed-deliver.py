@@ -5,10 +5,14 @@ timed-deliver.py — Hold and deliver a message at the top of the hour.
 Reads a message from a file, waits until :00 UTC, then sends via Telegram
 Bot API with disable_web_page_preview and disable_notification.
 
-Usage: python3 timed-deliver.py <message_file> [--silent]
+Usage: python3 timed-deliver.py <message_file> [--silent] [--token-env BOT_TOKEN_ENV_VAR]
 
 The agent writes its formatted output to the message file, then this
 script handles the timed delivery.
+
+The --token-env flag specifies which env var holds the bot token.
+If omitted, falls back to TELEGRAM_BOT_TOKEN. Never falls back to
+another agent's token — that sends messages to the wrong bot.
 """
 
 import json
@@ -18,8 +22,28 @@ import time
 from datetime import datetime, timezone
 import urllib.request
 
-BOT_TOKEN = os.environ.get("FIXIT_BOT_TOKEN", os.environ.get("TELEGRAM_BOT_TOKEN", ""))
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+def get_config():
+    """Parse args and resolve bot token. Fail loudly if token is missing."""
+    token_env = "TELEGRAM_BOT_TOKEN"
+    for i, arg in enumerate(sys.argv):
+        if arg == "--token-env" and i + 1 < len(sys.argv):
+            token_env = sys.argv[i + 1]
+
+    bot_token = os.environ.get(token_env, "")
+    if not bot_token:
+        print(f"ERROR: {token_env} not set in environment", file=sys.stderr)
+        sys.exit(1)
+
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if not chat_id:
+        print("ERROR: TELEGRAM_CHAT_ID not set in environment", file=sys.stderr)
+        sys.exit(1)
+
+    return bot_token, chat_id
+
+
+BOT_TOKEN, CHAT_ID = get_config()
 
 
 def send_telegram(text, silent=False):
@@ -55,12 +79,24 @@ def wait_for_top_of_hour():
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: timed-deliver.py <message_file> [--silent]")
+    # Filter out --token-env and its value from positional args
+    positional = []
+    skip_next = False
+    for arg in sys.argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--token-env":
+            skip_next = True
+            continue
+        positional.append(arg)
+
+    if not positional or positional[0].startswith("--"):
+        print("Usage: timed-deliver.py <message_file> [--silent] [--token-env ENV_VAR]")
         sys.exit(1)
 
-    msg_file = sys.argv[1]
-    silent = "--silent" in sys.argv
+    msg_file = positional[0]
+    silent = "--silent" in positional
 
     if not os.path.exists(msg_file):
         print(f"Message file not found: {msg_file}", file=sys.stderr)
