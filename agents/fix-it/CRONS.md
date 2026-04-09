@@ -25,27 +25,55 @@ Workspace: .openclaw/fix-it-workspace/
 ## Morning Status Report — Daily at 06:00 UTC
 
 **Schedule:** `0 6 * * *`
-**Command:** Compile a summary of all agent statuses, last validation result, any open alerts, and token usage estimates.
+
+**Command:** Run the structured 5-step morning-status prompt. The full prompt is defined in `deploy.sh` (the `MORNING_STATUS_PROMPT` bash variable) and is re-applied when the cron is registered. Summary:
+
+1. **Read KNOWN_ISSUES.md first** — `~/Dropbox/openclaw-backup/fix-it/KNOWN_ISSUES.md` is the operator-curated suppression list. Parse match patterns and expiries before looking at agent state.
+2. **Gather raw state** — read all `agents/*.status.md` files (status field, last_heartbeat, error_log, auth fields, mtime), run `validate.py`, check for Dropbox conflicts.
+3. **Classify each agent into ONE of 4 buckets** using rules in order:
+   - **🚨 DOWN** — heartbeat stale beyond 6 hours.
+   - **✅ HEALTHY** — status field is `ok` / `healthy`. **Critical: do NOT derive degraded from error_log history when the status field says ok.** The error_log is an audit log of past events, not current state.
+   - **ℹ️ KNOWN** — status is degraded and the error matches a non-expired KNOWN_ISSUES.md entry.
+   - **⚠️ STALE** — status is degraded but last_heartbeat > 6h old; content unverified.
+   - **🚨 OPEN ALERT** — status is degraded, no known-issue match, fresh heartbeat, AND a verification action confirmed the problem is still real.
+4. **Write the 4-bucket report** in the format below.
+5. **Enforce absolute rules** — see deploy.sh §STEP 5.
 
 **Telegram output:** Always. Format:
 
 ```
-🦊🔧 Morning Status — {date}
+🦊🔧 Morning Status — 2026-04-10 06:00 UTC
+
+Overall: ✅ all clear
+(or: ℹ️ 2 known | ⚠️ 1 stale | 🚨 1 open alert)
 
 Agents:
-  ✅ family-calendar — last heartbeat 12m ago
-  ✅ meetings-coach — last heartbeat 8m ago
-  ✅ shopping — last heartbeat 22m ago
-  ✅ news-digest — last heartbeat 5m ago
-  ✅ connector — last heartbeat 15m ago
+  ✅ family-calendar — heartbeat 12m ago
+  ℹ️ meetings-coach — WORKFLOWY_API_KEY missing (Murphy onboarding gap)
+  ✅ shopping — heartbeat 22m ago
+  ✅ news-digest — heartbeat 5m ago
+  ✅ connector — heartbeat 15m ago
 
-Brain: validation passed (last run 02:00 UTC)
+Brain: validation PASS 26 / FAIL 0
 Dropbox: no conflicts
-Files >500KB: none
-Archive: next run Apr 1
 
-Open alerts: none
+🚨 Open alerts: (omit if none)
+  - {agent}: {issue}
+    Verified: {action taken to re-check, e.g. "checked costco-tokens.json mtime: 14m old — token refresh daemon is working"}
+    Next: {restart | human needed | specific command}
+
+ℹ️ Known (pending human action): (omit if none)
+  - meetings-coach: WORKFLOWY_API_KEY missing (Sergeant Murphy deployed without WF key) — expires 2026-05-01
+
+⚠️ Stale (not re-verified): (omit if none)
+  - {agent}: status file last updated 8h ago; content may be resolved
 ```
+
+**Key invariants:**
+- Overall line is one of: `✅ all clear`, `ℹ️ N known`, `⚠️ N stale`, `🚨 N open alerts` — whichever is most severe wins.
+- An agent is NEVER in the "Open alerts" section without a `Verified:` line.
+- A known-issue is NEVER promoted to "Open alerts" regardless of how noisy it is in the status file.
+- Sections with zero items are OMITTED entirely (do not write "Open alerts: none" — just omit the section).
 
 ---
 

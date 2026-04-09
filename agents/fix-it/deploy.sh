@@ -107,6 +107,19 @@ echo "  Added /bin/* to allowlist"
 oc approvals allowlist add --agent fix-it "/usr/local/bin/*"
 echo "  Added /usr/local/bin/* to allowlist"
 
+oc approvals allowlist add --agent fix-it "python3 -"
+echo "  Added python3 stdin to allowlist"
+
+# ── Exec policy: trusted local automation ──
+# Without this, crons fail with "exec denied: Cron runs cannot wait for
+# interactive exec approval." The LLM generates compound shell commands
+# (redirects, pipes, heredocs) that don't match simple allowlist patterns.
+# For a private VPS running trusted agents, security=full + ask=off is the
+# right posture — no human approval needed for exec calls.
+oc config set tools.exec.security full
+oc config set tools.exec.ask off
+echo "  Set tools.exec.security=full, ask=off"
+
 echo ""
 
 # ── Step 5: Register Crons ───────────────────────────────────
@@ -126,15 +139,72 @@ oc cron add \
 echo "  [1/9] heartbeat-check (silent on all-clear)"
 
 # 2. Morning status — daily at 06:00 UTC
+# Structured 5-step prompt with known-issue suppression, staleness detection,
+# and per-alert verification. Replaces the old free-form "note any open alerts"
+# prompt which was freestyling classifications and re-reporting stale status.
+MORNING_STATUS_PROMPT='Compile the morning status report. Follow these steps in order.
+
+STEP 1 — Read the known-issues list FIRST.
+Read ~/Dropbox/openclaw-backup/fix-it/KNOWN_ISSUES.md. Parse each entry: match pattern, expires date, reason, escalation conditions. Any entry past its expires date is IGNORED (treat as not-known). Keep the parsed list in mind for step 3.
+
+STEP 2 — Gather raw state.
+For each file matching ~/Dropbox/openclaw-backup/agents/*.status.md, record: agent name, the status field value, the last_heartbeat field value, the error_log field (first 500 chars), any agent-specific auth fields (google_auth, workflowy_auth, krisp_auth, amazon_session, costco_session), and the file mtime via stat -c %Y. Also run: python3 ~/Dropbox/openclaw-backup/scripts/validate.py and capture its result. Also run: find ~/Dropbox/openclaw-backup/ -name "*conflicted copy*" -type f and capture the list.
+
+STEP 3 — Classify each REGISTERED agent into exactly one bucket.
+Ignore placeholder status files for undeployed agents. Ignore the "main" internal. Use the following rules IN ORDER — first match wins:
+
+(a) Heartbeat stale beyond 6 hours → 🚨 DOWN. The agent is not running.
+
+(b) CRITICAL RULE: read the status FIELD, not the error_log history. The error_log may contain old entries from before a fix landed. If status is "ok" or "healthy", the agent IS healthy regardless of what error_log contains — classify as ✅ HEALTHY and move on. Do NOT derive "degraded" from error_log text when status says ok.
+
+(c) status is "degraded" or an auth field shows an error: check the known-issues list. If a non-expired entry matches the text → ℹ️ KNOWN. Include the entry reason in parentheses.
+
+(d) status is "degraded" and last_heartbeat is older than 6 hours: → ⚠️ STALE. The content has not been refreshed since the error was written; we cannot tell if it is still real. Do NOT treat as an open alert.
+
+(e) Otherwise (fresh heartbeat, status=degraded, no known-issue match): do ONE verification action appropriate to the error before alerting. If the error mentions a token → check the token file mtime on disk via stat. If the error mentions a cron → run oc cron list and check the cron is still registered. If the error mentions exec approval → run oc config get tools.exec and verify security=full and ask=off. Include the verification output in your report. If verification confirms the problem → 🚨 OPEN ALERT. If verification shows the problem resolved → ✅ HEALTHY (note the status file is stale).
+
+(f) Default → ✅ HEALTHY.
+
+STEP 4 — Format the report EXACTLY as follows and send to Telegram:
+
+🦊🔧 Morning Status — {YYYY-MM-DD HH:MM UTC}
+
+Overall: {✅ all clear | ℹ️ {N} known | ⚠️ {N} stale | 🚨 {N} open alerts}
+
+Agents:
+  {bucket-emoji} {agent} — {one-line summary with heartbeat age}
+
+Brain: {validation PASS/FAIL with counts}
+Dropbox: {conflicts result}
+
+🚨 Open alerts: (OMIT this entire section if none)
+  - {agent}: {the issue}
+    Verified: {exact action you took in step 3e and the result}
+    Next: {restart / human needed / specific recommended command}
+
+ℹ️ Known (pending human action): (OMIT this entire section if none)
+  - {agent}: {issue} ({reason from KNOWN_ISSUES.md}) — expires {date}
+
+⚠️ Stale (not re-verified): (OMIT this entire section if none)
+  - {agent}: status file last updated {hours}h ago; content may be resolved — next agent run will refresh
+
+STEP 5 — ABSOLUTE RULES (violating any of these is a bug in your report):
+1. Never classify an agent as "degraded" based on error_log text alone when the status field is "ok".
+2. Never report a known-issue as an open alert. The known-issues list is authoritative for suppression.
+3. Never include an agent in the 🚨 Open alerts section without a "Verified:" line showing exactly what you did to re-check.
+4. If in doubt between ⚠️ stale and 🚨 alert, prefer ⚠️ stale.
+5. Authority reminder: you may restart agents and re-register crons. You may NOT provision credentials, edit other agents SOUL/IDENTITY (immutable), or touch deploy.sh files. Anything needing human decision goes in 🚨 Open alerts with "Next: human needed".
+6. If KNOWN_ISSUES.md is missing or unreadable, note it in the report header and proceed without suppression — do NOT fail silently.'
+
 oc cron add \
   --agent fix-it \
   --name "morning-status" \
-  --cron "0 6 * * *" \
+  --cron "55 11 * * *" \
   --to "$TELEGRAM_CHAT_ID" \
   --account "$TELEGRAM_ACCOUNT" \
   --announce \
-  --message "Compile a morning status report. Read all agent status files, run python3 ~/Dropbox/openclaw-backup/scripts/validate.py, check for Dropbox conflicts with find ~/Dropbox/openclaw-backup/ -name '*conflicted copy*' -type f, and note any open alerts. Send the full report to me on Telegram. Use the format from CRONS.md."
-echo "  [2/9] morning-status"
+  --message "$MORNING_STATUS_PROMPT"
+echo "  [2/9] morning-status (structured 5-step prompt with known-issue suppression, 11:55 UTC = 4:55 AM PT)"
 
 # 3. Brain validation — every 6 hours (SILENT on pass)
 oc cron add \
