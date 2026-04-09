@@ -105,7 +105,13 @@ Pickup: {Jamie / Sam} at 3:30 PM.
 **Schedule:** `*/30 * * * *`
 **Command:** Update your own status file with current heartbeat timestamp.
 
-Write current UTC time to `last_heartbeat` in `~/Dropbox/openclaw-backup/agents/family-calendar.status.md`. Verify calendar-config.json and token.json exist. Prune sent-reminders.json entries older than 48 hours. Produce NO output if everything is normal.
+1. Write current UTC time to `last_heartbeat` in `~/Dropbox/openclaw-backup/agents/family-calendar.status.md`.
+2. Set `status` to `ok` if calendar-config.json and token.json exist, else `degraded`.
+3. **Prune `error_log`**: remove any error lines older than 24 hours. If no recent errors remain, set `error_log: none`.
+4. Verify `sent-reminders.json` exists and prune entries older than 48 hours.
+5. Produce NO output if everything is normal.
+
+Stale errors in the status file can cause Mr Fixit to raise false alerts, so pruning is critical.
 
 **On success:** Silent.
 **On failure:** Alert on Telegram: "❌ family-calendar heartbeat issue: {description}"
