@@ -92,26 +92,28 @@ The script handles (all via Docker exec):
 - Configuring per-agent Telegram bot + binding
 - Setting exec approvals:
   - Allowlist: `/usr/bin/*`, `/bin/*`, `/usr/local/bin/*`
-  - Allowlist: `python3 ~/.openclaw/{agent}-workspace/scripts/*` (critical for crons)
+  - Allowlist: `python3 ~/.openclaw/{agent}-workspace/scripts/*`
   - Allowlist: `python3 -` (for inline Python)
-  - **Policy: `allowlist`** — without this, crons can't run scripts (they can't wait for interactive approval)
+  - **Exec policy: `security=full, ask=off`** — the LLM generates compound shell commands (redirects, pipes, heredocs) that don't match simple allowlist patterns. For a private VPS running trusted agents, `security=full + ask=off` is the right posture — no human approval needed. Set via `oc config set tools.exec.security full` and `oc config set tools.exec.ask off`. Also set `defaults: {security: "full", ask: "off"}` in `~/.openclaw/exec-approvals.json`.
 - Registering all cron jobs with `--to <chatId> --account <agent-id> --announce`
 - Security hardening (`chattr +i` on SOUL.md and IDENTITY.md)
 - Verification output
 
-**Important:** After running deploy.sh, verify the agent's exec policy is set:
+**Important:** After running deploy.sh, verify the exec policy is applied globally:
 
 ```bash
-# Check policy
-cat ~/.openclaw/exec-approvals.json | python3 -c "
-import sys, json; d=json.load(sys.stdin)
-print(d['agents']['AGENT_NAME']['policy'])"
+# Check gateway config
+oc config get tools.exec
+# Should show: {"security":"full","ask":"off","strictInlineEval":true}
 
-# If policy is missing, set it (replaces the full file — export first):
+# Check exec-approvals.json defaults
 cat ~/.openclaw/exec-approvals.json | python3 -c "
 import sys, json; d=json.load(sys.stdin)
-d['agents']['AGENT_NAME']['policy']='allowlist'
-json.dump(d, sys.stdout, indent=2)" | oc approvals set --stdin
+print(d.get('defaults'))"
+# Should show: {'security': 'full', 'ask': 'off'}
+
+# Restart gateway after config changes
+cd ~/openclaw && docker compose restart openclaw-gateway
 ```
 
 ---
@@ -239,5 +241,5 @@ All commands prefixed with `oc` (the Docker exec wrapper):
 - Python3 must be in the Docker image for `validate.py` to work
 - The brain directory must be mounted as a Docker volume
 - After rebuilding the container, re-check `oc health` and `oc agents list`
-- **Exec approvals need both allowlist AND policy.** Adding patterns with `oc approvals allowlist add` is not enough. Each agent needs `"policy": "allowlist"` in exec-approvals.json. Without it, crons fail with "exec denied: Cron runs cannot wait for interactive exec approval."
-- **Always add `python3 scripts/*` to the allowlist.** System path wildcards (`/usr/bin/*`) match the `python3` binary but not the full `python3 path/to/script.py` command string.
+- **Exec approvals need both allowlist AND global policy.** Adding allowlist patterns is not enough. The LLM generates compound shell commands (`cmd > /tmp/x && cat /tmp/x`, `python3 - <<'PY'...`) that don't match simple patterns. Set global `tools.exec.security=full` and `tools.exec.ask=off`, plus `defaults: {security: "full", ask: "off"}` in exec-approvals.json. Without this, crons fail with "exec denied: Cron runs cannot wait for interactive exec approval."
+- **Always add `python3 scripts/*` to the allowlist.** System path wildcards (`/usr/bin/*`) match the `python3` binary but not the full `python3 path/to/script.py` command string. Allowlist-only mode won't work anyway (see above) but keep these patterns for audit trail and defense-in-depth.
