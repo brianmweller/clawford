@@ -128,6 +128,45 @@ If no meetings today:
 **On `/confirm`:** Write commitments to `commitments/active.md`, facts to `facts/YYYY-MM.md`, following the shared brain schema.
 **On `/dismiss N`:** Remove item N from the pending debrief. If all items dismissed, delete the pending file.
 
+5. **Coaching (after debrief, if coaching.enabled is true):**
+   For each staged debrief with transcript text, run `python3 ~/.openclaw/meetings-coach-workspace/scripts/transcript-metrics.py --event-id EVENT_ID`. Read the metrics JSON. Read `meeting-config.json` for `coaching.growth_areas`. Read the transcript text from the debrief file. For each growth area, analyze Sam's utterances and compose a coaching section. Send a coaching message on Telegram:
+
+   ```
+   📊 Meeting Coach — {Meeting Title}
+
+   📏 CONCISION (talk ratio: {N}% · avg turn: {N} words)
+   {1-2 sentence assessment}
+   💬 "{quoted excerpt, ~80 chars}" ({timestamp})
+   ✏️ Try: "{suggested tighter version}"
+
+   🧩 STRUCTURED THINKING
+   {1-2 sentence assessment}
+   💬 "{quoted excerpt}" ({timestamp})
+   ✏️ Try: "{suggested restructured version}"
+
+   🤝 EMPATHY (questions asked: {N})
+   {1-2 sentence assessment}
+   💬 "{quoted excerpt}" ({timestamp})
+   ✏️ Try: "{suggested empathetic alternative}"
+
+   ━━━━━━━━━━━━━━━
+   📊 {talk_ratio}% talk · {turns} turns · {questions} questions · {fillers} fillers
+   🐷🔍
+   ```
+
+   If a growth area has nothing to flag: "Nothing to flag — {positive note}." (one line, no Moment/Try).
+
+   After sending, append to `cache/coaching-history.json`:
+   ```json
+   {
+     "event_id": "...",
+     "meeting_title": "...",
+     "date": "YYYY-MM-DD",
+     "metrics": {"talk_ratio": 0.30, "avg_turn_words": 24, "question_count": 6, "filler_count": 0},
+     "area_assessments": {"concision": "strong", "structured_thinking": "good", "empathy": "needs_work"}
+   }
+   ```
+
 **Telegram output:** Only when new transcripts are processed. Silent otherwise.
 
 ---

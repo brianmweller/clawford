@@ -11,6 +11,7 @@
   - `meeting-config.json` — calendar IDs, timezone, meeting filters, Workflowy config
   - `sent-alerts.json` — pre-meeting alert deduplication state (pruned every 48 hours)
   - `processed-transcripts.json` — transcript processing deduplication
+  - `coaching-history.json` — per-meeting coaching metrics and assessments for trend tracking
 
 ### Shared Brain (structured access)
 - **Path:** `~/Dropbox/openclaw-backup/`
@@ -69,6 +70,11 @@ python3 ~/.openclaw/meetings-coach-workspace/scripts/transcript-scan.py
 python3 ~/.openclaw/meetings-coach-workspace/scripts/transcript-scan.py --match EVENT_ID
 ```
 
+**Compute transcript metrics (for coaching):**
+```bash
+python3 ~/.openclaw/meetings-coach-workspace/scripts/transcript-metrics.py --event-id EVENT_ID
+```
+
 **Track commitments:**
 ```bash
 python3 ~/.openclaw/meetings-coach-workspace/scripts/commitment-tracker.py
@@ -100,6 +106,13 @@ python3 ~/.openclaw/meetings-coach-workspace/scripts/timed-deliver.py cache/morn
 - `/commitments` — List all open commitments from meetings
 - `/confirm` — Approve extracted action items and write to shared brain
 - `/dismiss N` — Dismiss extracted item N (don't commit to brain)
+
+### Coaching
+- `/coaching on` / `/coaching off` — Toggle coaching globally
+- `/coaching areas` — List current growth areas
+- `/coaching trends` — Show recent coaching trends
+- `/coaching add {id} {description}` — Add a new growth area
+- `/coaching remove {id}` — Remove a growth area
 
 ### Free-Text
 Parse natural language intent:

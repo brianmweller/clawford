@@ -217,8 +217,8 @@ async def fetch_krisp_transcripts_mcp(days_back=1):
                     # Fetch full transcript text
                     try:
                         doc_resp = await session.call_tool(
-                            "get_document",
-                            arguments={"documentId": doc_id},
+                            "get_multiple_documents",
+                            arguments={"ids": [doc_id]},
                         )
                         raw_text = _extract_text_from_response(doc_resp)
                         if raw_text and len(raw_text.strip()) >= 50:

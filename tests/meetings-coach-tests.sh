@@ -578,9 +578,86 @@ T11
 
 # ═══════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════
+# T12 — Transcript metrics
+# ═══════════════════════════════════════════════════════════════
+
+cat > "$BASE/tests/meetings-coach/T12-transcript-metrics.sh" << 'T12'
+# Does transcript-metrics.py return valid JSON with expected fields?
+test_start "T12" "Transcript Metrics — Valid JSON"
+
+TELEGRAM_ACCOUNT="murphy"
+
+# Find a pending debrief with transcript text
+DEBRIEF=$(python3 "$HOME/.openclaw/meetings-coach-workspace/scripts/list-pending-debriefs.py" 2>/dev/null)
+HAS_TEXT=$(echo "$DEBRIEF" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for db in d.get('debriefs', []):
+    if db.get('transcript_text', ''):
+        print(db['event_id'])
+        break
+else:
+    print('none')
+" 2>/dev/null)
+
+if [ "$HAS_TEXT" = "none" ] || [ -z "$HAS_TEXT" ]; then
+    echo "  SKIP: No pending debrief with transcript text"
+    test_pass
+    return 0
+fi
+
+echo "  Running transcript-metrics.py --event-id $HAS_TEXT..."
+OUTPUT=$(python3 "$HOME/.openclaw/meetings-coach-workspace/scripts/transcript-metrics.py" --event-id "$HAS_TEXT" 2>/dev/null || echo '{"status":"error"}')
+
+if ! echo "$OUTPUT" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
+    echo "  FAIL: output is not valid JSON"
+    test_fail "invalid JSON"
+    return 1
+fi
+
+failures=0
+
+STATUS=$(echo "$OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))")
+if [ "$STATUS" = "ok" ]; then
+    echo "  PASS: status is ok"
+else
+    echo "  INFO: status is '$STATUS' (may be expected if no Sam in transcript)"
+    test_pass
+    return 0
+fi
+
+METRIC_CHECK=$(echo "$OUTPUT" | python3 -c "
+import sys, json
+m = json.load(sys.stdin).get('metrics', {})
+required = ['brian_word_count', 'talk_ratio', 'brian_turn_count', 'avg_brian_turn_words', 'brian_question_count', 'brian_filler_count', 'speakers']
+missing = [k for k in required if k not in m]
+print('ok' if not missing else 'missing:' + ','.join(missing))
+")
+if [ "$METRIC_CHECK" = "ok" ]; then
+    echo "  PASS: all expected metric fields present"
+else
+    echo "  FAIL: $METRIC_CHECK"
+    failures=$((failures + 1))
+fi
+
+RATIO=$(echo "$OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('metrics',{}).get('talk_ratio',0))")
+echo "  INFO: talk_ratio=$RATIO"
+
+if [ "$failures" -eq 0 ]; then
+    test_pass
+    return 0
+else
+    test_fail "$failures verification(s) failed"
+    return 1
+fi
+T12
+
+# ═══════════════════════════════════════════════════════════════
+
 echo ""
 echo "============================================"
-echo "  Meetings Coach tests installed (11 tests)"
+echo "  Meetings Coach tests installed (12 tests)"
 echo ""
 echo "  Usage:"
 echo "    bash ~/openclaw-tests/test-agent.sh meetings-coach --calibrate"

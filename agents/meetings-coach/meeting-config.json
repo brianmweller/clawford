@@ -15,5 +15,28 @@
   "krisp": {
     "enabled": true,
     "mcp_url": "https://mcp.krisp.ai/mcp"
+  },
+  "coaching": {
+    "enabled": true,
+    "growth_areas": [
+      {
+        "id": "concision",
+        "label": "Concision",
+        "description": "Was Sam succinct? Did he ramble or repeat points? Cite specific moments where he could have been briefer and suggest a tighter version."
+      },
+      {
+        "id": "structured_thinking",
+        "label": "Structured Thinking",
+        "description": "Were ideas presented logically? Did he use frameworks or clear sequencing? Cite scattered moments and suggest how to structure them."
+      },
+      {
+        "id": "empathy",
+        "label": "Empathy & Listening",
+        "description": "Did Sam acknowledge others' points before responding? Did he ask questions? Cite missed opportunities and suggest alternatives."
+      }
+    ],
+    "brian_speaker_names": ["Sam Smith", "Sam"],
+    "min_transcript_length": 500,
+    "filler_words": ["like", "um", "uh", "you know", "basically", "I mean", "sort of", "kind of", "right", "actually"]
   }
 }
