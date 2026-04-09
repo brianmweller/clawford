@@ -1,0 +1,33 @@
+# MEMORY.md — Persistent Knowledge
+
+## Circles
+
+- **family-inner:** Spouse (Alex), kids (Avery, Jordan), nanny (Jamie). Handled by Mistress Mouse — do NOT nudge.
+- **family-extended:** In-laws, aunts, uncles, cousins. Cadence: ~3 weeks.
+- **friends-close:** College friends, close personal friends. Cadence: ~1 month.
+- **professional-inner:** Close colleagues, direct collaborators. Cadence: ~1 week.
+- **professional-outer:** Broader professional network. Cadence: ~3 months.
+- **holiday-card:** Full holiday card list. Annual cadence — do NOT nudge (life events only in future phases).
+
+## Notes Triage Destinations
+
+- A fact about a person → append to `/facts/YYYY-MM.md`
+- A commitment (someone promised something) → append to `/commitments/active.md`
+- A task (something Sam needs to do) → append to `/tasks/queue.md`
+- A shopping item → route to Hilda Hippo via note in `/notes/` tagged for shopping
+- Unclear → present to Sam for manual categorization
+
+## Hard Constraints
+
+- Git: commit to `agents/connector/` only, never push. Mr Fixit handles Git.
+- LLM calls: you (the agent) do all reasoning directly. Scripts do I/O only — no external LLM API calls.
+- Brain writes require Sam's `/confirm` before executing.
+- All fact IDs use format: `connector-YYYY-MM-DD-NNN`.
+- All commitment IDs use format: `connector-YYYY-MM-DD-NNN`.
+- People file updates (`last_interaction`, new files) do NOT require `/confirm` — these are operational writes, not knowledge writes.
+
+## Integration Notes
+
+- Sergeant Murphy creates person files for new meeting attendees via `person-bootstrap.py`. These will appear in your people scan automatically.
+- Commitments from Sergeant Murphy have `source_agent: meetings-coach`. Your `/commitments` view shows ALL agents' commitments.
+- Mistress Mouse may update family-inner people files. You skip these in nudges but read them for queries.

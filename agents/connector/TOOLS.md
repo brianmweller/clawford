@@ -1,0 +1,152 @@
+# TOOLS.md — Huckle Cat's Toolbox
+
+## Filesystem Access
+
+### Your Workspace (full read/write)
+- **Path:** `~/.openclaw/connector-workspace/`
+- **Contents:**
+  - `scripts/` — Python scripts for people scanning, notes triage, commitment reading
+  - `cache/` — morning nudge drafts, triage staging
+  - `logs/` — audit trail of all cron runs, brain writes, and queries
+  - `connector-config.json` — circle cadences, triage settings, skip circles
+  - `pending-triage.json` — triage deduplication state (pruned every 48 hours)
+  - `checkin-log.json` — record of `/checkin` commands for weekly review stats
+
+### Shared Brain (structured access)
+- **Path:** `~/Dropbox/openclaw-backup/`
+- **Permissions:**
+  - `agents/connector.status.md` — Write (your status file)
+  - `people/*.md` — Read and Write (read all people, create new people, update `last_interaction`)
+  - `facts/YYYY-MM.md` — Read and Write (read prior facts, write triaged facts after /confirm)
+  - `commitments/active.md` — Read and Write (read ALL open commitments, write triaged commitments after /confirm)
+  - `tasks/queue.md` — Write (append tasks from triaged notes after /confirm)
+  - `notes/inbox.md` — Read and Write (read untriaged notes, mark as triaged after /confirm)
+- **Hard limits:**
+  - NEVER read or write to other agents' status files
+  - NEVER write facts, commitments, or tasks without Sam's `/confirm`
+  - All writes include `source_agent: connector` and a timestamp
+  - Fact IDs use format: `connector-YYYY-MM-DD-NNN`
+  - Commitment IDs use format: `connector-YYYY-MM-DD-NNN`
+
+---
+
+## Command Execution
+
+### Shell / Exec
+- **Available:** Yes, for running Python scripts in your workspace.
+- **Guardrails:**
+  - Only run scripts in `~/.openclaw/connector-workspace/scripts/`
+  - Never pipe note content or people file data to bash
+  - Never run `rm -rf`
+  - Log all commands and output
+
+### Python Scripts
+
+**Scan people for check-in status:**
+```bash
+python3 ~/.openclaw/connector-workspace/scripts/people-scan.py
+python3 ~/.openclaw/connector-workspace/scripts/people-scan.py --overdue-only
+python3 ~/.openclaw/connector-workspace/scripts/people-scan.py --circle friends-close
+python3 ~/.openclaw/connector-workspace/scripts/people-scan.py --person mike-chen
+```
+
+**Triage notes from inbox:**
+```bash
+python3 ~/.openclaw/connector-workspace/scripts/notes-triage.py
+python3 ~/.openclaw/connector-workspace/scripts/notes-triage.py --limit 10
+python3 ~/.openclaw/connector-workspace/scripts/notes-triage.py --all
+```
+
+**Scan commitments (unified view):**
+```bash
+python3 ~/.openclaw/connector-workspace/scripts/commitment-scan.py
+python3 ~/.openclaw/connector-workspace/scripts/commitment-scan.py --person mike-chen
+python3 ~/.openclaw/connector-workspace/scripts/commitment-scan.py --overdue-only
+python3 ~/.openclaw/connector-workspace/scripts/commitment-scan.py --source-agent meetings-coach
+```
+
+**Timed delivery (hold until top of hour):**
+```bash
+python3 ~/.openclaw/connector-workspace/scripts/timed-deliver.py cache/morning-nudge.txt --token-env CONNECTOR_BOT_TOKEN
+```
+
+---
+
+## Telegram Commands
+
+### Relationship Queries
+- `/people [name]` — Look up a person: circle, last contact, recent facts, open commitments
+- `/nudge` — Force relationship check now (on demand)
+- `/circles` — Circle health summary: counts, overdue per circle
+- `/checkin [name]` — Record that Sam talked to someone (updates `last_interaction`)
+- `/draft [name]` — Draft a check-in message using context notes and recent facts
+- `/birthday [name]` — Look up birthday from facts
+
+### Notes & Triage
+- `/note [text]` — Quick-add a note to inbox.md
+- `/triage` — Force notes triage now
+- `/confirm` — Approve pending triage and write to shared brain
+- `/dismiss N` — Skip triage item N
+
+### People Management
+- `/add [name] [circle]` — Create a new person file
+
+### Cross-Agent Views
+- `/commitments` — Unified view of ALL open commitments from all agents
+
+### Free-Text
+Parse natural language intent:
+- "who haven't I talked to?" → run people-scan, show overdue
+- "when did I last see Mike?" → look up mike's people file, show last_interaction
+- "add a note about Alice's new job" → append to inbox.md
+- "what do I owe Bob?" → search commitments for Bob
+- "draft something for Mom" → compose check-in using context
+
+---
+
+## How Data Sources Work
+
+### People Files
+The `people-scan.py` script reads all `*.md` files in `~/Dropbox/openclaw-backup/people/` (skipping `_template.md`). It parses the `- **key:** value` format, loads circle cadences from `connector-config.json`, and computes check-in status for each person. Output is JSON with overdue, approaching, and healthy arrays.
+
+### Notes Inbox
+The `notes-triage.py` script reads `~/Dropbox/openclaw-backup/notes/inbox.md`, parses entries separated by `---` dividers, and filters for `triaged: false`. Output is JSON with untriaged notes. You (the agent) do the categorization — the script just reads.
+
+### Commitments
+The `commitment-scan.py` script reads `~/Dropbox/openclaw-backup/commitments/active.md`. Unlike Sergeant Murphy's version, it reads ALL commitments regardless of source agent, providing a unified view.
+
+### Connector Config
+`connector-config.json` configures circle cadences and triage settings:
+```json
+{
+  "cadences": {
+    "family-extended": {"check_days": 21, "nudge": true},
+    "friends-close": {"check_days": 30, "nudge": true},
+    "professional-inner": {"check_days": 7, "nudge": true},
+    "professional-outer": {"check_days": 90, "nudge": true}
+  },
+  "nudge": {"max_per_day": 5, "skip_circles": ["family-inner", "holiday-card"]},
+  "triage": {"max_batch_size": 10}
+}
+```
+
+---
+
+## Tools NOT Available (and why)
+
+- **Claude Code:** Huckle Cat does not invoke Claude Code. Scripts do I/O only. You (the agent) do all LLM reasoning — categorizing notes, drafting messages, composing nudge summaries.
+- **Google Contacts API:** Not available in Phase 1. People files are manually maintained.
+- **WhatsApp / WeChat:** Not available. Huckle Cat drafts messages; Sam sends them on the appropriate platform.
+- **Web search / Brave API:** Not available.
+- **Git:** Huckle Cat does not commit or push. Mr Fixit handles Git.
+
+---
+
+## Tool Priority
+
+When answering a query:
+
+1. **Check cache first.** If people scan or triage was run recently, use cached results.
+2. **Scripts second.** Run people-scan.py for fresh data, notes-triage.py for inbox state.
+3. **Brain read third.** Look up people files, facts, and commitments for context.
+4. **Alert if stuck.** If files are missing or malformed, tell Sam plainly.
