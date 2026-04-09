@@ -118,7 +118,35 @@ def parse_ics_basic(ics_text):
                 result["organizer"] = match.group(1)
         elif line.startswith("STATUS:"):
             result["status"] = line[7:]
+        elif line.startswith("METHOD:"):
+            result["method"] = line[7:]
     return result
+
+
+# Noise filters — Gmail queries also return daily digests and acceptance
+# notifications that aren't new invites. Skip anything matching these.
+NOISE_SUBJECT_PREFIXES = (
+    "daily agenda",
+    "agenda for",
+    "your daily agenda",
+    "accepted:",
+    "declined:",
+    "tentative:",
+    "updated invitation:",  # these are reschedules — could surface but noisy
+    "canceled event:",
+    "cancelled event:",
+)
+
+
+def is_noise(subject):
+    """Return True if this subject is not an actionable new invite."""
+    if not subject:
+        return True
+    subj_lower = subject.lower().strip()
+    for prefix in NOISE_SUBJECT_PREFIXES:
+        if subj_lower.startswith(prefix):
+            return True
+    return False
 
 
 def main():
@@ -141,62 +169,76 @@ def main():
     seen = load_seen()
     invites = []
 
-    # Search for calendar invite emails
-    queries = [
-        "has:attachment filename:ics newer_than:1d",
-        "from:calendar-notification@google.com newer_than:1d",
-    ]
+    # Narrower query: only ICS attachments, not the full calendar-notification
+    # stream (which includes daily agendas and acceptance notifications).
+    # ICS attachments come with invitations AND responses — we filter the
+    # responses out via METHOD and subject prefix.
+    query = "has:attachment filename:ics newer_than:1d"
 
-    for query in queries:
-        try:
-            results = service.users().messages().list(
-                userId="me", q=query, maxResults=20
+    try:
+        results = service.users().messages().list(
+            userId="me", q=query, maxResults=20
+        ).execute()
+
+        for msg_stub in results.get("messages", []):
+            msg_id = msg_stub["id"]
+            if msg_id in seen:
+                continue
+
+            msg = service.users().messages().get(
+                userId="me", id=msg_id, format="full"
             ).execute()
 
-            for msg_stub in results.get("messages", []):
-                msg_id = msg_stub["id"]
-                if msg_id in seen:
-                    continue
+            headers = {h["name"].lower(): h["value"] for h in msg.get("payload", {}).get("headers", [])}
+            subject = headers.get("subject", "")
+            from_addr = headers.get("from", "")
+            date_str = headers.get("date", "")
 
-                msg = service.users().messages().get(
-                    userId="me", id=msg_id, format="full"
-                ).execute()
-
-                headers = {h["name"].lower(): h["value"] for h in msg.get("payload", {}).get("headers", [])}
-                subject = headers.get("subject", "")
-                from_addr = headers.get("from", "")
-                date_str = headers.get("date", "")
-
-                # Check for ICS attachments
-                ics_data = None
-                parts = msg.get("payload", {}).get("parts", [])
-                for part in parts:
-                    filename = part.get("filename", "")
-                    if filename.endswith(".ics"):
-                        att_id = part.get("body", {}).get("attachmentId")
-                        if att_id:
-                            att = service.users().messages().attachments().get(
-                                userId="me", messageId=msg_id, id=att_id
-                            ).execute()
-                            ics_bytes = base64.urlsafe_b64decode(att["data"])
-                            ics_data = ics_bytes.decode("utf-8", errors="replace")
-
-                invite = {
-                    "subject": subject,
-                    "from": from_addr,
-                    "message_id": msg_id,
-                    "received_at": date_str,
-                }
-
-                if ics_data:
-                    parsed = parse_ics_basic(ics_data)
-                    invite.update(parsed)
-
-                invites.append(invite)
+            # Filter 1: skip noise subjects (daily agendas, accepted, declined, etc.)
+            if is_noise(subject):
                 seen.add(msg_id)
+                continue
 
-        except Exception as e:
-            print(f"Query '{query}' failed: {e}", file=sys.stderr)
+            # Check for ICS attachments
+            ics_data = None
+            parts = msg.get("payload", {}).get("parts", [])
+            for part in parts:
+                filename = part.get("filename", "")
+                if filename.endswith(".ics"):
+                    att_id = part.get("body", {}).get("attachmentId")
+                    if att_id:
+                        att = service.users().messages().attachments().get(
+                            userId="me", messageId=msg_id, id=att_id
+                        ).execute()
+                        ics_bytes = base64.urlsafe_b64decode(att["data"])
+                        ics_data = ics_bytes.decode("utf-8", errors="replace")
+
+            # Filter 2: only surface METHOD:REQUEST (new invites) —
+            # skip REPLY (acceptance), CANCEL, COUNTER, REFRESH
+            if ics_data:
+                parsed = parse_ics_basic(ics_data)
+                method = parsed.get("method", "").upper()
+                if method and method != "REQUEST":
+                    seen.add(msg_id)
+                    continue
+            else:
+                # No ICS attachment at all — probably not a real invite
+                seen.add(msg_id)
+                continue
+
+            invite = {
+                "subject": subject,
+                "from": from_addr,
+                "message_id": msg_id,
+                "received_at": date_str,
+            }
+            invite.update(parsed)
+
+            invites.append(invite)
+            seen.add(msg_id)
+
+    except Exception as e:
+        print(f"Query '{query}' failed: {e}", file=sys.stderr)
 
     save_seen(seen)
     print(json.dumps(invites, indent=2))
