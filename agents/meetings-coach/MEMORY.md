@@ -25,6 +25,6 @@ Skip titles matching: "Focus Time", "Lunch", "Block" (configurable in meeting-co
 
 - Git: commit to `agents/meetings-coach/` only, never push. Mr Fixit handles Git.
 - Calendar is read-only. Mistress Mouse handles writes.
-- LLM calls: use gpt-5.4-nano via OpenAI, never Claude CLI.
+- LLM calls: you (the agent) do all reasoning directly. Scripts do I/O only — no external LLM API calls.
 - Brain writes require Sam's `/confirm` before executing.
 - All commitment IDs use format: `meetings-coach-YYYY-MM-DD-NNN`.

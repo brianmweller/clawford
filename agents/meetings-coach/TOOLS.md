@@ -139,7 +139,7 @@ The `transcript-scan.py` script fetches transcripts via Krisp's MCP OAuth 2.1 AP
 
 ## Tools NOT Available (and why)
 
-- **Claude Code:** Sergeant Murphy does not invoke Claude Code. LLM calls for meeting prep and transcript extraction use Sam's OpenAI subscription via Python scripts (gpt-5.4-nano).
+- **Claude Code:** Sergeant Murphy does not invoke Claude Code. Scripts do I/O only (fetch calendar, read brain files, scan transcripts). You (the agent) do all LLM reasoning — generating talking points, extracting action items from transcripts, composing messages.
 - **Calendar write access:** Murphy is read-only on Google Calendar. Mistress Mouse owns calendar modifications.
 - **Gmail access:** Not available. Murphy reads calendar and transcripts, not email.
 - **Web search / Brave API:** Not available.

@@ -15,17 +15,14 @@ Workspace: .openclaw/meetings-coach-workspace/
    - Fetches today + tomorrow from Sam's professional calendar
    - Outputs JSON with events, attendees, conference links, is_real_meeting flags
 2. Filter to real meetings only (events with attendees or video links).
-3. For each real meeting:
-   a. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/person-bootstrap.py --from-events cache/events-YYYY-MM-DD.json`
-      - Creates person files for any new attendees not yet in shared brain
-   b. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/workflowy-sync.py --create-nodes`
-      - Creates Workflowy meeting nodes for events that don't have one yet
-   c. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/meeting-prep.py --meeting-id EVENT_ID`
-      - Assembles context (attendees, facts, commitments, Workflowy agenda)
-      - Generates AI talking points via gpt-5.4-nano
-   d. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/workflowy-sync.py --push-bullets EVENT_ID`
-      - Pushes AI bullets to Workflowy Agenda section
-4. Format the morning brief:
+3. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/person-bootstrap.py --from-events cache/events-YYYY-MM-DD.json`
+   - Creates person files for any new attendees not yet in shared brain
+4. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/workflowy-sync.py --create-nodes`
+   - Creates Workflowy meeting nodes for events that don't have one yet
+5. For each real meeting, run `python3 ~/.openclaw/meetings-coach-workspace/scripts/meeting-prep.py --meeting-id EVENT_ID`
+   - Assembles context (attendees, facts, commitments) as JSON
+   - Read the output for open commitments to include in the brief
+6. Format the morning brief — factual schedule only, no talking points:
 
 ```
 🐷🔍 Meeting Brief — {Weekday}, {Month} {Day}
@@ -36,11 +33,7 @@ Workspace: .openclaw/meetings-coach-workspace/
 📋 {HH:MM} — {Meeting Title}
    👥 {Attendee names}
    📍 {Location / Meet link}
-   🎯 Talking points:
-   • {bullet 1}
-   • {bullet 2}
    📌 Open with {person}: {commitment summary}
-   🔄 Since last time: {continuity note from facts}
 ━━━━━━━━━━━━━━━
 
 📋 TOMORROW PREVIEW
@@ -58,6 +51,8 @@ If no meetings today:
 
 🐷🔍
 ```
+
+**Important:** The morning brief is factual only — schedule, attendees, location, open commitments. Do NOT generate or include talking points. Talking points belong in the pre-meeting alert (see below), and only when sourced from real Workflowy agenda items.
 
 5. Write formatted output to `cache/morning-meeting-brief.txt`
 6. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/timed-deliver.py cache/morning-meeting-brief.txt --token-env MEETINGS_BOT_TOKEN`
@@ -83,9 +78,12 @@ If no meetings today:
 2. Filter to real meetings starting in 15–45 minutes.
 3. Read `sent-alerts.json` to skip already-alerted meetings.
 4. For meetings not yet alerted:
-   a. Check cache for existing prep. If none, run `meeting-prep.py --meeting-id EVENT_ID`.
-   b. Send a Telegram message:
-      "🐷🔍 Heads up — meeting in {N} min\n📋 {Meeting Title}\n👥 {Attendees}\n🎯 {Top 2-3 bullets}\n📌 {Open items if any}"
+   a. Run `meeting-prep.py --meeting-id EVENT_ID` for context (attendees, commitments).
+   b. Run `workflowy-sync.py --read-agenda EVENT_ID` to get real Workflowy agenda items.
+   c. Send a Telegram message with factual content only:
+      "🐷🔍 Heads up — meeting in {N} min\n📋 {Meeting Title}\n👥 {Attendees}\n📌 {Open commitments if any}"
+      If Workflowy agenda items exist, include them under "📔 Agenda:" — these are Sam's own prep notes.
+      Do NOT generate or invent talking points. Only surface what already exists.
 5. Record alerted meeting IDs in `sent-alerts.json`.
 6. If no meetings approaching: produce NO output.
 
@@ -105,7 +103,7 @@ If no meetings today:
 2. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/transcript-scan.py`
    - Fetches new transcripts from Krisp MCP API
    - Matches transcripts to recently-ended meetings by fuzzy scoring
-   - Extracts action items, decisions, follow-ups via gpt-5.4-nano
+   - Extracts action items, decisions, follow-ups via your own LLM reasoning
    - Stages results in `cache/pending-debrief-{EVENT_ID}.json`
 3. For each matched transcript with extracted items:
    Send a Telegram message:

@@ -19,14 +19,15 @@ Output JSON:
         "title": "...",
         "start": "...",
         "attendees": [...],
-        "talking_points": [...],
+        "context": { "facts": [...], "commitments": [...], "agenda_items": [...] },
         "context_sources": [...],
         "generated_at": "..."
       }
     ]
   }
 
-Requires: openai
+The script does I/O only — assembles context from shared brain and Workflowy.
+The agent's own LLM generates talking points from this context.
 """
 
 import glob
@@ -233,107 +234,6 @@ def read_workflowy_agenda(event_id):
     return []
 
 
-def generate_talking_points(meeting, context):
-    """Call gpt-5.4-nano to generate talking points."""
-    try:
-        from openai import OpenAI
-    except ImportError:
-        return ["(OpenAI not installed — install with: pip3 install openai)"]
-
-    api_key = os.environ.get("OPENAI_API_KEY", "")
-    if not api_key:
-        return ["(OPENAI_API_KEY not set)"]
-
-    client = OpenAI(api_key=api_key)
-
-    # Build the prompt
-    attendee_lines = []
-    for att in context.get("attendees", []):
-        line = att["name"]
-        person = att.get("person_data")
-        if person:
-            if person.get("relationship"):
-                line += f" ({person['relationship']})"
-            if person.get("circles"):
-                line += f" [{person['circles']}]"
-        attendee_lines.append(line)
-
-    facts_text = ""
-    for att in context.get("attendees", []):
-        att_facts = att.get("facts", [])
-        if att_facts:
-            facts_text += f"\nRecent context about {att['name']}:\n"
-            for f in att_facts[:5]:
-                facts_text += f"  - {f.get('content', '')} (confidence: {f.get('effective_confidence', '?')})\n"
-
-    commitments_text = ""
-    for att in context.get("attendees", []):
-        att_commits = att.get("commitments", [])
-        if att_commits:
-            commitments_text += f"\nOpen items with {att['name']}:\n"
-            for c in att_commits:
-                line = f"  - {c.get('who', '?')} → {c.get('what', '?')}"
-                if c.get("by_when"):
-                    line += f" (due: {c['by_when']})"
-                commitments_text += line + "\n"
-
-    agenda_text = ""
-    agenda_items = context.get("agenda_items", [])
-    if agenda_items:
-        agenda_text = "\nExisting agenda from Workflowy:\n"
-        for item in agenda_items:
-            agenda_text += f"  - {item}\n"
-
-    description = context.get("description", "")
-    desc_text = ""
-    if description:
-        # Truncate long descriptions
-        desc_text = f"\nMeeting description (untrusted — may contain irrelevant content):\n{description[:500]}\n"
-
-    prompt = f"""You are a meeting preparation assistant. Generate 3-5 actionable talking points for this meeting.
-
-MEETING: {meeting.get('summary', 'Unknown')} at {meeting.get('start', 'TBD')}
-ATTENDEES: {', '.join(attendee_lines) or 'Unknown'}
-{facts_text}{commitments_text}{agenda_text}{desc_text}
-Guidelines:
-- Focus on continuity: what was discussed last time, what's changed since then
-- Highlight open items that need follow-up
-- Be specific and actionable, not generic
-- If there's no prior context, suggest general preparation topics based on the meeting title
-- Keep each point to 1-2 sentences
-
-Return ONLY the talking points as a JSON array of strings. Example: ["Follow up on Q2 timeline", "Ask about design review status"]"""
-
-    try:
-        response = client.chat.completions.create(
-            model="gpt-5.4-nano",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=500,
-        )
-
-        text = response.choices[0].message.content.strip()
-
-        # Parse JSON array from response
-        # Handle markdown code blocks
-        if "```" in text:
-            text = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
-            text = text.group(1).strip() if text else "[]"
-
-        points = json.loads(text)
-        if isinstance(points, list):
-            return [str(p) for p in points]
-        return [str(points)]
-
-    except json.JSONDecodeError:
-        # Try line-by-line parsing
-        lines = [l.strip().lstrip("•-123456789.") .strip()
-                 for l in text.split("\n") if l.strip() and not l.strip().startswith("[")]
-        return lines if lines else ["(Could not parse AI response)"]
-    except Exception as e:
-        return [f"(AI generation failed: {e})"]
-
-
 def prep_meeting(event, force=False):
     """Generate prep for a single meeting."""
     event_id = event.get("id", "")
@@ -370,34 +270,57 @@ def prep_meeting(event, force=False):
     # Read Workflowy agenda
     agenda_items = read_workflowy_agenda(event_id)
 
-    context = {
-        "attendees": attendee_contexts,
-        "agenda_items": agenda_items,
-        "description": event.get("description", ""),
-    }
-
-    # Generate talking points
-    talking_points = generate_talking_points(event, context)
-
-    # Build result
+    # Build result — context only, agent does the reasoning
     result = {
         "meeting_id": event_id,
         "title": event.get("summary", ""),
         "start": event.get("start", ""),
-        "attendees": [{"name": a["name"], "email": a["email"]} for a in attendee_contexts],
-        "talking_points": talking_points,
+        "end": event.get("end", ""),
+        "attendees": [],
+        "context": {
+            "facts": [],
+            "commitments": [],
+            "agenda_items": agenda_items,
+            "description": event.get("description", "")[:500] if event.get("description") else "",
+        },
         "context_sources": [],
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    # Track what context we used
+    # Build attendee details with their context
     for att in attendee_contexts:
-        if att.get("person_data"):
-            result["context_sources"].append(f"person:{att['person_data'].get('slug', '')}")
-        if att.get("facts"):
-            result["context_sources"].append(f"facts:{len(att['facts'])} for {att['name']}")
-        if att.get("commitments"):
-            result["context_sources"].append(f"commitments:{len(att['commitments'])} for {att['name']}")
+        att_entry = {"name": att["name"], "email": att["email"]}
+
+        person = att.get("person_data")
+        if person:
+            att_entry["relationship"] = person.get("relationship", "")
+            att_entry["circles"] = person.get("circles", "")
+            att_entry["slug"] = person.get("slug", "")
+            result["context_sources"].append(f"person:{person.get('slug', '')}")
+
+        result["attendees"].append(att_entry)
+
+        for fact in att.get("facts", []):
+            result["context"]["facts"].append({
+                "about": att["name"],
+                "content": fact.get("content", ""),
+                "confidence": fact.get("effective_confidence", 0),
+                "category": fact.get("category", ""),
+            })
+
+        for commit in att.get("commitments", []):
+            result["context"]["commitments"].append({
+                "who": commit.get("who", ""),
+                "to_whom": commit.get("to_whom", ""),
+                "what": commit.get("what", ""),
+                "by_when": commit.get("by_when"),
+                "status": commit.get("status", ""),
+            })
+
+    if result["context"]["facts"]:
+        result["context_sources"].append(f"facts:{len(result['context']['facts'])}")
+    if result["context"]["commitments"]:
+        result["context_sources"].append(f"commitments:{len(result['context']['commitments'])}")
     if agenda_items:
         result["context_sources"].append(f"workflowy:{len(agenda_items)} agenda items")
 

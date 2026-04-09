@@ -49,7 +49,24 @@ MONTH_NAMES = {
 
 
 def get_api_key():
+    """Get Workflowy API key from env or .env file."""
     key = os.environ.get("WORKFLOWY_API_KEY", "")
+    if not key:
+        # Fallback: read from .env files (host and Docker paths)
+        for env_file in [
+            os.path.expanduser("~/openclaw/.env"),
+            "/home/openclaw/openclaw/.env",
+            os.path.expanduser("~/.env"),
+            "/tmp/.env",
+        ]:
+            if os.path.exists(env_file):
+                with open(env_file) as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("WORKFLOWY_API_KEY=") and not line.startswith("#"):
+                            key = line.split("=", 1)[1].strip().strip("'\"")
+                            if key:
+                                return key
     if not key:
         print(json.dumps({"status": "error", "message": "WORKFLOWY_API_KEY not set"}))
         sys.exit(1)

@@ -78,9 +78,15 @@ else
     failures=$((failures + 1))
 fi
 
-# Verify cache file written
-CACHE_FILE="$HOME/.openclaw/meetings-coach-workspace/cache/events-$(date -u +%Y-%m-%d).json"
-if [ -f "$CACHE_FILE" ]; then
+# Verify cache file written (check today and yesterday in case of timezone offset)
+CACHE_FOUND=0
+for d in $(date +%Y-%m-%d) $(date -u +%Y-%m-%d) $(date -d yesterday +%Y-%m-%d 2>/dev/null || date -v-1d +%Y-%m-%d 2>/dev/null); do
+    if [ -f "$HOME/.openclaw/meetings-coach-workspace/cache/events-${d}.json" ]; then
+        CACHE_FOUND=1
+        break
+    fi
+done
+if [ "$CACHE_FOUND" = "1" ]; then
     echo "  PASS: cache file written"
 else
     echo "  FAIL: cache file not created"
@@ -473,9 +479,108 @@ T9
 
 # ═══════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════
+# T10 — Krisp transcript scanning
+# ═══════════════════════════════════════════════════════════════
+
+cat > "$BASE/tests/meetings-coach/T10-krisp-scan.sh" << 'T10'
+# Does transcript-scan.py connect to Krisp MCP and return valid JSON?
+test_start "T10" "Krisp MCP — Transcript Scan"
+
+TELEGRAM_ACCOUNT="murphy"
+
+echo "  Running transcript-scan.py --days-back 30 (inside Docker)..."
+OUTPUT=$(docker compose -f ~/openclaw/docker-compose.yml exec -T openclaw-gateway python3 /home/node/.openclaw/meetings-coach-workspace/scripts/transcript-scan.py --days-back 30 2>/dev/null || echo '{"status":"error"}')
+
+if ! echo "$OUTPUT" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
+    echo "  FAIL: output is not valid JSON"
+    test_fail "invalid JSON"
+    return 1
+fi
+
+failures=0
+
+STATUS=$(echo "$OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))")
+if [ "$STATUS" = "ok" ]; then
+    echo "  PASS: status is ok"
+else
+    echo "  FAIL: status is '$STATUS'"
+    failures=$((failures + 1))
+fi
+
+MCP_ERR=$(echo "$OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('mcp_error') or 'none')")
+if [ "$MCP_ERR" = "none" ]; then
+    echo "  PASS: no MCP errors"
+else
+    echo "  FAIL: MCP error: $MCP_ERR"
+    failures=$((failures + 1))
+fi
+
+PROCESSED=$(echo "$OUTPUT" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('processed',[])))")
+UNMATCHED=$(echo "$OUTPUT" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('unmatched',[])))")
+echo "  INFO: $PROCESSED processed, $UNMATCHED unmatched"
+
+if [ "$failures" -eq 0 ]; then
+    test_pass
+    return 0
+else
+    test_fail "$failures verification(s) failed"
+    return 1
+fi
+T10
+
+# ═══════════════════════════════════════════════════════════════
+# T11 — List pending debriefs
+# ═══════════════════════════════════════════════════════════════
+
+cat > "$BASE/tests/meetings-coach/T11-list-debriefs.sh" << 'T11'
+# Does list-pending-debriefs.py return valid JSON?
+test_start "T11" "List Pending Debriefs — Valid JSON"
+
+TELEGRAM_ACCOUNT="murphy"
+
+echo "  Running list-pending-debriefs.py..."
+OUTPUT=$(python3 "$HOME/.openclaw/meetings-coach-workspace/scripts/list-pending-debriefs.py" 2>/dev/null || echo '{"status":"error"}')
+
+if ! echo "$OUTPUT" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
+    echo "  FAIL: output is not valid JSON"
+    test_fail "invalid JSON"
+    return 1
+fi
+
+failures=0
+
+STRUCTURE=$(echo "$OUTPUT" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+required = ['status', 'count', 'debriefs']
+missing = [k for k in required if k not in d]
+print('ok' if not missing else 'missing:' + ','.join(missing))
+")
+if [ "$STRUCTURE" = "ok" ]; then
+    echo "  PASS: has status, count, debriefs fields"
+else
+    echo "  FAIL: $STRUCTURE"
+    failures=$((failures + 1))
+fi
+
+COUNT=$(echo "$OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('count',0))")
+echo "  INFO: $COUNT pending debriefs"
+
+if [ "$failures" -eq 0 ]; then
+    test_pass
+    return 0
+else
+    test_fail "$failures verification(s) failed"
+    return 1
+fi
+T11
+
+# ═══════════════════════════════════════════════════════════════
+
 echo ""
 echo "============================================"
-echo "  Meetings Coach tests installed (9 tests)"
+echo "  Meetings Coach tests installed (11 tests)"
 echo ""
 echo "  Usage:"
 echo "    bash ~/openclaw-tests/test-agent.sh meetings-coach --calibrate"
