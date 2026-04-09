@@ -12,12 +12,12 @@ You've deployed one agent. The rest follow the same pattern.
 | 2 | 🐛 **Lowly Worm** | news-digest | Simplest — reads web, delivers summary. No bidirectional APIs. |
 | 3 | 🦛 **Hilda Hippo** | shopping | Amazon/Costco order tracking, grocery list. |
 | 4 | 🐭 **Mistress Mouse** | family-calendar | Google Calendar, family logistics. Deployed 2026-04-08. |
-| 5 | 🐷 **Sergeant Murphy** | meetings-coach | Needs Krisp transcripts, Workflowy, calendar. |
+| 5 | 🐷 **Sergeant Murphy** | meetings-coach | Meeting prep, coaching, Krisp, Workflowy. Deployed 2026-04-08. |
 | 6 | 🐱 **Huckle Cat** | connector | Most ambitious — relationship management, heaviest Flux dependency. |
 
 Start with Lowly Worm after Fix-It — simplest agent with no bidirectional APIs. The Telegram ↔ Claude Code relay is now handled locally (see `telegram-relay/`), not as a VPS agent.
 
-**Actual deploy order (as of 2026-04-08):** Mr Fixit → Lowly Worm → Hilda Hippo → Mistress Mouse.
+**Actual deploy order (as of 2026-04-08):** Mr Fixit → Lowly Worm → Hilda Hippo → Mistress Mouse → Sergeant Murphy.
 
 ## The reusable deployment pattern
 
@@ -143,6 +143,22 @@ This pattern is used by all agents with timed delivery:
 16. **WeChat ClawBot rollout is gradual.** Can't force it. Human bridge (compose Chinese on Telegram, user forwards to WeChat) works for low-volume family updates. Install the `openclaw-weixin` plugin so it's ready when Tencent flips the switch.
 
 17. **Phase incrementally.** Each phase should be independently deployable and useful. Phase 1 alone (morning briefing) delivered value on day one. Later phases layered on without breaking earlier ones.
+
+## Lessons from Sergeant Murphy (meetings-coach agent)
+
+18. **Scripts do I/O, agent does reasoning — including coaching.** The coaching feature works because the agent's own LLM reads transcript text and generates feedback. `transcript-metrics.py` computes deterministic data (talk ratio, filler count), but the qualitative analysis ("you rambled here, try this instead") is the agent's job. Never call OpenAI from scripts.
+
+19. **Krisp MCP requires the `mcp` Python SDK.** Raw HTTP won't work — MCP has its own protocol handshake. Bake the `mcp` package into the Dockerfile. The Krisp MCP tool is `get_multiple_documents` (not `get_document`), and `search_meetings` returns separate content blocks per meeting, not a JSON array.
+
+20. **Krisp OAuth tokens are reusable.** Run the Flux CLI `krisp auth` flow once locally, then copy `data/krisp_tokens/{tokens.json,client_info.json}` to the agent's workspace on VPS. Tokens auto-refresh.
+
+21. **Speaker-attributed transcripts enable coaching.** Krisp format is `**Speaker Name | HH:MM**\ntext`. This lets you parse Sam's turns separately, compute per-speaker metrics, and cite specific moments with timestamps in coaching feedback.
+
+22. **Env vars in Docker need explicit `environment:` entries.** `env_file: .env` passes vars through, but only after a `docker compose up -d --force-recreate` (not just `restart`). For new vars, add them to `.env`, add to `docker-compose.yml` `environment:` block with `${VAR:-}` syntax, then recreate.
+
+23. **Growth areas are config, not code.** Store coaching growth areas in `meeting-config.json` as an array of `{id, label, description}` objects. Sam can add/remove areas via Telegram (`/coaching add`, `/coaching remove`) without touching code.
+
+24. **Separate coaching from debriefs.** The debrief has an action loop (`/confirm`/`/dismiss`). Coaching is reflective. Mixing them clutters the confirm flow. Send coaching as a separate Telegram message after the debrief.
 
 ## Git workflow
 

@@ -8,9 +8,9 @@ A six-agent personal AI system themed after Richard Scarry's Busytown. Each agen
 |-----------|-------|--------|-----|------|
 | 🦊🔧 **Mr Fixit** | fix-it | Deployed | @openclaw_fixit_bot | Infrastructure, monitoring, repair, archival |
 | 🐛📰 **Lowly Worm** | news-digest | Deployed | @openclaw_lowly_worm_bot | Media curation and delivery |
-| 🐭📅 **Mistress Mouse** | family-calendar | Not deployed | — | Logistics, scheduling, family comms |
-| 🐷🔍 **Sergeant Murphy** | meetings-coach | Not deployed | — | Meeting prep, debrief, follow-ups |
-| 🦛🛒 **Hilda Hippo** | shopping | Not deployed | — | Multi-channel purchasing |
+| 🦛🛒 **Hilda Hippo** | shopping | Deployed | @openclaw_shopping_bot | Multi-channel purchasing |
+| 🐭📅 **Mistress Mouse** | family-calendar | Deployed | @openclaw_mistress_mouse_bot | Family logistics, scheduling, comms |
+| 🐷🔍 **Sergeant Murphy** | meetings-coach | Deployed | @openclaw_sergeant_murphy_bot | Meeting prep, coaching, debrief, commitments |
 | 🐱🤝 **Huckle Cat** | connector | Not deployed | — | Relationship management, social nudges |
 
 *And if anything breaks catastrophically: **Mr Frumble** is waiting in the wings.*
@@ -45,7 +45,10 @@ clawford/
 ├── VERSION                # Current version
 ├── agents/                # Per-agent packages
 │   ├── fix-it/            # 🦊 Mr Fixit (deployed)
-│   └── news-digest/       # 🐛 Lowly Worm (deployed)
+│   ├── news-digest/       # 🐛 Lowly Worm (deployed)
+│   ├── shopping/          # 🦛 Hilda Hippo (deployed)
+│   ├── family-calendar/   # 🐭 Mistress Mouse (deployed)
+│   └── meetings-coach/    # 🐷 Sergeant Murphy (deployed)
 ├── telegram-relay/        # Local Telegram ↔ Claude Code bot
 ├── brain/                 # Shared brain setup
 │   └── setup-brain.sh
