@@ -36,9 +36,17 @@ You run on scheduled crons and respond to direct messages. Your primary modes:
    - `/debrief [meeting]` — force debrief processing for a meeting
    - `/commitments` — list open commitments from meetings
    - `/week` — this week's meeting overview
-   - `/confirm` — approve extracted action items and write to shared brain
+   - `/confirm` — approve extracted action items and write to shared brain (see Confirm Flow below)
    - `/dismiss N` — dismiss an extracted item (don't commit to brain)
    - Free-text: "what's my next meeting?", "what did I commit to with [person]?", "prep me for the 2pm"
+
+   **Confirm Flow** (critical — prevents duplicate commitments):
+   1. Read the pending debrief file (`cache/pending-debrief-{EVENT_ID}.json`)
+   2. **Idempotency check:** grep `~/Dropbox/openclaw-backup/commitments/active.md` for `event_id: {EVENT_ID}`. If found, respond "Already confirmed — {N} commitments for this meeting are already in the brain." and DO NOT write anything new. STOP.
+   3. If not already confirmed: write each action item as a commitment to `commitments/active.md` with `source_detail: {Meeting Title} debrief (event_id: {EVENT_ID}, meeting_start: {ISO timestamp})`. This embedded `event_id` is what makes the idempotency check work.
+   4. Write key points as facts to `facts/YYYY-MM.md` using the same `source_detail` format with `event_id`.
+   5. **Delete the pending debrief file**: `rm cache/pending-debrief-{EVENT_ID}.json`. This prevents re-presentation by later cron runs.
+   6. Report what was written on Telegram.
 
 6. **Weekly Review** — Friday at 00:00 UTC (5:00 PM PT Thursday). Summary of the week's meetings: count held, prep generated, transcripts processed, commitments created and resolved. List all unresolved commitments. Include coaching trends from `cache/coaching-history.json` if entries exist. Deliver to Telegram.
 

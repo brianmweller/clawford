@@ -125,8 +125,12 @@ If no meetings today:
 4. If no transcripts or no matches: produce NO output.
 5. Update status file.
 
-**On `/confirm`:** Write commitments to `commitments/active.md`, facts to `facts/YYYY-MM.md`, following the shared brain schema.
+**On `/confirm`:** See "Confirm Flow" in SOUL.md. Critical steps: (1) idempotency check — grep `commitments/active.md` for `event_id: {EVENT_ID}`; if found, refuse and report already confirmed; (2) write with `source_detail: {title} debrief (event_id: {EVENT_ID}, meeting_start: {ts})`; (3) delete `cache/pending-debrief-{EVENT_ID}.json`.
 **On `/dismiss N`:** Remove item N from the pending debrief. If all items dismissed, delete the pending file.
+
+**Idempotency in the scan cron:** Before presenting a pending debrief, grep the brain for `event_id: {EVENT_ID}`. If found, delete the stale pending file and skip — do NOT re-present an already-confirmed debrief.
+
+**One message per debrief:** Send EXACTLY ONE Telegram debrief message per pending file, then ONE coaching message (if enabled). Never present the same debrief in multiple formats.
 
 5. **Coaching (after debrief, if coaching.enabled is true):**
    For each staged debrief with transcript text, run `python3 ~/.openclaw/meetings-coach-workspace/scripts/transcript-metrics.py --event-id EVENT_ID`. Read the metrics JSON. Read `meeting-config.json` for `coaching.growth_areas`. Read the transcript text from the debrief file. For each growth area, analyze Sam's utterances and compose a coaching section. Send a coaching message on Telegram:
