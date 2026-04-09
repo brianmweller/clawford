@@ -90,10 +90,29 @@ The script handles (all via Docker exec):
 - Copying SOUL.md, IDENTITY.md, TOOLS.md to the workspace
 - Initializing the status file in the shared brain
 - Configuring per-agent Telegram bot + binding
-- Setting exec approvals (allowlist for `/usr/bin/*`, `/bin/*`, `/usr/local/bin/*`)
+- Setting exec approvals:
+  - Allowlist: `/usr/bin/*`, `/bin/*`, `/usr/local/bin/*`
+  - Allowlist: `python3 ~/.openclaw/{agent}-workspace/scripts/*` (critical for crons)
+  - Allowlist: `python3 -` (for inline Python)
+  - **Policy: `allowlist`** — without this, crons can't run scripts (they can't wait for interactive approval)
 - Registering all cron jobs with `--to <chatId> --account <agent-id> --announce`
 - Security hardening (`chattr +i` on SOUL.md and IDENTITY.md)
 - Verification output
+
+**Important:** After running deploy.sh, verify the agent's exec policy is set:
+
+```bash
+# Check policy
+cat ~/.openclaw/exec-approvals.json | python3 -c "
+import sys, json; d=json.load(sys.stdin)
+print(d['agents']['AGENT_NAME']['policy'])"
+
+# If policy is missing, set it (replaces the full file — export first):
+cat ~/.openclaw/exec-approvals.json | python3 -c "
+import sys, json; d=json.load(sys.stdin)
+d['agents']['AGENT_NAME']['policy']='allowlist'
+json.dump(d, sys.stdout, indent=2)" | oc approvals set --stdin
+```
 
 ---
 
@@ -220,3 +239,5 @@ All commands prefixed with `oc` (the Docker exec wrapper):
 - Python3 must be in the Docker image for `validate.py` to work
 - The brain directory must be mounted as a Docker volume
 - After rebuilding the container, re-check `oc health` and `oc agents list`
+- **Exec approvals need both allowlist AND policy.** Adding patterns with `oc approvals allowlist add` is not enough. Each agent needs `"policy": "allowlist"` in exec-approvals.json. Without it, crons fail with "exec denied: Cron runs cannot wait for interactive exec approval."
+- **Always add `python3 scripts/*` to the allowlist.** System path wildcards (`/usr/bin/*`) match the `python3` binary but not the full `python3 path/to/script.py` command string.
