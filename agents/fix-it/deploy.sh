@@ -133,7 +133,10 @@ echo "Step 5: Registering 9 crons..."
 HEARTBEAT_PROMPT='Heartbeat check. Do these steps in order.
 
 STEP 1 — Check agent health.
-For each file matching ~/Dropbox/openclaw-backup/agents/*.status.md, parse the last_heartbeat field. Cross-reference with `openclaw agents list` (run via exec). For each agent that is BOTH locally registered AND has a brain status file, check if last_heartbeat is older than 90 minutes from now. Ignore the `main` internal (no status file expected). Ignore placeholder status files for agents not in `openclaw agents list`.
+For each file matching ~/Dropbox/openclaw-backup/agents/*.status.md, parse the last_heartbeat field. Accept BOTH of these timestamp formats as valid (normalize each to UTC before comparing):
+  - `2026-04-09 21:31 UTC` (space-separated, informal — used by fix-it, shopping, meetings-coach, news-digest)
+  - `2026-04-09T22:02:00Z` (ISO-8601 with Z suffix — used by family-calendar)
+A value in either format is a VALID timestamp. Do not flag ISO-8601 Z values as "invalid timestamp" — they are correct. Cross-reference with `openclaw agents list` (run via exec). For each agent that is BOTH locally registered AND has a brain status file, check if last_heartbeat is older than 90 minutes from now. Ignore the `main` internal (no status file expected). Ignore placeholder status files for agents not in `openclaw agents list`.
 
 STEP 2 — Decide overall status.
 - If all registered+filed agents have fresh heartbeats: status = healthy.
