@@ -28,7 +28,9 @@ import urllib.error
 WORKSPACE = os.path.expanduser("~/.openclaw/meetings-coach-workspace")
 CACHE_DIR = os.path.join(WORKSPACE, "cache")
 LINKS_FILE = os.path.join(CACHE_DIR, "workflowy-links.json")
+CONTACTS_CACHE_FILE = os.path.join(CACHE_DIR, "contact-names.json")
 CONFIG_PATH = os.path.join(WORKSPACE, "meeting-config.json")
+GOOGLE_TOKEN_PATH = os.path.join(WORKSPACE, "token.json")
 
 BASE_URL = "https://workflowy.com/api/v1"
 
@@ -52,8 +54,10 @@ def get_api_key():
     """Get Workflowy API key from env or .env file."""
     key = os.environ.get("WORKFLOWY_API_KEY", "")
     if not key:
-        # Fallback: read from .env files (host and Docker paths)
+        # Fallback: read from .env files. Workspace .env is the primary
+        # source inside Docker (where the host ~/openclaw/.env isn't mounted).
         for env_file in [
+            os.path.join(WORKSPACE, ".env"),
             os.path.expanduser("~/openclaw/.env"),
             "/home/openclaw/openclaw/.env",
             os.path.expanduser("~/.env"),
@@ -260,19 +264,291 @@ def find_or_create_date_path(meeting_date, nodes, api_key=None):
     return date_id
 
 
-def create_meeting_node(meeting_date, title, hashtags=None, api_key=None):
+def _load_contact_cache():
+    if os.path.exists(CONTACTS_CACHE_FILE):
+        try:
+            with open(CONTACTS_CACHE_FILE) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _save_contact_cache(cache):
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    with open(CONTACTS_CACHE_FILE, "w") as f:
+        json.dump(cache, f, indent=2)
+
+
+def _load_config():
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH) as f:
+            return json.load(f)
+    return {}
+
+
+def _get_gmail_service():
+    """Build a Gmail API service using the shared Google token."""
+    if not os.path.exists(GOOGLE_TOKEN_PATH):
+        return None
+    try:
+        from google.auth.transport.requests import Request
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
+    except ImportError:
+        return None
+
+    with open(GOOGLE_TOKEN_PATH) as f:
+        token_data = json.load(f)
+
+    creds = Credentials(
+        token=token_data.get("token"),
+        refresh_token=token_data.get("refresh_token"),
+        token_uri=token_data.get("token_uri"),
+        client_id=token_data.get("client_id"),
+        client_secret=token_data.get("client_secret"),
+        scopes=token_data.get("scopes"),
+    )
+
+    if creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            token_data["token"] = creds.token
+            with open(GOOGLE_TOKEN_PATH, "w") as f:
+                json.dump(token_data, f, indent=2)
+        except Exception:
+            return None
+
+    if not creds.valid:
+        return None
+
+    try:
+        return build("gmail", "v1", credentials=creds, cache_discovery=False)
+    except Exception:
+        return None
+
+
+# From: "Chris Example" <chris.example@example.com>  OR  From: chris.example@example.com
+_FROM_HEADER_RE = re.compile(
+    r'^\s*"?([^"<]+?)"?\s*<([^>]+)>\s*$'
+)
+
+
+def _gmail_lookup_name(service, email):
+    """Search Gmail for messages involving email and return the real display name.
+
+    Searches both incoming (from:) and outgoing (to:) messages. Parses the
+    From/To header to extract the display name when present.
+    """
+    if not service or not email:
+        return None
+
+    email_lower = email.lower()
+
+    try:
+        # Search recent messages where this person was sender or recipient
+        query = f"from:{email} OR to:{email}"
+        results = service.users().messages().list(
+            userId="me",
+            q=query,
+            maxResults=5,
+        ).execute()
+
+        messages = results.get("messages", [])
+        for msg_ref in messages:
+            msg = service.users().messages().get(
+                userId="me",
+                id=msg_ref["id"],
+                format="metadata",
+                metadataHeaders=["From", "To"],
+            ).execute()
+
+            headers = msg.get("payload", {}).get("headers", [])
+            for h in headers:
+                if h.get("name") not in ("From", "To"):
+                    continue
+                value = h.get("value", "")
+                # Could contain multiple addresses (in To:) — split on commas
+                for addr_str in value.split(","):
+                    match = _FROM_HEADER_RE.match(addr_str.strip())
+                    if not match:
+                        continue
+                    display_name = match.group(1).strip()
+                    addr = match.group(2).strip().lower()
+                    if addr == email_lower and display_name and display_name.lower() != email_lower:
+                        # Filter out cases where display name == email
+                        return display_name
+    except Exception:
+        pass
+
+    return None
+
+
+def _resolve_contact_name(email, config=None, cache=None, service=None):
+    """Resolve an email to a real display name.
+
+    Priority:
+    1. Manual override in config.attendee_name_overrides
+    2. Cached lookup
+    3. Gmail search
+    4. None (caller falls back to email local part)
+
+    Returns a tuple (name_or_none, source_string).
+    """
+    if not email:
+        return None, "no_email"
+
+    email_lower = email.lower().strip()
+
+    # 1. Manual override
+    if config:
+        overrides = config.get("attendee_name_overrides", {})
+        if email_lower in overrides and not email_lower.startswith("_"):
+            return overrides[email_lower], "override"
+
+    # 2. Cache
+    if cache and email_lower in cache:
+        entry = cache[email_lower]
+        if entry.get("name"):
+            return entry["name"], "cache"
+        # Cached as "not found" — don't re-query
+        if entry.get("checked_at"):
+            return None, "cache_miss"
+
+    # 3. Gmail lookup
+    if service is None:
+        service = _get_gmail_service()
+
+    name = _gmail_lookup_name(service, email_lower)
+
+    # Save to cache (even on miss, so we don't re-query)
+    if cache is not None:
+        cache[email_lower] = {
+            "name": name,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _save_contact_cache(cache)
+
+    return (name, "gmail") if name else (None, "not_found")
+
+
+def _attendee_tokens(attendees, config=None):
+    """Extract matching tokens from GCal attendees.
+
+    Uses resolved real names from Gmail/config overrides when available,
+    falling back to email local parts and the raw display name.
+
+    For Chris Example (chris.example@example.com, Gmail says "Chris Example"):
+      returns {"Chris", "Example", "Chris Example", "chrisc", "cexample", "Chris.Example"}
+    """
+    tokens = set()
+    service = _get_gmail_service() if attendees else None
+    cache = _load_contact_cache()
+
+    for att in attendees or []:
+        raw_name = (att.get("name") or "").lower().strip()
+        email = (att.get("email") or "").lower().strip()
+
+        # Resolve real name (Gmail / override / cache)
+        resolved, source = _resolve_contact_name(email, config=config, cache=cache, service=service)
+        real_name = (resolved or raw_name or "").lower().strip()
+
+        # Tokenize the real name (first name, last name, full)
+        if real_name:
+            tokens.add(real_name)
+            for part in re.split(r"[\s,\-_.]+", real_name):
+                if len(part) > 1:
+                    tokens.add(part)
+
+        # Also tokenize email local part as a fallback
+        if email and "@" in email:
+            local = email.split("@")[0]
+            tokens.add(local)
+            for sep in [".", "_", "-", "+"]:
+                for part in local.split(sep):
+                    if len(part) > 1:
+                        tokens.add(part)
+            # First-initial + last name variants (e.g. cexample, chrisc)
+            parts = local.replace("_", ".").replace("-", ".").split(".")
+            if len(parts) >= 2 and parts[0] and parts[-1]:
+                tokens.add(parts[0][0] + parts[-1])
+                tokens.add(parts[0] + parts[-1][0])
+
+    return tokens
+
+
+def _node_tokens(child_name):
+    """Extract matching tokens from a Workflowy node: hashtags + title words."""
+    clean = strip_html(child_name or "").strip().lower()
+    tokens = set()
+
+    # Hashtags (without the #)
+    for tag in HASHTAG_RE.findall(clean):
+        tokens.add(tag.lower())
+
+    # Title words (hashtags stripped)
+    title_only = HASHTAG_RE.sub("", clean).strip()
+    for word in re.split(r"[\s,\-_.]+", title_only):
+        word = word.strip()
+        if len(word) > 1:
+            tokens.add(word)
+
+    return tokens
+
+
+def _find_matching_child(existing_children, title, attendees, config=None):
+    """Find an existing Workflowy child that matches a GCal event.
+
+    Strategy (in order of confidence):
+    1. Exact title match (case-insensitive, hashtags stripped)
+    2. Attendee token overlap: any real name / email token from the invite
+       (resolved via Gmail lookup) appears as a hashtag or title word in
+       the Workflowy node
+    3. Title substring match (either direction)
+    4. Fuzzy title similarity >= 0.6
+
+    Returns the matching child dict or None.
+    """
+    gcal_title = title.lower().strip()
+    gcal_tokens = _attendee_tokens(attendees, config=config)
+
+    for child in existing_children:
+        child_name = strip_html((child.get("name") or "").strip())
+        child_title = HASHTAG_RE.sub("", child_name).strip().lower()
+        child_tokens = _node_tokens(child_name)
+
+        # 1. Exact title match
+        if gcal_title and child_title == gcal_title:
+            return child
+
+        # 2. Attendee token overlap (strongest signal — hashtags encode identity)
+        if gcal_tokens & child_tokens:
+            return child
+
+        # 3. Substring match (either direction)
+        if gcal_title and child_title:
+            if gcal_title in child_title or child_title in gcal_title:
+                return child
+
+        # 4. Fuzzy fallback
+        if gcal_title and child_title:
+            ratio = SequenceMatcher(None, gcal_title, child_title).ratio()
+            if ratio >= 0.6:
+                return child
+
+    return None
+
+
+def create_meeting_node(meeting_date, title, hashtags=None, attendees=None, api_key=None, config=None):
     """Create a meeting node with the standard template structure."""
     nodes = get_export(api_key=api_key)
     date_id = find_or_create_date_path(meeting_date, nodes, api_key=api_key)
 
-    # Duplicate prevention
+    # Duplicate prevention: try to find an existing matching meeting
     existing = get_children(date_id, api_key=api_key)
-    for child in existing:
-        child_name = strip_html((child.get("name") or "").strip())
-        child_title = HASHTAG_RE.sub("", child_name).strip()
-        ratio = SequenceMatcher(None, title.lower().strip(), child_title.lower()).ratio()
-        if ratio >= 0.6:
-            return child.get("id")
+    matched = _find_matching_child(existing, title, attendees or [], config=config)
+    if matched:
+        return matched.get("id")
 
     # Build node name with hashtags
     node_name = title
@@ -316,6 +592,7 @@ def cmd_create_nodes():
     """Create Workflowy meeting nodes for today's calendar events."""
     api_key = get_api_key()
     links = load_links()
+    config = _load_config()
 
     # Load today's events
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -351,16 +628,27 @@ def cmd_create_nodes():
             skipped.append({"event_id": event_id, "title": title, "reason": "bad date"})
             continue
 
-        # Extract hashtags from attendee names
+        # Build hashtags from resolved attendee names (Gmail → real name → first name)
+        attendees = event.get("attendees", [])
+        cache = _load_contact_cache()
+        service = _get_gmail_service()
         hashtags = []
-        for att in event.get("attendees", []):
-            name = att.get("name", "")
+        for att in attendees:
+            email = (att.get("email") or "").lower().strip()
+            resolved, _ = _resolve_contact_name(email, config=config, cache=cache, service=service)
+            name = resolved or att.get("name", "")
             first_name = name.split()[0] if name else ""
-            if first_name and len(first_name) > 1:
+            if first_name and len(first_name) > 1 and "." not in first_name:
                 hashtags.append(first_name)
 
         try:
-            node_id = create_meeting_node(meeting_date, title, hashtags=hashtags, api_key=api_key)
+            node_id = create_meeting_node(
+                meeting_date, title,
+                hashtags=hashtags,
+                attendees=attendees,
+                api_key=api_key,
+                config=config,
+            )
             links[event_id] = {
                 "node_id": node_id,
                 "title": title,

@@ -16,6 +16,9 @@
     "enabled": true,
     "mcp_url": "https://mcp.krisp.ai/mcp"
   },
+  "attendee_name_overrides": {
+    "_comment": "Manual email->name mapping. Add entries here when Gmail lookup fails to find the real name (bots, shared inboxes, aliases). Example: 'alerts@company.com': 'Infra Alerts'"
+  },
   "coaching": {
     "enabled": true,
     "growth_areas": [
