@@ -205,6 +205,13 @@ echo ""
 
 echo "Step 6: Registering 6 crons..."
 
+# CRITICAL: heartbeat is the ONLY cron that writes meetings-coach.status.md, and it
+# OVERWRITES (not appends). The other four crons (morning-meeting-brief,
+# pre-meeting-alert, post-meeting-scan, commitment-follow-up) write lightweight
+# result JSON to cache/last-<name>.json; heartbeat reads those caches to compose
+# the full snapshot. This prevents the unbounded multi-writer bloat that hit
+# 49 lines + corrupted half-writes by 2026-04-09.
+
 # 1. Morning meeting brief — daily at 11:55 UTC (4:55 AM PT), timed delivery at 12:00 UTC (5:00 AM PT)
 oc cron add \
   --agent meetings-coach \
@@ -213,7 +220,7 @@ oc cron add \
   --to "$TELEGRAM_CHAT_ID" \
   --account "$TELEGRAM_ACCOUNT" \
   --no-deliver \
-  --message "Generate and deliver the morning meeting brief. 1) Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/gcal-fetch.py --days 2. Read the JSON output — these are today's and tomorrow's professional meetings. 2) Filter to real meetings only (is_real_meeting=true). 3) For each real meeting: a) Run person-bootstrap.py to create person files for new attendees. b) Run workflowy-sync.py --create-nodes to create Workflowy meeting nodes. c) Run meeting-prep.py --meeting-id EVENT_ID to generate talking points. d) Run workflowy-sync.py --push-bullets EVENT_ID to push AI bullets to Workflowy. 4) Format the brief using the template in CRONS.md. Include talking points, open items with attendees, and a tomorrow preview. 5) Write to cache/morning-meeting-brief.txt. 6) Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/timed-deliver.py cache/morning-meeting-brief.txt --token-env MEETINGS_BOT_TOKEN. 7) Update your status file."
+  --message "Generate and deliver the morning meeting brief. 1) Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/gcal-fetch.py --days 2. Read the JSON output — these are today's and tomorrow's professional meetings. 2) Filter to real meetings only (is_real_meeting=true). 3) For each real meeting: a) Run person-bootstrap.py to create person files for new attendees. b) Run workflowy-sync.py --create-nodes to create Workflowy meeting nodes. c) Run meeting-prep.py --meeting-id EVENT_ID to generate talking points. d) Run workflowy-sync.py --push-bullets EVENT_ID to push AI bullets to Workflowy. 4) Format the brief using the template in CRONS.md. Include talking points, open items with attendees, and a tomorrow preview. 5) Write to cache/morning-meeting-brief.txt. 6) Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/timed-deliver.py cache/morning-meeting-brief.txt --token-env MEETINGS_BOT_TOKEN. 7) Write result summary to ~/.openclaw/meetings-coach-workspace/cache/last-morning-brief.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"meetings_briefed\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md — the heartbeat cron owns that file."
 echo "  [1/6] morning-meeting-brief (daily 11:55 UTC, deliver at 12:00 UTC / 5:00 AM PT)"
 
 # 2. Pre-meeting alert — every 30 minutes (SILENT when no meetings approaching)
@@ -225,7 +232,7 @@ oc cron add \
   --account "$TELEGRAM_ACCOUNT" \
   --no-deliver \
   --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
-  --message "Check for upcoming meetings needing alerts. Run gcal-fetch.py for events in the next 2 hours. Filter to real meetings starting in 15-45 minutes. Read sent-alerts.json to skip already-alerted meetings. For any un-alerted meeting: check cache for existing prep, generate if missing via meeting-prep.py. Send Telegram: '🐷🔍 Heads up — meeting in {N} min\n📋 {Title}\n👥 {Attendees}\n🎯 {Top bullets}\n📌 {Open items}'. Record in sent-alerts.json. If no meetings approaching: produce NO output."
+  --message "Check for upcoming meetings needing alerts. Run gcal-fetch.py for events in the next 2 hours. Filter to real meetings starting in 15-45 minutes. Read sent-alerts.json to skip already-alerted meetings. For any un-alerted meeting: check cache for existing prep, generate if missing via meeting-prep.py. Send Telegram: '🐷🔍 Heads up — meeting in {N} min\n📋 {Title}\n👥 {Attendees}\n🎯 {Top bullets}\n📌 {Open items}'. Record in sent-alerts.json. If no meetings approaching: produce NO output. Write result to ~/.openclaw/meetings-coach-workspace/cache/last-pre-meeting.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"meetings_alerted\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md — the heartbeat cron owns that file."
 echo "  [2/6] pre-meeting-alert (every 30 min, silent when no meetings)"
 
 # 3. Post-meeting scan — every 30 minutes at :15 and :45 (SILENT when no transcripts)
@@ -237,7 +244,7 @@ oc cron add \
   --account "$TELEGRAM_ACCOUNT" \
   --no-deliver \
   --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
-  --message "Scan for recently-ended meetings and new transcripts. 1) Run gcal-fetch.py and identify meetings ended in the last 60 minutes. 2) Run transcript-scan.py to fetch Krisp transcripts and match to meetings. 3) Read the output. If items were extracted and staged: send a debrief summary on Telegram with action items, decisions, follow-ups. Include '/confirm to save to brain · /dismiss N to skip item N'. 4) If no transcripts found: produce NO output. 5) Update status file."
+  --message "Scan for recently-ended meetings and new transcripts. 1) Run gcal-fetch.py and identify meetings ended in the last 60 minutes. 2) Run transcript-scan.py to fetch Krisp transcripts and match to meetings. 3) Read the output. If items were extracted and staged: send a debrief summary on Telegram with action items, decisions, follow-ups. Include '/confirm to save to brain · /dismiss N to skip item N'. 4) If no transcripts found: produce NO output. 5) Write result to ~/.openclaw/meetings-coach-workspace/cache/last-post-scan.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"transcripts_processed\": <N>, \"debriefs_staged\": <N>, \"unmatched\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md — the heartbeat cron owns that file."
 echo "  [3/6] post-meeting-scan (every 30 min at :15,:45, silent when no transcripts)"
 
 # 4. Commitment follow-up — daily at 16:00 UTC (9:00 AM PT) (SILENT when all clear)
@@ -249,10 +256,62 @@ oc cron add \
   --account "$TELEGRAM_ACCOUNT" \
   --no-deliver \
   --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
-  --message "Check open commitments from meetings. Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/commitment-tracker.py. Read the JSON output. If there are overdue or approaching items: send a follow-up summary on Telegram using the format in CRONS.md. If no actionable items: produce NO output. Update status file."
+  --message "Check open commitments from meetings. Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/commitment-tracker.py. Read the JSON output. If there are overdue or approaching items: send a follow-up summary on Telegram using the format in CRONS.md. If no actionable items: produce NO output. Write result to ~/.openclaw/meetings-coach-workspace/cache/last-commitment.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"overdue\": <N>, \"approaching\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md — the heartbeat cron owns that file."
 echo "  [4/6] commitment-follow-up (daily 16:00 UTC, silent when all clear)"
 
-# 5. Heartbeat — every 30 minutes (SILENT on success)
+# 5. Heartbeat — every 30 minutes (SILENT on success) — SOLE WRITER of the status file
+HEARTBEAT_PROMPT='Heartbeat. Do these steps in order.
+
+STEP 1 — Gather auth state.
+- google_auth: if ~/.openclaw/meetings-coach-workspace/token.json exists AND is valid JSON, return "ok", else "missing".
+- workflowy_auth: if env var WORKFLOWY_API_KEY is set AND non-empty, return "ok", else "missing".
+- krisp_auth: if ~/.openclaw/meetings-coach-workspace/cache/krisp-tokens/tokens.json exists AND is non-empty, return "ok", else "missing".
+
+STEP 2 — Gather per-cron state from caches.
+Read these files if they exist (missing is OK, treat as no-data):
+  - ~/.openclaw/meetings-coach-workspace/cache/last-morning-brief.json
+  - ~/.openclaw/meetings-coach-workspace/cache/last-pre-meeting.json
+  - ~/.openclaw/meetings-coach-workspace/cache/last-post-scan.json
+  - ~/.openclaw/meetings-coach-workspace/cache/last-commitment.json
+For each, extract: timestamp, status, summary. Compute last_cron_run = the most recent timestamp across all four caches. If no caches exist yet, last_cron_run = this heartbeat time. Use the matching cache'"'"'s summary as last_cron_result.
+
+STEP 3 — Verify required files.
+Check these exist: meeting-config.json, sent-alerts.json in ~/.openclaw/meetings-coach-workspace/. If any missing, note in error_log.
+
+STEP 4 — Prune stale prep files.
+Check ~/.openclaw/meetings-coach-workspace/cache/ for prep files older than 14 days. Delete them silently.
+
+STEP 5 — Decide overall status.
+- If any auth field is "missing" → status = degraded.
+- If any file in STEP 3 is missing → status = degraded.
+- If the most recent cron in any of the 4 caches has status=error → status = degraded.
+- Otherwise → status = ok.
+
+STEP 6 — OVERWRITE the status file.
+Write the following exact snapshot to ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md, REPLACING all existing content. Truncate the file first. Use `cat > /home/node/Dropbox/openclaw-backup/agents/meetings-coach.status.md <<"EOF" ... EOF` (NOT `>>`).
+
+# Meetings Coach — Status
+
+- **last_heartbeat:** {now in YYYY-MM-DD HH:MM UTC}
+- **status:** {ok | degraded}
+- **last_cron_run:** {last_cron_run from STEP 2} — {cron name or "heartbeat"}
+- **last_cron_result:** {summary from STEP 2 or "heartbeat ran" if no cache}
+- **google_auth:** {ok | missing}
+- **workflowy_auth:** {ok | missing}
+- **krisp_auth:** {ok | missing}
+- **error_log:** {none | one-sentence description of any issue found THIS run}
+- **token_usage_today:** —
+
+STEP 7 — Output.
+Produce NO Telegram output. The status file overwrite is silent.
+
+ABSOLUTE RULES:
+1. The status file must be OVERWRITTEN (truncate-write), never appended. The file is a snapshot, not a log.
+2. Do NOT include error history from past runs in error_log. Only THIS run findings.
+3. Do NOT add any append-style entries below the snapshot.
+4. Do NOT read or preserve any old content from the existing file. Overwrite blindly.
+5. The file must be exactly the block above (header + 9 fields), nothing more.'
+
 oc cron add \
   --agent meetings-coach \
   --name "heartbeat" \
@@ -261,8 +320,8 @@ oc cron add \
   --account "$TELEGRAM_ACCOUNT" \
   --no-deliver \
   --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
-  --message "Update your heartbeat. Write the current UTC timestamp to last_heartbeat in ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md. Verify these files exist: meeting-config.json, sent-alerts.json. Check cache/ for prep files older than 14 days — prune if found. Produce NO output if everything is normal."
-echo "  [5/6] heartbeat (silent on success)"
+  --message "$HEARTBEAT_PROMPT"
+echo "  [5/6] heartbeat (silent on success, SOLE WRITER of status file)"
 
 # 6. Weekly review — Friday at 00:00 UTC (5:00 PM PT Thursday)
 oc cron add \
