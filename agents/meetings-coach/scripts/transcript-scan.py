@@ -58,118 +58,191 @@ def save_processed(data):
         json.dump(data, f, indent=2)
 
 
-# ── Krisp MCP OAuth token storage ───────────────────────────────
+# ── Krisp MCP token loading and refresh ─────────────────────────
 
-class FileTokenStorage:
-    """Simple file-based OAuth token storage matching the MCP SDK protocol."""
+KRISP_TOKEN_ENDPOINT = "https://api.krisp.ai/platform/v1/oauth2/token"
 
-    def __init__(self, token_dir):
-        self._dir = token_dir
-        os.makedirs(token_dir, exist_ok=True)
 
-    @property
-    def _tokens_path(self):
-        return os.path.join(self._dir, "tokens.json")
+def load_krisp_token():
+    """Load the Krisp access token from tokens.json."""
+    token_path = os.path.join(KRISP_TOKEN_DIR, "tokens.json")
+    if not os.path.exists(token_path):
+        return None
+    try:
+        with open(token_path) as f:
+            data = json.load(f)
+        return data.get("access_token")
+    except Exception:
+        return None
 
-    @property
-    def _client_info_path(self):
-        return os.path.join(self._dir, "client_info.json")
 
-    async def get_tokens(self):
-        if not os.path.exists(self._tokens_path):
-            return None
+def load_krisp_client_info():
+    """Load the registered Krisp OAuth client_id and client_secret."""
+    path = os.path.join(KRISP_TOKEN_DIR, "client_info.json")
+    if not os.path.exists(path):
+        return None, None
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return data.get("client_id"), data.get("client_secret")
+    except Exception:
+        return None, None
+
+
+async def refresh_krisp_token():
+    """Refresh the Krisp access token using the stored refresh_token.
+
+    Saves the new tokens back to tokens.json. Returns the new access token,
+    or None on failure.
+    """
+    import httpx
+
+    token_path = os.path.join(KRISP_TOKEN_DIR, "tokens.json")
+    if not os.path.exists(token_path):
+        return None
+
+    with open(token_path) as f:
+        tokens = json.load(f)
+
+    refresh_token = tokens.get("refresh_token")
+    if not refresh_token:
+        return None
+
+    client_id, client_secret = load_krisp_client_info()
+    if not client_id or not client_secret:
+        return None
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
         try:
-            from mcp.shared.auth import OAuthToken
-            with open(self._tokens_path) as f:
-                data = json.load(f)
-            return OAuthToken.model_validate(data)
+            resp = await client.post(
+                KRISP_TOKEN_ENDPOINT,
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                },
+                auth=(client_id, client_secret),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            resp.raise_for_status()
+            new_tokens = resp.json()
+
+            # Merge and save (keep any extra fields)
+            tokens.update(new_tokens)
+            with open(token_path, "w") as f:
+                json.dump(tokens, f, indent=2)
+
+            return new_tokens.get("access_token")
         except Exception:
             return None
 
-    async def set_tokens(self, tokens):
-        with open(self._tokens_path, "w") as f:
-            f.write(tokens.model_dump_json(indent=2))
 
-    async def get_client_info(self):
-        if not os.path.exists(self._client_info_path):
-            return None
-        try:
-            from mcp.shared.auth import OAuthClientInformationFull
-            with open(self._client_info_path) as f:
-                data = json.load(f)
-            return OAuthClientInformationFull.model_validate(data)
-        except Exception:
-            return None
-
-    async def set_client_info(self, client_info):
-        with open(self._client_info_path, "w") as f:
-            f.write(client_info.model_dump_json(indent=2))
-
-    def has_tokens(self):
-        return os.path.exists(self._tokens_path)
-
-
-# ── MCP fetch ───────────────────────────────────────────────────
+# ── MCP fetch via direct HTTP ───────────────────────────────────
 
 async def fetch_krisp_transcripts_mcp(days_back=1):
-    """Fetch recent transcripts from Krisp via the MCP protocol."""
+    """Fetch recent transcripts from Krisp via direct HTTP calls to MCP.
+
+    Bypasses the MCP SDK's OAuth flow (which breaks on token refresh) and
+    uses the stored bearer token directly. The token is still valid even
+    when the SDK's refresh logic fails.
+    """
     try:
         import httpx
-        from mcp import ClientSession
-        from mcp.client.auth.oauth2 import OAuthClientProvider
-        from mcp.client.streamable_http import streamable_http_client
-        from mcp.shared.auth import OAuthClientMetadata
     except ImportError as e:
-        return [], f"MCP SDK not installed: {e}"
+        return [], f"httpx not installed: {e}"
 
-    storage = FileTokenStorage(KRISP_TOKEN_DIR)
-    if not storage.has_tokens():
-        return [], "No Krisp OAuth tokens — copy from Flux data/krisp_tokens/"
-
-    client_metadata = OAuthClientMetadata(
-        redirect_uris=["http://localhost:19823/callback"],
-        token_endpoint_auth_method="none",
-        grant_types=["authorization_code", "refresh_token"],
-        response_types=["code"],
-        client_name="Sergeant Murphy (Krisp Connector)",
-        scope="read",
-    )
-
-    auth_provider = OAuthClientProvider(
-        server_url=KRISP_MCP_URL,
-        client_metadata=client_metadata,
-        storage=storage,
-        redirect_handler=None,
-        callback_handler=None,
-        timeout=300.0,
-    )
-
-    http_client = httpx.AsyncClient(
-        auth=auth_provider,
-        timeout=httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0),
-    )
+    token = load_krisp_token()
+    if not token:
+        return [], "No Krisp access token — copy tokens.json from Flux data/krisp_tokens/"
 
     transcripts = []
     error = None
 
-    try:
-        async with streamable_http_client(
-            KRISP_MCP_URL, http_client=http_client
-        ) as (read_stream, write_stream, _get_sid):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
+    def build_headers(tok):
+        return {
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {tok}",
+        }
 
-                # Search for recent meetings
-                since = (
-                    datetime.now(timezone.utc) - timedelta(days=days_back)
-                ).strftime("%Y-%m-%d")
+    headers = build_headers(token)
 
-                meetings = []
-                offset = 0
-                while True:
-                    resp = await session.call_tool(
-                        "search_meetings",
-                        arguments={
+    async def mcp_post_with_retry(client, headers, payload, max_retries=6):
+        """POST to MCP with 401 retry.
+
+        Krisp has eventual consistency — tokens sometimes fail on edge
+        servers that haven't synced yet. We retry with backoff before
+        attempting a refresh. Only refresh ONCE at the end to avoid
+        burning through refresh tokens (Krisp rotates them on each use).
+        """
+        import asyncio as _asyncio
+        current_headers = headers
+
+        for attempt in range(max_retries):
+            resp = await client.post(KRISP_MCP_URL, headers=current_headers, json=payload)
+            if resp.status_code != 401:
+                return resp, current_headers
+
+            # Backoff — Krisp eventual consistency usually resolves in a few seconds
+            await _asyncio.sleep(1.0 + attempt * 1.5)
+
+        # Last resort: try refreshing the token once after all retries failed
+        new_token = await refresh_krisp_token()
+        if new_token:
+            current_headers = build_headers(new_token)
+            if "Mcp-Session-Id" in headers:
+                current_headers["Mcp-Session-Id"] = headers["Mcp-Session-Id"]
+            resp = await client.post(KRISP_MCP_URL, headers=current_headers, json=payload)
+
+        return resp, current_headers
+
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0),
+    ) as client:
+        try:
+            # Step 1: Initialize MCP session
+            init_payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "murphy", "version": "1.0"},
+                },
+            }
+            init_resp, headers = await mcp_post_with_retry(client, headers, init_payload)
+            init_resp.raise_for_status()
+
+            # Capture session ID from headers
+            session_id = init_resp.headers.get("mcp-session-id") or init_resp.headers.get("Mcp-Session-Id")
+            session_headers = dict(headers)
+            if session_id:
+                session_headers["Mcp-Session-Id"] = session_id
+
+            # Step 2: Send initialized notification
+            notif_payload = {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": {},
+            }
+            await client.post(KRISP_MCP_URL, headers=session_headers, json=notif_payload)
+
+            # Step 3: Search for recent meetings
+            since = (
+                datetime.now(timezone.utc) - timedelta(days=days_back)
+            ).strftime("%Y-%m-%d")
+
+            meetings = []
+            offset = 0
+            next_id = 2
+            while True:
+                search_payload = {
+                    "jsonrpc": "2.0",
+                    "id": next_id,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "search_meetings",
+                        "arguments": {
                             "after": since,
                             "limit": 50,
                             "offset": offset,
@@ -179,61 +252,131 @@ async def fetch_krisp_transcripts_mcp(days_back=1):
                                 "action_items",
                             ],
                         },
-                    )
-                    batch = _extract_meetings_from_response(resp)
-                    if not batch:
-                        break
-                    meetings.extend(batch)
-                    if len(batch) < 50:
-                        break
-                    offset += len(batch)
+                    },
+                }
+                next_id += 1
+                search_resp, session_headers = await mcp_post_with_retry(client, session_headers, search_payload)
+                search_resp.raise_for_status()
+                batch = _extract_meetings_from_sse(search_resp.text)
+                if not batch:
+                    break
+                meetings.extend(batch)
+                if len(batch) < 50:
+                    break
+                offset += len(batch)
 
-                # Fetch transcript text for each meeting
-                for meeting in meetings:
-                    doc_id = meeting.get("meeting_id")
-                    if not doc_id:
-                        continue
+            # Step 4: Fetch transcript text for each meeting
+            for meeting in meetings:
+                doc_id = meeting.get("meeting_id")
+                if not doc_id:
+                    continue
 
-                    transcript = {
-                        "id": f"krisp_mcp_{doc_id}",
-                        "title": meeting.get("name", ""),
-                        "date": meeting.get("date", ""),
-                        "participants": list(dict.fromkeys(
-                            meeting.get("speakers", [])
-                            + meeting.get("attendees", [])
-                        )),
-                        "key_points": (meeting.get("meeting_notes") or {}).get("key_points", []),
-                        "action_items": (meeting.get("meeting_notes") or {}).get("action_items", []),
-                        "text": "",
-                        "source": "krisp_mcp",
+                transcript = {
+                    "id": f"krisp_mcp_{doc_id}",
+                    "title": meeting.get("name", ""),
+                    "date": meeting.get("date", ""),
+                    "participants": list(dict.fromkeys(
+                        meeting.get("speakers", [])
+                        + meeting.get("attendees", [])
+                    )),
+                    "key_points": (meeting.get("meeting_notes") or {}).get("key_points", []),
+                    "action_items": (meeting.get("meeting_notes") or {}).get("action_items", []),
+                    "text": "",
+                    "source": "krisp_mcp",
+                }
+
+                if not transcript["key_points"]:
+                    transcript["key_points"] = meeting.get("key_points", [])
+                if not transcript["action_items"]:
+                    transcript["action_items"] = meeting.get("action_items", [])
+
+                # Fetch full transcript text
+                try:
+                    doc_payload = {
+                        "jsonrpc": "2.0",
+                        "id": next_id,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "get_multiple_documents",
+                            "arguments": {"ids": [doc_id]},
+                        },
                     }
+                    next_id += 1
+                    doc_resp, session_headers = await mcp_post_with_retry(client, session_headers, doc_payload)
+                    doc_resp.raise_for_status()
+                    raw_text = _extract_text_from_sse(doc_resp.text)
+                    if raw_text and len(raw_text.strip()) >= 50:
+                        transcript["text"] = raw_text
+                except Exception:
+                    pass
 
-                    # Also use top-level key_points/action_items if present
-                    if not transcript["key_points"]:
-                        transcript["key_points"] = meeting.get("key_points", [])
-                    if not transcript["action_items"]:
-                        transcript["action_items"] = meeting.get("action_items", [])
+                transcripts.append(transcript)
 
-                    # Fetch full transcript text
-                    try:
-                        doc_resp = await session.call_tool(
-                            "get_multiple_documents",
-                            arguments={"ids": [doc_id]},
-                        )
-                        raw_text = _extract_text_from_response(doc_resp)
-                        if raw_text and len(raw_text.strip()) >= 50:
-                            transcript["text"] = raw_text
-                    except Exception:
-                        pass  # Include without full text
-
-                    transcripts.append(transcript)
-
-    except Exception as e:
-        error = str(e)
-    finally:
-        await http_client.aclose()
+        except Exception as e:
+            error = str(e)
 
     return transcripts, error
+
+
+def _parse_sse_results(sse_text):
+    """Parse Server-Sent Events format and return the list of MCP content items."""
+    for line in sse_text.splitlines():
+        if line.startswith("data:"):
+            data_str = line[5:].strip()
+            if not data_str:
+                continue
+            try:
+                data = json.loads(data_str)
+                result = data.get("result", {})
+                if "content" in result:
+                    return result["content"]
+            except json.JSONDecodeError:
+                continue
+    return []
+
+
+def _extract_meetings_from_sse(sse_text):
+    """Parse search_meetings SSE response into a list of meeting dicts."""
+    content = _parse_sse_results(sse_text)
+    if not content:
+        return []
+
+    # Build a mock response object for the existing parser
+    class MockContent:
+        def __init__(self, text):
+            self.text = text
+
+    class MockResult:
+        def __init__(self, content):
+            self.content = [MockContent(c.get("text", "")) for c in content if c.get("type") == "text"]
+
+    # Also check for structuredContent which has a clean JSON array
+    for line in sse_text.splitlines():
+        if line.startswith("data:"):
+            try:
+                data = json.loads(line[5:].strip())
+                structured = data.get("result", {}).get("structuredContent", {})
+                if "meetings" in structured:
+                    return structured["meetings"]
+            except (json.JSONDecodeError, KeyError):
+                continue
+
+    # Fall back to text parsing
+    return _extract_meetings_from_response(MockResult(content))
+
+
+def _extract_text_from_sse(sse_text):
+    """Extract raw transcript text from get_multiple_documents SSE response."""
+    content = _parse_sse_results(sse_text)
+    for item in content:
+        if item.get("type") == "text":
+            text = item.get("text", "")
+            if text.startswith("Retrieved document "):
+                newline = text.find("\n")
+                if newline != -1:
+                    return text[newline + 1:].strip()
+            return text
+    return ""
 
 
 def _extract_meetings_from_response(call_result):
