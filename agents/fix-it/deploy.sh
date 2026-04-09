@@ -127,6 +127,41 @@ echo ""
 echo "Step 5: Registering 9 crons..."
 
 # 1. Heartbeat — every 30 minutes (SILENT on all-clear)
+# CRITICAL: heartbeat is the ONLY cron that writes fix-it.status.md, and it
+# OVERWRITES (not appends). Other fix-it crons must NOT touch the file.
+# This prevents the unbounded growth that hit 271KB by 2026-04-09.
+HEARTBEAT_PROMPT='Heartbeat check. Do these steps in order.
+
+STEP 1 — Check agent health.
+For each file matching ~/Dropbox/openclaw-backup/agents/*.status.md, parse the last_heartbeat field. Cross-reference with `openclaw agents list` (run via exec). For each agent that is BOTH locally registered AND has a brain status file, check if last_heartbeat is older than 90 minutes from now. Ignore the `main` internal (no status file expected). Ignore placeholder status files for agents not in `openclaw agents list`.
+
+STEP 2 — Decide overall status.
+- If all registered+filed agents have fresh heartbeats: status = healthy.
+- If any has stale heartbeat (>90 min): status = degraded. Note the unhealthy agent name.
+
+STEP 3 — OVERWRITE the status file.
+Write the following exact 7-line snapshot to ~/Dropbox/openclaw-backup/agents/fix-it.status.md, REPLACING all existing content. Truncate the file first. Use `cat > /home/node/Dropbox/openclaw-backup/agents/fix-it.status.md <<\"EOF\" ... EOF` (NOT `>>`).
+
+# Fix-It — Status
+
+- **last_heartbeat:** {now in YYYY-MM-DD HH:MM UTC}
+- **status:** {healthy | degraded}
+- **last_cron_run:** heartbeat-check at {now}
+- **last_cron_result:** {one sentence — e.g., "all 5 agents within 90-min threshold" OR "{agent} stale, last heartbeat {time}"}
+- **error_log:** {none | "{agent} unhealthy: {reason}" — only this run findings, do NOT include past errors}
+- **token_usage_today:** —
+
+STEP 4 — Telegram (only if degraded).
+If status = degraded, send: "⚠️ {agent} unresponsive. Last heartbeat: {time}. Investigate."
+If status = healthy, produce NO output. The status file overwrite is silent.
+
+ABSOLUTE RULES:
+1. The status file must be OVERWRITTEN (truncate-write), never appended. The file is a snapshot, not a log.
+2. Do NOT include error history from past runs in error_log. Only THIS run findings.
+3. Do NOT add any append-style entries below the snapshot. The file is exactly the 7-line block above (plus the header), nothing more.
+4. Do NOT read or preserve any old content from the existing file. Overwrite blindly.
+5. If the overwrite fails for any reason, send a Telegram alert: "❌ fix-it heartbeat: failed to overwrite status file: {error}".'
+
 oc cron add \
   --agent fix-it \
   --name "heartbeat-check" \
@@ -135,8 +170,8 @@ oc cron add \
   --account "$TELEGRAM_ACCOUNT" \
   --no-deliver \
   --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
-  --message "Read all agent status files in ~/Dropbox/openclaw-backup/agents/. For each agent, check if last_heartbeat is older than 90 minutes. Update your own status file with current heartbeat. If ALL agents are healthy: update the status file silently and produce NO output — do not send any message. If any agent is unhealthy or down: send me a Telegram message describing which agent is unhealthy and what you found."
-echo "  [1/9] heartbeat-check (silent on all-clear)"
+  --message "$HEARTBEAT_PROMPT"
+echo "  [1/9] heartbeat-check (silent on all-clear, OVERWRITES status file)"
 
 # 2. Morning status — daily at 06:00 UTC
 # Structured 5-step prompt with known-issue suppression, staleness detection,
@@ -215,8 +250,8 @@ oc cron add \
   --account "$TELEGRAM_ACCOUNT" \
   --no-deliver \
   --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
-  --message "Run: python3 ~/Dropbox/openclaw-backup/scripts/validate.py. If validation PASSES: update your status file silently and produce NO output. If validation FAILS: send me a Telegram message with the specific failures immediately."
-echo "  [3/9] brain-validation (silent on pass)"
+  --message "Run: python3 ~/Dropbox/openclaw-backup/scripts/validate.py. If validation PASSES: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If validation FAILS: send me a Telegram message with the specific failures immediately."
+echo "  [3/9] brain-validation (silent on pass, does NOT touch status file)"
 
 # 4. Dropbox conflict scan — every 2 hours (SILENT on clean)
 oc cron add \
@@ -227,8 +262,8 @@ oc cron add \
   --account "$TELEGRAM_ACCOUNT" \
   --no-deliver \
   --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
-  --message "Run: find ~/Dropbox/openclaw-backup/ -name '*conflicted copy*' -type f. If NO conflicts found: update your status file silently and produce NO output. If conflicts ARE found: send me a Telegram message with the filenames. Do NOT attempt to merge."
-echo "  [4/9] conflict-scan (silent on clean)"
+  --message "Run: find ~/Dropbox/openclaw-backup/ -name '*conflicted copy*' -type f. If NO conflicts found: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If conflicts ARE found: send me a Telegram message with the filenames. Do NOT attempt to merge."
+echo "  [4/9] conflict-scan (silent on clean, does NOT touch status file)"
 
 # 5. File size monitor — daily at 12:00 UTC (SILENT on clean)
 oc cron add \
@@ -239,8 +274,8 @@ oc cron add \
   --account "$TELEGRAM_ACCOUNT" \
   --no-deliver \
   --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
-  --message "Run: find ~/Dropbox/openclaw-backup/ -type f -size +500k. If NO large files found: update your status file silently and produce NO output. If large files ARE found: send me a Telegram message with the filenames and sizes."
-echo "  [5/9] file-size-monitor (silent on clean)"
+  --message "Run: find ~/Dropbox/openclaw-backup/ -type f -size +500k. If NO large files found: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If large files ARE found: send me a Telegram message with the filenames and sizes."
+echo "  [5/9] file-size-monitor (silent on clean, does NOT touch status file)"
 
 # 6. Monthly archival — 1st of each month at 03:00 UTC
 oc cron add \
@@ -284,8 +319,8 @@ oc cron add \
   --account "$TELEGRAM_ACCOUNT" \
   --no-deliver \
   --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
-  --message "Run: openclaw cron list. Verify all 9 fix-it crons are registered (heartbeat-check, morning-status, brain-validation, conflict-scan, file-size-monitor, monthly-archival, security-audit, update-check, cron-self-check). Filter the output visually for fix-it entries. If all 9 are present: update your status file silently and produce NO output. If any are missing: attempt to re-register them and send me a Telegram message."
-echo "  [9/9] cron-self-check (silent on pass)"
+  --message "Run: openclaw cron list. Verify all 9 fix-it crons are registered (heartbeat-check, morning-status, brain-validation, conflict-scan, file-size-monitor, monthly-archival, security-audit, update-check, cron-self-check). Filter the output visually for fix-it entries. If all 9 are present: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If any are missing: attempt to re-register them and send me a Telegram message."
+echo "  [9/9] cron-self-check (silent on pass, does NOT touch status file)"
 
 echo ""
 

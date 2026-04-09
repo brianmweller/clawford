@@ -23,10 +23,7 @@ read KNOWN_ISSUES.md, verify tokens, and cross-check state.
 
 ## Every Heartbeat (30 min)
 
-1. **Update your status file** with the current timestamp:
-   - Write `last_heartbeat` to `/home/node/Dropbox/openclaw-backup/agents/fix-it.status.md`
-
-2. **Quick health scan:**
+1. **Quick health scan:**
    - Read all `*.status.md` files in `/home/node/Dropbox/openclaw-backup/agents/`
    - Cross-reference with `openclaw agents list`
    - Only flag agents that are BOTH registered locally AND have a stale heartbeat (>90 min)
@@ -34,9 +31,29 @@ read KNOWN_ISSUES.md, verify tokens, and cross-check state.
    - Ignore `main` (OpenClaw internal default, no status file expected)
    - Do NOT flag based on `status` field or `error_log` content — that's the morning-status job
 
-3. **If all registered agents healthy:** Update status file silently. No output. No Telegram message.
+2. **OVERWRITE your status file** (truncate-write, NOT append):
+   - Write a fresh 7-line snapshot to `/home/node/Dropbox/openclaw-backup/agents/fix-it.status.md`
+   - The file content is EXACTLY this template, nothing more:
+     ```
+     # Fix-It — Status
 
-4. **If a registered agent has a stale heartbeat:** Send a Telegram message naming the agent and the heartbeat age. Do not speculate about cause — the morning-status report does that.
+     - **last_heartbeat:** {now in YYYY-MM-DD HH:MM UTC}
+     - **status:** {healthy | degraded}
+     - **last_cron_run:** heartbeat-check at {now}
+     - **last_cron_result:** {one sentence}
+     - **error_log:** {none | this-run findings only}
+     - **token_usage_today:** —
+     ```
+   - Use `cat > file <<EOF` or python `open(file, 'w').write(...)`. Never `>>`.
+   - Do NOT preserve any old content. Do NOT include past errors in error_log.
+
+3. **If all registered agents healthy:** Overwrite is silent. No Telegram message.
+
+4. **If a registered agent has a stale heartbeat:** Status field = degraded. Send a Telegram message naming the agent and the heartbeat age. Do not speculate about cause — morning-status does that.
+
+## Why overwrite, not append
+
+Before 2026-04-09, every heartbeat (and conflict-scan, brain-validation, file-size-monitor, cron-self-check) was appending a verbose paragraph to fix-it.status.md. By the morning of 2026-04-09 the file had grown to 271 KB and was being re-read by the LLM on every cron tick — burning input tokens for ancient history that the morning-status report didn't even use. The fix: only `heartbeat-check` writes, and it always overwrites with a fresh snapshot. The other fix-it crons stay silent on success and alert via Telegram on failure (see deploy.sh prompts).
 
 ## Do NOT do during heartbeat
 
