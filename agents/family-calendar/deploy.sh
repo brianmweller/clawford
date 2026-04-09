@@ -156,6 +156,12 @@ echo "  Added /bin/* to allowlist"
 oc approvals allowlist add --agent family-calendar "/usr/local/bin/*"
 echo "  Added /usr/local/bin/* to allowlist"
 
+oc approvals allowlist add --agent family-calendar "python3 ~/.openclaw/family-calendar-workspace/scripts/*"
+echo "  Added python3 scripts/* to allowlist"
+
+oc approvals allowlist add --agent family-calendar "python3 -"
+echo "  Added python3 stdin to allowlist"
+
 echo ""
 
 # ── Step 6: Register Crons ───────────────────────────────────
