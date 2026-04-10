@@ -24,7 +24,7 @@ BRAIN="$HOME/Dropbox/openclaw-backup"
 WORKSPACE="$HOME/.openclaw/fix-it-workspace"
 TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:?Set TELEGRAM_CHAT_ID in .env}"
 FIXIT_BOT_TOKEN="${FIXIT_BOT_TOKEN:?Set FIXIT_BOT_TOKEN in .env}"
-TELEGRAM_ACCOUNT="fixit"
+TELEGRAM_ACCOUNT="default"
 COMPOSE_FILE="$HOME/openclaw/docker-compose.yml"
 
 # OpenClaw CLI wrapper — runs through Docker
