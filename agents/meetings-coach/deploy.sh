@@ -288,7 +288,7 @@ STEP 5 — Decide overall status.
 - Otherwise → status = ok.
 
 STEP 6 — OVERWRITE the status file.
-Write the following exact snapshot to ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md, REPLACING all existing content. Truncate the file first. Use `cat > /home/node/Dropbox/openclaw-backup/agents/meetings-coach.status.md <<"EOF" ... EOF` (NOT `>>`).
+Write the following exact snapshot to ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md, REPLACING all existing content. Use python3: `python3 -c "open('/home/node/Dropbox/openclaw-backup/agents/meetings-coach.status.md','w').write('''<content>''')"` — this is atomic, no shell expansion issues. Do NOT use temp files. Do NOT use $(cat ...) or any command substitution. Do NOT write to /tmp first. Write DIRECTLY to the status file in one step.
 
 # Meetings Coach — Status
 
@@ -310,7 +310,8 @@ ABSOLUTE RULES:
 2. Do NOT include error history from past runs in error_log. Only THIS run findings.
 3. Do NOT add any append-style entries below the snapshot.
 4. Do NOT read or preserve any old content from the existing file. Overwrite blindly.
-5. The file must be exactly the block above (header + 9 fields), nothing more.'
+5. The file must be exactly the block above (header + 9 fields), nothing more.
+6. NEVER write to a temp file then cat it. NEVER use $(cat ...) or $(...) substitution in the write command. Write the content DIRECTLY to meetings-coach.status.md in a single python or heredoc command.'
 
 oc cron add \
   --agent meetings-coach \
