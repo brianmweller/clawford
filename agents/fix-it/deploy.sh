@@ -318,7 +318,11 @@ oc cron add \
 
 Remediation: {one sentence per critical/high finding — what command to run or config to change}
 
-Rules: use the emoji severity headers shown above. Group findings by severity. Include counts in parentheses. Omit empty severity sections. Add a Remediation section for critical and high only. If zero issues across all severities send just: ✅ Security audit clean. Do NOT run --fix. Do NOT run any checks beyond what the command returns."
+KNOWN ACCEPTS — suppress these findings entirely (do not include in the report):
+• tools.exec.security_full_configured — ACCEPTED. Global config is full but per-agent enforcement is in exec-approvals.json where only fix-it has policy=full; all other agents have policy=allowlist. This is the intended architecture.
+• plugins.tools_reachable_permissive_policy — ACCEPTED if plugins.allow is set and no untrusted extensions are installed.
+
+Rules: use the emoji severity headers shown above. Group findings by severity. Include counts in parentheses. Omit empty severity sections. Omit known-accepts listed above. Add a Remediation section for critical and high only. If zero issues after suppression send just: ✅ Security audit clean. Do NOT run --fix. Do NOT run any checks beyond what the command returns."
 echo "  [7/9] security-audit"
 
 # 8. Update check — weekly Wednesday 04:00 UTC
