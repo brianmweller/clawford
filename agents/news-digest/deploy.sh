@@ -9,7 +9,7 @@
 #   - SOUL.md, IDENTITY.md, TOOLS.md in /tmp/
 #   - scripts/ directory with fetch-and-rank.py, update-preferences.py, on-demand.py in /tmp/
 #   - .env with TELEGRAM_CHAT_ID, NEWSDIGEST_BOT_TOKEN, LINKEDIN_USER, LINKEDIN_PASS in /tmp/ or ~/openclaw/
-#   - feedparser, linkedin-api, and openai pip packages installed in Docker image
+#   - feedparser, playwright, and openai pip packages installed in Docker image
 
 set -euo pipefail
 
@@ -130,7 +130,8 @@ cat > "$WORKSPACE/preferences/model.json" << 'EOF'
     "science": ["research", "study", "breakthrough", "climate", "energy", "space", "nasa", "biotech", "pharmaceutical"],
     "business": ["merger", "acquisition", "revenue", "profit", "layoff", "ceo", "board", "valuation", "funding round"],
     "startups": ["venture capital", "seed round", "series a", "y combinator", "unicorn", "founder", "accelerator"]
-  }
+  },
+  "topic_last_engaged": {}
 }
 EOF
 
@@ -193,7 +194,7 @@ echo ""
 
 # ── Step 6: Register Crons ───────────────────────────────────
 
-echo "Step 6: Registering 3 crons..."
+echo "Step 6: Registering 5 crons..."
 
 # 1. Morning edition — daily at 12:00 UTC (8 AM ET)
 oc cron add \
@@ -204,7 +205,7 @@ oc cron add \
   --account "$TELEGRAM_ACCOUNT" \
   --announce \
   --message "Generate and deliver the morning news digest. Run: python3 ~/.openclaw/news-digest-workspace/scripts/fetch-and-rank.py. This fetches all RSS feeds (NYT, WSJ, WaPo, Slate, Google News) and LinkedIn updates, deduplicates articles, extracts topics, and ranks them using the preference model at preferences/model.json. Read the ranked output from cache/ranked-$(date +%Y-%m-%d).json. Select the top 15-20 items. For each item, generate an extended headline: the original headline plus one sentence of context explaining why it matters or what's new. Group items by topic (🤖 AI & Tech, 💰 Economics, 🌍 World, 🏛️ US Policy, 🔗 LinkedIn, 📋 Also Noted). Format using the template in CRONS.md. Include item numbers so the reader can use /like, /dislike, /more commands. End with: 🐛 {count} items · {source_count} sources · Reply: /like 1, /more 3, /ask [topic]. If any feed failed, note it at the bottom. Update your status file with results."
-echo "  [1/3] morning-edition (daily 12:00 UTC)"
+echo "  [1/5] morning-edition (daily 12:00 UTC)"
 
 # 2. Preference update — daily at 23:00 UTC (SILENT on success)
 oc cron add \
@@ -216,7 +217,7 @@ oc cron add \
   --no-deliver \
   --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
   --message "Process today's engagement signals and update the preference model. Run: python3 ~/.openclaw/news-digest-workspace/scripts/update-preferences.py. This reads new entries from preferences/engagement.jsonl, applies multiplicative weight updates (thumbs_up: topic ×1.1 source ×1.05, thumbs_down: topic ×0.85 source ×0.95, expand: topic ×1.05), clamps weights to safe ranges, and writes updated model to preferences/model.json. If there are no new engagement events, skip the update silently. Update your status file with the number of events processed and produce NO output."
-echo "  [2/3] preference-update (silent on success)"
+echo "  [2/5] preference-update (silent on success)"
 
 # 3. Heartbeat — every 30 minutes (SILENT on success)
 oc cron add \
@@ -228,7 +229,34 @@ oc cron add \
   --no-deliver \
   --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
   --message "Update your heartbeat. Write the current UTC timestamp to last_heartbeat in ~/Dropbox/openclaw-backup/agents/news-digest.status.md. Produce NO output."
-echo "  [3/3] heartbeat (silent on success)"
+echo "  [3/5] heartbeat (silent on success)"
+
+# 4. Engagement poll — every 5 minutes (ALWAYS SILENT)
+oc cron add \
+  --agent news-digest \
+  --name "engagement-poll" \
+  --cron "*/5 * * * *" \
+  --to "$TELEGRAM_CHAT_ID" \
+  --account "$TELEGRAM_ACCOUNT" \
+  --no-deliver \
+  --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
+  --message "Process engagement signals. Run: python3 ~/.openclaw/news-digest-workspace/scripts/engagement-poller.py. This reads session transcripts for /like and /dislike commands, looks up articles in the item-map, and appends events to preferences/engagement.jsonl. Produce NO output."
+echo "  [4/5] engagement-poll (silent always)"
+
+# 5. LinkedIn keepalive — every 6 hours (SILENT on success)
+# Experiment: keeps LinkedIn session cookies fresh by visiting the feed page.
+# If session expiry is activity-based, this extends it indefinitely.
+# If LinkedIn has a hard 30-day rotation, this still detects expiry within 6h.
+oc cron add \
+  --agent news-digest \
+  --name "linkedin-keepalive" \
+  --cron "0 */6 * * *" \
+  --to "$TELEGRAM_CHAT_ID" \
+  --account "$TELEGRAM_ACCOUNT" \
+  --no-deliver \
+  --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
+  --message "Keep LinkedIn session alive. Run: python3 ~/.openclaw/news-digest-workspace/scripts/linkedin-keepalive.py. If it succeeds: produce NO output. If it reports session expired: send a Telegram alert: '🔑 LinkedIn session expired — re-run linkedin-auth.py'."
+echo "  [5/5] linkedin-keepalive (session ping every 6h)"
 
 echo ""
 

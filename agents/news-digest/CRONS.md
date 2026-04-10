@@ -122,6 +122,22 @@ Run `python3 ~/.openclaw/news-digest-workspace/scripts/engagement-poller.py`. Th
 
 ---
 
+## LinkedIn Keepalive — Every 6 Hours
+
+**Schedule:** `0 */6 * * *`
+**Command:** Keep LinkedIn session cookies fresh by visiting the feed page.
+
+Run `python3 ~/.openclaw/news-digest-workspace/scripts/linkedin-keepalive.py`. This launches a headless Playwright browser with the persistent LinkedIn profile, navigates to the feed, and checks if still authenticated. The browser visit refreshes cookies server-side.
+
+**Experiment:** LinkedIn sessions expire ~monthly. If the expiry is activity-based, periodic pings should extend the session indefinitely (like Costco's keepalive). If LinkedIn has a hard 30-day rotation, this won't prevent expiry but will detect it within 6 hours instead of waiting for the next morning digest.
+
+**On success:** Silent. Session alive, cookies refreshed.
+**On failure:** Alert Sam on Telegram: "🔑 LinkedIn session expired — re-run linkedin-auth.py".
+
+**Telegram output:** Silent on success. Alert on failure only.
+
+---
+
 ## Summary Table
 
 | Cron | Frequency | Telegram | Auto-action |
@@ -130,3 +146,4 @@ Run `python3 ~/.openclaw/news-digest-workspace/scripts/engagement-poller.py`. Th
 | Preference update | Daily 23:00 UTC | On failure only | Update preference weights + virtual judge |
 | Heartbeat | Every 30 min | On failure only | Write heartbeat to status file |
 | Engagement poll | Every 5 min | Never | Parse session transcripts for /like /dislike |
+| LinkedIn keepalive | Every 6 hours | On failure only | Ping LinkedIn feed, refresh cookies |

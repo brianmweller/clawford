@@ -161,90 +161,6 @@ def fetch_single_feed(feed_config):
         return [], {"source": label, "error": str(e)}
 
 
-def fetch_linkedin():
-    """Fetch LinkedIn posts via Apify's LinkedIn Posts Search Scraper.
-
-    Uses the apimaestro/linkedin-posts-search-scraper-no-cookies actor
-    which requires no LinkedIn auth — runs on Apify's infrastructure.
-    Costs ~$0.02/day for 20 posts. Free tier gives $5/month.
-    """
-    apify_token = os.environ.get("APIFY_API_TOKEN")
-    if not apify_token:
-        return [], {"source": "LinkedIn", "error": "APIFY_API_TOKEN not configured"}
-
-    articles = []
-    queries = [
-        "artificial intelligence agents LLM",
-        "startup founder venture capital funding",
-        "economics policy regulation tech",
-    ]
-
-    try:
-        from apify_client import ApifyClient
-        client = ApifyClient(apify_token)
-
-        for query in queries:
-            try:
-                result = client.actor("apimaestro/linkedin-posts-search-scraper-no-cookies").call(
-                    run_input={
-                        "searchQuery": query,
-                        "limit": 7,
-                        "sort_type": "date_posted",
-                    }
-                )
-                items = client.dataset(result["defaultDatasetId"]).list_items().items
-
-                for item in items:
-                    author = item.get("author", {})
-                    author_name = author.get("name", "LinkedIn")
-                    text = item.get("text", "")
-                    post_url = item.get("post_url", "https://www.linkedin.com")
-                    stats = item.get("stats", {})
-                    posted_at = item.get("posted_at", {})
-
-                    if not text:
-                        continue
-
-                    # Build a headline from author + first line of text
-                    first_line = text.split("\n")[0][:120]
-                    title = f"{author_name}: {first_line}{'...' if len(first_line) >= 120 else ''}"
-
-                    # Parse posted_at timestamp
-                    ts = posted_at.get("timestamp")
-                    if ts:
-                        pub_date = datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
-                    else:
-                        pub_date = datetime.now(timezone.utc)
-
-                    likes = stats.get("num_likes", 0)
-                    comments = stats.get("num_comments", 0)
-
-                    articles.append({
-                        "id": article_id(post_url),
-                        "title": title,
-                        "link": clean_url(post_url),
-                        "summary": text[:300] if len(text) > 300 else text,
-                        "source": "linkedin",
-                        "source_label": f"LinkedIn ({likes} likes)",
-                        "pub_date": pub_date.isoformat(),
-                        "fetched_at": datetime.now(timezone.utc).isoformat(),
-                    })
-            except Exception as e:
-                # Log per-query failures but continue with other queries
-                print(f"LinkedIn query '{query}' failed: {e}", file=sys.stderr)
-                continue
-
-    except ImportError:
-        return [], {"source": "LinkedIn", "error": "apify-client not installed"}
-    except Exception as e:
-        return [], {"source": "LinkedIn", "error": str(e)}
-
-    if not articles:
-        return [], {"source": "LinkedIn", "error": "no posts found"}
-
-    return articles, None
-
-
 def fetch_linkedin_browser():
     """Fetch LinkedIn content by running the Playwright scraper script.
 
@@ -504,9 +420,12 @@ def assign_categories(articles):
         "tech": "🤖 AI & TECH",
         "economics": "💰 ECONOMICS",
         "markets": "💰 ECONOMICS",
+        "business": "💰 ECONOMICS",
         "international_politics": "🌍 WORLD",
-        "us_domestic_policy": "��️ US POLICY",
+        "us_domestic_policy": "🏛️ US POLICY",
         "regulation": "🏛️ US POLICY",
+        "science": "🔬 SCIENCE",
+        "startups": "🚀 STARTUPS",
     }
 
     for article in articles:

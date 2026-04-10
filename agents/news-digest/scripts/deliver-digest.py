@@ -242,6 +242,8 @@ def main():
     section_order = [
         "🤖 AI & TECH",
         "💰 ECONOMICS",
+        "🔬 SCIENCE",
+        "🚀 STARTUPS",
         "🌍 WORLD",
         "🏛️ US POLICY",
         "🔗 LINKEDIN",
@@ -255,7 +257,8 @@ def main():
         # We're in the :55-:59 window — wait until the top of the next hour
         wait_seconds = (60 - now.minute) * 60 - now.second
         if wait_seconds > 0 and wait_seconds <= 600:  # Cap at 10 min
-            print(f"Holding delivery for {wait_seconds}s until :{0:02d}", file=sys.stderr)
+            target_hour = (now.hour + 1) % 24
+            print(f"Holding delivery for {wait_seconds}s until {target_hour:02d}:00", file=sys.stderr)
             time.sleep(wait_seconds)
 
     # Send header
