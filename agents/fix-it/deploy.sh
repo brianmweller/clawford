@@ -300,7 +300,7 @@ oc cron add \
   --to "$TELEGRAM_CHAT_ID" \
   --account "$TELEGRAM_ACCOUNT" \
   --announce \
-  --message "Run: openclaw security audit --deep. Report results on Telegram. If issues are found, list them with severity. Do NOT run --fix automatically. Wait for my confirmation."
+  --message "Run openclaw security audit --deep RIGHT NOW — do not ask for permission, do not propose a plan, do not list what you intend to check. Just execute the command, read its output, and send a Telegram summary. Format: one line per finding with severity (critical/high/medium/low). If zero issues: send '✅ Security audit clean'. Do NOT run --fix. Do NOT run any checks beyond what openclaw security audit --deep returns (no port scans, no OS checks, no firewall inspection)."
 echo "  [7/9] security-audit"
 
 # 8. Update check — weekly Wednesday 04:00 UTC
