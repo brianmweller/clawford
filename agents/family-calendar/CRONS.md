@@ -170,6 +170,24 @@ Stale errors in the status file can cause Mr Fixit to raise false alerts, so pru
 
 ---
 
+## WhatsApp Chat Scan — Every 2 Hours
+
+**Schedule:** `45 */2 * * *`
+**Command:** Scan WhatsApp messages for schedule-relevant content.
+
+1. Run `python3 ~/.openclaw/family-calendar-workspace/scripts/chat-parse-schedule.py`
+   - Reads recent WhatsApp messages from OpenClaw session transcripts
+   - Outputs JSON array of messages with schedule-relevant content
+2. For each message with schedule content (cancellations, time changes, pickup changes):
+   send a Telegram alert to Sam: "🐭 📱 WhatsApp: {person} — {summary}. Suggested action: {action}."
+3. If no schedule-relevant messages: produce NO output.
+
+**Telegram output:** Only when schedule-relevant items found. Silent otherwise.
+
+**Important:** Never post to WhatsApp groups automatically. All output goes to Sam on Telegram. He decides what to forward.
+
+---
+
 ## Summary Table
 
 | Cron | Frequency | Telegram | Auto-action |
@@ -180,3 +198,4 @@ Stale errors in the status file can cause Mr Fixit to raise false alerts, so pru
 | Activity email check | Every 2 hours | On items found | Parse Example Preschool/Example Swim School/Tutu emails via LLM |
 | Gmail invite check | Every 3 hours | On invites found | Parse ICS attachments, surface invites |
 | Weekly overview | Sunday 01:00 UTC | Always | Full week-ahead schedule |
+| WhatsApp chat scan | Every 2 hours | On items found | Parse WhatsApp for schedule changes |
