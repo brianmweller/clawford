@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-meeting-prep.py — Assemble context and generate AI-powered talking points.
+meeting-prep.py — Assemble meeting context from the shared brain.
 
 For each real meeting, looks up attendees in the shared brain (people files,
-facts, commitments), checks Workflowy for existing agenda items, and calls
-gpt-5.4-nano to generate talking points.
+facts, commitments) and checks Workflowy for existing agenda items. Outputs
+context JSON for the agent to use in briefings and alerts.
 
 Usage:
   python3 meeting-prep.py --meeting-id EVENT_ID
