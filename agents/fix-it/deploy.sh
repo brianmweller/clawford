@@ -300,7 +300,25 @@ oc cron add \
   --to "$TELEGRAM_CHAT_ID" \
   --account "$TELEGRAM_ACCOUNT" \
   --announce \
-  --message "Run openclaw security audit --deep RIGHT NOW — do not ask for permission, do not propose a plan, do not list what you intend to check. Just execute the command, read its output, and send a Telegram summary. Format: one line per finding with severity (critical/high/medium/low). If zero issues: send '✅ Security audit clean'. Do NOT run --fix. Do NOT run any checks beyond what openclaw security audit --deep returns (no port scans, no OS checks, no firewall inspection)."
+  --message "Run openclaw security audit --deep RIGHT NOW. Do not ask for permission. Execute the command, read its output, then send a Telegram report formatted EXACTLY like this template (adapt findings to actual output):
+
+🦊🔧 Security Audit — {date}
+
+🔴 CRITICAL ({count})
+• {short label} — {one-line description}
+
+🟠 HIGH ({count})
+• {short label} — {one-line description}
+
+🟡 MEDIUM ({count})
+• {short label} — {one-line description}
+
+🟢 LOW ({count})
+• {short label} — {one-line description}
+
+Remediation: {one sentence per critical/high finding — what command to run or config to change}
+
+Rules: use the emoji severity headers shown above. Group findings by severity. Include counts in parentheses. Omit empty severity sections. Add a Remediation section for critical and high only. If zero issues across all severities send just: ✅ Security audit clean. Do NOT run --fix. Do NOT run any checks beyond what the command returns."
 echo "  [7/9] security-audit"
 
 # 8. Update check — weekly Wednesday 04:00 UTC
