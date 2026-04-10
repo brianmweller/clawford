@@ -56,6 +56,17 @@ for file in SOUL.md IDENTITY.md TOOLS.md; do
     fi
 done
 
+# Copy KNOWN_ISSUES.md to brain (alert suppression list for morning status)
+KNOWN_ISSUES_SRC="/tmp/KNOWN_ISSUES.md"
+KNOWN_ISSUES_DST="$BRAIN/fix-it/KNOWN_ISSUES.md"
+mkdir -p "$BRAIN/fix-it"
+if [ -f "$KNOWN_ISSUES_SRC" ]; then
+    cp "$KNOWN_ISSUES_SRC" "$KNOWN_ISSUES_DST"
+    echo "  Copied KNOWN_ISSUES.md -> $KNOWN_ISSUES_DST"
+else
+    echo "  WARNING: $KNOWN_ISSUES_SRC not found — morning status will run without suppression"
+fi
+
 echo ""
 
 # ── Step 2: Create Status File ───────────────────────────────
@@ -124,7 +135,7 @@ echo ""
 
 # ── Step 5: Register Crons ───────────────────────────────────
 
-echo "Step 5: Registering 9 crons..."
+echo "Step 5: Registering 10 crons..."
 
 # 1. Heartbeat — every 30 minutes (SILENT on all-clear)
 # CRITICAL: heartbeat is the ONLY cron that writes fix-it.status.md, and it
@@ -355,8 +366,20 @@ oc cron add \
   --account "$TELEGRAM_ACCOUNT" \
   --no-deliver \
   --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
-  --message "Run: openclaw cron list. Verify all 9 fix-it crons are registered (heartbeat-check, morning-status, brain-validation, conflict-scan, file-size-monitor, monthly-archival, security-audit, update-check, cron-self-check). Filter the output visually for fix-it entries. If all 9 are present: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If any are missing: attempt to re-register them and send me a Telegram message."
-echo "  [9/9] cron-self-check (silent on pass, does NOT touch status file)"
+  --message "Run: openclaw cron list. Verify all 10 fix-it crons are registered (heartbeat-check, morning-status, brain-validation, conflict-scan, file-size-monitor, monthly-archival, security-audit, update-check, cron-self-check, obsidian-briefing). Filter the output visually for fix-it entries. If all 10 are present: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If any are missing: attempt to re-register them and send me a Telegram message."
+echo "  [9/10] cron-self-check (silent on pass, does NOT touch status file)"
+
+# 10. Obsidian daily briefing — daily at 12:10 UTC (SILENT on success)
+oc cron add \
+  --agent fix-it \
+  --name "obsidian-briefing" \
+  --cron "10 12 * * *" \
+  --to "$TELEGRAM_CHAT_ID" \
+  --account "$TELEGRAM_ACCOUNT" \
+  --no-deliver \
+  --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
+  --message "Run: python3 ~/Dropbox/openclaw-backup/scripts/obsidian-briefing/generate.py. If it succeeds: produce NO output. If it fails: send the error on Telegram."
+echo "  [10/10] obsidian-briefing (silent on success, generates Obsidian daily briefing)"
 
 echo ""
 

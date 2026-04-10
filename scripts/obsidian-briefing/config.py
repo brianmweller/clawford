@@ -20,6 +20,8 @@ AGENT_ROSTER = [
     {"name": "family-calendar", "display": "Mistress Mouse", "emoji": "🐭📅"},
     {"name": "news-digest", "display": "Lowly Worm", "emoji": "🐛📰"},
     {"name": "shopping", "display": "Hilda Hippo", "emoji": "🦛🛒"},
+    {"name": "meetings-coach", "display": "Sergeant Murphy", "emoji": "🐷🔍"},
+    {"name": "connector", "display": "Huckle Cat", "emoji": "🐱🤝"},
 ]
 
 # --- Wikilink aliases: display name → people file slug ---
