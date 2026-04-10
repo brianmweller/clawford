@@ -300,29 +300,39 @@ oc cron add \
   --to "$TELEGRAM_CHAT_ID" \
   --account "$TELEGRAM_ACCOUNT" \
   --announce \
-  --message "Run openclaw security audit --deep RIGHT NOW. Do not ask for permission. Execute the command, read its output, then send a Telegram report formatted EXACTLY like this template (adapt findings to actual output):
+  --message "Security audit. Do not ask for permission. Execute ALL steps, then send ONE Telegram report.
+
+STEP 1 — Run openclaw security audit --deep. Capture its output.
+
+STEP 2 — Check per-agent exec policies. Run: python3 -c \"import json; d=json.load(open('/home/node/.openclaw/exec-approvals.json')); [(print(f'{a}: {c.get(chr(112)+chr(111)+chr(108)+chr(105)+chr(99)+chr(121),chr(63))}')) for a,c in d.get('agents',{}).items()]\"
+
+STEP 3 — Compose the report. Format EXACTLY like this:
 
 🦊🔧 Security Audit — {date}
 
+🔒 Exec Policies
+{for each agent from STEP 2, one line: • {agent}: {policy}}
+{if any non-fix-it agent has policy=full, flag it as 🔴 CRITICAL below}
+
 🔴 CRITICAL ({count})
-• {short label} — {one-line description}
+• {finding}
 
 🟠 HIGH ({count})
-• {short label} — {one-line description}
+• {finding}
 
 🟡 MEDIUM ({count})
-• {short label} — {one-line description}
+• {finding}
 
 🟢 LOW ({count})
-• {short label} — {one-line description}
+• {finding}
 
-Remediation: {one sentence per critical/high finding — what command to run or config to change}
+Remediation: {one sentence per critical/high}
 
-KNOWN ACCEPTS — suppress these findings entirely (do not include in the report):
-• tools.exec.security_full_configured — ACCEPTED. Global config is full but per-agent enforcement is in exec-approvals.json where only fix-it has policy=full; all other agents have policy=allowlist. This is the intended architecture.
-• plugins.tools_reachable_permissive_policy — ACCEPTED if plugins.allow is set and no untrusted extensions are installed.
+ENRICHMENT RULES for STEP 1 findings:
+• tools.exec.security_full_configured — do NOT report this raw finding. Replace it with the 🔒 Exec Policies section from STEP 2. The global config is full because per-agent enforcement lives in exec-approvals.json. Only flag as CRITICAL if a non-fix-it agent has policy=full.
+• plugins.tools_reachable_permissive_policy — suppress if plugins.allow is set and no untrusted extensions are installed.
 
-Rules: use the emoji severity headers shown above. Group findings by severity. Include counts in parentheses. Omit empty severity sections. Omit known-accepts listed above. Add a Remediation section for critical and high only. If zero issues after suppression send just: ✅ Security audit clean. Do NOT run --fix. Do NOT run any checks beyond what the command returns."
+FORMAT RULES: use the emoji severity headers shown above. Group by severity. Include counts. Omit empty sections. If zero issues send just: ✅ Security audit clean. Do NOT run --fix. Do NOT run checks beyond what these steps specify."
 echo "  [7/9] security-audit"
 
 # 8. Update check — weekly Wednesday 04:00 UTC
