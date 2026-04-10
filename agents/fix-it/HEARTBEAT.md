@@ -44,7 +44,8 @@ read KNOWN_ISSUES.md, verify tokens, and cross-check state.
      - **error_log:** {none | this-run findings only}
      - **token_usage_today:** —
      ```
-   - Use `cat > file <<EOF` or python `open(file, 'w').write(...)`. Never `>>`.
+   - Use python `open(file, 'w').write(...)` to write. Never `>>`. Never temp files.
+   - Do NOT use `$(cat ...)` or any command substitution in the write command.
    - Do NOT preserve any old content. Do NOT include past errors in error_log.
 
 3. **If all registered agents healthy:** Overwrite is silent. No Telegram message.

@@ -143,7 +143,7 @@ STEP 2 — Decide overall status.
 - If any has stale heartbeat (>90 min): status = degraded. Note the unhealthy agent name.
 
 STEP 3 — OVERWRITE the status file.
-Write the following exact 7-line snapshot to ~/Dropbox/openclaw-backup/agents/fix-it.status.md, REPLACING all existing content. Truncate the file first. Use `cat > /home/node/Dropbox/openclaw-backup/agents/fix-it.status.md <<\"EOF\" ... EOF` (NOT `>>`).
+Write the following exact 7-line snapshot to ~/Dropbox/openclaw-backup/agents/fix-it.status.md, REPLACING all existing content. Use python3: `python3 -c "open(\"/home/node/Dropbox/openclaw-backup/agents/fix-it.status.md\",\"w\").write(\"\"\"<content>\"\"\")"` — this is atomic, no shell expansion issues. Do NOT use temp files. Do NOT use $(cat ...) or any command substitution. Do NOT write to /tmp first. Write DIRECTLY to the status file in one step.
 
 # Fix-It — Status
 
@@ -163,7 +163,8 @@ ABSOLUTE RULES:
 2. Do NOT include error history from past runs in error_log. Only THIS run findings.
 3. Do NOT add any append-style entries below the snapshot. The file is exactly the 7-line block above (plus the header), nothing more.
 4. Do NOT read or preserve any old content from the existing file. Overwrite blindly.
-5. If the overwrite fails for any reason, send a Telegram alert: "❌ fix-it heartbeat: failed to overwrite status file: {error}".'
+5. If the overwrite fails for any reason, send a Telegram alert: "❌ fix-it heartbeat: failed to overwrite status file: {error}".
+6. NEVER write to a temp file then cat it. NEVER use $(cat ...) or $(...) substitution in the write command. Write the content DIRECTLY to fix-it.status.md in a single python or heredoc command.'
 
 oc cron add \
   --agent fix-it \
