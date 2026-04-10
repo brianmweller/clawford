@@ -59,7 +59,7 @@ for file in SOUL.md IDENTITY.md TOOLS.md AGENTS.md USER.md HEARTBEAT.md MEMORY.m
 done
 
 # Copy Python scripts
-for script in gcal-fetch.py gcal-auth.py reminder-check.py timed-deliver.py; do
+for script in gcal-fetch.py gcal-auth.py gcal-write.py reminder-check.py timed-deliver.py activity-email-check.py gmail-invite-check.py chat-parse-schedule.py; do
     if [ -f "/tmp/scripts/$script" ]; then
         cp "/tmp/scripts/$script" "$WORKSPACE/scripts/$script"
         echo "  Copied scripts/$script -> $WORKSPACE/scripts/$script"
@@ -176,7 +176,7 @@ echo ""
 
 # ── Step 6: Register Crons ───────────────────────────────────
 
-echo "Step 6: Registering 3 crons..."
+echo "Step 6: Registering 6 crons..."
 
 # 1. Morning briefing — daily at 11:55 UTC (4:55 AM PT), timed delivery at 12:00 UTC (5:00 AM PT)
 oc cron add \
@@ -187,7 +187,7 @@ oc cron add \
   --account "$TELEGRAM_ACCOUNT" \
   --no-deliver \
   --message "Generate and deliver the morning family briefing. 1) Run: python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 2. Read the JSON output — these are today's and tomorrow's events across all family calendars. 2) Format the briefing using the template in CRONS.md. Group events by time blocks (Morning, Afternoon, Evening). Use family member emoji (👨 Sam, 👩 Alex, 🧒 Avery, 👶 Jordan, 🏠 Jamie). Flag any conflicts with ⚠️. Include a tomorrow preview. Check if today is a standard routine day (see MEMORY.md) — if no extra events, say 'Standard {weekday} — no exceptions.' Note the pickup arrangement for today (Mon=Sam+swimming, Fri=Sam, other=Jamie). 3) Write the formatted output to cache/morning-briefing.txt. 4) Run: python3 ~/.openclaw/family-calendar-workspace/scripts/timed-deliver.py cache/morning-briefing.txt --token-env FAMILYCAL_BOT_TOKEN. 5) Update your status file."
-echo "  [1/3] morning-briefing (daily 11:55 UTC, deliver at 12:00 UTC / 5:00 AM PT)"
+echo "  [1/6] morning-briefing (daily 11:55 UTC, deliver at 12:00 UTC / 5:00 AM PT)"
 
 # 2. Reminder check — every 5 minutes (SILENT when no reminders)
 oc cron add \
@@ -199,7 +199,7 @@ oc cron add \
   --no-deliver \
   --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
   --message "Check for upcoming events that need reminders. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/reminder-check.py. Read the JSON output. If the output contains reminders: for each one, send a Telegram message '🐭 Heads up — {emoji} {person} {event} in {minutes} min ({location})'. If the output is empty (no reminders needed): produce NO output — do not send any message. Update your status file only if reminders were sent."
-echo "  [2/3] reminder-check (every 5 min, silent when no reminders)"
+echo "  [2/6] reminder-check (every 5 min, silent when no reminders)"
 
 # 3. Heartbeat — every 30 minutes (SILENT on success)
 oc cron add \
@@ -211,7 +211,42 @@ oc cron add \
   --no-deliver \
   --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
   --message "Update your heartbeat. Write the current UTC timestamp to last_heartbeat in ~/Dropbox/openclaw-backup/agents/family-calendar.status.md. Verify these files exist: calendar-config.json, sent-reminders.json. Check if sent-reminders.json has entries older than 48 hours — if so, prune them. Produce NO output if everything is normal."
-echo "  [3/3] heartbeat (silent on success)"
+echo "  [3/6] heartbeat (silent on success)"
+
+# 4. Activity email check — every 2 hours at :15 (SILENT when no items)
+oc cron add \
+  --agent family-calendar \
+  --name "activity-email-check" \
+  --cron "15 */2 * * *" \
+  --to "$TELEGRAM_CHAT_ID" \
+  --account "$TELEGRAM_ACCOUNT" \
+  --no-deliver \
+  --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
+  --message "Check Gmail for emails from activity providers. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/activity-email-check.py. Read the JSON output — these are emails from Example Preschool, Example Swim School, and Example Ballet Studio in the last 48 hours. For each email with schedule-relevant content (closures, cancellations, action items, event changes): classify the urgency and send a Telegram message. Closures/cancellations: '🐭 ⚠️ {source}: {summary}'. Action items: '🐭 📋 {source}: {summary}'. Events/FYI: '🐭 📌 {source}: {summary}'. If no actionable items found: produce NO output. Update your status file."
+echo "  [4/6] activity-email-check (every 2h at :15, silent when no items)"
+
+# 5. Gmail invite check — every 3 hours at :30 (SILENT when no invites)
+oc cron add \
+  --agent family-calendar \
+  --name "gmail-invite-check" \
+  --cron "30 */3 * * *" \
+  --to "$TELEGRAM_CHAT_ID" \
+  --account "$TELEGRAM_ACCOUNT" \
+  --no-deliver \
+  --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
+  --message "Check Gmail for calendar invites. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/gmail-invite-check.py. Read the JSON output — these are new calendar invites (ICS attachments with METHOD:REQUEST). For each invite: send a Telegram message '🐭 New invite: {subject} on {date} from {organizer}. Accept?'. If no new invites: produce NO output."
+echo "  [5/6] gmail-invite-check (every 3h at :30, silent when no invites)"
+
+# 6. Weekly overview — Sunday at 01:00 UTC (6 PM PT Saturday)
+oc cron add \
+  --agent family-calendar \
+  --name "weekly-overview" \
+  --cron "0 1 * * 0" \
+  --to "$TELEGRAM_CHAT_ID" \
+  --account "$TELEGRAM_ACCOUNT" \
+  --announce \
+  --message "Generate and deliver the weekly schedule overview. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 7. Format as a day-by-day overview for the upcoming week. For each day: list key events with times, attendees, and locations. Flag any conflicts with ⚠️. Note pickup arrangements per day (Mon=Sam+swimming, Fri=Sam, other=Jamie). Include a summary line: '🐭 {N} events this week · {conflicts} conflicts'. Deliver to Telegram."
+echo "  [6/6] weekly-overview (Sunday 01:00 UTC / 6 PM PT Saturday)"
 
 echo ""
 

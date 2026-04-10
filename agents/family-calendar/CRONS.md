@@ -159,7 +159,7 @@ Stale errors in the status file can cause Mr Fixit to raise false alerts, so pru
 
 ## Weekly Overview — Sunday at 01:00 UTC (6 PM PT)
 
-**Schedule:** `0 1 * * 1`
+**Schedule:** `0 1 * * 0`
 **Command:** Generate a week-ahead schedule overview.
 
 1. Run `python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 7`

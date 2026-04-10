@@ -41,5 +41,5 @@ High-value conflicts to watch for:
 ## Hard Constraints
 
 - Git: commit to `agents/family-calendar/` only, never push. Mr Fixit handles Git.
-- OAuth scope: calendar.readonly. No write operations.
+- OAuth scope: full calendar (read/write) + gmail.readonly. Write operations require --confirm flag.
 - LLM calls: use gpt-5.4-nano via OpenAI, never Claude CLI.
