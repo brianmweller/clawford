@@ -266,8 +266,53 @@ def fetch_linkedin_browser():
             "_is_notification": True,
         })
 
+    # Summarize message threads via LLM
+    for msg in data.get("messages", []):
+        sender = msg.get("sender", "")
+        full_messages = msg.get("full_messages", [])
+        preview = msg.get("preview", "")
+
+        if not sender:
+            continue
+
+        # If we have full thread messages, summarize with LLM
+        summary = preview
+        if full_messages and len(full_messages) > 1:
+            try:
+                import subprocess
+                thread_text = "\n".join(full_messages[-10:])
+                prompt = (
+                    f"Summarize this LinkedIn message thread with {sender} in 1-2 sentences. "
+                    f"Focus on what was discussed, any action items, and the current status. "
+                    f"Be concise.\n\nThread:\n{thread_text[:1000]}"
+                )
+                result = subprocess.run(
+                    ["claude", "-p", prompt, "--output-format", "text", "--model", "haiku"],
+                    capture_output=True, text=True, timeout=20,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    summary = result.stdout.strip()
+            except Exception as e:
+                print(f"  Message summarization failed for {sender}: {e}", file=sys.stderr)
+
+        url = msg.get("url", "https://www.linkedin.com/messaging/")
+        time_ago = msg.get("time_ago", "")
+        title = f"{sender} ({time_ago}): {summary[:120]}{'...' if len(summary) > 120 else ''}" if time_ago else f"{sender}: {summary[:120]}"
+
+        articles.append({
+            "id": article_id("msg-" + sender + summary[:50]),
+            "title": title,
+            "link": clean_url(url),
+            "summary": summary,
+            "source": "linkedin",
+            "source_label": "LinkedIn Message",
+            "pub_date": datetime.now(timezone.utc).isoformat(),
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "_is_message": True,
+        })
+
     if not articles:
-        return [], {"source": "LinkedIn", "error": "no feed posts or notifications found"}
+        return [], {"source": "LinkedIn", "error": "no feed posts, notifications, or messages found"}
 
     return articles, None
 
