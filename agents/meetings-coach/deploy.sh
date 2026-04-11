@@ -257,58 +257,15 @@ oc cron add \
 echo "  [4/6] commitment-follow-up (daily 16:00 UTC, silent when all clear)"
 
 # 5. Heartbeat — every 30 minutes (SILENT on success) — SOLE WRITER of the status file
-HEARTBEAT_PROMPT='Heartbeat. Do these steps in order.
+HEARTBEAT_PROMPT='Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/heartbeat.py
 
-STEP 1 — Gather auth state.
-- google_auth: if ~/.openclaw/meetings-coach-workspace/token.json exists AND is valid JSON, return "ok", else "missing".
-- workflowy_auth: if env var WORKFLOWY_API_KEY is set AND non-empty, return "ok", else "missing".
-- krisp_auth: if ~/.openclaw/meetings-coach-workspace/cache/krisp-tokens/tokens.json exists AND is non-empty, return "ok", else "missing".
+This script checks auth state, reads cron caches, verifies required files, prunes stale preps, and writes meetings-coach.status.md automatically. You do NOT write the status file — the script does it.
 
-STEP 2 — Gather per-cron state from caches.
-Read these files if they exist (missing is OK, treat as no-data):
-  - ~/.openclaw/meetings-coach-workspace/cache/last-morning-brief.json
-  - ~/.openclaw/meetings-coach-workspace/cache/last-pre-meeting.json
-  - ~/.openclaw/meetings-coach-workspace/cache/last-post-scan.json
-  - ~/.openclaw/meetings-coach-workspace/cache/last-commitment.json
-For each, extract: timestamp, status, summary. Compute last_cron_run = the most recent timestamp across all four caches. If no caches exist yet, last_cron_run = this heartbeat time. Use the matching cache'"'"'s summary as last_cron_result.
+If the script exits 0: all ok. Produce NO output.
+If the script exits 1: degraded. The script prints the alert message. Send that exact message on Telegram.
+If the script exits 2: script error. Send a Telegram alert: "❌ meetings-coach heartbeat: script error" with the output.
 
-STEP 3 — Verify required files.
-Check these exist: meeting-config.json, sent-alerts.json in ~/.openclaw/meetings-coach-workspace/. If any missing, note in error_log.
-
-STEP 4 — Prune stale prep files.
-Check ~/.openclaw/meetings-coach-workspace/cache/ for prep files older than 14 days. Delete them silently.
-
-STEP 5 — Decide overall status.
-- If any auth field is "missing" → status = degraded.
-- If any file in STEP 3 is missing → status = degraded.
-- If the most recent cron in any of the 4 caches has status=error → status = degraded.
-- Otherwise → status = ok.
-
-STEP 6 — OVERWRITE the status file.
-Write the following exact snapshot to ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md, REPLACING all existing content. Use python3: `python3 -c "open('/home/node/Dropbox/openclaw-backup/agents/meetings-coach.status.md','w').write('''<content>''')"` — this is atomic, no shell expansion issues. Do NOT use temp files. Do NOT use $(cat ...) or any command substitution. Do NOT write to /tmp first. Write DIRECTLY to the status file in one step.
-
-# Meetings Coach — Status
-
-- **last_heartbeat:** {now in YYYY-MM-DD HH:MM UTC}
-- **status:** {ok | degraded}
-- **last_cron_run:** {last_cron_run from STEP 2} — {cron name or "heartbeat"}
-- **last_cron_result:** {summary from STEP 2 or "heartbeat ran" if no cache}
-- **google_auth:** {ok | missing}
-- **workflowy_auth:** {ok | missing}
-- **krisp_auth:** {ok | missing}
-- **error_log:** {none | one-sentence description of any issue found THIS run}
-- **token_usage_today:** —
-
-STEP 7 — Output.
-Produce NO Telegram output. The status file overwrite is silent.
-
-ABSOLUTE RULES:
-1. The status file must be OVERWRITTEN (truncate-write), never appended. The file is a snapshot, not a log.
-2. Do NOT include error history from past runs in error_log. Only THIS run findings.
-3. Do NOT add any append-style entries below the snapshot.
-4. Do NOT read or preserve any old content from the existing file. Overwrite blindly.
-5. The file must be exactly the block above (header + 9 fields), nothing more.
-6. NEVER write to a temp file then cat it. NEVER use $(cat ...) or $(...) substitution in the write command. Write the content DIRECTLY to meetings-coach.status.md in a single python or heredoc command.'
+Do NOT write to meetings-coach.status.md yourself. Do NOT use python3 -c. Do NOT use heredocs. Just run the script and relay its output if non-zero.'
 
 oc cron add \
   --agent meetings-coach \

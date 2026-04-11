@@ -153,44 +153,15 @@ echo "Step 5: Registering 10 crons..."
 # CRITICAL: heartbeat is the ONLY cron that writes fix-it.status.md, and it
 # OVERWRITES (not appends). Other fix-it crons must NOT touch the file.
 # This prevents the unbounded growth that hit 271KB by 2026-04-09.
-HEARTBEAT_PROMPT='Heartbeat check. Do these steps in order.
+HEARTBEAT_PROMPT='Run: python3 ~/.openclaw/fix-it-workspace/scripts/heartbeat.py
 
-STEP 1 — Check agent health.
-For each file matching ~/Dropbox/openclaw-backup/agents/*.status.md, parse the last_heartbeat field. Accept BOTH of these timestamp formats as valid (normalize each to UTC before comparing):
-  - `2026-04-09 21:31 UTC` (space-separated, informal — used by fix-it, shopping, meetings-coach, news-digest)
-  - `2026-04-09T22:02:00Z` (ISO-8601 with Z suffix — used by family-calendar)
-A value in either format is a VALID timestamp. Do not flag ISO-8601 Z values as "invalid timestamp" — they are correct. Cross-reference with `openclaw agents list` (run via exec). For each agent that is BOTH locally registered AND has a brain status file, check if last_heartbeat is older than 90 minutes from now. Ignore the `main` internal (no status file expected). Ignore placeholder status files for agents not in `openclaw agents list`.
+This script checks all agent status files, determines healthy/degraded, and writes fix-it.status.md automatically. You do NOT write the status file — the script does it.
 
-STEP 2 — Decide overall status.
-- If all registered+filed agents have fresh heartbeats: status = healthy.
-- If any has stale heartbeat (>90 min): status = degraded. Note the unhealthy agent name.
+If the script exits 0: all agents healthy. Produce NO output.
+If the script exits 1: an agent is degraded. The script prints the alert message to stdout. Send that exact message on Telegram.
+If the script exits 2: script error. Send a Telegram alert: "❌ fix-it heartbeat: script error" with the output.
 
-STEP 3 — OVERWRITE the status file.
-Pipe the following exact 7-line snapshot to the heartbeat-write script via heredoc. Fill in the {placeholders} with values from STEPs 1-2, then run:
-
-python3 ~/.openclaw/fix-it-workspace/scripts/heartbeat-write.py <<'"'"'STATUSEOF'"'"'
-# Fix-It — Status
-
-- **last_heartbeat:** {now in YYYY-MM-DD HH:MM UTC}
-- **status:** {healthy | degraded}
-- **last_cron_run:** heartbeat-check at {now}
-- **last_cron_result:** {one sentence — e.g., "all 5 agents within 90-min threshold" OR "{agent} stale, last heartbeat {time}"}
-- **error_log:** {none | "{agent} unhealthy: {reason}" — only this run findings, do NOT include past errors}
-- **token_usage_today:** —
-STATUSEOF
-
-If the script exits non-zero, send a Telegram alert: "❌ fix-it heartbeat: failed to overwrite status file".
-
-STEP 4 — Telegram (only if degraded).
-If status = degraded, send: "⚠️ {agent} unresponsive. Last heartbeat: {time}. Investigate."
-If status = healthy, produce NO output. The status file overwrite is silent.
-
-ABSOLUTE RULES:
-1. The status file must be OVERWRITTEN (truncate-write), never appended. The file is a snapshot, not a log.
-2. Do NOT include error history from past runs in error_log. Only THIS run findings.
-3. Do NOT add any append-style entries below the snapshot. The file is exactly the 7-line block above (plus the header), nothing more.
-4. Do NOT read or preserve any old content from the existing file. Overwrite blindly.
-5. Always use the heartbeat-write.py script with a heredoc. NEVER use python3 -c, NEVER use $(cat ...), NEVER write to temp files.'
+Do NOT write to fix-it.status.md yourself. Do NOT use python3 -c. Do NOT use heredocs. Just run the script and relay its output if non-zero.'
 
 oc cron add \
   --agent fix-it \
