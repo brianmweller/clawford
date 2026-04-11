@@ -60,7 +60,7 @@ for file in SOUL.md IDENTITY.md TOOLS.md; do
 done
 
 # Copy Python scripts
-for script in fetch-and-rank.py update-preferences.py on-demand.py; do
+for script in fetch-and-rank.py deliver-digest.py update-preferences.py engagement-poller.py on-demand.py linkedin-scrape.py linkedin-keepalive.py linkedin-auth.py; do
     if [ -f "/tmp/scripts/$script" ]; then
         cp "/tmp/scripts/$script" "$WORKSPACE/scripts/$script"
         echo "  Copied scripts/$script -> $WORKSPACE/scripts/$script"

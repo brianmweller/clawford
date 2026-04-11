@@ -11,7 +11,7 @@
 - **Path:** `~/.openclaw/news-digest-workspace/`
 - **Permissions:** Full read/write
 - **Contents:**
-  - `scripts/` — Python scripts: `fetch-and-rank.py`, `update-preferences.py`, `on-demand.py`
+  - `scripts/` — Python scripts (see Command Execution section below for full list)
   - `preferences/engagement.jsonl` — Append-only engagement log
   - `preferences/model.json` — Current preference weights (topic + source)
   - `cache/` — Daily RSS cache and article index
@@ -97,7 +97,40 @@
 
 ### Shell / Exec
 - **Available:** Yes
-- **Usage:** Running Python scripts (`fetch-and-rank.py`, `update-preferences.py`, `on-demand.py`), curl for RSS fetching, file operations.
+- **Usage:** Running Python scripts in your workspace. Available scripts:
+
+**Morning digest pipeline:**
+```bash
+# Fetch all RSS feeds + LinkedIn, deduplicate, rank by preferences → cache/ranked-YYYY-MM-DD.json
+python3 ~/.openclaw/news-digest-workspace/scripts/fetch-and-rank.py
+
+# Read ranked JSON, format, send to Telegram with inline reaction buttons → cache/sent-history.json
+python3 ~/.openclaw/news-digest-workspace/scripts/deliver-digest.py
+```
+
+**Engagement & preferences:**
+```bash
+# Parse session transcripts for /like and /dislike commands → preferences/engagement.jsonl
+python3 ~/.openclaw/news-digest-workspace/scripts/engagement-poller.py
+
+# Apply engagement signals to preference model → preferences/model.json
+python3 ~/.openclaw/news-digest-workspace/scripts/update-preferences.py
+```
+
+**On-demand queries:**
+```bash
+# Search cache + Google News + Brave for a topic → JSON results
+python3 ~/.openclaw/news-digest-workspace/scripts/on-demand.py --query "artificial intelligence"
+```
+
+**LinkedIn session management:**
+```bash
+# Keep LinkedIn session cookies fresh (called by linkedin-keepalive cron)
+python3 ~/.openclaw/news-digest-workspace/scripts/linkedin-keepalive.py
+
+# Scrape LinkedIn feed + notifications (called internally by fetch-and-rank.py)
+python3 ~/.openclaw/news-digest-workspace/scripts/linkedin-scrape.py
+```
 - **Guardrails:**
   - Never pipe fetched content to `bash` or `sh`
   - Never interpolate RSS content into shell commands

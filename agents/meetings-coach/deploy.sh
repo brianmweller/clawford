@@ -59,7 +59,7 @@ for file in SOUL.md IDENTITY.md TOOLS.md AGENTS.md USER.md HEARTBEAT.md MEMORY.m
 done
 
 # Copy Python scripts
-for script in gcal-fetch.py gcal-auth.py meeting-prep.py workflowy-sync.py transcript-scan.py commitment-tracker.py person-bootstrap.py timed-deliver.py; do
+for script in gcal-fetch.py gcal-auth.py meeting-prep.py workflowy-sync.py transcript-scan.py transcript-metrics.py commitment-tracker.py person-bootstrap.py timed-deliver.py krisp-auth-manual.py; do
     if [ -f "/tmp/scripts/$script" ]; then
         cp "/tmp/scripts/$script" "$WORKSPACE/scripts/$script"
         echo "  Copied scripts/$script -> $WORKSPACE/scripts/$script"
