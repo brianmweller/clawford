@@ -129,16 +129,9 @@ echo "  Added /bin/* to allowlist"
 oc approvals allowlist add --agent fix-it "/usr/local/bin/*"
 echo "  Added /usr/local/bin/* to allowlist"
 
-oc approvals allowlist add --agent fix-it "python3 *"
-oc approvals allowlist add --agent fix-it "bash *"
-oc approvals allowlist add --agent fix-it "set -euo pipefail*"
-echo "  Added exec patterns: python3 *, bash *, set -euo pipefail*"
-
-# ask=off so crons don't wait for interactive approval.
-# The global security is set to "full" by the first agent deployed,
-# but per-agent allowlist policy in exec-approvals.json narrows scope.
+# Per-agent exec policy: full (allowlist can't handle LLM compound commands).
 oc config set tools.exec.ask off
-echo "  Set tools.exec.ask=off"
+echo "  Exec approvals set (policy=full per agent, ask=off)"
 
 echo ""
 

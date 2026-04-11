@@ -183,12 +183,9 @@ echo "  Added /bin/* to allowlist"
 oc approvals allowlist add --agent meetings-coach "/usr/local/bin/*"
 echo "  Added /usr/local/bin/* to allowlist"
 
-oc approvals allowlist add --agent meetings-coach "python3 *"
-oc approvals allowlist add --agent meetings-coach "bash *"
-echo "  Added exec patterns: python3 *, bash *"
-
+# Per-agent exec policy: full (allowlist can't handle LLM compound commands).
 oc config set tools.exec.ask off
-echo "  Set tools.exec.ask=off"
+echo "  Exec approvals set (policy=full per agent, ask=off)"
 
 echo ""
 
