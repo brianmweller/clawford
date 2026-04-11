@@ -1,0 +1,41 @@
+{
+  "operator_emails": ["sam.smith@example.com"],
+  "family_inner_names": ["Alex", "Avery", "Jordan", "Jamie"],
+  "professional_domains": [],
+  "personal_domains": ["gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com", "me.com", "aol.com"],
+  "noreply_patterns": ["noreply", "no-reply", "notifications", "mailer-daemon", "donotreply", "automated", "bounce", "postmaster", "daemon", "notify", "alert"],
+  "mailing_list_heuristic": {
+    "min_received": 10,
+    "max_sent": 0
+  },
+  "min_importance_score": 5.0,
+  "lookback_years": 2,
+  "gmail": {
+    "token_path": null,
+    "batch_size": 50,
+    "batch_delay_seconds": 1.0,
+    "max_body_chars": 3000
+  },
+  "calendar": {
+    "token_path": null,
+    "calendar_ids": ["sam.smith@example.com"]
+  },
+  "krisp": {
+    "token_dir": null
+  },
+  "workflowy": {
+    "contact_cache_path": null
+  },
+  "openai": {
+    "model": "gpt-5.4-nano",
+    "max_tokens_per_person": 4000,
+    "batch_size": 10,
+    "batch_delay_seconds": 1.0
+  },
+  "circle_rules": {
+    "high_meeting_threshold": 5,
+    "high_meeting_recency_days": 30,
+    "high_email_sent_threshold": 10,
+    "high_whatsapp_threshold": 5
+  }
+}
