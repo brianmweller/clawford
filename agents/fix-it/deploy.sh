@@ -67,6 +67,12 @@ else
     echo "  WARNING: $KNOWN_ISSUES_SRC not found — morning status will run without suppression"
 fi
 
+# Copy expected-crons.json (used by cron-self-check for all agents)
+if [ -f "/tmp/expected-crons.json" ]; then
+    cp "/tmp/expected-crons.json" "$WORKSPACE/expected-crons.json"
+    echo "  Copied expected-crons.json -> $WORKSPACE/expected-crons.json"
+fi
+
 # Copy scripts
 mkdir -p "$WORKSPACE/scripts"
 for script in timed-deliver.py heartbeat-write.py; do
@@ -344,7 +350,7 @@ oc cron add \
   --account "$TELEGRAM_ACCOUNT" \
   --no-deliver \
   --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
-  --message "Run: openclaw cron list. Verify all 10 fix-it crons are registered (heartbeat-check, morning-status, brain-validation, conflict-scan, file-size-monitor, monthly-archival, security-audit, update-check, cron-self-check, obsidian-briefing). Filter the output visually for fix-it entries. If all 10 are present: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If any are missing: attempt to re-register them and send me a Telegram message."
+  --message "Check crons for ALL agents. 1) Run: openclaw cron list. 2) Read ~/.openclaw/fix-it-workspace/expected-crons.json — this lists the expected cron names per agent. 3) For each agent in the config, check that every expected cron name appears in the cron list output. 4) If ALL crons for ALL agents are present: produce NO output. 5) If any crons are missing: send a Telegram alert listing which agent is missing which cron(s). For fix-it crons only, attempt to re-register. For other agents, just report the gap. DO NOT touch fix-it.status.md — the heartbeat-check cron owns that file."
 echo "  [9/10] cron-self-check (silent on pass, does NOT touch status file)"
 
 # 10. Obsidian daily briefing — daily at 12:10 UTC (SILENT on success)
