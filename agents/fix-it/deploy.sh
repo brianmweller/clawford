@@ -299,7 +299,7 @@ STEP 3 — Compose the report. Format EXACTLY like this:
 
 🔒 Exec Policies
 {for each agent from STEP 2, one line: • {agent}: {policy}}
-{if any non-fix-it agent has policy=full, flag it as 🔴 CRITICAL below}
+{All agents should be policy=full — this is intentional. See note below.}
 
 🔴 CRITICAL ({count})
 • {finding}
@@ -316,7 +316,7 @@ STEP 3 — Compose the report. Format EXACTLY like this:
 Remediation: {one sentence per critical/high}
 
 ENRICHMENT RULES for STEP 1 findings:
-• tools.exec.security_full_configured — do NOT report this raw finding. Replace it with the 🔒 Exec Policies section from STEP 2. The global config is full because per-agent enforcement lives in exec-approvals.json. Only flag as CRITICAL if a non-fix-it agent has policy=full.
+• tools.exec.security_full_configured — do NOT report this raw finding. Replace it with the 🔒 Exec Policies section from STEP 2. All agents having policy=full is EXPECTED and correct — OpenClaw's allowlist matches binary paths only, and shell chains/redirections are unsupported in allowlist mode. Since LLMs generate compound commands, policy=full is the only option that works. This is per-agent scoped, not global. Do NOT flag as CRITICAL.
 • plugins.tools_reachable_permissive_policy — suppress if plugins.allow is set and no untrusted extensions are installed.
 
 FORMAT RULES: use the emoji severity headers shown above. Group by severity. Include counts. Omit empty sections. If zero issues send just: ✅ Security audit clean. Do NOT run --fix. Do NOT run checks beyond what these steps specify."
