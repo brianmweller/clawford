@@ -1,47 +1,47 @@
 {
-  "fix-it": [
-    "heartbeat-check",
-    "morning-status",
-    "brain-validation",
-    "conflict-scan",
-    "file-size-monitor",
-    "monthly-archival",
-    "security-audit",
-    "update-check",
-    "cron-self-check",
-    "obsidian-briefing"
-  ],
-  "shopping": [
-    "delivery-digest",
-    "subscribe-save-review",
-    "heartbeat",
-    "costco-token-refresh",
-    "amazon-keepalive",
-    "morning-delivery-brief"
-  ],
-  "news-digest": [
-    "morning-edition",
-    "preference-update",
-    "heartbeat",
-    "engagement-poll",
-    "linkedin-keepalive"
-  ],
-  "family-calendar": [
-    "morning-briefing",
-    "reminder-check",
-    "heartbeat",
-    "activity-email-check",
-    "gmail-invite-check",
-    "weekly-overview",
-    "whatsapp-chat-scan",
-    "whatsapp-schedule-post"
-  ],
-  "meetings-coach": [
-    "morning-meeting-brief",
-    "pre-meeting-alert",
-    "post-meeting-scan",
-    "commitment-follow-up",
-    "heartbeat",
-    "weekly-review"
-  ]
+  "fix-it": {
+    "heartbeat-check": {"cron": "*/30 * * * *", "no_deliver": true},
+    "morning-status": {"cron": "50 11 * * *", "announce": true},
+    "brain-validation": {"cron": "0 */6 * * *", "no_deliver": true},
+    "conflict-scan": {"cron": "0 */2 * * *", "no_deliver": true},
+    "file-size-monitor": {"cron": "0 12 * * *", "no_deliver": true},
+    "monthly-archival": {"cron": "0 3 1 * *", "announce": true},
+    "security-audit": {"cron": "0 4 * * 0", "announce": true},
+    "update-check": {"cron": "0 4 * * 3", "announce": true},
+    "cron-self-check": {"cron": "0 0 * * *", "no_deliver": true},
+    "obsidian-briefing": {"cron": "10 12 * * *", "no_deliver": true}
+  },
+  "shopping": {
+    "delivery-digest": {"cron": "0 14 * * *", "announce": true},
+    "morning-delivery-brief": {"cron": "50 11 * * *", "no_deliver": true},
+    "subscribe-save-review": {"cron": "0 14 1 * *", "announce": true},
+    "heartbeat": {"cron": "*/30 * * * *", "no_deliver": true},
+    "costco-token-refresh": {"cron": "*/12 * * * *", "no_deliver": true},
+    "amazon-keepalive": {"cron": "*/30 * * * *", "no_deliver": true}
+  },
+  "news-digest": {
+    "morning-edition": {"cron": "0 12 * * *", "announce": true},
+    "preference-update": {"cron": "0 23 * * *", "no_deliver": true},
+    "heartbeat": {"cron": "*/30 * * * *", "no_deliver": true},
+    "engagement-poll": {"cron": "*/5 * * * *", "no_deliver": true},
+    "linkedin-keepalive": {"cron": "0 */6 * * *", "no_deliver": true}
+  },
+  "family-calendar": {
+    "morning-briefing": {"cron": "50 11 * * *", "no_deliver": true},
+    "reminder-check": {"cron": "*/5 * * * *", "no_deliver": true},
+    "heartbeat": {"cron": "*/30 * * * *", "no_deliver": true},
+    "activity-email-check": {"cron": "15 */2 * * *", "no_deliver": true},
+    "gmail-invite-check": {"cron": "30 */3 * * *", "no_deliver": true},
+    "weekly-overview": {"cron": "0 1 * * 0", "announce": true},
+    "whatsapp-chat-scan": {"cron": "45 */2 * * *", "no_deliver": true},
+    "whatsapp-schedule-post": {"cron": "0 12 * * *", "no_deliver": true}
+  },
+  "meetings-coach": {
+    "morning-meeting-brief": {"cron": "50 11 * * *", "no_deliver": true},
+    "pre-meeting-alert": {"cron": "*/30 * * * *", "no_deliver": true},
+    "post-meeting-scan": {"cron": "15,45 * * * *", "no_deliver": true},
+    "commitment-follow-up": {"cron": "0 16 * * *", "no_deliver": true},
+    "heartbeat": {"cron": "*/30 * * * *", "no_deliver": true},
+    "weekly-review": {"cron": "0 0 * * 5", "announce": true}
+  }
 }
