@@ -207,6 +207,7 @@ Agents:
 
 Brain: {validation PASS/FAIL with counts}
 Dropbox: {conflicts result}
+Platform heartbeat: n/a (cron-based status files are source of truth)
 
 🚨 Open alerts: (OMIT this entire section if none)
   - {agent}: {the issue}

@@ -11,3 +11,10 @@
 - **expires:** 2026-05-10
 - **reason:** Status file multi-writer bloat — fix specified (heartbeat sole writer) but not yet enforced in agent code. Tracked.
 - **escalation:** If status file exceeds 50KB or heartbeat stops writing entirely.
+
+---
+
+- **match:** tools\.exec\.security.*full|exec.*policy.*full
+- **expires:** 2027-01-01
+- **reason:** policy=full is intentional for all agents. OpenClaw allowlist only matches binary paths; LLM compound commands (pipes, &&, redirections) require full mode. Single-operator setup, no untrusted agents. Not a finding.
+- **escalation:** If an untrusted or third-party agent is added with policy=full.

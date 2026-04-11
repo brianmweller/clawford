@@ -21,6 +21,17 @@ The split exists because heartbeat runs every 30 min (48x/day) and must be
 near-instant, while morning-status runs once and can take 60+ seconds to
 read KNOWN_ISSUES.md, verify tokens, and cross-check state.
 
+## Platform Heartbeat (`openclaw status --deep`) — not used
+
+OpenClaw has a built-in platform heartbeat feature visible via `openclaw status --deep`.
+Busytown agents do **not** use it. The platform view showing "heartbeats disabled" or
+partial/stale data is **expected behavior**, not a failure.
+
+Source of truth for agent health is the cron-based status file system:
+`~/Dropbox/openclaw-backup/agents/*.status.md`, checked every 30 minutes by the
+heartbeat crons below. Do not attempt to enable or reconcile the platform heartbeat —
+it would duplicate signals and risk conflicting with the cron-based model.
+
 ## Every Heartbeat (30 min)
 
 1. **Quick health scan:**
