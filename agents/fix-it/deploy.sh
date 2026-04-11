@@ -67,6 +67,17 @@ else
     echo "  WARNING: $KNOWN_ISSUES_SRC not found — morning status will run without suppression"
 fi
 
+# Copy scripts
+mkdir -p "$WORKSPACE/scripts"
+for script in timed-deliver.py heartbeat-write.py; do
+    if [ -f "/tmp/scripts/$script" ]; then
+        cp "/tmp/scripts/$script" "$WORKSPACE/scripts/$script"
+        echo "  Copied scripts/$script -> $WORKSPACE/scripts/$script"
+    else
+        echo "  WARNING: /tmp/scripts/$script not found — skipping"
+    fi
+done
+
 echo ""
 
 # ── Step 2: Create Status File ───────────────────────────────
@@ -154,8 +165,9 @@ STEP 2 — Decide overall status.
 - If any has stale heartbeat (>90 min): status = degraded. Note the unhealthy agent name.
 
 STEP 3 — OVERWRITE the status file.
-Write the following exact 7-line snapshot to ~/Dropbox/openclaw-backup/agents/fix-it.status.md, REPLACING all existing content. Use python3: `python3 -c "open(\"/home/node/Dropbox/openclaw-backup/agents/fix-it.status.md\",\"w\").write(\"\"\"<content>\"\"\")"` — this is atomic, no shell expansion issues. Do NOT use temp files. Do NOT use $(cat ...) or any command substitution. Do NOT write to /tmp first. Write DIRECTLY to the status file in one step.
+Pipe the following exact 7-line snapshot to the heartbeat-write script via heredoc. Fill in the {placeholders} with values from STEPs 1-2, then run:
 
+python3 ~/.openclaw/fix-it-workspace/scripts/heartbeat-write.py <<'"'"'STATUSEOF'"'"'
 # Fix-It — Status
 
 - **last_heartbeat:** {now in YYYY-MM-DD HH:MM UTC}
@@ -164,6 +176,9 @@ Write the following exact 7-line snapshot to ~/Dropbox/openclaw-backup/agents/fi
 - **last_cron_result:** {one sentence — e.g., "all 5 agents within 90-min threshold" OR "{agent} stale, last heartbeat {time}"}
 - **error_log:** {none | "{agent} unhealthy: {reason}" — only this run findings, do NOT include past errors}
 - **token_usage_today:** —
+STATUSEOF
+
+If the script exits non-zero, send a Telegram alert: "❌ fix-it heartbeat: failed to overwrite status file".
 
 STEP 4 — Telegram (only if degraded).
 If status = degraded, send: "⚠️ {agent} unresponsive. Last heartbeat: {time}. Investigate."
@@ -174,8 +189,7 @@ ABSOLUTE RULES:
 2. Do NOT include error history from past runs in error_log. Only THIS run findings.
 3. Do NOT add any append-style entries below the snapshot. The file is exactly the 7-line block above (plus the header), nothing more.
 4. Do NOT read or preserve any old content from the existing file. Overwrite blindly.
-5. If the overwrite fails for any reason, send a Telegram alert: "❌ fix-it heartbeat: failed to overwrite status file: {error}".
-6. NEVER write to a temp file then cat it. NEVER use $(cat ...) or $(...) substitution in the write command. Write the content DIRECTLY to fix-it.status.md in a single python or heredoc command.'
+5. Always use the heartbeat-write.py script with a heredoc. NEVER use python3 -c, NEVER use $(cat ...), NEVER write to temp files.'
 
 oc cron add \
   --agent fix-it \
