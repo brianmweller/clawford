@@ -183,15 +183,9 @@ echo "  Added /bin/* to allowlist"
 oc approvals allowlist add --agent meetings-coach "/usr/local/bin/*"
 echo "  Added /usr/local/bin/* to allowlist"
 
-oc approvals allowlist add --agent meetings-coach "python3 ~/.openclaw/meetings-coach-workspace/scripts/*"
-oc approvals allowlist add --agent meetings-coach "python3 /home/node/.openclaw/meetings-coach-workspace/scripts/*"
-oc approvals allowlist add --agent meetings-coach "python3 ~/.openclaw/meetings-coach-workspace/scripts/*.py*"
-oc approvals allowlist add --agent meetings-coach "python3 /home/node/.openclaw/meetings-coach-workspace/scripts/*.py*"
-echo "  Added script patterns (simple + compound, ~/... + /home/node/...)"
-
-oc approvals allowlist add --agent meetings-coach "python3 -"
-oc approvals allowlist add --agent meetings-coach "python3 -c *"
-echo "  Added python3 stdin and -c patterns"
+oc approvals allowlist add --agent meetings-coach "python3 *"
+oc approvals allowlist add --agent meetings-coach "bash *"
+echo "  Added exec patterns: python3 *, bash *"
 
 oc config set tools.exec.ask off
 echo "  Set tools.exec.ask=off"

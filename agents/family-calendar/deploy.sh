@@ -156,15 +156,9 @@ echo "  Added /bin/* to allowlist"
 oc approvals allowlist add --agent family-calendar "/usr/local/bin/*"
 echo "  Added /usr/local/bin/* to allowlist"
 
-oc approvals allowlist add --agent family-calendar "python3 ~/.openclaw/family-calendar-workspace/scripts/*"
-oc approvals allowlist add --agent family-calendar "python3 /home/node/.openclaw/family-calendar-workspace/scripts/*"
-oc approvals allowlist add --agent family-calendar "python3 ~/.openclaw/family-calendar-workspace/scripts/*.py*"
-oc approvals allowlist add --agent family-calendar "python3 /home/node/.openclaw/family-calendar-workspace/scripts/*.py*"
-echo "  Added script patterns (simple + compound, ~/... + /home/node/...)"
-
-oc approvals allowlist add --agent family-calendar "python3 -"
-oc approvals allowlist add --agent family-calendar "python3 -c *"
-echo "  Added python3 stdin and -c patterns"
+oc approvals allowlist add --agent family-calendar "python3 *"
+oc approvals allowlist add --agent family-calendar "bash *"
+echo "  Added exec patterns: python3 *, bash *"
 
 oc config set tools.exec.ask off
 echo "  Set tools.exec.ask=off"

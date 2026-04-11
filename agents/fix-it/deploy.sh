@@ -129,13 +129,10 @@ echo "  Added /bin/* to allowlist"
 oc approvals allowlist add --agent fix-it "/usr/local/bin/*"
 echo "  Added /usr/local/bin/* to allowlist"
 
-oc approvals allowlist add --agent fix-it "python3 -"
-oc approvals allowlist add --agent fix-it "python3 -c *"
-oc approvals allowlist add --agent fix-it "python3 ~/.openclaw/fix-it-workspace/scripts/*.py*"
-oc approvals allowlist add --agent fix-it "python3 /home/node/.openclaw/fix-it-workspace/scripts/*.py*"
-# The heartbeat LLM generates multi-line bash with set -euo pipefail
+oc approvals allowlist add --agent fix-it "python3 *"
+oc approvals allowlist add --agent fix-it "bash *"
 oc approvals allowlist add --agent fix-it "set -euo pipefail*"
-echo "  Added python3, script, and compound-command patterns"
+echo "  Added exec patterns: python3 *, bash *, set -euo pipefail*"
 
 # ask=off so crons don't wait for interactive approval.
 # The global security is set to "full" by the first agent deployed,
