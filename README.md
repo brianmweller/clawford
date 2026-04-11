@@ -11,7 +11,7 @@ A six-agent personal AI system themed after Richard Scarry's Busytown. Each agen
 | 🦛🛒 **Hilda Hippo** | shopping | Deployed | @openclaw_shopping_bot | Multi-channel purchasing |
 | 🐭📅 **Mistress Mouse** | family-calendar | Deployed | @openclaw_mistress_mouse_bot | Family logistics, scheduling, comms |
 | 🐷🔍 **Sergeant Murphy** | meetings-coach | Deployed | @openclaw_sergeant_murphy_bot | Meeting prep, coaching, debrief, commitments |
-| 🐱🤝 **Huckle Cat** | connector | Not deployed | — | Relationship management, social nudges |
+| 🐱🤝 **Huckle Cat** | connector | Deployed | @openclaw_huckle_cat_bot | Relationship management, brain bootstrapping, notes triage |
 
 *And if anything breaks catastrophically: **Mr Frumble** is waiting in the wings.*
 
@@ -48,7 +48,8 @@ clawford/
 │   ├── news-digest/       # 🐛 Lowly Worm (deployed)
 │   ├── shopping/          # 🦛 Hilda Hippo (deployed)
 │   ├── family-calendar/   # 🐭 Mistress Mouse (deployed)
-│   └── meetings-coach/    # 🐷 Sergeant Murphy (deployed)
+│   ├── meetings-coach/    # 🐷 Sergeant Murphy (deployed)
+│   └── connector/         # 🐱 Huckle Cat (deployed) + mine/ data pipeline
 ├── telegram-relay/        # Local Telegram ↔ Claude Code bot
 ├── brain/                 # Shared brain setup
 │   └── setup-brain.sh

@@ -1,8 +1,8 @@
 # OpenClaw Shared Brain Schema
 
-**Version:** 0.1.0
-**Date:** 2026-04-02
-**Status:** Design spec — not yet implemented
+**Version:** 0.2.0
+**Date:** 2026-04-11
+**Status:** Active — agents read/write per access matrix. People files seeded via mining pipeline.
 
 ---
 
@@ -247,14 +247,18 @@ Each person gets a file in `/people/` with identity and circle information. Dyna
 - **slug:** {slug}
 - **circles:** {comma-separated list}
 - **relationship:** {relationship to user}
-- **google_contact_id:** {if synced}
+- **relationship_type:** {colleague, manager, friend, client, family, acquaintance, vendor}
+- **preferred_channel:** {iMessage, WhatsApp, WeChat, email, Telegram, phone}
+- **tone:** {casual, warm, professional, formal}
 - **email:** {primary email}
 - **phone:** {primary phone}
 - **platforms:** {where you communicate: WhatsApp, WeChat, email, etc.}
-- **preferred_channel:** {how they prefer to be reached}
 - **last_interaction:** {date, updated by agents}
+- **context_notes:** {free-form — what's going on in their life, what to ask about next}
 - **notes:** {any static notes}
 ```
+
+Fields `relationship_type`, `tone`, and `context_notes` were added for Huckle Cat (connector agent). They enable voice-calibrated message drafting and richer relationship nudges. Inspired by Flux's `RecipientPreference` model.
 
 **Circles:**
 

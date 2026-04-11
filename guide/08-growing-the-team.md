@@ -13,11 +13,11 @@ You've deployed one agent. The rest follow the same pattern.
 | 3 | 🦛 **Hilda Hippo** | shopping | Amazon/Costco order tracking, grocery list. |
 | 4 | 🐭 **Mistress Mouse** | family-calendar | Google Calendar, family logistics. Deployed 2026-04-08. |
 | 5 | 🐷 **Sergeant Murphy** | meetings-coach | Meeting prep, coaching, Krisp, Workflowy. Deployed 2026-04-08. |
-| 6 | 🐱 **Huckle Cat** | connector | Most ambitious — relationship management, heaviest Flux dependency. |
+| 6 | 🐱 **Huckle Cat** | connector | Most ambitious — relationship management, data mining, brain bootstrapping. Deployed 2026-04-11. |
 
 Start with Lowly Worm after Fix-It — simplest agent with no bidirectional APIs. The Telegram ↔ Claude Code relay is now handled locally (see `telegram-relay/`), not as a VPS agent.
 
-**Actual deploy order (as of 2026-04-08):** Mr Fixit → Lowly Worm → Hilda Hippo → Mistress Mouse → Sergeant Murphy.
+**Actual deploy order:** Mr Fixit → Lowly Worm → Hilda Hippo → Mistress Mouse (2026-04-08) → Sergeant Murphy (2026-04-08) → Huckle Cat (2026-04-11).
 
 ## The reusable deployment pattern
 
@@ -181,14 +181,53 @@ Agents coordinate through the shared brain, not by messaging each other. The rul
 - **Fix-It monitors everyone:** Heartbeat checks, validation, conflict detection
 - **Access matrix enforced by convention:** Not all agents need access to all directories (see Chapter 2)
 
+## Lessons from Huckle Cat (connector agent)
+
+The final agent — and the most different. Where every other agent was built around one external API (Calendar, Gmail, Krisp, Amazon), Huckle Cat was built around the *brain itself*. It doesn't have a single primary data source — it mines seven of them, aggregates them, and synthesizes a relationship intelligence layer that none of the individual agents could produce alone.
+
+25. **Mine the data you already have.** The system was sitting on two years of relationship data across Gmail, Google Calendar, Krisp transcripts, WhatsApp session logs, Google Messages, Google Contacts, and Workflowy's contact cache — but no agent was looking at it holistically. Huckle Cat's mining pipeline (`agents/connector/scripts/mine/`) extracts contacts from all seven sources, deduplicates them, scores them by interaction frequency, and produces a review file. The data was always there; it just needed someone to aggregate it.
+
+26. **Google Contacts is two databases.** The People API has `people.connections.list` (2,435 explicitly saved contacts) and `otherContacts.list` (1,895 auto-saved from email interactions). Together they give you 3,500+ email-to-name-and-phone mappings. You need both the `contacts.readonly` and `contacts.other.readonly` scopes. Enable the People API separately in Cloud Console — it's not bundled with Calendar or Gmail.
+
+27. **LLM enrichment is appropriate for one-time pipelines.** The "scripts do I/O, agent does thinking" rule applies to VPS crons where the agent's own LLM does reasoning. But for a local one-time mining pipeline, calling OpenAI (gpt-5.4-nano) directly from a script is the right call. The LLM pass extracts per-person relationship type, key facts, discussion topics, context notes, and tone — intelligence that would take hours to assemble manually. At ~$0.01 per person, enriching 200 contacts costs about $2.
+
+28. **Chrome DevTools is a valid data source.** Google Messages has no API. WhatsApp Web has no export. But Sam had both open in Chrome tabs. A self-contained JS snippet pasted into DevTools walks through every conversation, extracts messages, and copies the result to clipboard as JSON. No extension installation, no permissions dialog, no persistent access. The Flux Chrome extension's selector patterns (`messages.google.com` and `web.whatsapp.com`) provided the battle-tested CSS selectors.
+
+29. **Seed the brain before deploying the agent.** Every other agent was deployed first, then accumulated data over time. Huckle Cat inverted this: the mining pipeline ran *before* the first cron, so the morning nudge was useful from day one. An empty address book makes a relationship agent worthless. A pre-seeded one with 100+ contacts, circle assignments, and LLM-generated context notes makes it immediately valuable.
+
+30. **The enriched people file template.** The original shared brain schema had 10 fields per person. Huckle Cat's template adds `relationship_type`, `tone`, and `context_notes` — inspired by Flux's `RecipientPreference` model. These enable voice-calibrated drafting (`/draft` adjusts tone per person) and richer nudge messages ("he started that new role last month" vs. "overdue by 22 days").
+
+31. **The aggregator is the real product.** The individual miners are straightforward (Gmail API, Calendar API, Krisp MCP, JSONL parsing). The aggregator is where the value is: email-based deduplication across Gmail/Calendar/Workflowy, fuzzy name matching for Krisp (name-only) and WhatsApp, Google Contacts lookup for blank names and phone numbers, importance scoring that overweights sent emails and meetings over received newsletters, and automatic circle assignment based on domain + frequency + recency.
+
+32. **Review before seeding.** The pipeline generates a tiered Markdown table, not people files directly. Sam reviews it in his editor — deletes marketing contacts, fixes circles, corrects names — then runs `--finalize` to produce the seed. This catches the inevitable errors (NasalFreshMD.com is not a person, sam.smith.alt@example.com is Sam's other account) before they pollute the brain. The cost of one review pass is low; the cost of 200 wrong people files is high.
+
+33. **Facts from signatures, not from bodies.** Email body mining is expensive (3x the API quota) and noisy. But email signatures are structured gold: job title, company, phone number, LinkedIn URL. The signature parser uses heuristic line detection (look for `--`, `Best,`, `Regards,` near the end) and extracts `Title | Company` patterns. These become `category: established` facts in the brain with `confidence: 0.7` and `source_type: observed`.
+
+## The complete agent roster
+
+All six agents are now deployed. The team:
+
+| Agent | Character | Crons | Data Sources | Brain Access |
+|-------|-----------|-------|-------------|-------------|
+| fix-it | 🦊🔧 Mr Fixit | 9 | Git, filesystem | R (all), W (own status, archive) |
+| news-digest | 🐛📰 Lowly Worm | 4 | RSS, LinkedIn, web | None (deliberately isolated) |
+| shopping | 🦛🛒 Hilda Hippo | 3 | Amazon, Costco, Gmail | R/W (facts, tasks) |
+| family-calendar | 🐭📅 Mistress Mouse | 7 | Google Calendar, Gmail, WhatsApp | R/W (people, facts, commitments) |
+| meetings-coach | 🐷🔍 Sergeant Murphy | 6 | Google Calendar, Krisp, Workflowy | R/W (people, facts, commitments, tasks) |
+| connector | 🐱🤝 Huckle Cat | 4 | Shared brain (all dirs) | R/W (people, facts, commitments, notes, tasks) |
+
+Huckle Cat has the broadest access because he's the connective tissue — he reads what every other agent writes, triages raw notes into structured knowledge, and surfaces relationship insights that span all data sources.
+
 ## The Flux upgrade path
 
-As Flux (or similar MCP-based tools) matures:
+Flux (Sam's cognitive exoskeleton project) provided the reference architecture for Huckle Cat's relationship intelligence: `RecipientPreference` (per-contact relationship type, social distance, tone), `KnowledgeFact` (epistemic types, confidence decay), and the `Nudge` engine (urgency-ranked triggers). These patterns were ported into the shared brain's file-based format rather than integrated as a running service.
 
-1. Expose the Flux tool to agents that need it
-2. Update the agent's SOUL to prefer the Flux tool over the file-based brain
+As Flux capabilities are rebuilt or new MCP tools mature:
+
+1. Port the capability into the agent's scripts or expose as an MCP tool
+2. Update the agent's SOUL to use the new tool
 3. Keep the file-based brain as a fallback for 30+ days
-4. Deprecate the file-based version once Flux is stable
+4. Deprecate the file-based version once the new approach is stable
 
 This ensures no single tool failure takes down the agent network.
 
