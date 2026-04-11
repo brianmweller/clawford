@@ -257,7 +257,7 @@ oc cron add \
 echo "  [4/6] commitment-follow-up (daily 16:00 UTC, silent when all clear)"
 
 # 5. Heartbeat — every 30 minutes (SILENT on success) — SOLE WRITER of the status file
-HEARTBEAT_PROMPT='Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/heartbeat.py
+HEARTBEAT_PROMPT='Run: python3 /home/node/.openclaw/meetings-coach-workspace/scripts/heartbeat.py
 
 This script checks auth state, reads cron caches, verifies required files, prunes stale preps, and writes meetings-coach.status.md automatically. You do NOT write the status file — the script does it.
 

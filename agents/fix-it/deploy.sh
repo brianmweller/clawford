@@ -153,7 +153,7 @@ echo "Step 5: Registering 10 crons..."
 # CRITICAL: heartbeat is the ONLY cron that writes fix-it.status.md, and it
 # OVERWRITES (not appends). Other fix-it crons must NOT touch the file.
 # This prevents the unbounded growth that hit 271KB by 2026-04-09.
-HEARTBEAT_PROMPT='Run: python3 ~/.openclaw/fix-it-workspace/scripts/heartbeat.py
+HEARTBEAT_PROMPT='Run: python3 /home/node/.openclaw/fix-it-workspace/scripts/heartbeat.py
 
 This script checks all agent status files, determines healthy/degraded, and writes fix-it.status.md automatically. You do NOT write the status file — the script does it.
 
