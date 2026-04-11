@@ -157,20 +157,17 @@ oc approvals allowlist add --agent family-calendar "/usr/local/bin/*"
 echo "  Added /usr/local/bin/* to allowlist"
 
 oc approvals allowlist add --agent family-calendar "python3 ~/.openclaw/family-calendar-workspace/scripts/*"
-echo "  Added python3 scripts/* to allowlist"
+oc approvals allowlist add --agent family-calendar "python3 /home/node/.openclaw/family-calendar-workspace/scripts/*"
+oc approvals allowlist add --agent family-calendar "python3 ~/.openclaw/family-calendar-workspace/scripts/*.py*"
+oc approvals allowlist add --agent family-calendar "python3 /home/node/.openclaw/family-calendar-workspace/scripts/*.py*"
+echo "  Added script patterns (simple + compound, ~/... + /home/node/...)"
 
 oc approvals allowlist add --agent family-calendar "python3 -"
-echo "  Added python3 stdin to allowlist"
+oc approvals allowlist add --agent family-calendar "python3 -c *"
+echo "  Added python3 stdin and -c patterns"
 
-# ── Exec policy: trusted local automation ──
-# Without this, crons fail with "exec denied: Cron runs cannot wait for
-# interactive exec approval." The LLM generates compound shell commands
-# (redirects, pipes, heredocs) that don't match simple allowlist patterns.
-# For a private VPS running trusted agents, security=full + ask=off is the
-# right posture — no human approval needed for exec calls.
-oc config set tools.exec.security full
 oc config set tools.exec.ask off
-echo "  Set tools.exec.security=full, ask=off"
+echo "  Set tools.exec.ask=off"
 
 echo ""
 
