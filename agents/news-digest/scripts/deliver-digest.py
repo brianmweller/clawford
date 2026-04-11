@@ -357,6 +357,31 @@ def main():
                 sent_count += 1
                 time.sleep(0.3)
 
+        # LinkedIn messages/InMail section
+        msgs = li_data.get("messages", [])
+        if msgs:
+            send_telegram("💬 LINKEDIN MESSAGES\n━━━━━━━━━━━━━━━")
+            time.sleep(0.3)
+
+            for m in msgs:
+                sender = m.get("sender", "")
+                preview = m.get("preview", "")
+                time_ago = m.get("time_ago", "")
+                url = m.get("url", "https://www.linkedin.com/messaging/")
+                unread = m.get("unread", False)
+
+                if not sender or not preview:
+                    continue
+
+                indicator = "🔵 " if unread else ""
+                msg = f"{indicator}{sender}\n{preview}\n{url}"
+                if time_ago:
+                    msg = f"{indicator}{sender} ({time_ago})\n{preview}\n{url}"
+
+                send_telegram(msg)
+                sent_count += 1
+                time.sleep(0.3)
+
     # Check for LinkedIn auth errors and alert
     linkedin_auth_error = False
     for err in errors:
