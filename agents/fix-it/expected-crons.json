@@ -116,14 +116,6 @@
       "to": "111111111",
       "message": "Run: python3 /home/node/.openclaw/shopping-workspace/scripts/heartbeat.py \u00e2\u20ac\u201d If exit 0: produce NO output. If exit 1: send the stdout text on Telegram. If exit 2: send Telegram alert with the output. Do NOT write to shopping.status.md yourself."
     },
-    "amazon-keepalive": {
-      "cron": "*/30 * * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "default",
-      "to": "111111111",
-      "message": "Keep Amazon browser session alive. Run: python3 ~/.openclaw/shopping-workspace/scripts/amazon-keepalive.py. If it succeeds: produce NO output. If it reports session expired: send a Telegram alert: \u00f0\u0178\u00a6\u203a Amazon browser session expired \u00e2\u20ac\u201d re-run amazon-auth.py via SSH tunnel."
-    },
     "morning-delivery-brief": {
       "cron": "50 11 * * *",
       "no_deliver": true,
