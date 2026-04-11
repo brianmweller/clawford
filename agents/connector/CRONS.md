@@ -6,9 +6,9 @@ Workspace: .openclaw/connector-workspace/
 
 ---
 
-## Morning Relationship Nudge — Daily at 11:55 UTC (4:55 AM PT), deliver at 12:00 UTC (5:00 AM PT)
+## Morning Relationship Nudge — Daily at 11:50 UTC (4:50 AM PT), deliver at 12:00 UTC (5:00 AM PT)
 
-**Schedule:** `55 11 * * *`
+**Schedule:** `50 11 * * *`
 **Command:** Scan people files, compute check-in status, deliver nudge at 5:00 AM PT sharp.
 
 1. Run `python3 ~/.openclaw/connector-workspace/scripts/people-scan.py`
@@ -155,7 +155,7 @@ If no overdue: replace STILL OVERDUE section with "Everyone's accounted for."
 
 | Cron | Frequency | Telegram | Auto-action |
 |------|-----------|----------|-------------|
-| Morning nudge | Daily 11:55 UTC (deliver at 12:00) | Always | Scan people, timed-deliver |
+| Morning nudge | Daily 11:50 UTC (deliver at 12:00) | Always | Scan people, timed-deliver |
 | Notes triage | Twice daily (08:00, 20:00 UTC) | On untriaged found | Read inbox, present for /confirm |
 | Heartbeat | Every 30 min | On failure only | Write heartbeat, prune stale data |
 | Weekly review | Sunday 00:00 UTC | Always | Compile week summary |

@@ -69,22 +69,42 @@ def send_telegram(text, silent=False):
 
 
 def wait_for_top_of_hour():
-    """Wait until :00 of the next hour if we're past :50."""
+    """Wait until :00 of the next hour if we're in the gather window (:40-:59).
+
+    If we arrive past :00 (processing overshot the window), log a warning
+    and deliver immediately — the message is already late.
+    """
     now = datetime.now(timezone.utc)
-    if now.minute >= 50:
+    if now.minute >= 40:
+        # In the gather window — hold until :00
         wait_seconds = (60 - now.minute) * 60 - now.second
-        if 0 < wait_seconds <= 600:
+        if 0 < wait_seconds <= 1200:
             print(f"Holding delivery for {wait_seconds}s until :00", file=sys.stderr)
             time.sleep(wait_seconds)
+    elif now.minute <= 10:
+        # Overshot — we're past the target :00. Deliver immediately but warn.
+        print(f"WARNING: arrived at :{now.minute:02d} — overshot the :00 target, delivering now", file=sys.stderr)
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: timed-deliver.py <message_file> [--silent]")
+    # Filter out --token-env and its value from positional args
+    positional = []
+    skip_next = False
+    for arg in sys.argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--token-env":
+            skip_next = True
+            continue
+        positional.append(arg)
+
+    if not positional or positional[0].startswith("--"):
+        print("Usage: timed-deliver.py <message_file> [--silent] [--token-env ENV_VAR]")
         sys.exit(1)
 
-    msg_file = sys.argv[1]
-    silent = "--silent" in sys.argv
+    msg_file = positional[0]
+    silent = "--silent" in positional
 
     if not os.path.exists(msg_file):
         print(f"Message file not found: {msg_file}", file=sys.stderr)

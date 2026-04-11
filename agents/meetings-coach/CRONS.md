@@ -6,9 +6,9 @@ Workspace: .openclaw/meetings-coach-workspace/
 
 ---
 
-## Morning Meeting Brief — Daily at 11:55 UTC (4:55 AM PT), deliver at 12:00 UTC (5:00 AM PT)
+## Morning Meeting Brief — Daily at 11:50 UTC (4:50 AM PT), deliver at 12:00 UTC (5:00 AM PT)
 
-**Schedule:** `55 11 * * *`
+**Schedule:** `50 11 * * *`
 **Command:** Fetch today's meetings, generate prep, sync Workflowy, deliver brief at 5:00 AM PT sharp.
 
 1. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/gcal-fetch.py --days 2`
@@ -251,7 +251,7 @@ Write current UTC time to `last_heartbeat` in `~/Dropbox/openclaw-backup/agents/
 
 | Cron | Frequency | Telegram | Auto-action |
 |------|-----------|----------|-------------|
-| Morning meeting brief | Daily 11:55 UTC (deliver at 12:00) | Always | Fetch calendar, prep meetings, Workflowy sync, timed-deliver |
+| Morning meeting brief | Daily 11:50 UTC (deliver at 12:00) | Always | Fetch calendar, prep meetings, Workflowy sync, timed-deliver |
 | Pre-meeting alert | Every 30 min | On meetings approaching | Check for upcoming, generate/send prep |
 | Post-meeting scan | Every 30 min (:15, :45) | On transcripts found | Scan Krisp, extract items, present for /confirm |
 | Commitment follow-up | Daily 16:00 UTC | On items found | Check overdue, alert |

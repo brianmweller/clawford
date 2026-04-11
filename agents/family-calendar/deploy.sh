@@ -166,16 +166,16 @@ echo ""
 
 echo "Step 6: Registering 7 crons..."
 
-# 1. Morning briefing — daily at 11:55 UTC (4:55 AM PT), timed delivery at 12:00 UTC (5:00 AM PT)
+# 1. Morning briefing — daily at 11:50 UTC (4:50 AM PT), timed delivery at 12:00 UTC (5:00 AM PT)
 oc cron add \
   --agent family-calendar \
   --name "morning-briefing" \
-  --cron "55 11 * * *" \
+  --cron "50 11 * * *" \
   --to "$TELEGRAM_CHAT_ID" \
   --account "$TELEGRAM_ACCOUNT" \
   --no-deliver \
   --message "Generate and deliver the morning family briefing. 1) Run: python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 2. Read the JSON output — these are today's and tomorrow's events across all family calendars. 2) Format the briefing using the template in CRONS.md. Group events by time blocks (Morning, Afternoon, Evening). Use family member emoji (👨 Sam, 👩 Alex, 🧒 Avery, 👶 Jordan, 🏠 Jamie). Flag any conflicts with ⚠️. Include a tomorrow preview. Check if today is a standard routine day (see MEMORY.md) — if no extra events, say 'Standard {weekday} — no exceptions.' Note the pickup arrangement for today (Mon=Sam+swimming, Fri=Sam, other=Jamie). 3) Write the formatted output to cache/morning-briefing.txt. 4) Run: python3 ~/.openclaw/family-calendar-workspace/scripts/timed-deliver.py cache/morning-briefing.txt --token-env FAMILYCAL_BOT_TOKEN. 5) Update your status file."
-echo "  [1/7] morning-briefing (daily 11:55 UTC, deliver at 12:00 UTC / 5:00 AM PT)"
+echo "  [1/7] morning-briefing (daily 11:50 UTC, deliver at 12:00 UTC / 5:00 AM PT)"
 
 # 2. Reminder check — every 5 minutes (SILENT when no reminders)
 oc cron add \

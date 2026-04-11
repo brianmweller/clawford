@@ -164,10 +164,9 @@ oc cron add \
   --message "$HEARTBEAT_PROMPT"
 echo "  [1/9] heartbeat-check (silent on all-clear, OVERWRITES status file)"
 
-# 2. Morning status — daily at 06:00 UTC
-# Structured 5-step prompt with known-issue suppression, staleness detection,
-# and per-alert verification. Replaces the old free-form "note any open alerts"
-# prompt which was freestyling classifications and re-reporting stale status.
+# 2. Morning status — daily at 11:50 UTC (4:50 AM PT), timed delivery at 12:00 UTC (5:00 AM PT)
+# Structured 6-step prompt with known-issue suppression, staleness detection,
+# per-alert verification, and timed delivery via timed-deliver.py.
 MORNING_STATUS_PROMPT='Compile the morning status report. Follow these steps in order.
 
 STEP 1 — Read the known-issues list FIRST.
@@ -191,7 +190,7 @@ Ignore placeholder status files for undeployed agents. Ignore the "main" interna
 
 (f) Default → ✅ HEALTHY.
 
-STEP 4 — Format the report EXACTLY as follows and send to Telegram:
+STEP 4 — Format the report EXACTLY as follows (do NOT send to Telegram yet — step 6 handles delivery):
 
 🦊🔧 Morning Status — {YYYY-MM-DD HH:MM UTC}
 
@@ -220,17 +219,20 @@ STEP 5 — ABSOLUTE RULES (violating any of these is a bug in your report):
 3. Never include an agent in the 🚨 Open alerts section without a "Verified:" line showing exactly what you did to re-check.
 4. If in doubt between ⚠️ stale and 🚨 alert, prefer ⚠️ stale.
 5. Authority reminder: you may restart agents and re-register crons. You may NOT provision credentials, edit other agents SOUL/IDENTITY (immutable), or touch deploy.sh files. Anything needing human decision goes in 🚨 Open alerts with "Next: human needed".
-6. If KNOWN_ISSUES.md is missing or unreadable, note it in the report header and proceed without suppression — do NOT fail silently.'
+6. If KNOWN_ISSUES.md is missing or unreadable, note it in the report header and proceed without suppression — do NOT fail silently.
+
+STEP 6 — Write the formatted report to cache/morning-status.txt and deliver via timed-deliver.py.
+Write the complete formatted report from step 4 to ~/.openclaw/fix-it-workspace/cache/morning-status.txt. Then run: python3 ~/.openclaw/fix-it-workspace/scripts/timed-deliver.py cache/morning-status.txt --token-env FIXIT_BOT_TOKEN. The script holds delivery until :00 UTC (5:00 AM PT sharp). Do NOT send the report to Telegram yourself — the script handles delivery.'
 
 oc cron add \
   --agent fix-it \
   --name "morning-status" \
-  --cron "55 11 * * *" \
+  --cron "50 11 * * *" \
   --to "$TELEGRAM_CHAT_ID" \
   --account "$TELEGRAM_ACCOUNT" \
-  --announce \
+  --no-deliver \
   --message "$MORNING_STATUS_PROMPT"
-echo "  [2/9] morning-status (structured 5-step prompt with known-issue suppression, 11:55 UTC = 4:55 AM PT)"
+echo "  [2/9] morning-status (daily 11:50 UTC, deliver at 12:00 UTC / 5:00 AM PT via timed-deliver.py)"
 
 # 3. Brain validation — every 6 hours (SILENT on pass)
 oc cron add \

@@ -6,9 +6,9 @@ Workspace: .openclaw/family-calendar-workspace/
 
 ---
 
-## Morning Briefing — Daily at 11:55 UTC (4:55 AM PT), deliver at 12:00 UTC (5:00 AM PT)
+## Morning Briefing — Daily at 11:50 UTC (4:50 AM PT), deliver at 12:00 UTC (5:00 AM PT)
 
-**Schedule:** `55 11 * * *`
+**Schedule:** `50 11 * * *`
 **Command:** Fetch all family calendars, format briefing, deliver at 5:00 AM PT sharp.
 
 1. Run `python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 2`
@@ -192,7 +192,7 @@ Stale errors in the status file can cause Mr Fixit to raise false alerts, so pru
 
 | Cron | Frequency | Telegram | Auto-action |
 |------|-----------|----------|-------------|
-| Morning briefing | Daily 11:55 UTC (deliver at 12:00) | Always | Fetch calendars, format, timed-deliver |
+| Morning briefing | Daily 11:50 UTC (deliver at 12:00) | Always | Fetch calendars, format, timed-deliver |
 | Reminder check | Every 5 min | On events found | Poll calendars, send per-event reminders |
 | Heartbeat | Every 30 min | On failure only | Write heartbeat, prune stale reminders |
 | Activity email check | Every 2 hours | On items found | Parse Example Preschool/Example Swim School/Tutu emails via LLM |

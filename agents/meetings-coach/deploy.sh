@@ -200,16 +200,16 @@ echo "Step 6: Registering 6 crons..."
 # the full snapshot. This prevents the unbounded multi-writer bloat that hit
 # 49 lines + corrupted half-writes by 2026-04-09.
 
-# 1. Morning meeting brief — daily at 11:55 UTC (4:55 AM PT), timed delivery at 12:00 UTC (5:00 AM PT)
+# 1. Morning meeting brief — daily at 11:50 UTC (4:50 AM PT), timed delivery at 12:00 UTC (5:00 AM PT)
 oc cron add \
   --agent meetings-coach \
   --name "morning-meeting-brief" \
-  --cron "55 11 * * *" \
+  --cron "50 11 * * *" \
   --to "$TELEGRAM_CHAT_ID" \
   --account "$TELEGRAM_ACCOUNT" \
   --no-deliver \
   --message "Generate and deliver the morning meeting brief. 1) Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/gcal-fetch.py --days 2. Read the JSON output — these are today's and tomorrow's professional meetings. 2) Filter to real meetings only (is_real_meeting=true). 3) For each real meeting: a) Run person-bootstrap.py to create person files for new attendees. b) Run workflowy-sync.py --create-nodes to create Workflowy meeting nodes. c) Run meeting-prep.py --meeting-id EVENT_ID to assemble context (attendees, facts, open commitments). 4) Format the brief using the template in CRONS.md — factual schedule only: meeting times, attendees, locations, open commitments with attendees. Do NOT include talking points. Include a tomorrow preview. 5) Write to cache/morning-meeting-brief.txt. 6) Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/timed-deliver.py cache/morning-meeting-brief.txt --token-env MEETINGS_BOT_TOKEN. 7) Write result summary to ~/.openclaw/meetings-coach-workspace/cache/last-morning-brief.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"meetings_briefed\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md — the heartbeat cron owns that file."
-echo "  [1/6] morning-meeting-brief (daily 11:55 UTC, deliver at 12:00 UTC / 5:00 AM PT)"
+echo "  [1/6] morning-meeting-brief (daily 11:50 UTC, deliver at 12:00 UTC / 5:00 AM PT)"
 
 # 2. Pre-meeting alert — every 30 minutes (SILENT when no meetings approaching)
 oc cron add \

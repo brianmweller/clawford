@@ -197,16 +197,16 @@ echo ""
 
 echo "Step 6: Registering 4 crons..."
 
-# 1. Morning relationship nudge — daily at 11:55 UTC (4:55 AM PT), timed delivery at 12:00 UTC (5:00 AM PT)
+# 1. Morning relationship nudge — daily at 11:50 UTC (4:50 AM PT), timed delivery at 12:00 UTC (5:00 AM PT)
 oc cron add \
   --agent connector \
   --name "morning-relationship-nudge" \
-  --cron "55 11 * * *" \
+  --cron "50 11 * * *" \
   --to "$TELEGRAM_CHAT_ID" \
   --account "$TELEGRAM_ACCOUNT" \
   --no-deliver \
   --message "Generate and deliver the morning relationship nudge. 1) Run: python3 ~/.openclaw/connector-workspace/scripts/people-scan.py. Read the JSON output — it contains overdue, approaching, and healthy contacts with their check-in status. 2) Format the nudge using the template in CRONS.md. Group by overdue then approaching. Include each person's name, relationship, days since last contact, and preferred channel. 3) If no overdue or approaching: use the 'everyone accounted for' template. 4) Write formatted output to cache/morning-nudge.txt. 5) Run: python3 ~/.openclaw/connector-workspace/scripts/timed-deliver.py cache/morning-nudge.txt --token-env CONNECTOR_BOT_TOKEN. 6) Update your status file."
-echo "  [1/4] morning-relationship-nudge (daily 11:55 UTC, deliver at 12:00 UTC / 5:00 AM PT)"
+echo "  [1/4] morning-relationship-nudge (daily 11:50 UTC, deliver at 12:00 UTC / 5:00 AM PT)"
 
 # 2. Notes triage — twice daily (SILENT when inbox is empty)
 oc cron add \

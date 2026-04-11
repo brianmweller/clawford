@@ -80,24 +80,28 @@ The emoji and name make Telegram messages instantly recognizable. Each agent sho
 
 5. **Follow [AGENTS-PATTERN.md](../AGENTS-PATTERN.md).** All patterns are codified there. When a pattern changes, update the doc.
 
-## Timed delivery: fetch at T-5, deliver at T
+## Timed delivery: fetch at T-10, deliver at T
 
-When an agent needs to deliver at a specific time (e.g., 5:00 AM), don't schedule the cron at 5:00 — the agent takes 3-5 minutes to process, so delivery arrives late.
+When an agent needs to deliver at a specific time (e.g., 5:00 AM), don't schedule the cron at 5:00 — the agent takes 3-10 minutes to process, so delivery arrives late.
 
 Instead:
 
-1. **Schedule the cron 5 minutes early** (e.g., `55 11 * * *` for 5:00 AM PT / 12:00 UTC)
-2. **Set `--no-deliver`** on the cron so the agent's response isn't sent directly
+1. **Schedule the cron 10 minutes early** (e.g., `50 11 * * *` for 5:00 AM PT / 12:00 UTC)
+2. **Set `--no-deliver`** on the cron so the agent's response isn't sent directly (never use `--announce` for timed briefs)
 3. **Agent writes output to a file** using its write tool
 4. **Agent runs `timed-deliver.py`** which holds until :00 then sends via Telegram Bot API
 
 ```python
 # timed-deliver.py — core logic
 now = datetime.now(timezone.utc)
-if now.minute >= 50:
+if now.minute >= 40:
+    # In the gather window — hold until :00
     wait_seconds = (60 - now.minute) * 60 - now.second
-    if 0 < wait_seconds <= 600:
+    if 0 < wait_seconds <= 1200:
         time.sleep(wait_seconds)
+elif now.minute <= 10:
+    # Overshot — warn but deliver immediately (better late than silent)
+    print(f"WARNING: arrived at :{now.minute:02d} — overshot the :00 target")
 # then send via Bot API with disable_web_page_preview, disable_notification
 ```
 
@@ -112,11 +116,15 @@ The `--token-env` flag is **required** — it specifies which env var holds the 
 Each agent's bot token must be in both the `.env` file and `docker-compose.yml` `environment` block.
 
 This pattern is used by all agents with timed delivery:
+- **Mr Fixit:** `fix-it-workspace/scripts/timed-deliver.py` (morning status)
+- **Mistress Mouse:** `family-calendar-workspace/scripts/timed-deliver.py` (morning briefing)
+- **Sergeant Murphy:** `meetings-coach-workspace/scripts/timed-deliver.py` (morning meeting brief)
+- **Hilda Hippo:** `shopping-workspace/scripts/timed-deliver.py` (morning delivery brief)
 - **Lowly Worm:** built into `deliver-digest.py` (same hold logic)
-- **Mr Fixit:** `fix-it-workspace/scripts/timed-deliver.py`
-- **Hilda Hippo:** `shopping-workspace/scripts/timed-deliver.py`
 
-**Why not just schedule at :00 and accept late delivery?** Because the user expects messages at a consistent time. A 5:00 AM digest arriving at 5:03 feels sloppy. The T-5 pattern makes delivery predictable.
+**Why T-10 instead of T-5?** Murphy's 6-step pipeline (gcal-fetch → person-bootstrap → workflowy-sync → meeting-prep → format → deliver) regularly takes 9+ minutes. With T-5, processing overshoots the :00 mark and `timed-deliver.py` sends immediately instead of holding. T-10 gives enough headroom for all agents.
+
+**Why not just schedule at :00 and accept late delivery?** Because the user expects messages at a consistent time. A 5:00 AM digest arriving at 5:03 feels sloppy. The T-10 pattern makes delivery predictable.
 
 ## Lessons from Mistress Mouse (Google Calendar agent)
 

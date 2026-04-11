@@ -22,11 +22,11 @@ Workspace: .openclaw/fix-it-workspace/
 
 ---
 
-## Morning Status Report — Daily at 06:00 UTC
+## Morning Status Report — Daily at 11:50 UTC (4:50 AM PT), deliver at 12:00 UTC (5:00 AM PT)
 
-**Schedule:** `0 6 * * *`
+**Schedule:** `50 11 * * *`
 
-**Command:** Run the structured 5-step morning-status prompt. The full prompt is defined in `deploy.sh` (the `MORNING_STATUS_PROMPT` bash variable) and is re-applied when the cron is registered. Summary:
+**Command:** Run the structured 6-step morning-status prompt. The full prompt is defined in `deploy.sh` (the `MORNING_STATUS_PROMPT` bash variable) and is re-applied when the cron is registered. Output is written to `cache/morning-status.txt` and delivered via `timed-deliver.py` at :00 UTC sharp. Summary:
 
 1. **Read KNOWN_ISSUES.md first** — `~/Dropbox/openclaw-backup/fix-it/KNOWN_ISSUES.md` is the operator-curated suppression list. Parse match patterns and expiries before looking at agent state.
 2. **Gather raw state** — read all `agents/*.status.md` files (status field, last_heartbeat, error_log, auth fields, mtime), run `validate.py`, check for Dropbox conflicts.
@@ -209,7 +209,7 @@ This is the "who watches the watchman" cron. If this one breaks, the human will 
 | Cron | Frequency | Telegram | Auto-action |
 |------|-----------|----------|-------------|
 | Heartbeat check | Every 30 min | On failure only | Restart attempt |
-| Morning status | Daily 06:00 | Always | None (report only) |
+| Morning status | Daily 11:50 UTC (deliver at 12:00) | Always | Gather state, classify, timed-deliver |
 | Brain validation | Every 6 hours | On failure only | None (log + alert) |
 | Dropbox conflicts | Every 2 hours | On detection | None (alert only) |
 | File size monitor | Daily 12:00 | On detection | None (alert only) |
