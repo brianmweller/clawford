@@ -1,4 +1,212 @@
 {
+  "meetings-coach": {
+    "pre-meeting-alert": {
+      "cron": "*/30 * * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "murphy",
+      "to": "111111111",
+      "message": "Check for upcoming meetings needing alerts. Run gcal-fetch.py for events in the next 2 hours. Filter to real meetings starting in 15-45 minutes. Read sent-alerts.json to skip already-alerted meetings. For any un-alerted meeting: check cache for existing prep, generate if missing via meeting-prep.py. Send Telegram: '\u00f0\u0178\udc90\u00b7\u00f0\u0178\u201d\udc8d Heads up \u00e2\u20ac\u201d meeting in {N} min\\n\u00f0\u0178\u201c\u2039 {Title}\\n\u00f0\u0178\u2018\u00a5 {Attendees}\\n\u00f0\u0178\u017d\u00af {Top bullets}\\n\u00f0\u0178\u201c\u0152 {Open items}'. Record in sent-alerts.json. If no meetings approaching: produce NO output. Write result to ~/.openclaw/meetings-coach-workspace/cache/last-pre-meeting.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"meetings_alerted\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md \u00e2\u20ac\u201d the heartbeat cron owns that file."
+    },
+    "heartbeat": {
+      "cron": "*/30 * * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "murphy",
+      "to": "111111111",
+      "message": "Run: python3 /home/node/.openclaw/meetings-coach-workspace/scripts/heartbeat.py \u00e2\u20ac\u201d If exit 0: produce NO output. If exit 1: send the stdout text on Telegram. If exit 2: send Telegram alert with the output. Do NOT write to meetings-coach.status.md yourself."
+    },
+    "post-meeting-scan": {
+      "cron": "15,45 * * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "murphy",
+      "to": "111111111",
+      "message": "Scan for recently-ended meetings and new transcripts. 1) Run gcal-fetch.py and identify meetings ended in the last 60 minutes. 2) Run transcript-scan.py to fetch Krisp transcripts and match to meetings. 3) Read the output. If items were extracted and staged: send a debrief summary on Telegram with action items, decisions, follow-ups. Include '/confirm to save to brain \u00c2\u00b7 /dismiss N to skip item N'. 4) If no transcripts found: produce NO output. 5) Write result to ~/.openclaw/meetings-coach-workspace/cache/last-post-scan.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"transcripts_processed\": <N>, \"debriefs_staged\": <N>, \"unmatched\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md \u00e2\u20ac\u201d the heartbeat cron owns that file."
+    },
+    "morning-meeting-brief": {
+      "cron": "50 11 * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "murphy",
+      "to": "111111111",
+      "message": "Generate and deliver the morning meeting brief. 1) Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/gcal-fetch.py --days 2. Read the JSON output \u00e2\u20ac\u201d these are today's and tomorrow's professional meetings. 2) Filter to real meetings only (is_real_meeting=true). 3) For each real meeting: a) Run person-bootstrap.py to create person files for new attendees. b) Run workflowy-sync.py --create-nodes to create Workflowy meeting nodes. c) Run meeting-prep.py --meeting-id EVENT_ID to generate talking points. d) Run workflowy-sync.py --push-bullets EVENT_ID to push AI bullets to Workflowy. 4) Format the brief using the template in CRONS.md. Include talking points, open items with attendees, and a tomorrow preview. 5) Write to cache/morning-meeting-brief.txt. 6) Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/timed-deliver.py cache/morning-meeting-brief.txt --token-env MEETINGS_BOT_TOKEN. 7) Write result summary to ~/.openclaw/meetings-coach-workspace/cache/last-morning-brief.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"meetings_briefed\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md \u00e2\u20ac\u201d the heartbeat cron owns that file."
+    },
+    "commitment-follow-up": {
+      "cron": "0 16 * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "murphy",
+      "to": "111111111",
+      "message": "Check open commitments from meetings. Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/commitment-tracker.py. Read the JSON output. If there are overdue or approaching items: send a follow-up summary on Telegram using the format in CRONS.md. If no actionable items: produce NO output. Write result to ~/.openclaw/meetings-coach-workspace/cache/last-commitment.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"overdue\": <N>, \"approaching\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md \u00e2\u20ac\u201d the heartbeat cron owns that file."
+    },
+    "weekly-review": {
+      "cron": "0 0 * * 5",
+      "no_deliver": false,
+      "announce": true,
+      "account": "murphy",
+      "to": "111111111",
+      "message": "Generate the weekly meeting review. Run gcal-fetch.py --days 7 to look back at this weeks meetings. Run commitment-tracker.py to get open commitments. Compile: meetings held, prep generated, transcripts processed, commitments created/resolved/overdue. List all unresolved commitments. Format using the template in CRONS.md. Deliver to Telegram."
+    }
+  },
+  "news-digest": {
+    "heartbeat": {
+      "cron": "*/30 * * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "newsdigest",
+      "to": "111111111",
+      "message": "Update your heartbeat. Write the current UTC timestamp to last_heartbeat in ~/Dropbox/openclaw-backup/agents/news-digest.status.md. Produce NO output."
+    },
+    "engagement-poll": {
+      "cron": "*/5 * * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "newsdigest",
+      "to": "111111111",
+      "message": "Run: python3 /home/node/.openclaw/news-digest-workspace/scripts/engagement-poller.py. This polls Telegram for /like and /dislike messages and logs engagement events. Produce NO output."
+    },
+    "morning-edition": {
+      "cron": "55 11 * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "newsdigest",
+      "to": "111111111",
+      "message": "Generate and deliver the morning news digest. Run these two scripts in order:\n\n1. python3 /home/node/.openclaw/news-digest-workspace/scripts/fetch-and-rank.py\n2. python3 /home/node/.openclaw/news-digest-workspace/scripts/deliver-digest.py\n\nThe first script fetches RSS feeds, deduplicates, ranks, and saves to cache. The second script reads the ranked cache and sends each item as a separate Telegram message directly via the Bot API \u00e2\u20ac\u201d do NOT try to send messages yourself.\n\nAfter both scripts finish, update your status file with the results. Your text response will NOT be delivered to Telegram (delivery is handled by the script), so just output a brief status summary."
+    },
+    "preference-update": {
+      "cron": "0 23 * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "newsdigest",
+      "to": "111111111",
+      "message": "Process today's engagement signals and update the preference model. Run: python3 ~/.openclaw/news-digest-workspace/scripts/update-preferences.py. This reads new entries from preferences/engagement.jsonl, applies multiplicative weight updates (thumbs_up: topic x1.1 source x1.05, thumbs_down: topic x0.85 source x0.95, expand: topic x1.05), clamps weights to safe ranges, and writes updated model to preferences/model.json. If there are no new engagement events, skip the update silently. Update your status file with the number of events processed and produce NO output."
+    }
+  },
+  "shopping": {
+    "heartbeat": {
+      "cron": "*/30 * * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "shopping",
+      "to": "111111111",
+      "message": "Run: python3 /home/node/.openclaw/shopping-workspace/scripts/heartbeat.py \u00e2\u20ac\u201d If exit 0: produce NO output. If exit 1: send the stdout text on Telegram. If exit 2: send Telegram alert with the output. Do NOT write to shopping.status.md yourself."
+    },
+    "costco-token-refresh": {
+      "cron": "*/12 * * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "default",
+      "to": "111111111",
+      "message": "Refresh the Costco id_token. Run with a 5-minute timeout: timeout 300 python3 ~/.openclaw/shopping-workspace/scripts/costco-token-daemon.py. The daemon takes 30-180 seconds depending on Costco server speed \u00e2\u20ac\u201d do NOT use a shorter timeout. Capture the exit code and the last few lines of output. BEFORE writing the result, read the EXISTING cache/last-token-refresh.json to get the previous run status. Then write the current run result to cache/last-token-refresh.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"exit_code\": <int>, \"status\": \"ok\" or \"error\", \"summary\": \"<one sentence>\"}. ALERT LOGIC: If exit_code != 0 AND the PREVIOUS run was also error, send Telegram: \"\u00f0\u0178\u00a6\u203a Costco token refresh failed twice in a row.\" If previous was ok, do NOT alert. DO NOT touch shopping.status.md."
+    },
+    "morning-delivery-brief": {
+      "cron": "50 11 * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "shopping",
+      "to": "111111111",
+      "message": "Generate and deliver the morning delivery snapshot. 1) Run: python3 ~/.openclaw/shopping-workspace/scripts/amazon-orders.py --recent --days 3. Read the JSON output. 2) Run: python3 ~/.openclaw/shopping-workspace/scripts/costco-orders.py --recent --days 3. Read the JSON output. If Costco auth fails, note it and continue. 3) Filter to items arriving TODAY or with tracking updates in the last 24 hours. If nothing is arriving today and no recent tracking updates, write a one-liner: '\u00f0\u0178\u00a6\u203a No deliveries expected today.' 4) Format as a compact morning snapshot (not the full delivery digest \u00e2\u20ac\u201d that runs at 10 AM):\n\n\u00f0\u0178\u00a6\u203a Deliveries Today \u00e2\u20ac\u201d {Weekday}, {Month} {Day}\n\n\u00f0\u0178\u201c\u00a6 ARRIVING TODAY\n\u00e2\u20ac\u00a2 {Item} \u00e2\u20ac\u201d {Store}, {tracking status}\n\n\u00f0\u0178\u0161\u0161 TRACKING UPDATE\n\u00e2\u20ac\u00a2 {Item} \u00e2\u20ac\u201d {Store}, {new status}\n\n\u00f0\u0178\u00a6\u203a {count} item(s) arriving\n\nIf nothing: '\u00f0\u0178\u00a6\u203a No deliveries expected today. Full report at 10 AM.'\n\n5) Write to cache/morning-delivery-brief.txt. 6) Run: python3 ~/.openclaw/shopping-workspace/scripts/timed-deliver.py cache/morning-delivery-brief.txt --token-env SHOPPING_BOT_TOKEN. 7) Write result to ~/.openclaw/shopping-workspace/cache/last-morning-brief.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"items_today\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/shopping.status.md \u00e2\u20ac\u201d the heartbeat cron owns that file."
+    },
+    "delivery-digest": {
+      "cron": "0 14 * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "shopping",
+      "to": "111111111",
+      "message": "Generate the daily delivery report. 0) FIRST, refresh the Costco token: Run python3 ~/.openclaw/shopping-workspace/scripts/costco-token-daemon.py. Wait for it to finish (takes ~30-90 seconds). If exit code 0, the token is fresh. If non-zero, note Costco will be unavailable and continue. 1) Run: python3 ~/.openclaw/shopping-workspace/scripts/amazon-orders.py --recent --days 7. Read the JSON output \u00e2\u20ac\u201d these are Amazon orders. 2) Run: python3 ~/.openclaw/shopping-workspace/scripts/costco-orders.py --recent --days 7. Read the JSON output \u00e2\u20ac\u201d these are Costco orders. If this fails with auth_failed, note it and continue. 3) Run: python3 ~/.openclaw/shopping-workspace/scripts/gmail-search.py --query \"from:shipment-tracking@amazon.com newer_than:7d\" --query \"from:costco@t.costco.com subject:shipped newer_than:7d\" --query \"from:no-reply@amazon.com subject:Delivered newer_than:3d\". Read the JSON array of matching shipping notifications. 4) Combine results. Categories are MUTUALLY EXCLUSIVE \u00e2\u20ac\u201d every item must appear in EXACTLY ONE group. Apply these rules in order: (a) Delivered = status==Delivered in the last 3 days (takes priority, even if delivery date is today); (b) Arriving Today = not yet delivered AND delivery date == today; (c) This Week = not yet delivered AND delivery date in next 7 days (excluding today); (d) Recently Ordered = ordered but no ship/delivery date yet. 5) Format the report following the delivery-digest template in ~/.openclaw/shopping-workspace/CRONS.md and deliver to Telegram. If any source failed, deliver what you have and note failures in Source notes. Update your status file."
+    },
+    "subscribe-save-review": {
+      "cron": "0 14 1 * *",
+      "no_deliver": false,
+      "announce": true,
+      "account": "shopping",
+      "to": "111111111",
+      "message": "Monthly Subscribe & Save review. 1) Run: python3 ~/.openclaw/shopping-workspace/scripts/amazon-orders.py --subscriptions. Read the JSON output. 2) Run: python3 ~/.openclaw/shopping-workspace/scripts/gmail-search.py --query \"from:no-reply@amazon.com subject:Subscribe & Save newer_than:30d\". Read matching emails for shipment details. 3) List all S&S items with: item name, quantity, price, next shipment date. 4) Note any price changes or out-of-stock items. 5) Format following the S&S review template in ~/.openclaw/shopping-workspace/CRONS.md and deliver to Telegram. Ask Sam if he wants any changes. Update your status file."
+    }
+  },
+  "fix-it": {
+    "heartbeat-check": {
+      "cron": "*/30 * * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "default",
+      "to": "111111111",
+      "message": "Run: python3 /home/node/.openclaw/fix-it-workspace/scripts/heartbeat.py \u00e2\u20ac\u201d If exit 0: produce NO output. If exit 1: send the stdout text on Telegram. If exit 2: send Telegram alert with the output. Do NOT write to fix-it.status.md yourself."
+    },
+    "cron-self-check": {
+      "cron": "0 0 * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "default",
+      "to": "111111111",
+      "message": "Run: openclaw cron list. Verify all 9 fix-it crons are registered (heartbeat-check, morning-status, brain-validation, conflict-scan, file-size-monitor, monthly-archival, security-audit, update-check, cron-self-check). Filter the output visually for fix-it entries. If all 9 are present: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If any are missing: attempt to re-register them and send me a Telegram message."
+    },
+    "conflict-scan": {
+      "cron": "0 */2 * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "default",
+      "to": "111111111",
+      "message": "Run: find ~/Dropbox/openclaw-backup/ -name *conflicted copy* -type f. If NO conflicts found: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If conflicts ARE found: send me a Telegram message with the filenames. Do NOT attempt to merge."
+    },
+    "brain-validation": {
+      "cron": "0 */6 * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "default",
+      "to": "111111111",
+      "message": "Run: python3 ~/Dropbox/openclaw-backup/scripts/validate.py. If validation PASSES: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If validation FAILS: send me a Telegram message with the specific failures immediately."
+    },
+    "security-audit": {
+      "cron": "0 4 * * 0",
+      "no_deliver": false,
+      "announce": true,
+      "account": "default",
+      "to": "111111111",
+      "message": "Security audit. Do not ask for permission. Execute ALL steps, then send ONE Telegram report.\n\nSTEP 1 \u00e2\u20ac\u201d Run openclaw security audit --deep. Capture its output.\n\nSTEP 2 \u00e2\u20ac\u201d Check per-agent exec policies. Run: python3 -c \"import json; d=json.load(open(chr(47)+chr(104)+chr(111)+chr(109)+chr(101)+chr(47)+chr(110)+chr(111)+chr(100)+chr(101)+chr(47)+chr(46)+chr(111)+chr(112)+chr(101)+chr(110)+chr(99)+chr(108)+chr(97)+chr(119)+chr(47)+chr(101)+chr(120)+chr(101)+chr(99)+chr(45)+chr(97)+chr(112)+chr(112)+chr(114)+chr(111)+chr(118)+chr(97)+chr(108)+chr(115)+chr(46)+chr(106)+chr(115)+chr(111)+chr(110))); [(print(a,c.get(chr(112)+chr(111)+chr(108)+chr(105)+chr(99)+chr(121),chr(63)))) for a,c in d.get(chr(97)+chr(103)+chr(101)+chr(110)+chr(116)+chr(115),{}).items()]\"\n\nSTEP 3 \u00e2\u20ac\u201d Compose the report. Format EXACTLY like this:\n\n\u00f0\u0178\u00a6\u0160\u00f0\u0178\u201d\u00a7 Security Audit \u00e2\u20ac\u201d {date}\n\n\u00f0\u0178\u201d\u2019 Exec Policies\n{for each agent from STEP 2, one line: \u00e2\u20ac\u00a2 {agent}: {policy}}\n{All agents having policy=full is EXPECTED \u00e2\u20ac\u201d see enrichment rules below. Do NOT flag as \u00f0\u0178\u201d\u00b4 CRITICAL below}\n\n\u00f0\u0178\u201d\u00b4 CRITICAL ({count})\n\u00e2\u20ac\u00a2 {finding}\n\n\u00f0\u0178\u0178\u00a0 HIGH ({count})\n\u00e2\u20ac\u00a2 {finding}\n\n\u00f0\u0178\u0178\u00a1 MEDIUM ({count})\n\u00e2\u20ac\u00a2 {finding}\n\n\u00f0\u0178\u0178\u00a2 LOW ({count})\n\u00e2\u20ac\u00a2 {finding}\n\nRemediation: {one sentence per critical/high}\n\nENRICHMENT RULES for STEP 1 findings:\n\u00e2\u20ac\u00a2 tools.exec.security_full_configured \u00e2\u20ac\u201d do NOT report this raw finding. Replace it with the Exec Policies section from STEP 2. The global config is full because per-agent enforcement lives in exec-approvals.json. All agents having policy=full is EXPECTED and correct \u00e2\u20ac\u201d OpenClaw allowlist matches binary paths only, and shell chains/redirections are unsupported in allowlist mode. Since LLMs generate compound commands, policy=full is the only option that works. This is per-agent scoped, not global. Do NOT flag as CRITICAL.\n\u00e2\u20ac\u00a2 plugins.tools_reachable_permissive_policy \u00e2\u20ac\u201d suppress if plugins.allow is set and no untrusted extensions are installed.\n\nFORMAT RULES: use the emoji severity headers. Group by severity. Include counts. Omit empty sections. If zero issues send just: Security audit clean. Do NOT run --fix. Do NOT run checks beyond what these steps specify."
+    },
+    "morning-status": {
+      "cron": "50 11 * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "fixit",
+      "to": "111111111",
+      "message": "Compile the morning status report. Follow these steps in order.\n\nSTEP 1 \u00e2\u20ac\u201d Read the known-issues list FIRST.\nRead ~/Dropbox/openclaw-backup/fix-it/KNOWN_ISSUES.md. Parse each entry: match pattern, expires date, reason, escalation conditions. Any entry past its expires date is IGNORED (treat as not-known). Keep the parsed list in mind for step 3.\n\nSTEP 2 \u00e2\u20ac\u201d Gather raw state.\nFor each file matching ~/Dropbox/openclaw-backup/agents/*.status.md, record: agent name, the status field value, the last_heartbeat field value, the error_log field (first 500 chars), any agent-specific auth fields (google_auth, workflowy_auth, krisp_auth, amazon_session, costco_session), and the file mtime via stat -c %Y. Also run: python3 ~/Dropbox/openclaw-backup/scripts/validate.py and capture its result. Also run: find ~/Dropbox/openclaw-backup/ -name \"*conflicted copy*\" -type f and capture the list.\n\nSTEP 3 \u00e2\u20ac\u201d Classify each REGISTERED agent into exactly one bucket.\nIgnore placeholder status files for undeployed agents. Ignore the \"main\" internal. Use the following rules IN ORDER \u00e2\u20ac\u201d first match wins:\n\n(a) Heartbeat stale beyond 6 hours \u00e2\u2020\u2019 \u00f0\u0178\u0161\u00a8 DOWN. The agent is not running.\n\n(b) CRITICAL RULE: read the status FIELD, not the error_log history. The error_log may contain old entries from before a fix landed. If status is \"ok\" or \"healthy\", the agent IS healthy regardless of what error_log contains \u00e2\u20ac\u201d classify as \u00e2\u0153\u2026 HEALTHY and move on. Do NOT derive \"degraded\" from error_log text when status says ok.\n\n(c) status is \"degraded\" or an auth field shows an error: check the known-issues list. If a non-expired entry matches the text \u00e2\u2020\u2019 \u00e2\u201e\u00b9\u00ef\u00b8\udc8f KNOWN. Include the entry reason in parentheses.\n\n(d) status is \"degraded\" and last_heartbeat is older than 6 hours: \u00e2\u2020\u2019 \u00e2\u0161\u00a0\u00ef\u00b8\udc8f STALE. The content has not been refreshed since the error was written; we cannot tell if it is still real. Do NOT treat as an open alert.\n\n(e) Otherwise (fresh heartbeat, status=degraded, no known-issue match): do ONE verification action appropriate to the error before alerting. If the error mentions a token \u00e2\u2020\u2019 check the token file mtime on disk via stat. If the error mentions a cron \u00e2\u2020\u2019 run oc cron list and check the cron is still registered. If the error mentions exec approval \u00e2\u2020\u2019 run oc config get tools.exec and verify security=full and ask=off. Include the verification output in your report. If verification confirms the problem \u00e2\u2020\u2019 \u00f0\u0178\u0161\u00a8 OPEN ALERT. If verification shows the problem resolved \u00e2\u2020\u2019 \u00e2\u0153\u2026 HEALTHY (note the status file is stale).\n\n(f) Default \u00e2\u2020\u2019 \u00e2\u0153\u2026 HEALTHY.\n\nSTEP 4 \u00e2\u20ac\u201d Format the report EXACTLY as follows (do NOT send to Telegram yet \u00e2\u20ac\u201d step 6 handles delivery):\n\n\u00f0\u0178\u00a6\u0160\u00f0\u0178\u201d\u00a7 Morning Status \u00e2\u20ac\u201d {YYYY-MM-DD HH:MM UTC}\n\nOverall: {\u00e2\u0153\u2026 all clear | \u00e2\u201e\u00b9\u00ef\u00b8\udc8f {N} known | \u00e2\u0161\u00a0\u00ef\u00b8\udc8f {N} stale | \u00f0\u0178\u0161\u00a8 {N} open alerts}\n\nAgents:\n  {bucket-emoji} {agent} \u00e2\u20ac\u201d {one-line summary with heartbeat age}\n\nBrain: {validation PASS/FAIL with counts}\nDropbox: {conflicts result}\nPlatform heartbeat: n/a (cron-based status files are source of truth)\n\n\u00f0\u0178\u0161\u00a8 Open alerts: (OMIT this entire section if none)\n  - {agent}: {the issue}\n    Verified: {exact action you took in step 3e and the result}\n    Next: {restart / human needed / specific recommended command}\n\n\u00e2\u201e\u00b9\u00ef\u00b8\udc8f Known (pending human action): (OMIT this entire section if none)\n  - {agent}: {issue} ({reason from KNOWN_ISSUES.md}) \u00e2\u20ac\u201d expires {date}\n\n\u00e2\u0161\u00a0\u00ef\u00b8\udc8f Stale (not re-verified): (OMIT this entire section if none)\n  - {agent}: status file last updated {hours}h ago; content may be resolved \u00e2\u20ac\u201d next agent run will refresh\n\nSTEP 5 \u00e2\u20ac\u201d ABSOLUTE RULES (violating any of these is a bug in your report):\n1. Never classify an agent as \"degraded\" based on error_log text alone when the status field is \"ok\".\n2. Never report a known-issue as an open alert. The known-issues list is authoritative for suppression.\n3. Never include an agent in the \u00f0\u0178\u0161\u00a8 Open alerts section without a \"Verified:\" line showing exactly what you did to re-check.\n4. If in doubt between \u00e2\u0161\u00a0\u00ef\u00b8\udc8f stale and \u00f0\u0178\u0161\u00a8 alert, prefer \u00e2\u0161\u00a0\u00ef\u00b8\udc8f stale.\n5. Authority reminder: you may restart agents and re-register crons. You may NOT provision credentials, edit other agents SOUL/IDENTITY (immutable), or touch deploy.sh files. Anything needing human decision goes in \u00f0\u0178\u0161\u00a8 Open alerts with \"Next: human needed\".\n6. If KNOWN_ISSUES.md is missing or unreadable, note it in the report header and proceed without suppression \u00e2\u20ac\u201d do NOT fail silently.\n\nSTEP 6 \u00e2\u20ac\u201d Write the formatted report to cache/morning-status.txt and deliver via timed-deliver.py.\nWrite the complete formatted report from step 4 to ~/.openclaw/fix-it-workspace/cache/morning-status.txt. Then run: python3 ~/.openclaw/fix-it-workspace/scripts/timed-deliver.py cache/morning-status.txt --token-env FIXIT_BOT_TOKEN. The script holds delivery until :00 UTC (5:00 AM PT sharp). Do NOT send the report to Telegram yourself \u00e2\u20ac\u201d the script handles delivery."
+    },
+    "file-size-monitor": {
+      "cron": "0 12 * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "default",
+      "to": "111111111",
+      "message": "Run: find ~/Dropbox/openclaw-backup/ -type f -size +500k. If NO large files found: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If large files ARE found: send me a Telegram message with the filenames and sizes."
+    },
+    "obsidian-briefing": {
+      "cron": "10 12 * * *",
+      "no_deliver": true,
+      "announce": false,
+      "account": "default",
+      "to": "111111111",
+      "message": "Generate daily Obsidian briefing. Run: python3\n~/Dropbox/openclaw-backup/scripts/obsidian-briefing/generate.py. If successful: produce NO output. Update your status file. If it fails: report the error."
+    },
+    "update-check": {
+      "cron": "0 4 * * 3",
+      "no_deliver": false,
+      "announce": true,
+      "account": "default",
+      "to": "111111111",
+      "message": "Run: openclaw update. Report current version and whether an update is available on Telegram. Do NOT apply updates automatically. Wait for my confirmation."
+    },
+    "monthly-archival": {
+      "cron": "0 3 1 * *",
+      "no_deliver": false,
+      "announce": true,
+      "account": "default",
+      "to": "111111111",
+      "message": "Run monthly archival. Create /home/node/Dropbox/openclaw-backup/archive/YYYY-MM/ for current month. Scan ALL files matching /home/node/Dropbox/openclaw-backup/facts/*.md (every monthly file, not just the current month). For each fact entry, calculate effective_confidence = original_confidence * 0.5^(days_since_recorded / half_life) using category half-lives: identity=never, established=365, situation=90, preference=180, plan=30, logistics=7, rumor=14. Move facts with effective_confidence < 0.2 AND recorded > 90 days ago to the archive. Also scan /home/node/Dropbox/openclaw-backup/tasks/queue.md and move tasks with status done and completed > 90 days ago. Write an archive manifest listing everything moved. Report results on Telegram."
+    }
+  },
   "family-calendar": {
     "reminder-check": {
       "cron": "*/5 * * * *",
@@ -63,214 +271,6 @@
       "account": "familycal",
       "to": "111111111",
       "message": "Generate the weekly overview for the coming week. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 7. Read the JSON output. Format a day-by-day overview: for each day, list key events with family member emoji, note pickup arrangements, flag conflicts. Include Monday exceptions (Sam swimming), Friday exceptions (Jamie early, Alex takes Jordan). Deliver to Telegram. Update your status file."
-    }
-  },
-  "news-digest": {
-    "engagement-poll": {
-      "cron": "*/5 * * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "newsdigest",
-      "to": "111111111",
-      "message": "Run: python3 /home/node/.openclaw/news-digest-workspace/scripts/engagement-poller.py. This polls Telegram for /like and /dislike messages and logs engagement events. Produce NO output."
-    },
-    "heartbeat": {
-      "cron": "*/30 * * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "newsdigest",
-      "to": "111111111",
-      "message": "Update your heartbeat. Write the current UTC timestamp to last_heartbeat in ~/Dropbox/openclaw-backup/agents/news-digest.status.md. Produce NO output."
-    },
-    "preference-update": {
-      "cron": "0 23 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "newsdigest",
-      "to": "111111111",
-      "message": "Process today's engagement signals and update the preference model. Run: python3 ~/.openclaw/news-digest-workspace/scripts/update-preferences.py. This reads new entries from preferences/engagement.jsonl, applies multiplicative weight updates (thumbs_up: topic x1.1 source x1.05, thumbs_down: topic x0.85 source x0.95, expand: topic x1.05), clamps weights to safe ranges, and writes updated model to preferences/model.json. If there are no new engagement events, skip the update silently. Update your status file with the number of events processed and produce NO output."
-    },
-    "morning-edition": {
-      "cron": "55 11 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "newsdigest",
-      "to": "111111111",
-      "message": "Generate and deliver the morning news digest. Run these two scripts in order:\n\n1. python3 /home/node/.openclaw/news-digest-workspace/scripts/fetch-and-rank.py\n2. python3 /home/node/.openclaw/news-digest-workspace/scripts/deliver-digest.py\n\nThe first script fetches RSS feeds, deduplicates, ranks, and saves to cache. The second script reads the ranked cache and sends each item as a separate Telegram message directly via the Bot API \u00e2\u20ac\u201d do NOT try to send messages yourself.\n\nAfter both scripts finish, update your status file with the results. Your text response will NOT be delivered to Telegram (delivery is handled by the script), so just output a brief status summary."
-    }
-  },
-  "shopping": {
-    "costco-token-refresh": {
-      "cron": "*/12 * * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "default",
-      "to": "111111111",
-      "message": "Refresh the Costco id_token. Run: python3 ~/.openclaw/shopping-workspace/scripts/costco-token-daemon.py. Capture the exit code and the last few lines of output. BEFORE writing the result, read the EXISTING cache/last-token-refresh.json to get the previous run status. Then write the current run result summary to ~/.openclaw/shopping-workspace/cache/last-token-refresh.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"exit_code\": <int>, \"status\": \"ok\" if exit_code == 0 else \"error\", \"summary\": \"<one sentence>\"}. ALERT LOGIC: If exit_code != 0 AND the PREVIOUS run status was also error, this is a consecutive failure \u00e2\u20ac\u201d send a Telegram alert. If exit_code != 0 but the previous run was ok, do NOT alert. DO NOT touch ~/Dropbox/openclaw-backup/agents/shopping.status.md \u00e2\u20ac\u201d the heartbeat cron owns that file."
-    },
-    "heartbeat": {
-      "cron": "*/30 * * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "shopping",
-      "to": "111111111",
-      "message": "Run: python3 /home/node/.openclaw/shopping-workspace/scripts/heartbeat.py \u00e2\u20ac\u201d If exit 0: produce NO output. If exit 1: send the stdout text on Telegram. If exit 2: send Telegram alert with the output. Do NOT write to shopping.status.md yourself."
-    },
-    "morning-delivery-brief": {
-      "cron": "50 11 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "shopping",
-      "to": "111111111",
-      "message": "Generate and deliver the morning delivery snapshot. 1) Run: python3 ~/.openclaw/shopping-workspace/scripts/amazon-orders.py --recent --days 3. Read the JSON output. 2) Run: python3 ~/.openclaw/shopping-workspace/scripts/costco-orders.py --recent --days 3. Read the JSON output. If Costco auth fails, note it and continue. 3) Filter to items arriving TODAY or with tracking updates in the last 24 hours. If nothing is arriving today and no recent tracking updates, write a one-liner: '\u00f0\u0178\u00a6\u203a No deliveries expected today.' 4) Format as a compact morning snapshot (not the full delivery digest \u00e2\u20ac\u201d that runs at 10 AM):\n\n\u00f0\u0178\u00a6\u203a Deliveries Today \u00e2\u20ac\u201d {Weekday}, {Month} {Day}\n\n\u00f0\u0178\u201c\u00a6 ARRIVING TODAY\n\u00e2\u20ac\u00a2 {Item} \u00e2\u20ac\u201d {Store}, {tracking status}\n\n\u00f0\u0178\u0161\u0161 TRACKING UPDATE\n\u00e2\u20ac\u00a2 {Item} \u00e2\u20ac\u201d {Store}, {new status}\n\n\u00f0\u0178\u00a6\u203a {count} item(s) arriving\n\nIf nothing: '\u00f0\u0178\u00a6\u203a No deliveries expected today. Full report at 10 AM.'\n\n5) Write to cache/morning-delivery-brief.txt. 6) Run: python3 ~/.openclaw/shopping-workspace/scripts/timed-deliver.py cache/morning-delivery-brief.txt --token-env SHOPPING_BOT_TOKEN. 7) Write result to ~/.openclaw/shopping-workspace/cache/last-morning-brief.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"items_today\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/shopping.status.md \u00e2\u20ac\u201d the heartbeat cron owns that file."
-    },
-    "delivery-digest": {
-      "cron": "0 14 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "shopping",
-      "to": "111111111",
-      "message": "Generate the daily delivery report. 0) FIRST, refresh the Costco token: Run python3 ~/.openclaw/shopping-workspace/scripts/costco-token-daemon.py. Wait for it to finish (takes ~30-90 seconds). If exit code 0, the token is fresh. If non-zero, note Costco will be unavailable and continue. 1) Run: python3 ~/.openclaw/shopping-workspace/scripts/amazon-orders.py --recent --days 7. Read the JSON output \u00e2\u20ac\u201d these are Amazon orders. 2) Run: python3 ~/.openclaw/shopping-workspace/scripts/costco-orders.py --recent --days 7. Read the JSON output \u00e2\u20ac\u201d these are Costco orders. If this fails with auth_failed, note it and continue. 3) Run: python3 ~/.openclaw/shopping-workspace/scripts/gmail-search.py --query \"from:shipment-tracking@amazon.com newer_than:7d\" --query \"from:costco@t.costco.com subject:shipped newer_than:7d\" --query \"from:no-reply@amazon.com subject:Delivered newer_than:3d\". Read the JSON array of matching shipping notifications. 4) Combine results. Categories are MUTUALLY EXCLUSIVE \u00e2\u20ac\u201d every item must appear in EXACTLY ONE group. Apply these rules in order: (a) Delivered = status==Delivered in the last 3 days (takes priority, even if delivery date is today); (b) Arriving Today = not yet delivered AND delivery date == today; (c) This Week = not yet delivered AND delivery date in next 7 days (excluding today); (d) Recently Ordered = ordered but no ship/delivery date yet. 5) Format the report following the delivery-digest template in ~/.openclaw/shopping-workspace/CRONS.md and deliver to Telegram. If any source failed, deliver what you have and note failures in Source notes. Update your status file."
-    },
-    "subscribe-save-review": {
-      "cron": "0 14 1 * *",
-      "no_deliver": false,
-      "announce": true,
-      "account": "shopping",
-      "to": "111111111",
-      "message": "Monthly Subscribe & Save review. 1) Run: python3 ~/.openclaw/shopping-workspace/scripts/amazon-orders.py --subscriptions. Read the JSON output. 2) Run: python3 ~/.openclaw/shopping-workspace/scripts/gmail-search.py --query \"from:no-reply@amazon.com subject:Subscribe & Save newer_than:30d\". Read matching emails for shipment details. 3) List all S&S items with: item name, quantity, price, next shipment date. 4) Note any price changes or out-of-stock items. 5) Format following the S&S review template in ~/.openclaw/shopping-workspace/CRONS.md and deliver to Telegram. Ask Sam if he wants any changes. Update your status file."
-    }
-  },
-  "meetings-coach": {
-    "post-meeting-scan": {
-      "cron": "15,45 * * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "murphy",
-      "to": "111111111",
-      "message": "Scan for recently-ended meetings and new transcripts. 1) Run gcal-fetch.py and identify meetings ended in the last 60 minutes. 2) Run transcript-scan.py to fetch Krisp transcripts and match to meetings. 3) Read the output. If items were extracted and staged: send a debrief summary on Telegram with action items, decisions, follow-ups. Include '/confirm to save to brain \u00c2\u00b7 /dismiss N to skip item N'. 4) If no transcripts found: produce NO output. 5) Write result to ~/.openclaw/meetings-coach-workspace/cache/last-post-scan.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"transcripts_processed\": <N>, \"debriefs_staged\": <N>, \"unmatched\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md \u00e2\u20ac\u201d the heartbeat cron owns that file."
-    },
-    "pre-meeting-alert": {
-      "cron": "*/30 * * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "murphy",
-      "to": "111111111",
-      "message": "Check for upcoming meetings needing alerts. Run gcal-fetch.py for events in the next 2 hours. Filter to real meetings starting in 15-45 minutes. Read sent-alerts.json to skip already-alerted meetings. For any un-alerted meeting: check cache for existing prep, generate if missing via meeting-prep.py. Send Telegram: '\u00f0\u0178\udc90\u00b7\u00f0\u0178\u201d\udc8d Heads up \u00e2\u20ac\u201d meeting in {N} min\\n\u00f0\u0178\u201c\u2039 {Title}\\n\u00f0\u0178\u2018\u00a5 {Attendees}\\n\u00f0\u0178\u017d\u00af {Top bullets}\\n\u00f0\u0178\u201c\u0152 {Open items}'. Record in sent-alerts.json. If no meetings approaching: produce NO output. Write result to ~/.openclaw/meetings-coach-workspace/cache/last-pre-meeting.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"meetings_alerted\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md \u00e2\u20ac\u201d the heartbeat cron owns that file."
-    },
-    "heartbeat": {
-      "cron": "*/30 * * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "murphy",
-      "to": "111111111",
-      "message": "Run: python3 /home/node/.openclaw/meetings-coach-workspace/scripts/heartbeat.py \u00e2\u20ac\u201d If exit 0: produce NO output. If exit 1: send the stdout text on Telegram. If exit 2: send Telegram alert with the output. Do NOT write to meetings-coach.status.md yourself."
-    },
-    "morning-meeting-brief": {
-      "cron": "50 11 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "murphy",
-      "to": "111111111",
-      "message": "Generate and deliver the morning meeting brief. 1) Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/gcal-fetch.py --days 2. Read the JSON output \u00e2\u20ac\u201d these are today's and tomorrow's professional meetings. 2) Filter to real meetings only (is_real_meeting=true). 3) For each real meeting: a) Run person-bootstrap.py to create person files for new attendees. b) Run workflowy-sync.py --create-nodes to create Workflowy meeting nodes. c) Run meeting-prep.py --meeting-id EVENT_ID to generate talking points. d) Run workflowy-sync.py --push-bullets EVENT_ID to push AI bullets to Workflowy. 4) Format the brief using the template in CRONS.md. Include talking points, open items with attendees, and a tomorrow preview. 5) Write to cache/morning-meeting-brief.txt. 6) Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/timed-deliver.py cache/morning-meeting-brief.txt --token-env MEETINGS_BOT_TOKEN. 7) Write result summary to ~/.openclaw/meetings-coach-workspace/cache/last-morning-brief.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"meetings_briefed\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md \u00e2\u20ac\u201d the heartbeat cron owns that file."
-    },
-    "commitment-follow-up": {
-      "cron": "0 16 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "murphy",
-      "to": "111111111",
-      "message": "Check open commitments from meetings. Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/commitment-tracker.py. Read the JSON output. If there are overdue or approaching items: send a follow-up summary on Telegram using the format in CRONS.md. If no actionable items: produce NO output. Write result to ~/.openclaw/meetings-coach-workspace/cache/last-commitment.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"overdue\": <N>, \"approaching\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md \u00e2\u20ac\u201d the heartbeat cron owns that file."
-    },
-    "weekly-review": {
-      "cron": "0 0 * * 5",
-      "no_deliver": false,
-      "announce": true,
-      "account": "murphy",
-      "to": "111111111",
-      "message": "Generate the weekly meeting review. Run gcal-fetch.py --days 7 to look back at this weeks meetings. Run commitment-tracker.py to get open commitments. Compile: meetings held, prep generated, transcripts processed, commitments created/resolved/overdue. List all unresolved commitments. Format using the template in CRONS.md. Deliver to Telegram."
-    }
-  },
-  "fix-it": {
-    "heartbeat-check": {
-      "cron": "*/30 * * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "default",
-      "to": "111111111",
-      "message": "Run: python3 /home/node/.openclaw/fix-it-workspace/scripts/heartbeat.py \u00e2\u20ac\u201d If exit 0: produce NO output. If exit 1: send the stdout text on Telegram. If exit 2: send Telegram alert with the output. Do NOT write to fix-it.status.md yourself."
-    },
-    "conflict-scan": {
-      "cron": "0 */2 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "default",
-      "to": "111111111",
-      "message": "Run: find ~/Dropbox/openclaw-backup/ -name *conflicted copy* -type f. If NO conflicts found: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If conflicts ARE found: send me a Telegram message with the filenames. Do NOT attempt to merge."
-    },
-    "cron-self-check": {
-      "cron": "0 0 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "default",
-      "to": "111111111",
-      "message": "Run: openclaw cron list. Verify all 9 fix-it crons are registered (heartbeat-check, morning-status, brain-validation, conflict-scan, file-size-monitor, monthly-archival, security-audit, update-check, cron-self-check). Filter the output visually for fix-it entries. If all 9 are present: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If any are missing: attempt to re-register them and send me a Telegram message."
-    },
-    "brain-validation": {
-      "cron": "0 */6 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "default",
-      "to": "111111111",
-      "message": "Run: python3 ~/Dropbox/openclaw-backup/scripts/validate.py. If validation PASSES: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If validation FAILS: send me a Telegram message with the specific failures immediately."
-    },
-    "security-audit": {
-      "cron": "0 4 * * 0",
-      "no_deliver": false,
-      "announce": true,
-      "account": "default",
-      "to": "111111111",
-      "message": "Security audit. Do not ask for permission. Execute ALL steps, then send ONE Telegram report.\n\nSTEP 1 \u00e2\u20ac\u201d Run openclaw security audit --deep. Capture its output.\n\nSTEP 2 \u00e2\u20ac\u201d Check per-agent exec policies. Run: python3 -c \"import json; d=json.load(open(chr(47)+chr(104)+chr(111)+chr(109)+chr(101)+chr(47)+chr(110)+chr(111)+chr(100)+chr(101)+chr(47)+chr(46)+chr(111)+chr(112)+chr(101)+chr(110)+chr(99)+chr(108)+chr(97)+chr(119)+chr(47)+chr(101)+chr(120)+chr(101)+chr(99)+chr(45)+chr(97)+chr(112)+chr(112)+chr(114)+chr(111)+chr(118)+chr(97)+chr(108)+chr(115)+chr(46)+chr(106)+chr(115)+chr(111)+chr(110))); [(print(a,c.get(chr(112)+chr(111)+chr(108)+chr(105)+chr(99)+chr(121),chr(63)))) for a,c in d.get(chr(97)+chr(103)+chr(101)+chr(110)+chr(116)+chr(115),{}).items()]\"\n\nSTEP 3 \u00e2\u20ac\u201d Compose the report. Format EXACTLY like this:\n\n\u00f0\u0178\u00a6\u0160\u00f0\u0178\u201d\u00a7 Security Audit \u00e2\u20ac\u201d {date}\n\n\u00f0\u0178\u201d\u2019 Exec Policies\n{for each agent from STEP 2, one line: \u00e2\u20ac\u00a2 {agent}: {policy}}\n{All agents having policy=full is EXPECTED \u00e2\u20ac\u201d see enrichment rules below. Do NOT flag as CRITICAL.}\n\n\u00f0\u0178\u201d\u00b4 CRITICAL ({count})\n\u00e2\u20ac\u00a2 {finding}\n\n\u00f0\u0178\u0178\u00a0 HIGH ({count})\n\u00e2\u20ac\u00a2 {finding}\n\n\u00f0\u0178\u0178\u00a1 MEDIUM ({count})\n\u00e2\u20ac\u00a2 {finding}\n\n\u00f0\u0178\u0178\u00a2 LOW ({count})\n\u00e2\u20ac\u00a2 {finding}\n\nRemediation: {one sentence per critical/high}\n\nENRICHMENT RULES for STEP 1 findings:\n\u00e2\u20ac\u00a2 tools.exec.security_full_configured \u00e2\u20ac\u201d do NOT report this raw finding. Replace it with the Exec Policies section from STEP 2. The global config is full because per-agent enforcement lives in exec-approvals.json. All agents having policy=full is EXPECTED and correct \u00e2\u20ac\u201d OpenClaw's allowlist matches binary paths only, and shell chains/redirections are unsupported in allowlist mode. Since LLMs generate compound commands, policy=full is the only option that works. This is per-agent scoped, not global. Do NOT flag as CRITICAL.\n\u00e2\u20ac\u00a2 plugins.tools_reachable_permissive_policy \u00e2\u20ac\u201d suppress if plugins.allow is set and no untrusted extensions are installed.\n\nFORMAT RULES: use the emoji severity headers. Group by severity. Include counts. Omit empty sections. If zero issues send just: Security audit clean. Do NOT run --fix. Do NOT run checks beyond what these steps specify."
-    },
-    "morning-status": {
-      "cron": "50 11 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "fixit",
-      "to": "111111111",
-      "message": "Compile the morning status report. Follow these steps in order.\n\nSTEP 1 \u00e2\u20ac\u201d Read the known-issues list FIRST.\nRead ~/Dropbox/openclaw-backup/fix-it/KNOWN_ISSUES.md. Parse each entry: match pattern, expires date, reason, escalation conditions. Any entry past its expires date is IGNORED (treat as not-known). Keep the parsed list in mind for step 3.\n\nSTEP 2 \u00e2\u20ac\u201d Gather raw state.\nFor each file matching ~/Dropbox/openclaw-backup/agents/*.status.md, record: agent name, the status field value, the last_heartbeat field value, the error_log field (first 500 chars), any agent-specific auth fields (google_auth, workflowy_auth, krisp_auth, amazon_session, costco_session), and the file mtime via stat -c %Y. Also run: python3 ~/Dropbox/openclaw-backup/scripts/validate.py and capture its result. Also run: find ~/Dropbox/openclaw-backup/ -name \"*conflicted copy*\" -type f and capture the list.\n\nSTEP 3 \u00e2\u20ac\u201d Classify each REGISTERED agent into exactly one bucket.\nIgnore placeholder status files for undeployed agents. Ignore the \"main\" internal. Use the following rules IN ORDER \u00e2\u20ac\u201d first match wins:\n\n(a) Heartbeat stale beyond 6 hours \u00e2\u2020\u2019 \u00f0\u0178\u0161\u00a8 DOWN. The agent is not running.\n\n(b) CRITICAL RULE: read the status FIELD, not the error_log history. The error_log may contain old entries from before a fix landed. If status is \"ok\" or \"healthy\", the agent IS healthy regardless of what error_log contains \u00e2\u20ac\u201d classify as \u00e2\u0153\u2026 HEALTHY and move on. Do NOT derive \"degraded\" from error_log text when status says ok.\n\n(c) status is \"degraded\" or an auth field shows an error: check the known-issues list. If a non-expired entry matches the text \u00e2\u2020\u2019 \u00e2\u201e\u00b9\u00ef\u00b8\udc8f KNOWN. Include the entry reason in parentheses.\n\n(d) status is \"degraded\" and last_heartbeat is older than 6 hours: \u00e2\u2020\u2019 \u00e2\u0161\u00a0\u00ef\u00b8\udc8f STALE. The content has not been refreshed since the error was written; we cannot tell if it is still real. Do NOT treat as an open alert.\n\n(e) Otherwise (fresh heartbeat, status=degraded, no known-issue match): do ONE verification action appropriate to the error before alerting. If the error mentions a token \u00e2\u2020\u2019 check the token file mtime on disk via stat. If the error mentions a cron \u00e2\u2020\u2019 run oc cron list and check the cron is still registered. If the error mentions exec approval \u00e2\u2020\u2019 run oc config get tools.exec and verify security=full and ask=off. Include the verification output in your report. If verification confirms the problem \u00e2\u2020\u2019 \u00f0\u0178\u0161\u00a8 OPEN ALERT. If verification shows the problem resolved \u00e2\u2020\u2019 \u00e2\u0153\u2026 HEALTHY (note the status file is stale).\n\n(f) Default \u00e2\u2020\u2019 \u00e2\u0153\u2026 HEALTHY.\n\nSTEP 4 \u00e2\u20ac\u201d Format the report EXACTLY as follows (do NOT send to Telegram yet \u00e2\u20ac\u201d step 6 handles delivery):\n\n\u00f0\u0178\u00a6\u0160\u00f0\u0178\u201d\u00a7 Morning Status \u00e2\u20ac\u201d {YYYY-MM-DD HH:MM UTC}\n\nOverall: {\u00e2\u0153\u2026 all clear | \u00e2\u201e\u00b9\u00ef\u00b8\udc8f {N} known | \u00e2\u0161\u00a0\u00ef\u00b8\udc8f {N} stale | \u00f0\u0178\u0161\u00a8 {N} open alerts}\n\nAgents:\n  {bucket-emoji} {agent} \u00e2\u20ac\u201d {one-line summary with heartbeat age}\n\nBrain: {validation PASS/FAIL with counts}\nDropbox: {conflicts result}\nPlatform heartbeat: n/a (cron-based status files are source of truth)\n\n\u00f0\u0178\u0161\u00a8 Open alerts: (OMIT this entire section if none)\n  - {agent}: {the issue}\n    Verified: {exact action you took in step 3e and the result}\n    Next: {restart / human needed / specific recommended command}\n\n\u00e2\u201e\u00b9\u00ef\u00b8\udc8f Known (pending human action): (OMIT this entire section if none)\n  - {agent}: {issue} ({reason from KNOWN_ISSUES.md}) \u00e2\u20ac\u201d expires {date}\n\n\u00e2\u0161\u00a0\u00ef\u00b8\udc8f Stale (not re-verified): (OMIT this entire section if none)\n  - {agent}: status file last updated {hours}h ago; content may be resolved \u00e2\u20ac\u201d next agent run will refresh\n\nSTEP 5 \u00e2\u20ac\u201d ABSOLUTE RULES (violating any of these is a bug in your report):\n1. Never classify an agent as \"degraded\" based on error_log text alone when the status field is \"ok\".\n2. Never report a known-issue as an open alert. The known-issues list is authoritative for suppression.\n3. Never include an agent in the \u00f0\u0178\u0161\u00a8 Open alerts section without a \"Verified:\" line showing exactly what you did to re-check.\n4. If in doubt between \u00e2\u0161\u00a0\u00ef\u00b8\udc8f stale and \u00f0\u0178\u0161\u00a8 alert, prefer \u00e2\u0161\u00a0\u00ef\u00b8\udc8f stale.\n5. Authority reminder: you may restart agents and re-register crons. You may NOT provision credentials, edit other agents SOUL/IDENTITY (immutable), or touch deploy.sh files. Anything needing human decision goes in \u00f0\u0178\u0161\u00a8 Open alerts with \"Next: human needed\".\n6. If KNOWN_ISSUES.md is missing or unreadable, note it in the report header and proceed without suppression \u00e2\u20ac\u201d do NOT fail silently.\n\nSTEP 6 \u00e2\u20ac\u201d Write the formatted report to cache/morning-status.txt and deliver via timed-deliver.py.\nWrite the complete formatted report from step 4 to ~/.openclaw/fix-it-workspace/cache/morning-status.txt. Then run: python3 ~/.openclaw/fix-it-workspace/scripts/timed-deliver.py cache/morning-status.txt --token-env FIXIT_BOT_TOKEN. The script holds delivery until :00 UTC (5:00 AM PT sharp). Do NOT send the report to Telegram yourself \u00e2\u20ac\u201d the script handles delivery."
-    },
-    "file-size-monitor": {
-      "cron": "0 12 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "default",
-      "to": "111111111",
-      "message": "Run: find ~/Dropbox/openclaw-backup/ -type f -size +500k. If NO large files found: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If large files ARE found: send me a Telegram message with the filenames and sizes."
-    },
-    "obsidian-briefing": {
-      "cron": "10 12 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "default",
-      "to": "111111111",
-      "message": "Generate daily Obsidian briefing. Run: python3\n~/Dropbox/openclaw-backup/scripts/obsidian-briefing/generate.py. If successful: produce NO output. Update your status file. If it fails: report the error."
-    },
-    "update-check": {
-      "cron": "0 4 * * 3",
-      "no_deliver": false,
-      "announce": true,
-      "account": "default",
-      "to": "111111111",
-      "message": "Run: openclaw update. Report current version and whether an update is available on Telegram. Do NOT apply updates automatically. Wait for my confirmation."
-    },
-    "monthly-archival": {
-      "cron": "0 3 1 * *",
-      "no_deliver": false,
-      "announce": true,
-      "account": "default",
-      "to": "111111111",
-      "message": "Run monthly archival. Create /home/node/Dropbox/openclaw-backup/archive/YYYY-MM/ for current month. Scan ALL files matching /home/node/Dropbox/openclaw-backup/facts/*.md (every monthly file, not just the current month). For each fact entry, calculate effective_confidence = original_confidence * 0.5^(days_since_recorded / half_life) using category half-lives: identity=never, established=365, situation=90, preference=180, plan=30, logistics=7, rumor=14. Move facts with effective_confidence < 0.2 AND recorded > 90 days ago to the archive. Also scan /home/node/Dropbox/openclaw-backup/tasks/queue.md and move tasks with status done and completed > 90 days ago. Write an archive manifest listing everything moved. Report results on Telegram."
     }
   }
 }
