@@ -1,9 +1,22 @@
 {
-  "operator_emails": ["sam.smith@example.com"],
+  "operator_emails": [
+    "sam.smith@example.com",
+    "sam.smith.alt@example.com",
+    "sam.smith@airbnb.example",
+    "sam.smith@chicagobooth.example",
+    "sam.smith@kellogg.example",
+    "sam.smith@uchicago.example",
+    "samsmith@example.com"
+  ],
+  "email_aliases": {
+    "alex.rivera@example.com": "alex.rivera@example.com",
+    "taylor.rivera@example.com": "taylor.rivera@example.com"
+  },
   "family_inner_names": ["Alex", "Avery", "Jordan", "Jamie"],
   "professional_domains": [],
   "personal_domains": ["gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com", "me.com", "aol.com"],
-  "noreply_patterns": ["noreply", "no-reply", "notifications", "mailer-daemon", "donotreply", "automated", "bounce", "postmaster", "daemon", "notify", "alert"],
+  "noreply_patterns": ["noreply", "no-reply", "notifications", "mailer-daemon", "donotreply", "automated", "bounce", "postmaster", "daemon", "notify", "alert", "auto-reply", "auto-confirm", "calendar-notification", "shipment-tracking", "order-update", "connect-notification", "uspsinformed"],
+  "newsletter_domains": ["substack.com", "duck.com", "mail.fidelity.com", "nytimes.com", "linkedin.com", "googlegroups.com"],
   "mailing_list_heuristic": {
     "min_received": 10,
     "max_sent": 0
@@ -17,7 +30,7 @@
     "max_body_chars": 3000
   },
   "calendar": {
-    "token_path": null,
+    "token_path": "E:/Dropbox/Startup/Clawford/agents/family-calendar/token.json",
     "calendar_ids": ["sam.smith@example.com"]
   },
   "krisp": {

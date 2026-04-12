@@ -1,206 +1,194 @@
 /**
- * messages-extract.js — Google Messages contact mining via Chrome DevTools
+ * messages-extract.js — Google Messages full conversation mining v4
  *
- * Paste this entire script into the Chrome DevTools console on messages.google.com.
- * It walks through all conversations, extracts messages, and copies the result
- * to your clipboard as JSON.
+ * Paste into Chrome DevTools Console on messages.google.com.
  *
- * Based on selector patterns from Flux chrome_extension/content_scripts/google_messages.js
- *
- * Usage:
- *   1. Open messages.google.com in Chrome
- *   2. Press F12 to open DevTools
- *   3. Go to Console tab
- *   4. Paste this entire script and press Enter
- *   5. Wait for it to finish (progress shown in console)
- *   6. Result is copied to clipboard — paste into cache/mined-messages.json
+ * Fixed: uses Angular router links (click <a role="option">) instead of
+ * window.location.href which killed the script via full page reload.
+ * Waits for mws-message-wrapper elements to appear after navigation.
  */
 
 (async function mineMessages() {
   "use strict";
 
-  const SELECTORS = {
-    conversationList: [
-      "mws-conversations-list",
-      '[role="listbox"]',
-      "nav [role='list']",
-    ],
-    conversationItem: [
-      "mws-conversation-list-item",
-      "a[href*='conversation']",
-      '[role="option"]',
-    ],
-    conversationName: [
-      "mws-conversation-list-item-content .name",
-      "[data-e2e-conversation-name]",
-      "h3.name",
-      ".text-content .name",
-    ],
-    conversationSnippet: [
-      "mws-conversation-list-item-content .snippet-text",
-      ".text-content .snippet-text",
-      ".snippet",
-    ],
-    conversationTimestamp: [
-      "mws-relative-timestamp",
-      ".timestamp",
-      "time",
-    ],
-    messageList: [
-      "mws-messages-list",
-      "div[data-e2e-message-list]",
-      '[role="list"]',
-    ],
-    messageWrapper: [
-      "mws-message-wrapper",
-      "[data-e2e-message]",
-      ".message-wrapper",
-    ],
-    messageText: [
-      "mws-message-content .text-msg",
-      "[data-e2e-message-text]",
-      ".message-text",
-      ".text-content",
-    ],
-    messageTimestamp: [
-      "mws-relative-timestamp",
-      "[data-e2e-timestamp]",
-      ".timestamp",
-    ],
-    headerName: [
-      "mws-conversation-header h2",
-      "[data-e2e-conversation-name]",
-      "header h2",
-    ],
-    backButton: [
-      'mws-conversation-back button',
-      'button[aria-label="Back"]',
-      'a[href="/"]',
-    ],
-  };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  function $(selectors, root = document) {
-    for (const sel of selectors) {
-      const el = root.querySelector(sel);
-      if (el) return el;
-    }
-    return null;
-  }
+  console.log("🐱🤝 Google Messages Miner v4");
 
-  function $$(selectors, root = document) {
-    for (const sel of selectors) {
-      const els = root.querySelectorAll(sel);
-      if (els.length > 0) return Array.from(els);
-    }
-    return [];
-  }
+  // ── Get all conversation <a> links ─────────────────────────
+  // From probe: <a role="option" class="list-item" href="/web/conversations/...">
+  const getConvLinks = () => document.querySelectorAll('a[role="option"][data-e2e-conversation]');
 
-  function text(el) {
-    return el ? el.textContent.trim() : "";
-  }
+  let convLinks = getConvLinks();
+  console.log(`Found ${convLinks.length} conversations`);
 
-  function sleep(ms) {
-    return new Promise((r) => setTimeout(r, ms));
-  }
-
-  console.log("🐱🤝 Mining Google Messages...");
-
-  // Step 1: Get all conversation items from the sidebar
-  const convItems = $$(SELECTORS.conversationItem);
-  console.log(`Found ${convItems.length} conversations`);
-
-  if (convItems.length === 0) {
-    console.error("No conversations found. Make sure you're on messages.google.com with conversations visible.");
+  if (convLinks.length === 0) {
+    console.error("No conversations. Are you on messages.google.com?");
     return;
   }
 
+  // ── Index sidebar metadata ─────────────────────────────────
+  const convMeta = [];
+  for (const link of convLinks) {
+    // Name: first non-empty span text
+    const spans = link.querySelectorAll("span");
+    let name = "";
+    for (const sp of spans) {
+      const t = sp.textContent.trim();
+      if (t.length > 0 && t.length < 100 && !name) { name = t; break; }
+    }
+
+    // Snippet
+    const snippetEl = link.querySelector("mws-conversation-snippet");
+    const snippet = snippetEl ? snippetEl.textContent.trim() : "";
+
+    // Timestamp
+    const tsEl = link.querySelector("mws-relative-timestamp");
+    const ts = tsEl ? tsEl.textContent.trim() : "";
+
+    convMeta.push({ name: name || `Conv ${convMeta.length + 1}`, snippet, timestamp: ts });
+  }
+
+  console.log(`Indexed ${convMeta.length} conversations`);
+
+  // ── Walk each conversation ─────────────────────────────────
   const results = [];
 
-  for (let i = 0; i < convItems.length; i++) {
-    const item = convItems[i];
+  for (let i = 0; i < convMeta.length; i++) {
+    const meta = convMeta[i];
+    console.log(`  [${i + 1}/${convMeta.length}] ${meta.name}`);
 
-    // Get name and snippet from sidebar (before clicking)
-    const nameEl = $(SELECTORS.conversationName, item);
-    const snippetEl = $(SELECTORS.conversationSnippet, item);
-    const tsEl = $(SELECTORS.conversationTimestamp, item);
+    // Re-query links (DOM updates after navigation)
+    convLinks = getConvLinks();
+    if (i >= convLinks.length) {
+      console.log(`    ⚠ Only ${convLinks.length} links available, stopping`);
+      break;
+    }
 
-    const contactName = text(nameEl) || `Conversation ${i + 1}`;
-    const lastSnippet = text(snippetEl);
-    const lastTimestamp = text(tsEl);
+    // Click the <a> link — Angular router handles SPA navigation
+    convLinks[i].click();
 
-    console.log(`  [${i + 1}/${convItems.length}] ${contactName}`);
+    // Wait for message list to render
+    let msgList = null;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      await sleep(300);
+      // Look for mws-message-wrapper (from probe: exists as a tag name)
+      msgList = document.querySelector("mws-messages-list");
+      if (msgList) break;
+    }
 
-    // Click into the conversation
-    item.click();
-    await sleep(1500); // Wait for messages to load
-
-    // Read messages from the conversation
     const messages = [];
-    const msgWrappers = $$(SELECTORS.messageWrapper);
 
-    for (const wrapper of msgWrappers) {
-      const msgTextEl = $(SELECTORS.messageText, wrapper);
-      const msgTsEl = $(SELECTORS.messageTimestamp, wrapper);
+    if (msgList) {
+      // Google Messages uses virtual scrolling: only ~25 messages in DOM at once.
+      // Must extract-while-scrolling: read visible messages, scroll up, repeat.
+      const seen = new Set();
+      const scrollable = msgList.parentElement || msgList.closest('[style*="overflow"]') || msgList;
 
-      const msgText = text(msgTextEl);
-      const msgTs = text(msgTsEl);
+      function harvestVisible() {
+        const wrappers = msgList.querySelectorAll("mws-message-wrapper");
+        for (const w of wrappers) {
+          const textEl = w.querySelector(".text-msg");
+          const msgText = textEl ? textEl.textContent.trim() : "";
+          if (!msgText) continue;
 
-      if (!msgText) continue;
+          // Dedupe by text content (virtual scroll recycles elements)
+          const key = msgText.substring(0, 100);
+          if (seen.has(key)) continue;
+          seen.add(key);
 
-      // Determine direction: outgoing messages typically have specific classes
-      const isOutbound =
-        wrapper.classList.contains("outgoing") ||
-        wrapper.closest(".outgoing") !== null ||
-        wrapper.querySelector('[data-e2e-is-outgoing="true"]') !== null ||
-        wrapper.closest('[data-outgoing="true"]') !== null;
+          const isOut = w.classList.contains("outgoing") ||
+                        w.getAttribute("data-e2e-is-outgoing") === "true" ||
+                        w.querySelector('[data-e2e-is-outgoing="true"]') !== null;
 
-      messages.push({
-        direction: isOutbound ? "outbound" : "inbound",
-        text: msgText,
-        timestamp: msgTs || null,
-      });
+          const tsEl = w.querySelector("mws-relative-timestamp");
+          const ts = tsEl ? tsEl.textContent.trim() : null;
+
+          messages.push({
+            direction: isOut ? "outbound" : "inbound",
+            text: msgText.substring(0, 500),
+            timestamp: ts,
+          });
+        }
+      }
+
+      // First harvest: bottom of conversation (most recent)
+      harvestVisible();
+
+      // Scroll up incrementally (one viewport at a time) and harvest
+      let prevSeen = 0;
+      let stableRounds = 0;
+      const pageHeight = scrollable.clientHeight || 600;
+      for (let s = 0; s < 500; s++) {
+        scrollable.scrollTop = Math.max(0, scrollable.scrollTop - pageHeight);
+        await sleep(400);
+        harvestVisible();
+
+        if (seen.size === prevSeen) {
+          stableRounds++;
+          if (stableRounds >= 5) break;
+        } else {
+          stableRounds = 0;
+        }
+        prevSeen = seen.size;
+      }
+    } else {
+      console.log("    ⚠ mws-messages-list not found after 6s");
     }
 
     results.push({
-      name: contactName,
+      name: meta.name,
       platform: "sms",
-      messages: messages,
+      messages,
       message_count: messages.length,
-      last_snippet: lastSnippet,
-      last_timestamp: lastTimestamp,
+      last_snippet: meta.snippet,
+      last_timestamp: meta.timestamp,
     });
 
-    // Go back to conversation list
-    const backBtn = $(SELECTORS.backButton);
-    if (backBtn) {
-      backBtn.click();
-      await sleep(800);
+    if (messages.length > 0) {
+      console.log(`    ✓ ${messages.length} messages`);
     } else {
-      // Try browser back
-      window.history.back();
-      await sleep(800);
+      console.log(`    ✗ 0 messages`);
     }
+
+    // Navigate back: click the logo/back link
+    const backLink = document.querySelector('a[data-e2e-messages-title]') ||
+                     document.querySelector('a[href="/web/conversations"]') ||
+                     document.querySelector("mw-main-nav a");
+    if (backLink) {
+      backLink.click();
+    } else {
+      window.history.back();
+    }
+    await sleep(1000);
   }
 
-  // Build final output
+  // ── Output ─────────────────────────────────────────────────
+  const totalMsgs = results.reduce((s, r) => s + r.message_count, 0);
   const output = {
     status: "ok",
     source: "messages",
     mined_at: new Date().toISOString(),
     conversations_scanned: results.length,
     contacts_found: results.length,
+    total_messages: totalMsgs,
     contacts: results,
   };
 
-  // Copy to clipboard
   const jsonStr = JSON.stringify(output, null, 2);
   try {
     await navigator.clipboard.writeText(jsonStr);
-    console.log(`\n🐱🤝 Done! ${results.length} conversations mined.`);
-    console.log("Result copied to clipboard. Paste into cache/mined-messages.json");
+    console.log(`\n🐱🤝 Done! ${results.length} conversations, ${totalMsgs} messages.`);
+    console.log("Copied to clipboard — paste into cache/mined-messages.json");
   } catch (e) {
-    console.log("Clipboard failed. Output below — copy manually:");
-    console.log(jsonStr);
+    const blob = new Blob([jsonStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "mined-messages.json";
+    a.click();
+    URL.revokeObjectURL(url);
+    console.log(`\n🐱🤝 Done! Downloaded as mined-messages.json`);
   }
 
   return output;

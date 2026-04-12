@@ -41,7 +41,7 @@ def load_mined(name):
     path = CACHE_DIR / f"mined-{name}.json"
     if not path.exists():
         return None
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -156,6 +156,17 @@ def aggregate():
     config = load_config()
     min_score = config.get("min_importance_score", 5.0)
 
+    # Email alias resolution
+    email_aliases = config.get("email_aliases", {})
+    def resolve_email(email):
+        return email_aliases.get(email, email)
+
+    # Newsletter/mailing list domain filter
+    newsletter_domains = config.get("newsletter_domains", [])
+    def is_newsletter(email):
+        if not email: return False
+        return any(email.endswith(f"@{d}") or email.endswith(f".{d}") for d in newsletter_domains)
+
     # Load all mined sources
     gmail_data = load_mined("gmail")
     gcal_data = load_mined("gcal")
@@ -181,6 +192,9 @@ def aggregate():
         for email, data in gmail_data.get("contacts", {}).items():
             email = normalize_email(email)
             if not email or is_brian(email, config) or is_noreply(email, config):
+                continue
+            email = resolve_email(email)
+            if is_newsletter(email):
                 continue
             contacts[email] = {
                 "email": email,
@@ -208,6 +222,7 @@ def aggregate():
             email = normalize_email(email)
             if not email or is_brian(email, config):
                 continue
+            email = resolve_email(email)
 
             if email in contacts:
                 c = contacts[email]
@@ -296,7 +311,10 @@ def aggregate():
     # ── Merge WhatsApp ───────────────────────────────────────
     whatsapp_contacts = []
     if whatsapp_data and whatsapp_data.get("status") == "ok":
-        for key, data in whatsapp_data.get("contacts", {}).items():
+        wa_contacts = whatsapp_data.get("contacts", {})
+        # Handle both dict (from web scraper) and list (from phone export)
+        wa_items = wa_contacts.items() if isinstance(wa_contacts, dict) else enumerate(wa_contacts)
+        for key, data in wa_items:
             name = data.get("name", "")
             if not name:
                 continue
@@ -416,7 +434,19 @@ def aggregate():
     existing_slugs = existing_people_slugs()
 
     scored_contacts = []
+    mailing_list_cfg = config.get("mailing_list_heuristic", {})
+    ml_min_recv = mailing_list_cfg.get("min_received", 10)
+    ml_max_sent = mailing_list_cfg.get("max_sent", 0)
+
     for email, c in contacts.items():
+        # Skip mailing lists: high received, zero/low sent, no meetings, no SMS/WA
+        if (c.get("gmail_received", 0) >= ml_min_recv
+            and c.get("gmail_sent", 0) <= ml_max_sent
+            and c.get("meeting_count", 0) == 0
+            and c.get("whatsapp_messages", 0) == 0
+            and c.get("sms_messages", 0) == 0):
+            continue
+
         score = compute_score(c, config)
         if score < min_score:
             continue
