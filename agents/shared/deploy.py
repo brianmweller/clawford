@@ -60,6 +60,37 @@ DROPBOX_BACKUP_ROOT = Path(
 )
 BACKUP_RETENTION = 10  # keep last N backups per agent
 
+# VPS-side secrets file. The gateway container reads this at boot, but a
+# human running `python3 deploy.py` from a fresh shell wouldn't have its
+# values in os.environ — so load it explicitly before the cron-sync step
+# consults TELEGRAM_CHAT_ID et al.
+VPS_ENV_FILE = Path(os.path.expanduser("~/openclaw/.env"))
+
+
+def load_vps_env() -> dict[str, str]:
+    """Parse VPS_ENV_FILE into a flat dict. Missing file → empty dict.
+
+    Supports simple KEY=VALUE lines, with comments (#) and blank lines
+    ignored. Strips surrounding single/double quotes from values.
+    """
+    if not VPS_ENV_FILE.exists():
+        return {}
+    result: dict[str, str] = {}
+    for raw in VPS_ENV_FILE.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, sep, val = line.partition("=")
+        if not sep:
+            continue
+        key = key.strip()
+        val = val.strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
+            val = val[1:-1]
+        if key:
+            result[key] = val
+    return result
+
 
 # ────────────────────────────────────────────────────────────────────────
 # Logging
@@ -1073,7 +1104,8 @@ def deploy_one(agent_id: str, args: argparse.Namespace) -> int:
 
     if not args.skip_crons:
         note("Crons")
-        telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+        vps_env = load_vps_env()
+        telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID") or vps_env.get("TELEGRAM_CHAT_ID", "")
         if not telegram_chat_id:
             log("TELEGRAM_CHAT_ID not in env — crons may fail delivery", "warn")
         live = fetch_live_crons(mf.agent_id)
