@@ -61,15 +61,40 @@ Respond with ONLY the JSON object, no markdown fencing or explanation."""
 
 
 def build_prompt(contact):
-    """Build the enrichment prompt for a single contact."""
-    # Truncate long lists for token efficiency
-    subjects = contact.get("gmail_subjects", [])[:15]
-    meeting_titles = contact.get("meeting_titles", [])[:15]
+    """Build the enrichment prompt with sqrt-scaled message sampling.
 
-    # Build message samples from body excerpts + WhatsApp/SMS
+    Core relationships (high score) get rich context — many message samples,
+    subjects, and meeting titles. Acquaintances get minimal context.
+    Sample count ≈ sqrt(score), capped at 150.
+    """
+    import math
+
+    score = contact.get("score", 5)
+    sample_budget = min(int(math.sqrt(score)) + 2, 150)
+
+    # Allocate budget across data types proportionally
+    subjects = contact.get("gmail_subjects", [])[:sample_budget]
+    meeting_titles = contact.get("meeting_titles", [])[:max(sample_budget // 3, 3)]
+
+    # Message samples: body excerpts + WhatsApp + SMS
+    msg_budget = max(sample_budget // 2, 3)
     message_samples = []
-    for excerpt in contact.get("gmail_body_excerpts", [])[:3]:
+
+    for excerpt in contact.get("gmail_body_excerpts", [])[:msg_budget]:
         message_samples.append(f"[email] {excerpt[:300]}")
+
+    # WhatsApp/SMS messages from the mined data (if available in contact)
+    for msg in contact.get("whatsapp_samples", [])[:msg_budget]:
+        direction = msg.get("direction", "?")
+        text = msg.get("text", "")[:200]
+        message_samples.append(f"[whatsapp {direction}] {text}")
+
+    for msg in contact.get("sms_samples", [])[:msg_budget]:
+        direction = msg.get("direction", "?")
+        text = msg.get("text", "")[:200]
+        message_samples.append(f"[sms {direction}] {text}")
+
+    message_samples = message_samples[:sample_budget]
 
     sig = contact.get("signature", {})
     sig_str = json.dumps(sig) if sig else "none"
@@ -90,21 +115,35 @@ def build_prompt(contact):
     )
 
 
-def call_openai(prompt, config):
-    """Call OpenAI API for enrichment."""
-    import openai
+def call_llm(prompt, config):
+    """Call LLM API for enrichment. Tries Anthropic first, falls back to OpenAI."""
+    import os
 
-    model = config.get("openai", {}).get("model", "gpt-5.4-nano")
-    client = openai.OpenAI()
-
-    response = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-        max_tokens=500,
-    )
-
-    text = response.choices[0].message.content.strip()
+    # Try Anthropic (Claude)
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        import anthropic
+        client = anthropic.Anthropic()
+        model = config.get("anthropic", {}).get("model", "claude-haiku-4-5-20251001")
+        response = client.messages.create(
+            model=model,
+            max_tokens=500,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = response.content[0].text.strip()
+    # Fallback to OpenAI
+    elif os.environ.get("OPENAI_API_KEY"):
+        import openai
+        model = config.get("openai", {}).get("model", "gpt-5.4-nano")
+        client = openai.OpenAI()
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=500,
+        )
+        text = response.choices[0].message.content.strip()
+    else:
+        raise RuntimeError("No API key found. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.")
 
     # Strip markdown fencing if present
     if text.startswith("```"):
@@ -127,10 +166,54 @@ def enrich():
         print("ERROR: Run contact-aggregator.py first.", file=sys.stderr)
         sys.exit(1)
 
-    with open(agg_path) as f:
+    with open(agg_path, encoding="utf-8") as f:
         agg_data = json.load(f)
 
     contacts = agg_data.get("contacts", [])
+
+    # Load message samples from source files for richer prompts
+    wa_samples = {}  # name → [messages]
+    sms_samples = {}  # name/phone → [messages]
+
+    wa_path = CACHE_DIR / "mined-whatsapp.json"
+    if wa_path.exists():
+        wa_data = json.load(open(wa_path, encoding="utf-8"))
+        wa_list = wa_data.get("contacts", {})
+        if isinstance(wa_list, list):
+            for c in wa_list:
+                wa_samples[c.get("name", "").lower()] = c.get("messages", [])
+        elif isinstance(wa_list, dict):
+            for k, c in wa_list.items():
+                wa_samples[c.get("name", "").lower()] = c.get("messages", [])
+
+    sms_path = CACHE_DIR / "mined-messages.json"
+    if sms_path.exists():
+        sms_data = json.load(open(sms_path, encoding="utf-8"))
+        sms_list = sms_data.get("contacts", [])
+        for c in sms_list:
+            name = c.get("name", "").lower()
+            phone = c.get("phone", "")
+            msgs = c.get("messages", [])
+            if name:
+                sms_samples[name] = msgs
+            if phone:
+                sms_samples[phone] = msgs
+
+    # Attach samples to contacts
+    for contact in contacts:
+        name = contact.get("name", "").lower()
+        # WhatsApp samples
+        for wa_name, msgs in wa_samples.items():
+            if wa_name and (wa_name == name or wa_name in contact.get("display_names_lower", [name])):
+                contact["whatsapp_samples"] = msgs
+                break
+        # SMS samples
+        for sms_key, msgs in sms_samples.items():
+            if sms_key == name:
+                contact["sms_samples"] = msgs
+                break
+
+    print(f"Loaded message samples: {sum(1 for c in contacts if c.get('whatsapp_samples'))} WhatsApp, {sum(1 for c in contacts if c.get('sms_samples'))} SMS", file=sys.stderr)
 
     # Parse args
     resume = "--resume" in sys.argv
@@ -164,7 +247,7 @@ def enrich():
         prompt = build_prompt(contact)
 
         try:
-            llm_result = call_openai(prompt, config)
+            llm_result = call_llm(prompt, config)
             enriched_map[key] = llm_result
             print(f"  [{i + 1}/{len(contacts)}] {name}: {llm_result.get('relationship_type', '?')}", file=sys.stderr)
         except Exception as e:

@@ -9,8 +9,12 @@
     "samsmith@example.com"
   ],
   "email_aliases": {
-    "alex.rivera@example.com": "alex.rivera@example.com",
-    "taylor.rivera@example.com": "taylor.rivera@example.com"
+    "alex.rivera@example.com": "alex.rivera@example.com"
+  },
+  "name_to_email": {
+    "spouse-nick": "alex.rivera@example.com",
+    "Alex Rivera": "alex.rivera@example.com",
+    "Alex": "alex.rivera@example.com"
   },
   "family_inner_names": ["Alex", "Avery", "Jordan", "Jamie"],
   "professional_domains": [],
@@ -34,10 +38,10 @@
     "calendar_ids": ["sam.smith@example.com"]
   },
   "krisp": {
-    "token_dir": null
+    "token_dir": "E:/Dropbox/Startup/Clawford/agents/connector/scripts/mine/cache/krisp-tokens"
   },
   "workflowy": {
-    "contact_cache_path": null
+    "contact_cache_path": "E:/Dropbox/Startup/Clawford/agents/connector/scripts/mine/cache/workflowy-contact-names.json"
   },
   "openai": {
     "model": "gpt-5.4-nano",
