@@ -1,0 +1,253 @@
+"""
+family_map.py — Pre-seeded family relationships for Sam Smith.
+
+These contacts are hand-classified and bypass LLM enrichment entirely.
+LLM classification can be wrong (Daniel as extended vs inner, etc.), so
+for confirmed family we hardcode the relationship and circle.
+
+Structure:
+  email → (name, relation, circle, extra_facts)
+  first_name → (relation, circle)  [for contacts without known emails]
+"""
+
+# Smith paternal side
+# Quinn family — Sam's mother's aunt/uncle and their daughter
+# Lee family — Sam's mother's sister, her kids, and their spouses
+FAMILY_EMAIL_MAP = {
+    # Alex (wife)
+    "alex.rivera@example.com": {
+        "name": "Alex Rivera",
+        "relation": "wife",
+        "circle": "family-inner",
+        "facts": [
+            "Sam's wife",
+            "Mother of Avery and Jordan",
+        ],
+    },
+    "alex.rivera@example.com": {  # alias
+        "name": "Alex Rivera",
+        "relation": "wife",
+        "circle": "family-inner",
+        "facts": ["Sam's wife", "Mother of Avery and Jordan"],
+    },
+
+    # Daniel — brother
+    "chris.smith@example.com": {
+        "name": "Chris Smith",
+        "relation": "brother",
+        "circle": "family-inner",
+        "facts": ["Sam's brother", "Married into the Lee family"],
+    },
+
+    # Pat — father
+    "pat.smith@example.com": {
+        "name": "Pat Smith",
+        "relation": "father",
+        "circle": "family-inner",
+        "facts": ["Sam's father", "Married to Robin Smith"],
+    },
+    "pat.smith@example.net": {
+        "name": "Pat Smith",
+        "relation": "father",
+        "circle": "family-inner",
+        "facts": ["Sam's father", "Married to Robin Smith"],
+    },
+
+    # Robin — mother
+    "robin.smith@example.com": {
+        "name": "Robin Smith",
+        "relation": "mother",
+        "circle": "family-inner",
+        "facts": ["Sam's mother", "Married to Pat Smith", "Sister of Morgan Lee"],
+    },
+
+    # Kim Rivera — mother-in-law (Alex's mother)
+    "kim.rivera@example.com": {
+        "name": "Kim Rivera",
+        "relation": "mother-in-law",
+        "circle": "family-inner",
+        "facts": [
+            "Sam's mother-in-law (Alex Rivera's mother)",
+            "Grandmother to Avery and Jordan",
+        ],
+    },
+
+    # Arnold — paternal uncle (Pat's brother)
+    "alex.smith@example.com": {
+        "name": "Alex Smith",
+        "relation": "paternal uncle",
+        "circle": "family-extended",
+        "facts": ["Sam's paternal uncle (Pat Smith's brother)", "Married to Dana Smith"],
+    },
+
+    # Robin — paternal aunt (Arnold's wife)
+    "dana.smith@example.com": {
+        "name": "Dana Smith",
+        "relation": "paternal aunt",
+        "circle": "family-extended",
+        "facts": ["Sam's paternal aunt (by marriage to Alex Smith)"],
+    },
+
+    # Quinn family — Robin's aunt/uncle (Sam's great-aunt/uncle)
+    "quinn.family@example.com": {
+        "name": "Frances and Gerald Quinn",
+        "relation": "great-aunt and great-uncle",
+        "circle": "family-extended",
+        "facts": [
+            "Sam's great-aunt and great-uncle on his mother's side",
+            "Phyllis is Robin Smith's aunt",
+            "Parents of Harper Quinn",
+        ],
+    },
+    "harper.quinn@example.com": {
+        "name": "Harper Quinn",
+        "relation": "cousin (once removed)",
+        "circle": "family-extended",
+        "facts": [
+            "Sam's first cousin once removed on his mother's side",
+            "Daughter of Frances and Gerald Quinn",
+        ],
+    },
+
+    # Lee family — Robin's sister and her family
+    "morgan.lee@example.com": {
+        "name": "Morgan Lee",
+        "relation": "maternal aunt",
+        "circle": "family-extended",
+        "facts": [
+            "Sam's maternal aunt (Robin Smith's sister)",
+            "Mother of Steven and Jordan Lee",
+        ],
+    },
+    "drew.lee@example.com": {
+        "name": "Drew Lee",
+        "relation": "maternal cousin",
+        "circle": "family-extended",
+        "facts": [
+            "Sam's maternal cousin (Morgan Lee's son)",
+            "Married to Quinn Lee",
+        ],
+    },
+    "jordan.lee@example.com": {
+        "name": "Jordan Lee",
+        "relation": "maternal cousin",
+        "circle": "family-extended",
+        "facts": [
+            "Sam's maternal cousin (Morgan Lee's son)",
+            "Brother of Drew Lee",
+        ],
+    },
+    "quinn.lee@example.org": {
+        "name": "Quinn Lee",
+        "relation": "cousin-in-law",
+        "circle": "family-extended",
+        "facts": [
+            "Sam's cousin-in-law (Drew Lee's wife)",
+            "Works at UW Health",
+        ],
+    },
+}
+
+
+# First-name matches — for kids and other family members without email
+# addresses in the mining data. These are matched against the contact's
+# `name` field (exact match, lowercase).
+FAMILY_FIRST_NAME_MAP = {
+    "Avery": {
+        "relation": "daughter",
+        "circle": "family-inner",
+        "facts": ["Sam's daughter", "Alex's daughter"],
+    },
+    "Jordan": {
+        "relation": "daughter",
+        "circle": "family-inner",
+        "facts": ["Sam's daughter", "Alex's daughter"],
+    },
+}
+
+
+# Vivian is Alex's sister (Sam's sister-in-law); not on email maps above
+# because she's classified by family relationship, not pre-seeded family.
+# Add to FAMILY_EMAIL_MAP here.
+FAMILY_EMAIL_MAP.update({
+    "taylor.rivera@example.com": {
+        "name": "Taylor Rivera",
+        "relation": "sister-in-law",
+        "circle": "family-extended",
+        "facts": ["Sam's sister-in-law (Alex Rivera's sister)"],
+    },
+    "taylor.rivera@example.edu": {
+        "name": "Taylor Rivera",
+        "relation": "sister-in-law",
+        "circle": "family-extended",
+        "facts": ["Sam's sister-in-law (Alex Rivera's sister)"],
+    },
+    "taylor.rivera.alt@example.com": {
+        "name": "Taylor Rivera",
+        "relation": "sister-in-law",
+        "circle": "family-extended",
+        "facts": ["Sam's sister-in-law (Alex Rivera's sister)"],
+    },
+})
+
+
+# Special non-family contacts with hand-curated classification overrides.
+# These bypass LLM classification for specific emails. Used for cases
+# where LLM can't infer the ground truth (e.g., Jamie is Sam's nanny,
+# not a "colleague" as the LLM guesses from work-like WhatsApp chat).
+SPECIAL_CONTACTS = {
+    "jamie.park@example.com": {
+        "name": "Jamie Park",
+        "relation": "nanny",
+        "circle": "family-extended",
+        "relationship_type": "vendor",  # professional childcare role
+        "tone": "warm",
+        "facts": [
+            "Sam and Alex's nanny for Avery and Jordan",
+            "Onboarded December 2023",
+        ],
+        "context_notes": "Sam's nanny, central to daily childcare for Avery and Jordan.",
+    },
+}
+
+
+# Circle-only overrides — LLM got everything else right but the circle
+# wrong. Merge these on top of LLM output without replacing facts/notes.
+CIRCLE_OVERRIDES = {
+    "friend.one@example.com": "friends-close",
+    "friend.one@example.com": "friends-close",
+}
+
+
+def lookup_special(contact):
+    """Return a SPECIAL_CONTACTS override if matched, else None."""
+    email = (contact.get("email") or "").lower().strip()
+    return SPECIAL_CONTACTS.get(email)
+
+
+def lookup_circle_override(contact):
+    """Return a circle override string if matched, else None."""
+    email = (contact.get("email") or "").lower().strip()
+    return CIRCLE_OVERRIDES.get(email)
+
+
+def lookup_family(contact):
+    """Return a family dict if this contact is a known family member, else None.
+
+    Matches on (1) exact email, (2) email alias in the map, (3) first name
+    from FAMILY_FIRST_NAME_MAP.
+    """
+    email = (contact.get("email") or "").lower().strip()
+    if email in FAMILY_EMAIL_MAP:
+        return FAMILY_EMAIL_MAP[email]
+
+    # First-name match for kids
+    name = (contact.get("name") or "").strip()
+    if name:
+        first = name.split()[0].lower()
+        if first in FAMILY_FIRST_NAME_MAP:
+            info = FAMILY_FIRST_NAME_MAP[first].copy()
+            info["name"] = name
+            return info
+
+    return None

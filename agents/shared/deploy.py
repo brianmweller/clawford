@@ -252,6 +252,8 @@ class Manifest:
     scripts: list[str]
     state_files: list[StateFile]
     approvals_allowlist: list[str]
+    approvals_policy: str
+    approvals_security: str
     crons: list[Cron]
     source_dir: Path = field(default_factory=Path)
     smoke_test: dict | None = None  # {"cron_name": ..., "max_wait_s": int}
@@ -315,6 +317,8 @@ def load_manifest(path: Path) -> Manifest:
             "allowlist",
             ["/usr/bin/*", "/bin/*", "/usr/local/bin/*"],
         ),
+        approvals_policy=data.get("approvals", {}).get("policy", "full"),
+        approvals_security=data.get("approvals", {}).get("security", "full"),
         crons=crons,
         source_dir=path.parent,
         smoke_test=data.get("smoke_test"),
@@ -858,6 +862,32 @@ def ensure_binding(mf: Manifest) -> None:
 
 
 def ensure_approvals(mf: Manifest) -> None:
+    # Set per-agent policy/security (e.g. "full") so new agents don't fall
+    # back to host defaults that don't understand wildcards. Edit
+    # exec-approvals.json directly — there's no CLI for policy yet.
+    approvals_path = Path(os.path.expanduser("~/.openclaw/exec-approvals.json"))
+    if approvals_path.exists():
+        try:
+            with open(approvals_path, encoding="utf-8") as f:
+                data = json.load(f)
+            agent_entry = data.setdefault("agents", {}).setdefault(mf.agent_id, {})
+            changed = False
+            if agent_entry.get("policy") != mf.approvals_policy:
+                agent_entry["policy"] = mf.approvals_policy
+                changed = True
+            if agent_entry.get("security") != mf.approvals_security:
+                agent_entry["security"] = mf.approvals_security
+                changed = True
+            if changed:
+                log(f"approv  POLICY {mf.agent_id} policy={mf.approvals_policy} security={mf.approvals_security}", "plan")
+                if not _DRY:
+                    with open(approvals_path, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2)
+            else:
+                log(f"approv  OK     {mf.agent_id} policy={mf.approvals_policy}", "ok")
+        except (OSError, json.JSONDecodeError) as e:
+            log(f"approv  FAIL   cannot update policy: {e}", "error")
+
     for pattern in mf.approvals_allowlist:
         log(f"allow   ENSURE {mf.agent_id} {pattern}", "plan")
         if not _DRY:
@@ -900,6 +930,25 @@ def sync_files(mf: Manifest, yes_updates: bool = False) -> tuple[int, int]:
             updated += 1
         else:
             skipped += 1
+
+    # Remove auto-generated openclaw onboarding files that conflict with a
+    # deployed IDENTITY.md. BOOTSTRAP.md is the "fresh workspace" script
+    # openclaw writes on first `agents add`; it runs a "who am I?" dialog
+    # that shadows the real identity. Once IDENTITY.md is in place, BOOTSTRAP
+    # must go.
+    _ONBOARDING_ORPHANS = ("BOOTSTRAP.md",)
+    have_identity = any(cf.src == "IDENTITY.md" for cf in mf.config_files)
+    if have_identity:
+        for name in _ONBOARDING_ORPHANS:
+            path = workspace / name
+            if path.exists():
+                if not _DRY:
+                    try:
+                        path.unlink()
+                    except OSError as e:
+                        log(f"file  FAIL   remove {name}: {e}", "error")
+                        continue
+                log(f"file  REMOVE {name} (onboarding orphan)", "plan")
     return updated, skipped
 
 

@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
 """
-contact-review.py — Generate a review markdown or finalize after edits.
+contact-review.py — Apply cutoff rule and generate review markdown.
 
-Default: reads enriched-contacts.json and generates review-contacts.md
-         for Sam to review in his editor.
+Default: loads enriched-contacts.json + cache/cutoff-rule.json, applies
+the rule, writes:
+  - cache/review-contacts.md (kept contacts, for spot-check)
+  - cache/review-dropped.md (dropped contacts, audit trail)
 
---finalize: re-reads review-contacts.md (after Sam's edits), parses
-            the remaining rows, and writes review-ready.json for seeding.
+--finalize: re-reads review-contacts.md after edits and writes review-ready.json.
 
 Usage:
-  python3 contact-review.py               # Generate review markdown
-  python3 contact-review.py --finalize    # Parse edited markdown → JSON
-
-Input: cache/enriched-contacts.json (or aggregated-contacts.json)
-Output: cache/review-contacts.md + cache/review-ready.json
+  python3 contact-review.py               # Auto-apply cutoff, generate md
+  python3 contact-review.py --finalize    # Parse edited md -> JSON
 """
 
+import io
 import json
 import os
 import re
@@ -25,145 +24,167 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mining_utils import CACHE_DIR
 
+if sys.stdout.encoding != "utf-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
 REVIEW_MD = CACHE_DIR / "review-contacts.md"
+REVIEW_DROPPED_MD = CACHE_DIR / "review-dropped.md"
 REVIEW_JSON = CACHE_DIR / "review-ready.json"
+CUTOFF_RULE = CACHE_DIR / "cutoff-rule.json"
 
 
 def load_contacts():
-    """Load enriched or aggregated contacts."""
-    enriched = CACHE_DIR / "enriched-contacts.json"
-    aggregated = CACHE_DIR / "aggregated-contacts.json"
-
-    path = enriched if enriched.exists() else aggregated
+    enriched = CACHE_DIR / "contacts-enriched.json"
+    merged = CACHE_DIR / "contacts-merged.json"
+    path = enriched if enriched.exists() else merged
     if not path.exists():
-        print("ERROR: Run aggregator (and optionally llm-enrich) first.", file=sys.stderr)
+        print("ERROR: Run contact-aggregator.py and heuristic-enrich.py first.", file=sys.stderr)
         sys.exit(1)
-
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
-def generate_review():
-    """Generate the review markdown file."""
-    data = load_contacts()
-    contacts = data.get("contacts", [])
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+def load_cutoff_rule():
+    if not CUTOFF_RULE.exists():
+        print("ERROR: cache/cutoff-rule.json not found. Run analyze-distribution.py first.", file=sys.stderr)
+        sys.exit(1)
+    with open(CUTOFF_RULE, encoding="utf-8") as f:
+        return json.load(f)
 
-    # Count sources
+
+def apply_rule(contacts, rule):
+    """Apply cutoff thresholds. Data-quality filtering already done in aggregator
+    via is_person_entity(); this only decides signal strength."""
+    kept = []
+    dropped = []
+    thresholds = rule["type_thresholds"]
+
+    for c in contacts:
+        rt = (c.get("llm") or {}).get("relationship_type", "unknown")
+        score = c.get("score", 0)
+        min_s = thresholds.get(rt, thresholds.get("unknown", 50))
+        if score >= min_s:
+            kept.append(c)
+        else:
+            dropped.append((c, f"score<{min_s}({rt})"))
+
+    return kept, dropped
+
+
+def format_row(i, c):
+    llm = c.get("llm", {}) or {}
+    facts = llm.get("key_facts") or []
+    # Prefer a "Works at..." or "Phone..." fact; otherwise first fact
+    title_co = ""
+    for f in facts:
+        if f.lower().startswith(("works", "job title", "phone:", "linkedin:")):
+            title_co = f[:60]
+            break
+    if not title_co and facts:
+        title_co = (facts[0] or "")[:60]
+
+    circle = llm.get("circle_suggestion") or c.get("auto_circle", "")
+    rel_type = llm.get("relationship_type", "")
+    context = (llm.get("context_notes") or "").replace("\n", " ").replace("|", "/")[:60]
+    name = (c.get("name", "") or "").replace("|", "/")
+    email = c.get("email", "") or ""
+
+    return (
+        f"| {i} "
+        f"| {name} "
+        f"| {email} "
+        f"| {circle} "
+        f"| {rel_type} "
+        f"| {c.get('score', 0):.0f} "
+        f"| {c.get('gmail_sent', 0)}/{c.get('gmail_received', 0)} "
+        f"| {c.get('meeting_count', 0)} "
+        f"| {c.get('whatsapp_messages', 0)} "
+        f"| {c.get('sms_messages', 0)} "
+        f"| {c.get('last_interaction', '') or ''} "
+        f"| {title_co.replace('|', '/')} "
+        f"| {context} "
+        f"| {c.get('slug', '')} |"
+    )
+
+
+def generate_review():
+    data = load_contacts()
+    rule = load_cutoff_rule()
+    contacts = data.get("contacts", [])
+
+    kept, dropped = apply_rule(contacts, rule)
+    # Sort kept by score descending
+    kept.sort(key=lambda c: -c.get("score", 0))
+    dropped.sort(key=lambda x: -x[0].get("score", 0))
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     sources = set()
     for c in contacts:
         sources.update(c.get("platforms", []))
 
-    lines = [
-        f"# People Directory — Mining Review",
-        f"Generated: {now} | Contacts: {len(contacts)} | Sources: {', '.join(sorted(sources))}",
-        "",
-        "## Instructions",
-        "- **Delete** rows you don't want to create people files for",
-        "- **Fix** names, circles, and relationship types as needed",
-        "- **Leave** the slug column alone (auto-generated)",
-        "- When done, run: `python3 contact-review.py --finalize`",
-        "",
-    ]
-
-    # Tier contacts
-    tiers = [
-        ("Tier 1: High Importance (score >= 50)", lambda c: c.get("score", 0) >= 50),
-        ("Tier 2: Medium Importance (score 15-49)", lambda c: 15 <= c.get("score", 0) < 50),
-        ("Tier 3: Low Importance (score 5-14)", lambda c: c.get("score", 0) < 15),
-    ]
-
     header = "| # | Name | Email | Circle | Type | Score | Gmail S/R | Meet | WA | SMS | Last Seen | Title / Company | Context | Slug |"
     separator = "|-|-|-|-|-|-|-|-|-|-|-|-|-|-|"
 
-    for tier_name, tier_filter in tiers:
-        tier_contacts = [c for c in contacts if tier_filter(c) and not c.get("exists_in_brain")]
-        if not tier_contacts:
-            continue
+    # ── Kept (review markdown) ─────────────────────────────
+    lines = [
+        "# People Directory — Mining Review",
+        f"Generated: {now} | Kept: {len(kept)} | Dropped: {len(dropped)} | Sources: {', '.join(sorted(sources))}",
+        "",
+        "## Instructions",
+        "- **Delete** rows that slipped through (spot-check top 20 + random middle + bottom).",
+        "- **Fix** names, circles, relationship types as needed.",
+        "- **Leave** the slug column alone.",
+        "- When done: `python3 contact-review.py --finalize`",
+        "",
+        "## Rule Applied",
+        "```json",
+        json.dumps({k: rule[k] for k in ("type_thresholds", "drop_domains", "drop_domains_if_low") if k in rule}, indent=2),
+        "```",
+        "",
+        f"## All Kept Contacts ({len(kept)})",
+        "",
+        header,
+        separator,
+    ]
+    for i, c in enumerate(kept, 1):
+        lines.append(format_row(i, c))
 
-        lines.append(f"## {tier_name}")
-        lines.append("")
-        lines.append(header)
-        lines.append(separator)
-
-        for i, c in enumerate(tier_contacts, 1):
-            llm = c.get("llm", {})
-            sig = c.get("signature", {})
-            title_co = ""
-            if sig.get("title") and sig.get("company"):
-                title_co = f"{sig['title']} / {sig['company']}"
-            elif llm.get("key_facts"):
-                # Use first fact as fallback
-                title_co = llm["key_facts"][0][:40] if llm["key_facts"] else ""
-
-            circle = llm.get("circle_suggestion", c.get("auto_circle", ""))
-            rel_type = llm.get("relationship_type", "")
-            context = llm.get("context_notes", "")[:60]
-
-            lines.append(
-                f"| {i} "
-                f"| {c.get('name', '')} "
-                f"| {c.get('email', '')} "
-                f"| {circle} "
-                f"| {rel_type} "
-                f"| {c.get('score', 0)} "
-                f"| {c.get('gmail_sent', 0)}/{c.get('gmail_received', 0)} "
-                f"| {c.get('meeting_count', 0)} "
-                f"| {c.get('whatsapp_messages', 0)} "
-                f"| {c.get('sms_messages', 0)} "
-                f"| {c.get('last_interaction', '')} "
-                f"| {title_co} "
-                f"| {context} "
-                f"| {c.get('slug', '')} |"
-            )
-
-        lines.append("")
-
-    # Already exists section
-    existing = [c for c in contacts if c.get("exists_in_brain")]
-    if existing:
-        lines.append("## Already in People Directory")
-        lines.append("")
-        lines.append("| # | Name | Email | Slug | Current Data |")
-        lines.append("|-|-|-|-|-|")
-        for i, c in enumerate(existing, 1):
-            lines.append(f"| {i} | {c.get('name', '')} | {c.get('email', '')} | {c.get('slug', '')} | score={c.get('score', 0)} |")
-        lines.append("")
-
-    # Unresolved
-    for group, label in [
-        ("unresolved_krisp", "Unresolved Krisp Names (no email match)"),
-        ("unmatched_whatsapp", "Unmatched WhatsApp Contacts"),
-        ("unmatched_messages", "Unmatched Google Messages Contacts"),
-    ]:
-        items = data.get(group, [])
-        if items:
-            lines.append(f"## {label}")
-            lines.append("")
-            lines.append("| # | Name | Count | Last Seen |")
-            lines.append("|-|-|-|-|")
-            for i, item in enumerate(items, 1):
-                name = item.get("name", "")
-                count = item.get("meeting_count", item.get("message_count", 0))
-                last = item.get("last_meeting", item.get("last_message", ""))
-                lines.append(f"| {i} | {name} | {count} | {last} |")
-            lines.append("")
-
-    # Write markdown
     with open(REVIEW_MD, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
+        f.write("\n".join(lines) + "\n")
+    print(f"Review file written: {REVIEW_MD} ({len(kept)} contacts)", file=sys.stderr)
 
-    print(f"Review file written: {REVIEW_MD}", file=sys.stderr)
-    print(f"{len(contacts)} contacts. Edit the file, then run: python3 contact-review.py --finalize", file=sys.stderr)
+    # ── Dropped (audit trail) ──────────────────────────────
+    drop_lines = [
+        "# People Directory — Dropped Contacts (Audit Trail)",
+        f"Generated: {now} | Dropped: {len(dropped)}",
+        "",
+        "Review this for false negatives. To rescue any, add them back to review-contacts.md before finalizing.",
+        "",
+        "| # | Name | Email | Reason | Score | Type | Last Seen |",
+        "|-|-|-|-|-|-|-|",
+    ]
+    for i, (c, reason) in enumerate(dropped, 1):
+        llm = c.get("llm", {}) or {}
+        name = (c.get("name", "") or "").replace("|", "/")
+        email = c.get("email", "") or ""
+        rt = llm.get("relationship_type", "")
+        drop_lines.append(
+            f"| {i} | {name} | {email} | {reason} | {c.get('score', 0):.0f} | {rt} | {c.get('last_interaction', '') or ''} |"
+        )
+
+    with open(REVIEW_DROPPED_MD, "w", encoding="utf-8") as f:
+        f.write("\n".join(drop_lines) + "\n")
+    print(f"Dropped audit: {REVIEW_DROPPED_MD} ({len(dropped)} contacts)", file=sys.stderr)
+
+    print(f"\nNext: open {REVIEW_MD}, spot-check, then run --finalize", file=sys.stderr)
 
 
 def finalize_review():
-    """Parse the edited review markdown back into JSON."""
     if not REVIEW_MD.exists():
-        print("ERROR: No review-contacts.md found. Run without --finalize first.", file=sys.stderr)
+        print("ERROR: No review-contacts.md. Run without --finalize first.", file=sys.stderr)
         sys.exit(1)
 
-    # Also load the enriched/aggregated data for full contact details
     data = load_contacts()
     contacts_by_slug = {c.get("slug", ""): c for c in data.get("contacts", [])}
     contacts_by_email = {c.get("email", ""): c for c in data.get("contacts", [])}
@@ -171,34 +192,36 @@ def finalize_review():
     with open(REVIEW_MD, encoding="utf-8") as f:
         content = f.read()
 
-    # Parse table rows (lines starting with |)
     kept_contacts = []
     for line in content.split("\n"):
         line = line.strip()
         if not line.startswith("|") or line.startswith("|-"):
             continue
-        # Skip header rows
-        cells = [c.strip() for c in line.split("|")]
-        cells = [c for c in cells if c]  # Remove empty from leading/trailing |
-
+        # Split by | and strip each cell, but KEEP empty cells to preserve
+        # column positions. Only trim the leading/trailing empties from
+        # the outer pipe markers.
+        raw_cells = line.split("|")
+        if raw_cells and raw_cells[0].strip() == "":
+            raw_cells = raw_cells[1:]
+        if raw_cells and raw_cells[-1].strip() == "":
+            raw_cells = raw_cells[:-1]
+        cells = [c.strip() for c in raw_cells]
         if len(cells) < 10:
             continue
-        if cells[0] == "#" or cells[0] == "Name":
+        if cells[0] in ("#", "Name"):
             continue
-
         try:
             int(cells[0])
         except ValueError:
             continue
 
-        # Parse: #, Name, Email, Circle, Type, Score, Gmail, Meet, WA, SMS, Last, Title, Context, Slug
+        # Column layout: # Name Email Circle Type Score S/R Meet WA SMS LastSeen Title Context Slug
         name = cells[1] if len(cells) > 1 else ""
         email = cells[2] if len(cells) > 2 else ""
         circle = cells[3] if len(cells) > 3 else ""
         rel_type = cells[4] if len(cells) > 4 else ""
-        slug = cells[-1] if len(cells) > 13 else ""
+        slug = cells[13] if len(cells) > 13 else (cells[-1] if len(cells) > 10 else "")
 
-        # Find full contact data
         full = contacts_by_slug.get(slug) or contacts_by_email.get(email) or {}
 
         kept_contacts.append({
@@ -217,10 +240,10 @@ def finalize_review():
         "total": len(kept_contacts),
     }
 
-    with open(REVIEW_JSON, "w") as f:
+    with open(REVIEW_JSON, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2)
 
-    print(f"Finalized: {len(kept_contacts)} contacts → {REVIEW_JSON}", file=sys.stderr)
+    print(f"Finalized: {len(kept_contacts)} contacts -> {REVIEW_JSON}", file=sys.stderr)
     print(f"Next: python3 people-seed-from-mine.py --dry-run", file=sys.stderr)
 
 

@@ -9,12 +9,25 @@
     "samsmith@example.com"
   ],
   "email_aliases": {
-    "alex.rivera@example.com": "alex.rivera@example.com"
+    "alex.rivera@example.com": "alex.rivera@example.com",
+    "pat.smith@example.net": "pat.smith@example.com"
   },
   "name_to_email": {
     "spouse-nick": "alex.rivera@example.com",
     "Alex Rivera": "alex.rivera@example.com",
-    "Alex": "alex.rivera@example.com"
+    "Alex": "alex.rivera@example.com",
+    "dad": "pat.smith@example.com",
+    "Pat Smith": "pat.smith@example.com",
+    "mom": "robin.smith@example.com",
+    "Robin Smith": "robin.smith@example.com",
+    "Chris Smith": "chris.smith@example.com",
+    "Chris Smith": "chris.smith@example.com",
+    "Chris": "chris.smith@example.com",
+    "Jamie Park": "jamie.park@example.com",
+    "Jamie Park (nanny)": "jamie.park@example.com",
+    "Jamie": "jamie.park@example.com",
+    "Alex Guest": "alex.guest@example.com",
+    "Alex Guest": "alex.guest@example.com"
   },
   "family_inner_names": ["Alex", "Avery", "Jordan", "Jamie"],
   "professional_domains": [],

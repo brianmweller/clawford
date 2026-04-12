@@ -18,7 +18,7 @@ import sys
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from mining_utils import get_google_credentials, load_config, normalize_email, save_mined
+from mining_utils import get_google_credentials, load_config, normalize_email, normalize_name, save_mined
 
 DEFAULT_TOKEN_PATHS = [
     os.path.join(os.path.dirname(__file__), "..", "..", "..", "family-calendar", "token.json"),
@@ -78,9 +78,25 @@ def mine_contacts():
             if not display_name:
                 continue
 
+            # Skip placeholder names — don't let them override real ones
+            placeholder_names = {"UNLISTED", "Unlisted", "UNKNOWN", "Unknown", "No Name", "(No name)"}
+            if display_name.strip() in placeholder_names:
+                continue
+
             for email_entry in emails:
                 email = normalize_email(email_entry.get("value", ""))
                 if email:
+                    # Don't overwrite an existing real name with a new entry
+                    existing = email_to_name.get(email)
+                    if existing and existing.get("name"):
+                        # Only replace if new name is more complete (has space)
+                        if " " not in existing["name"] and " " in display_name:
+                            email_to_name[email] = {
+                                "name": display_name,
+                                "phone": phones[0].get("value", "") if phones else "",
+                                "source": "saved",
+                            }
+                        continue
                     email_to_name[email] = {
                         "name": display_name,
                         "phone": phones[0].get("value", "") if phones else "",
@@ -125,6 +141,17 @@ def mine_contacts():
             phones = person.get("phoneNumbers", [])
 
             display_name = names[0].get("displayName", "") if names else ""
+
+            # If no explicit name but we have an email, derive a name from the
+            # local part (e.g., drew.branden@example.com -> "Drew Branden").
+            # This lets unnamed auto-saved contacts still merge with saved
+            # phone-only records by name.
+            if not display_name and emails:
+                local = emails[0].get("value", "").split("@")[0]
+                derived = normalize_name(local)
+                if derived and " " in derived:
+                    display_name = derived
+
             if not display_name:
                 continue
 
@@ -148,6 +175,28 @@ def mine_contacts():
         page_token = result.get("nextPageToken")
         if not page_token:
             break
+
+    # ── Post-pass: cross-link saved phone-only contacts with other email-only
+    # Saved GC often has a name+phone but no email; "other" auto-saves email
+    # with no name. Match by derived name and backfill.
+    print("Cross-linking saved phone records with other email records...", file=sys.stderr)
+    name_to_emails = {}
+    for e, info in email_to_name.items():
+        nm = info.get("name", "")
+        if nm:
+            name_to_emails.setdefault(nm.lower(), []).append(e)
+    linked = 0
+    for phone, info in phone_to_name.items():
+        if info.get("email"):
+            continue
+        nm = (info.get("name") or "").lower()
+        if not nm:
+            continue
+        candidates = name_to_emails.get(nm, [])
+        if len(candidates) == 1:
+            info["email"] = candidates[0]
+            linked += 1
+    print(f"  Linked {linked} phone-only records to their email counterpart", file=sys.stderr)
 
     print(f"  Other contacts: {other_count}", file=sys.stderr)
 

@@ -66,14 +66,15 @@ def parse_person_file(filepath):
     person = {}
     for line in content.split("\n"):
         line = line.strip()
-        if line.startswith("- **") and ":**" in line:
-            match = re.match(r"- \*\*(\w[\w_]*)\*\*:\s*(.*)", line)
-            if match:
-                key = match.group(1).strip()
-                value = match.group(2).strip()
-                if value == "—" or value == "":
-                    value = None
-                person[key] = value
+        # Accept both "- **key:** value" (current template) and
+        # "- **key**: value" (older format used by some agents).
+        match = re.match(r"- \*\*(\w[\w_]*)(?::\*\*|\*\*:)\s*(.*)", line)
+        if match:
+            key = match.group(1).strip()
+            value = match.group(2).strip()
+            if value == "—" or value == "":
+                value = None
+            person[key] = value
 
     # Extract name from heading
     for line in content.split("\n"):
@@ -108,7 +109,9 @@ def get_cadence_for_person(person, config):
             best_cadence = check_days
             best_circle = circle
 
-    return best_cadence, best_circle if best_cadence else (None, None)
+    if best_cadence is None:
+        return None, None
+    return best_cadence, best_circle
 
 
 def main():

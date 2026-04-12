@@ -105,6 +105,8 @@
     }
   ],
   "approvals": {
+    "policy": "full",
+    "security": "full",
     "allowlist": [
       "/usr/bin/*",
       "/bin/*",
