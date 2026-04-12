@@ -197,41 +197,83 @@ during the Huckle Cat (2026-04-12) build.
    your IDENTITY.md. `deploy.py` removes BOOTSTRAP.md automatically as
    of 2026-04-12 — but if you see the symptom, verify the file is gone
    at `~/.openclaw/<agent>-workspace/BOOTSTRAP.md`.
-10. **Set the bot's slash-command menu via the Telegram Bot API.**
-    Freshly-created bots ship with the generic `/start`, `/help` menu —
-    users won't see agent-specific commands until you call
-    `setMyCommands`. BotFather's `/setcommands` works interactively,
-    but scripting it via HTTP is faster and reproducible:
+10. **Set the bot's slash-command menu. Two steps — both required.**
 
-    ```bash
-    TOKEN="<YOUR_BOT_TOKEN>"
-    curl -s -X POST "https://api.telegram.org/bot${TOKEN}/setMyCommands" \
-      -H "Content-Type: application/json" -d '{
-        "commands": [
-          {"command": "radar",     "description": "Todays relationship nudges"},
-          {"command": "find",      "description": "Look up a person: /find Drew"},
-          {"command": "log",       "description": "Log a check-in: /log Drew lunch"},
-          {"command": "triage",    "description": "Triage pending notes"},
-          {"command": "confirm",   "description": "Approve a pending write"},
-          {"command": "nevermind", "description": "Cancel a pending write"}
-        ]
-      }'
+    **Step 10a — openclaw config.** Edit
+    `~/.openclaw/openclaw.json` in the gateway container. For the
+    Telegram account belonging to the new agent, set:
 
-    curl -s -X POST "https://api.telegram.org/bot${TOKEN}/setMyDescription" \
-      -H "Content-Type: application/json" \
-      -d '{"description": "..."}'
-
-    curl -s -X POST "https://api.telegram.org/bot${TOKEN}/setMyShortDescription" \
-      -H "Content-Type: application/json" \
-      -d '{"short_description": "..."}'
+    ```json
+    "channels": {
+      "telegram": {
+        "accounts": {
+          "<account>": {
+            "botToken": "...",
+            "enabled": true,
+            "name": "<Display Name>",
+            "commands": {"native": false},
+            "customCommands": [
+              {"command": "radar", "description": "Today's nudges"},
+              {"command": "find",  "description": "Look up: /find Drew"}
+            ]
+          }
+        }
+      }
+    }
     ```
 
-    **Gotcha:** Windows `curl` on git-bash often mangles quotes. If the
-    setMyDescription call returns
-    `"Bad Request: strings must be encoded in UTF-8"`, pipe through a
-    short Python helper using `urllib.request` with explicit UTF-8
-    encoding instead. Verify with
-    `curl -s "https://api.telegram.org/bot${TOKEN}/getMyCommands"`.
+    Then restart the gateway so openclaw re-runs its command sync. If
+    you skip this step, on the next gateway restart openclaw will
+    clobber any commands you set directly via the Bot API — it
+    maintains its own hash-cached state in
+    `~/.openclaw/telegram/command-hash-<account>-*.txt` and resyncs on
+    startup whenever the hash differs. **Why `commands.native: false`:
+    without it, openclaw injects all ~49 built-in commands
+    (`/help`, `/status`, `/context`, `/tools`, `/exec`, …) into the
+    bot's menu alongside your 7 custom ones, producing a 56-item menu
+    that makes the agent look generic.**
+
+    **Step 10b — the Telegram Bot API set.** Even with openclaw
+    managing its own command sync, you may want to set commands
+    directly via the Bot API for immediate effect (openclaw's sync
+    runs on startup and may be skipped if the hash matches). Both
+    `default` and `all_private_chats` scopes should be set — the
+    Telegram client picks the most specific scope when showing the
+    menu, so `all_private_chats` wins in DMs:
+
+    ```python
+    import json, urllib.request
+    TOKEN = "<YOUR_BOT_TOKEN>"
+    def call(method, body=None):
+        data = json.dumps(body or {}).encode("utf-8")
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{TOKEN}/{method}",
+            data=data,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req) as r:
+            return json.loads(r.read().decode())
+
+    cmds = [
+        {"command": "radar",     "description": "Today's nudges"},
+        {"command": "find",      "description": "Look up: /find Drew"},
+        ...
+    ]
+    call("setMyCommands", {"commands": cmds})
+    call("setMyCommands", {"commands": cmds, "scope": {"type": "all_private_chats"}})
+    call("setMyDescription", {"description": "..."})
+    call("setMyShortDescription", {"short_description": "..."})
+    ```
+
+    **Gotchas:**
+    - git-bash `curl` on Windows mangles UTF-8 quotes in JSON bodies.
+      Use Python's `urllib.request` with explicit UTF-8 encoding.
+    - After setting via Bot API, force-refresh the Telegram client to
+      clear its cache: pull-down on the chat, or close/reopen the app.
+      Telegram caches command menus aggressively on the client side.
+    - If commands were previously wrong, wipe the openclaw hash cache
+      before restarting:
+      `rm /home/node/.openclaw/telegram/command-hash-<account>-*.txt`
 
 11. Smoke-test via Telegram: send a message, confirm the agent reads
     SOUL.md and runs its scripts without approval prompts.
