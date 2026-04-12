@@ -1,0 +1,144 @@
+{
+  "agent_id": "fix-it",
+  "display_name": "Mr Fixit",
+  "workspace": "~/.openclaw/fix-it-workspace",
+  "status_file": "~/Dropbox/openclaw-backup/agents/fix-it.status.md",
+  "telegram": {
+    "account": "fixit",
+    "bot_token_env": "FIXIT_BOT_TOKEN"
+  },
+  "smoke_test": {
+    "cron_name": "heartbeat-check",
+    "max_wait_s": 120
+  },
+  "config_files": [
+    {
+      "src": "SOUL.md",
+      "immutable": true
+    },
+    {
+      "src": "IDENTITY.md",
+      "immutable": true
+    },
+    {
+      "src": "TOOLS.md"
+    },
+    {
+      "src": "AGENTS.md"
+    },
+    {
+      "src": "USER.md"
+    },
+    {
+      "src": "HEARTBEAT.md"
+    },
+    {
+      "src": "CRONS.md"
+    },
+    {
+      "src": "probation.md"
+    }
+  ],
+  "scripts": [
+    "scripts/heartbeat.py",
+    "scripts/timed-deliver.py",
+    "scripts/heartbeat-write.py",
+    "scripts/security-audit.py",
+    "scripts/diagnose-approval.py",
+    "retire.sh"
+  ],
+  "state_files": [],
+  "approvals": {
+    "allowlist": [
+      "/usr/bin/*",
+      "/bin/*",
+      "/usr/local/bin/*"
+    ]
+  },
+  "crons": [
+    {
+      "name": "heartbeat-check",
+      "cron": "*/30 * * * *",
+      "message": "Run: python3 /home/node/.openclaw/fix-it-workspace/scripts/heartbeat.py\n\nThis script checks all agent status files, determines healthy/degraded, and writes fix-it.status.md automatically. You do NOT write the status file — the script does it.\n\nIf the script exits 0: all agents healthy. Produce NO output.\nIf the script exits 1: an agent is degraded. The script prints the alert message to stdout. Send that exact message on Telegram.\nIf the script exits 2: script error. Send a Telegram alert: \"❌ fix-it heartbeat: script error\" with the output.\n\nDo NOT write to fix-it.status.md yourself. Do NOT use python3 -c. Do NOT use heredocs. Just run the script and relay its output if non-zero.",
+      "announce": false,
+      "no_deliver": true
+    },
+    {
+      "name": "morning-status",
+      "cron": "50 11 * * *",
+      "message": "Compile the morning status report. Follow these steps in order.\n\nSTEP 1 — Read the known-issues list FIRST.\nRead ~/Dropbox/openclaw-backup/fix-it/KNOWN_ISSUES.md. Parse each entry: match pattern, expires date, reason, escalation conditions. Any entry past its expires date is IGNORED (treat as not-known). Keep the parsed list in mind for step 3.\n\nSTEP 2 — Gather raw state.\nFor each file matching ~/Dropbox/openclaw-backup/agents/*.status.md, record: agent name, the status field value, the last_heartbeat field value, the error_log field (first 500 chars), any agent-specific auth fields (google_auth, workflowy_auth, krisp_auth, amazon_session, costco_session), and the file mtime via stat -c %Y. Also run: python3 ~/Dropbox/openclaw-backup/scripts/validate.py and capture its result. Also run: find ~/Dropbox/openclaw-backup/ -name \"*conflicted copy*\" -type f and capture the list.\n\nSTEP 3 — Classify each REGISTERED agent into exactly one bucket.\nIgnore placeholder status files for undeployed agents. Ignore the \"main\" internal. Use the following rules IN ORDER — first match wins:\n\n(a) Heartbeat stale beyond 6 hours → 🚨 DOWN. The agent is not running.\n\n(b) CRITICAL RULE: read the status FIELD, not the error_log history. The error_log may contain old entries from before a fix landed. If status is \"ok\" or \"healthy\", the agent IS healthy regardless of what error_log contains — classify as ✅ HEALTHY and move on. Do NOT derive \"degraded\" from error_log text when status says ok.\n\n(c) status is \"degraded\" or an auth field shows an error: check the known-issues list. If a non-expired entry matches the text → ℹ️ KNOWN. Include the entry reason in parentheses.\n\n(d) status is \"degraded\" and last_heartbeat is older than 6 hours: → ⚠️ STALE. The content has not been refreshed since the error was written; we cannot tell if it is still real. Do NOT treat as an open alert.\n\n(e) Otherwise (fresh heartbeat, status=degraded, no known-issue match): do ONE verification action appropriate to the error before alerting. If the error mentions a token → check the token file mtime on disk via stat. If the error mentions a cron → run oc cron list and check the cron is still registered. If the error mentions exec approval → run oc config get tools.exec and verify security=full and ask=off. Include the verification output in your report. If verification confirms the problem → 🚨 OPEN ALERT. If verification shows the problem resolved → ✅ HEALTHY (note the status file is stale).\n\n(f) Default → ✅ HEALTHY.\n\nSTEP 4 — Format the report EXACTLY as follows (do NOT send to Telegram yet — step 6 handles delivery):\n\n🦊🔧 Morning Status — {YYYY-MM-DD HH:MM UTC}\n\nOverall: {✅ all clear | ℹ️ {N} known | ⚠️ {N} stale | 🚨 {N} open alerts}\n\nAgents:\n  {bucket-emoji} {agent} — {one-line summary with heartbeat age}\n\nBrain: {validation PASS/FAIL with counts}\nDropbox: {conflicts result}\nPlatform heartbeat: n/a (cron-based status files are source of truth)\n\n🚨 Open alerts: (OMIT this entire section if none)\n  - {agent}: {the issue}\n    Verified: {exact action you took in step 3e and the result}\n    Next: {restart / human needed / specific recommended command}\n\nℹ️ Known (pending human action): (OMIT this entire section if none)\n  - {agent}: {issue} ({reason from KNOWN_ISSUES.md}) — expires {date}\n\n⚠️ Stale (not re-verified): (OMIT this entire section if none)\n  - {agent}: status file last updated {hours}h ago; content may be resolved — next agent run will refresh\n\nSTEP 5 — ABSOLUTE RULES (violating any of these is a bug in your report):\n1. Never classify an agent as \"degraded\" based on error_log text alone when the status field is \"ok\".\n2. Never report a known-issue as an open alert. The known-issues list is authoritative for suppression.\n3. Never include an agent in the 🚨 Open alerts section without a \"Verified:\" line showing exactly what you did to re-check.\n4. If in doubt between ⚠️ stale and 🚨 alert, prefer ⚠️ stale.\n5. Authority reminder: you may restart agents and re-register crons. You may NOT provision credentials, edit other agents SOUL/IDENTITY (immutable), or touch deploy.sh files. Anything needing human decision goes in 🚨 Open alerts with \"Next: human needed\".\n6. If KNOWN_ISSUES.md is missing or unreadable, note it in the report header and proceed without suppression — do NOT fail silently.\n\nSTEP 6 — Write the formatted report to cache/morning-status.txt and deliver via timed-deliver.py.\nWrite the complete formatted report from step 4 to ~/.openclaw/fix-it-workspace/cache/morning-status.txt. Then run: python3 ~/.openclaw/fix-it-workspace/scripts/timed-deliver.py cache/morning-status.txt --token-env FIXIT_BOT_TOKEN. The script holds delivery until :00 UTC (5:00 AM PT sharp). Do NOT send the report to Telegram yourself — the script handles delivery.",
+      "announce": false,
+      "no_deliver": true
+    },
+    {
+      "name": "brain-validation",
+      "cron": "0 */6 * * *",
+      "message": "Run: python3 ~/Dropbox/openclaw-backup/scripts/validate.py. If validation PASSES: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If validation FAILS: send me a Telegram message with the specific failures immediately.",
+      "announce": false,
+      "no_deliver": true
+    },
+    {
+      "name": "conflict-scan",
+      "cron": "0 */2 * * *",
+      "message": "Run: find ~/Dropbox/openclaw-backup/ -name '*conflicted copy*' -type f. If NO conflicts found: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If conflicts ARE found: send me a Telegram message with the filenames. Do NOT attempt to merge.",
+      "announce": false,
+      "no_deliver": true
+    },
+    {
+      "name": "file-size-monitor",
+      "cron": "0 12 * * *",
+      "message": "Run: find ~/Dropbox/openclaw-backup/ -type f -size +500k. If NO large files found: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If large files ARE found: send me a Telegram message with the filenames and sizes.",
+      "announce": false,
+      "no_deliver": true
+    },
+    {
+      "name": "monthly-archival",
+      "cron": "0 3 1 * *",
+      "message": "Run monthly archival. Create ~/Dropbox/openclaw-backup/archive/YYYY-MM/ for current month. Scan ALL files matching ~/Dropbox/openclaw-backup/facts/*.md (every monthly file, not just the current month). For each fact entry, calculate effective_confidence = original_confidence * 0.5^(days_since_recorded / half_life) using category half-lives: identity=never, established=365, situation=90, preference=180, plan=30, logistics=7, rumor=14. Move facts with effective_confidence < 0.2 AND recorded > 90 days ago to the archive. Also scan tasks/queue.md and move tasks with status done and completed > 90 days ago. Write an archive manifest listing everything moved. Report results on Telegram.",
+      "announce": true,
+      "no_deliver": false
+    },
+    {
+      "name": "security-audit",
+      "cron": "0 4 * * 0",
+      "message": "Run: python3 /home/node/.openclaw/fix-it-workspace/scripts/security-audit.py\n\nThe script reads /home/node/.openclaw/exec-approvals.json directly, runs openclaw security audit --deep, applies enrichment rules (suppresses tools.exec.security_full_configured and plugins.tools_reachable_permissive_policy), and prints the formatted emoji-headed severity report. Send the entire stdout to Telegram as ONE message. Do NOT use python3 -c. Do NOT use heredocs. Do NOT regenerate the report yourself — just run the script and forward its output verbatim.",
+      "announce": true,
+      "no_deliver": false
+    },
+    {
+      "name": "update-check",
+      "cron": "0 4 * * 3",
+      "message": "Run: openclaw update. Report current version and whether an update is available on Telegram. Do NOT apply updates automatically. Wait for my confirmation.",
+      "announce": true,
+      "no_deliver": false
+    },
+    {
+      "name": "cron-self-check",
+      "cron": "0 0 * * *",
+      "message": "Check crons for ALL agents and re-register any missing ones. 1) Run: openclaw cron list. 2) Read ~/.openclaw/fix-it-workspace/expected-crons.json — this contains the full cron config for every agent: name, schedule, delivery mode (no_deliver/announce), account, to, AND the complete message prompt. 3) For each agent in the config, check that every expected cron name appears in the live cron list. 4) If ALL present: produce NO output. 5) If any are missing: re-register using the FULL config from the JSON — openclaw cron add --agent {agent} --name {name} --cron {schedule} --to {to} --account {account} {--no-deliver if no_deliver else --announce} --message {the full message from the JSON}. This restores the cron with its complete original prompt, not a placeholder. 6) After re-registering, send a Telegram alert: '🦊🔧 Cron repair: re-registered {list of agent:cron pairs}'. DO NOT touch fix-it.status.md.",
+      "announce": false,
+      "no_deliver": true
+    },
+    {
+      "name": "obsidian-briefing",
+      "cron": "10 12 * * *",
+      "message": "Run: python3 ~/Dropbox/openclaw-backup/scripts/obsidian-briefing/generate.py. If it succeeds: produce NO output. If it fails: send the error on Telegram.",
+      "announce": false,
+      "no_deliver": true
+    },
+    {
+      "name": "probation-end-reminder",
+      "cron": "0 16 25 4 *",
+      "message": "🦊🔧 Probation review reminder. Today is 2026-04-25 — your 14-day probation window ends today. Read ~/Dropbox/openclaw-backup/fix-it/probation.md for the failure ledger Sam has been keeping. Send Sam one Telegram message: 'Probation ends today. Failures logged: {N}. Verdict requested: keep / extend / retire.' Then stop. Do not propose a verdict yourself — that is Sam's decision. Retirement command if needed: bash ~/repo/agents/fix-it/retire.sh",
+      "announce": true,
+      "no_deliver": false
+    },
+    {
+      "name": "workspace-snapshot",
+      "cron": "30 3 * * *",
+      "message": "Run: python3 /home/node/repo/agents/shared/workspace-snapshot.py. This tars each agent's workspace to ~/Dropbox/openclaw-backup/workspace-snapshots/<agent>-<date>.tar.gz with 14-day retention. Dropbox syncs the result off-VPS for regression recovery. If the script exits 0: produce NO output. If it exits non-zero: send a Telegram alert with the error. Do NOT use python3 -c. Do NOT use heredocs.",
+      "announce": false,
+      "no_deliver": true
+    }
+  ]
+}
