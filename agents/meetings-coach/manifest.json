@@ -42,7 +42,8 @@
     "scripts/commitment-tracker.py",
     "scripts/person-bootstrap.py",
     "scripts/timed-deliver.py",
-    "scripts/krisp-auth-manual.py"
+    "scripts/krisp-auth-manual.py",
+    "scripts/heartbeat.py"
   ],
   "state_files": [
     {
