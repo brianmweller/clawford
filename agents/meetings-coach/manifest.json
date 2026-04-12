@@ -1,0 +1,153 @@
+{
+  "agent_id": "meetings-coach",
+  "display_name": "Sergeant Murphy",
+  "workspace": "~/.openclaw/meetings-coach-workspace",
+  "status_file": "~/Dropbox/openclaw-backup/agents/meetings-coach.status.md",
+  "telegram": {
+    "account": "murphy",
+    "bot_token_env": "MURPHY_BOT_TOKEN"
+  },
+  "config_files": [
+    {
+      "src": "SOUL.md",
+      "immutable": true
+    },
+    {
+      "src": "IDENTITY.md",
+      "immutable": true
+    },
+    {
+      "src": "TOOLS.md"
+    },
+    {
+      "src": "AGENTS.md"
+    },
+    {
+      "src": "USER.md"
+    },
+    {
+      "src": "HEARTBEAT.md"
+    },
+    {
+      "src": "MEMORY.md"
+    }
+  ],
+  "scripts": [
+    "scripts/gcal-fetch.py",
+    "scripts/gcal-auth.py",
+    "scripts/meeting-prep.py",
+    "scripts/workflowy-sync.py",
+    "scripts/transcript-scan.py",
+    "scripts/transcript-metrics.py",
+    "scripts/commitment-tracker.py",
+    "scripts/person-bootstrap.py",
+    "scripts/timed-deliver.py",
+    "scripts/krisp-auth-manual.py"
+  ],
+  "state_files": [
+    {
+      "path": "sent-alerts.json",
+      "seed_if_absent": {
+        "alerts": {},
+        "last_pruned": null
+      }
+    },
+    {
+      "path": "processed-transcripts.json",
+      "seed_if_absent": {
+        "processed": []
+      }
+    },
+    {
+      "path": "cache/workflowy-links.json",
+      "seed_if_absent": {}
+    },
+    {
+      "path": "meeting-config.json",
+      "seed_if_absent": {
+        "calendars": [
+          {
+            "id": "sam.smith@example.com",
+            "label": "Sam (Work)",
+            "emoji": "👨"
+          }
+        ],
+        "timezone": "America/Los_Angeles",
+        "meeting_filters": {
+          "skip_titles": [
+            "Focus Time",
+            "Lunch",
+            "Block"
+          ],
+          "require_attendees_or_video": true
+        },
+        "workflowy": {
+          "enabled": true,
+          "ai_bullet_prefix": "[AI]",
+          "node_template": [
+            "Pre / during",
+            "📔 Agenda",
+            "📝 Notes",
+            "Post-meeting",
+            "✅ Takeaways"
+          ]
+        },
+        "krisp": {
+          "enabled": true,
+          "mcp_url": "https://mcp.krisp.ai/mcp"
+        }
+      }
+    }
+  ],
+  "approvals": {
+    "allowlist": [
+      "/usr/bin/*",
+      "/bin/*",
+      "/usr/local/bin/*"
+    ]
+  },
+  "crons": [
+    {
+      "name": "morning-meeting-brief",
+      "cron": "50 11 * * *",
+      "message": "Generate and deliver the morning meeting brief. 1) Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/gcal-fetch.py --days 2. Read the JSON output — these are today's and tomorrow's professional meetings. 2) Filter to real meetings only (is_real_meeting=true). 3) For each real meeting: a) Run person-bootstrap.py to create person files for new attendees. b) Run workflowy-sync.py --create-nodes to create Workflowy meeting nodes. c) Run meeting-prep.py --meeting-id EVENT_ID to assemble context (attendees, facts, open commitments). 4) Format the brief using the template in CRONS.md — factual schedule only: meeting times, attendees, locations, open commitments with attendees. Do NOT include talking points. Include a tomorrow preview. 5) Write to cache/morning-meeting-brief.txt. 6) Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/timed-deliver.py cache/morning-meeting-brief.txt --token-env MEETINGS_BOT_TOKEN. 7) Write result summary to ~/.openclaw/meetings-coach-workspace/cache/last-morning-brief.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"meetings_briefed\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md — the heartbeat cron owns that file.",
+      "announce": false,
+      "no_deliver": true
+    },
+    {
+      "name": "pre-meeting-alert",
+      "cron": "*/30 * * * *",
+      "message": "Check for upcoming meetings needing alerts. Run gcal-fetch.py for events in the next 2 hours. Filter to real meetings starting in 15-45 minutes. Read sent-alerts.json to skip already-alerted meetings. For any un-alerted meeting: check cache for existing prep, generate if missing via meeting-prep.py. Send Telegram: '🐷🔍 Heads up — meeting in {N} min\\n📋 {Title}\\n👥 {Attendees}\\n🎯 {Top bullets}\\n📌 {Open items}'. Record in sent-alerts.json. If no meetings approaching: produce NO output. Write result to ~/.openclaw/meetings-coach-workspace/cache/last-pre-meeting.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"meetings_alerted\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md — the heartbeat cron owns that file.",
+      "announce": false,
+      "no_deliver": true
+    },
+    {
+      "name": "post-meeting-scan",
+      "cron": "15,45 * * * *",
+      "message": "Scan for recently-ended meetings and new transcripts. 1) Run gcal-fetch.py and identify meetings ended in the last 60 minutes. 2) Run transcript-scan.py to fetch Krisp transcripts and match to meetings. 3) IDEMPOTENCY CHECK: For each pending debrief file in cache/pending-debrief-*.json, extract the event_id and grep ~/Dropbox/openclaw-backup/commitments/active.md for that event_id. If found: the debrief was already confirmed — delete the stale pending file and skip it. Do NOT re-present an already-confirmed debrief. 4) Read the output. If NEW items were extracted and staged (not already confirmed): send a debrief summary on Telegram with action items, decisions, follow-ups. Include '/confirm to save to brain · /dismiss N to skip item N'. 5) If no transcripts found and no pending debriefs: produce NO output. 6) COACHING (after debrief, if coaching.enabled is true in meeting-config.json): For each staged debrief that has transcript text, run: python3 ~/.openclaw/meetings-coach-workspace/scripts/transcript-metrics.py --event-id EVENT_ID. Read the metrics JSON. Read coaching.growth_areas from meeting-config.json. For each growth area, find Sam's utterances in the transcript that relate to that area. Compose a coaching message using the format in CRONS.md (metric header, 1-2 sentence assessment, quoted excerpt with timestamp, suggested alternative). Send ONE coaching message per debrief on Telegram. After sending, append to cache/coaching-history.json: {\"event_id\": \"...\", \"meeting_title\": \"...\", \"date\": \"YYYY-MM-DD\", \"metrics\": {...}, \"area_assessments\": {\"concision\": \"strong|good|needs_work\", ...}}. 7) Write result to ~/.openclaw/meetings-coach-workspace/cache/last-post-scan.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"transcripts_processed\": <N>, \"debriefs_staged\": <N>, \"unmatched\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md — the heartbeat cron owns that file.",
+      "announce": false,
+      "no_deliver": true
+    },
+    {
+      "name": "commitment-follow-up",
+      "cron": "0 16 * * *",
+      "message": "Check open commitments from meetings. Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/commitment-tracker.py. Read the JSON output. If there are overdue or approaching items: send a follow-up summary on Telegram using the format in CRONS.md. If no actionable items: produce NO output. Write result to ~/.openclaw/meetings-coach-workspace/cache/last-commitment.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"overdue\": <N>, \"approaching\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md — the heartbeat cron owns that file.",
+      "announce": false,
+      "no_deliver": true
+    },
+    {
+      "name": "heartbeat",
+      "cron": "*/30 * * * *",
+      "message": "Run: python3 /home/node/.openclaw/meetings-coach-workspace/scripts/heartbeat.py\n\nThis script checks auth state, reads cron caches, verifies required files, prunes stale preps, and writes meetings-coach.status.md automatically. You do NOT write the status file — the script does it.\n\nIf the script exits 0: all ok. Produce NO output.\nIf the script exits 1: degraded. The script prints the alert message. Send that exact message on Telegram.\nIf the script exits 2: script error. Send a Telegram alert: \"❌ meetings-coach heartbeat: script error\" with the output.\n\nDo NOT write to meetings-coach.status.md yourself. Do NOT use python3 -c. Do NOT use heredocs. Just run the script and relay its output if non-zero.",
+      "announce": false,
+      "no_deliver": true
+    },
+    {
+      "name": "weekly-review",
+      "cron": "0 0 * * 5",
+      "message": "Generate the weekly meeting review. 1) Run gcal-fetch.py --days 7 to look back at this week's meetings. 2) Run commitment-tracker.py to get open commitments. 3) Compile: meetings held, prep generated, transcripts processed, commitments created/resolved/overdue. 4) List all unresolved commitments. 5) Format using the template in CRONS.md. 6) Deliver to Telegram.",
+      "announce": true,
+      "no_deliver": false
+    }
+  ]
+}

@@ -1,0 +1,130 @@
+{
+  "agent_id": "family-calendar",
+  "display_name": "Mistress Mouse",
+  "workspace": "~/.openclaw/family-calendar-workspace",
+  "status_file": "~/Dropbox/openclaw-backup/agents/family-calendar.status.md",
+  "telegram": {
+    "account": "familycal",
+    "bot_token_env": "FAMILYCAL_BOT_TOKEN"
+  },
+  "config_files": [
+    {
+      "src": "SOUL.md",
+      "immutable": true
+    },
+    {
+      "src": "IDENTITY.md",
+      "immutable": true
+    },
+    {
+      "src": "TOOLS.md"
+    },
+    {
+      "src": "AGENTS.md"
+    },
+    {
+      "src": "USER.md"
+    },
+    {
+      "src": "HEARTBEAT.md"
+    },
+    {
+      "src": "MEMORY.md"
+    }
+  ],
+  "scripts": [
+    "scripts/gcal-fetch.py",
+    "scripts/gcal-auth.py",
+    "scripts/gcal-write.py",
+    "scripts/reminder-check.py",
+    "scripts/timed-deliver.py",
+    "scripts/activity-email-check.py",
+    "scripts/gmail-invite-check.py",
+    "scripts/chat-parse-schedule.py"
+  ],
+  "state_files": [
+    {
+      "path": "sent-reminders.json",
+      "seed_if_absent": {
+        "reminders": {},
+        "last_pruned": null
+      }
+    },
+    {
+      "path": "calendar-config.json",
+      "seed_if_absent": {
+        "calendars": [
+          {
+            "id": "sam.smith@example.com",
+            "label": "Sam",
+            "emoji": "👨"
+          },
+          {
+            "id": "alex.rivera@example.com",
+            "label": "Alex",
+            "emoji": "👩"
+          }
+        ],
+        "timezone": "America/Los_Angeles"
+      }
+    }
+  ],
+  "approvals": {
+    "allowlist": [
+      "/usr/bin/*",
+      "/bin/*",
+      "/usr/local/bin/*"
+    ]
+  },
+  "crons": [
+    {
+      "name": "morning-briefing",
+      "cron": "50 11 * * *",
+      "message": "Generate and deliver the morning family briefing. 1) Run: python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 2. Read the JSON output — these are today's and tomorrow's events across all family calendars. 2) Format the briefing using the template in CRONS.md. Group events by time blocks (Morning, Afternoon, Evening). Use family member emoji (👨 Sam, 👩 Alex, 🧒 Avery, 👶 Jordan, 🏠 Jamie). Flag any conflicts with ⚠️. Include a tomorrow preview. Check if today is a standard routine day (see MEMORY.md) — if no extra events, say 'Standard {weekday} — no exceptions.' Note the pickup arrangement for today (Mon=Sam+swimming, Fri=Sam, other=Jamie). 3) Write the formatted output to cache/morning-briefing.txt. 4) Run: python3 ~/.openclaw/family-calendar-workspace/scripts/timed-deliver.py cache/morning-briefing.txt --token-env FAMILYCAL_BOT_TOKEN. 5) Update your status file.",
+      "announce": false,
+      "no_deliver": true
+    },
+    {
+      "name": "reminder-check",
+      "cron": "*/5 * * * *",
+      "message": "Check for upcoming events that need reminders. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/reminder-check.py. Read the JSON output. If the output contains reminders: for each one, send a Telegram message '🐭 Heads up — {emoji} {person} {event} in {minutes} min ({location})'. If the output is empty (no reminders needed): produce NO output — do not send any message. Update your status file only if reminders were sent.",
+      "announce": false,
+      "no_deliver": true
+    },
+    {
+      "name": "heartbeat",
+      "cron": "*/30 * * * *",
+      "message": "Update your heartbeat. Write the current UTC timestamp to last_heartbeat in ~/Dropbox/openclaw-backup/agents/family-calendar.status.md. Verify these files exist: calendar-config.json, sent-reminders.json. Check if sent-reminders.json has entries older than 48 hours — if so, prune them. Produce NO output if everything is normal.",
+      "announce": false,
+      "no_deliver": true
+    },
+    {
+      "name": "activity-email-check",
+      "cron": "15 */2 * * *",
+      "message": "Check Gmail for emails from activity providers. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/activity-email-check.py. Read the JSON output — these are emails from Example Preschool, Example Swim School, and Example Ballet Studio in the last 48 hours. For each email with schedule-relevant content (closures, cancellations, action items, event changes): classify the urgency and send a Telegram message. Closures/cancellations: '🐭 ⚠️ {source}: {summary}'. Action items: '🐭 📋 {source}: {summary}'. Events/FYI: '🐭 📌 {source}: {summary}'. If no actionable items found: produce NO output. Update your status file.",
+      "announce": false,
+      "no_deliver": true
+    },
+    {
+      "name": "gmail-invite-check",
+      "cron": "30 */3 * * *",
+      "message": "Check Gmail for calendar invites. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/gmail-invite-check.py. Read the JSON output — these are new calendar invites (ICS attachments with METHOD:REQUEST). For each invite: send a Telegram message '🐭 New invite: {subject} on {date} from {organizer}. Accept?'. If no new invites: produce NO output.",
+      "announce": false,
+      "no_deliver": true
+    },
+    {
+      "name": "weekly-overview",
+      "cron": "0 1 * * 0",
+      "message": "Generate and deliver the weekly schedule overview. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 7. Format as a day-by-day overview for the upcoming week. For each day: list key events with times, attendees, and locations. Flag any conflicts with ⚠️. Note pickup arrangements per day (Mon=Sam+swimming, Fri=Sam, other=Jamie). Include a summary line: '🐭 {N} events this week · {conflicts} conflicts'. Deliver to Telegram.",
+      "announce": true,
+      "no_deliver": false
+    },
+    {
+      "name": "whatsapp-chat-scan",
+      "cron": "45 */2 * * *",
+      "message": "Scan WhatsApp messages for schedule-relevant content. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/chat-parse-schedule.py. Read the JSON output — these are recent WhatsApp messages from the familycal-wa channel. For each message with schedule-relevant content (cancellations, time changes, pickup changes, new events): send a Telegram alert to Sam: '🐭 📱 WhatsApp: {person} — {summary}. Suggested action: {action}.' If no schedule-relevant messages: produce NO output. NEVER post to WhatsApp groups automatically — all output goes to Sam on Telegram.",
+      "announce": false,
+      "no_deliver": true
+    }
+  ]
+}
