@@ -1,7 +1,7 @@
 {
   "calendars": [
-    {"id": "sam.smith@example.com", "label": "Sam", "emoji": "👨"},
-    {"id": "alex.rivera@example.com", "label": "Alex", "emoji": "👩"}
+    {"id": "sam.smith@example.com", "label": "Sam", "emoji": "👨", "remind": true},
+    {"id": "alex.rivera@example.com", "label": "Alex", "emoji": "👩", "remind": false}
   ],
   "timezone": "America/Los_Angeles"
 }

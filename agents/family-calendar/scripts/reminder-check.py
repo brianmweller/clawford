@@ -169,6 +169,9 @@ def main():
     reminders_to_send = []
 
     for cal in config.get("calendars", []):
+        if not cal.get("remind", True):
+            continue
+
         cal_id = cal["id"]
         label = cal["label"]
         emoji = cal.get("emoji", "")
