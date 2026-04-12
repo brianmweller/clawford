@@ -583,14 +583,14 @@ def _drift_manifest_path(agent_id: str) -> Path:
 
 def _workspace_sha_map(mf: "Manifest") -> dict[str, str]:
     """Compute sha256 for every manifest-tracked file currently in the
-    workspace (config files, scripts, state files). Missing files map to
-    the empty string — the absence of a previously-tracked file is itself
-    a form of drift."""
+    workspace (config files + scripts). State files are owned by the
+    agent at runtime — cron runs mutate them continuously — so they
+    must not be hashed into the drift baseline. Missing files map to
+    the empty string — the absence of a previously-tracked file is
+    itself a form of drift."""
     ws = mf.expanded_workspace
     result: dict[str, str] = {}
-    tracked = [cf.src for cf in mf.config_files] + list(mf.scripts) + [
-        sf.path for sf in mf.state_files
-    ]
+    tracked = [cf.src for cf in mf.config_files] + list(mf.scripts)
     for rel in tracked:
         p = ws / rel
         if p.exists():
@@ -606,6 +606,10 @@ def check_drift(mf: "Manifest") -> list[tuple[str, str, str]]:
     Returns a list of (path, recorded_hash, current_hash) tuples for any
     files that have drifted. Empty list means no drift. If no prior
     manifest exists (first deploy), returns empty (silent pass).
+
+    Legacy drift manifests written before state_files were excluded
+    from _workspace_sha_map still contain state_file entries — filter
+    them out so we don't fire a spurious DELETED/MODIFIED on them.
     """
     mpath = _drift_manifest_path(mf.agent_id)
     if not mpath.exists():
@@ -616,8 +620,11 @@ def check_drift(mf: "Manifest") -> list[tuple[str, str, str]]:
         return []
     recorded_files: dict[str, str] = recorded.get("files", {})
     current = _workspace_sha_map(mf)
+    state_file_paths = {sf.path for sf in mf.state_files}
     drifted = []
     for path, rec_hash in recorded_files.items():
+        if path in state_file_paths:
+            continue
         cur_hash = current.get(path, "")
         if cur_hash != rec_hash:
             drifted.append((path, rec_hash, cur_hash))
