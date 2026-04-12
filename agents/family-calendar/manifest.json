@@ -125,6 +125,13 @@
       "message": "Scan WhatsApp messages for schedule-relevant content. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/chat-parse-schedule.py. Read the JSON output — these are recent WhatsApp messages from the familycal-wa channel. For each message with schedule-relevant content (cancellations, time changes, pickup changes, new events): send a Telegram alert to Sam: '🐭 📱 WhatsApp: {person} — {summary}. Suggested action: {action}.' If no schedule-relevant messages: produce NO output. NEVER post to WhatsApp groups automatically — all output goes to Sam on Telegram.",
       "announce": false,
       "no_deliver": true
+    },
+    {
+      "name": "whatsapp-schedule-post",
+      "cron": "0 12 * * *",
+      "message": "Compose a brief WhatsApp-style schedule summary for today. Fetch events with: python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 1. Include only non-routine events, pickup arrangement changes, and conflicts. Keep it short and scannable. Send it to Sam on Telegram — he will decide what to forward to the FamilyGroup WhatsApp group (Alex + Jamie) as needed. Do NOT send directly to WhatsApp.",
+      "announce": false,
+      "no_deliver": true
     }
   ]
 }
