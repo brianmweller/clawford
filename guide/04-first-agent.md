@@ -32,24 +32,38 @@ Routine checks use `--no-deliver` + `--failure-alert` so you only get notified w
 
 Give the bot a fox avatar if you want to match its personality.
 
-## Step 2: Transfer files to the VPS
+## Step 2: Commit locally, push, pull on the VPS
 
-From your local machine:
+**Do not `scp` files directly.** The canonical flow is `git commit →
+push → pull on VPS → run deploy.py`. The hardened deploy tool at
+`agents/shared/deploy.py` enforces this: it refuses to run if the
+source repo has uncommitted modifications or untracked files.
 
-```bash
-scp -i ~/.ssh/id_ed25519 \
-  agents/fix-it/deploy.sh \
-  agents/fix-it/SOUL.md \
-  agents/fix-it/IDENTITY.md \
-  agents/fix-it/TOOLS.md \
-  openclaw@{server_ip}:/tmp/
-```
-
-Also transfer `.env` if not already on the VPS:
+From your local Clawford repo:
 
 ```bash
-scp -i ~/.ssh/id_ed25519 .env openclaw@{server_ip}:/tmp/.env
+git add agents/fix-it/
+git commit -m "fix-it: deploy prep"
+git push origin master
 ```
+
+Then on the VPS:
+
+```bash
+ssh openclaw@{server_ip}
+cd ~/repo && git pull
+```
+
+Make sure `~/openclaw/.env` has `TELEGRAM_CHAT_ID` and
+`FIXIT_BOT_TOKEN` (set once, persists across deploys):
+
+```bash
+grep -E '^(TELEGRAM_CHAT_ID|FIXIT_BOT_TOKEN)=' ~/openclaw/.env
+```
+
+If either is missing, add them from your password manager (NOT from a
+copy of the Clawford repo — `.env` is gitignored precisely so secrets
+stay out of git).
 
 ## Step 3: Create the agent (interactive)
 
@@ -82,29 +96,40 @@ oc devices approve {request-id}
 
 > **WARNING:** Without device pairing approval, ALL agent operations fail with "pairing required." This is not documented in the CLI help. It is the single most common reason for a "working" agent that does nothing.
 
-## Step 5: Run the deploy script
+## Step 5: Run the unified deploy tool
 
 ```bash
-bash /tmp/deploy.sh
+cd ~/repo && python3 agents/shared/deploy.py fix-it
 ```
 
-The script:
-1. Copies all workspace files to the agent's workspace:
-   - **SOUL.md** — personality, boundaries, operating model
-   - **IDENTITY.md** — name, emoji, tone
-   - **TOOLS.md** — available tools and permissions
-   - **AGENTS.md** — hard rules, role, config architecture, agent roster
-   - **USER.md** — human's name, timezone, preferences
-   - **HEARTBEAT.md** — 30-minute recurring checklist
-   - **MEMORY.md** — persistent lessons (seeded, agent maintains over time)
-2. Deletes BOOTSTRAP.md if present (generic onboarding, overrides identity)
-3. Initializes the status file in the shared brain
-4. Adds the agent's Telegram bot as the default channel account
-5. Binds the agent to the default Telegram account
-6. Configures exec approvals
-7. Registers all cron jobs with Telegram delivery
-8. Locks SOUL.md and IDENTITY.md with `chattr +i`
-9. Prints verification output
+The tool reads `agents/fix-it/manifest.json` and, guided by six
+safeguards, performs:
+
+1. **Backup** — tars the current workspace to
+   `~/.openclaw/deploy-backups/fix-it-<ts>.tar.gz` AND mirrors it to
+   `~/Dropbox/openclaw-backup/deploy-backups/`. (Safeguard 1.)
+2. **Source-clean check** — refuses if `~/repo` has uncommitted or
+   untracked state. (Safeguard 2. Override: `--allow-dirty`.)
+3. **Drift check** — refuses if the workspace has changed since the
+   last recorded deploy. (Safeguard 4. Override: `--accept-drift`.)
+4. **Config files** — copies manifest-listed workspace files
+   (SOUL.md, IDENTITY.md, TOOLS.md, AGENTS.md, USER.md, HEARTBEAT.md,
+   MEMORY.md, CRONS.md), unlocking any chattr-immutable ones before
+   write and re-locking afterwards.
+5. **Scripts** — copies manifest-listed Python scripts under
+   `scripts/` and chmods them 755.
+6. **State files** — seeds `grocery-list.json`, `pending-actions.json`,
+   etc. only if absent. Live accumulated data is preserved.
+7. **Channel & binding** — ensures the Telegram bot token is
+   registered and the agent is bound to it (idempotent).
+8. **Approvals** — adds each manifest-listed exec allowlist pattern.
+9. **Crons** — syncs the manifest's cron list with live state:
+   `cron edit --message` for UPDATEs (preserves history), `cron add`
+   for new. UPDATEs show a unified diff and prompt for confirmation
+   unless `--yes-updates` is passed. (Safeguard 3.)
+10. **Smoke test** — if the manifest has a `smoke_test` block and
+    `--smoke-test` is passed, fires the test cron and auto-restores
+    the pre-deploy backup if it fails. (Safeguard 6.)
 
 > **WARNING:** OpenClaw auto-loads 8 workspace files at every session start. If AGENTS.md, USER.md, or HEARTBEAT.md are missing or generic, the agent won't know its rules, its human, or its recurring tasks. This was the root cause of Mr Fixit's repeated identity crises and config amnesia.
 

@@ -19,21 +19,44 @@ Start with Lowly Worm after Fix-It — simplest agent with no bidirectional APIs
 
 **Actual deploy order:** Mr Fixit → Lowly Worm → Hilda Hippo → Mistress Mouse (2026-04-08) → Sergeant Murphy (2026-04-08) → Huckle Cat (2026-04-11).
 
-## The reusable deployment pattern
+## The reusable deployment pattern (2026-04-12 refactor)
 
-Every agent follows the same sequence:
+Every agent follows the same sequence. The pre-2026-04-12 flow used a
+hand-written 300-line `deploy.sh` per agent; that template caused a
+production regression incident and has been replaced with a unified
+Python deploy tool at `agents/shared/deploy.py`.
 
-1. **Create Telegram bot** via @BotFather
-2. **Write agent files:** SOUL.md, IDENTITY.md, TOOLS.md, CRONS.md
-3. **Write deploy.sh** — modeled on Fix-It's deploy script
-4. **SCP files** to VPS
-5. **Create agent:** `oci agents add {name}`
-6. **Run deploy script:** `bash /tmp/deploy.sh`
-7. **Pair Telegram bot:** `/start` → `oc pairing approve telegram {CODE}`
-8. **Set bot commands:** add to `~/openclaw/scripts/set-bot-commands.sh`, then `bash ~/openclaw/scripts/set-bot-commands.sh` (OpenClaw overwrites commands on every restart — this script re-applies all agents)
-9. **Smoke test:** `oc cron run {id}`, check Telegram
-10. **Harden:** `sudo chattr +i SOUL.md IDENTITY.md`
-11. **Test:** `bash ~/openclaw-tests/test-agent.sh {name}`
+1. **Create Telegram bot** via @BotFather, save token in VPS `~/openclaw/.env`
+2. **Write agent files locally:** SOUL.md, IDENTITY.md, TOOLS.md,
+   AGENTS.md, USER.md, HEARTBEAT.md, MEMORY.md, CRONS.md, plus any
+   scripts under `agents/<agent-id>/scripts/`. Edit in the Dropbox
+   Clawford repo (or any local git clone).
+3. **Write `agents/<agent-id>/manifest.json`** declaring config files,
+   scripts, state files, allowlist, and crons. See
+   `agents/shopping/manifest.json` as the canonical example.
+   (Migrating from a legacy `deploy.sh`? Run
+   `python3 agents/shared/import_from_deploy_sh.py <agent-id>` once.)
+4. **Commit everything locally, push to GitHub:**
+   ```
+   git add agents/<agent-id>/
+   git commit -m "add <agent-id>"
+   git push origin master
+   ```
+5. **On the VPS:** `cd ~/repo && git pull`
+6. **First-time onboarding (interactive, can't automate):**
+   `oci agents add <agent-id>`, then `/start` the bot on Telegram,
+   then `oc pairing approve telegram <CODE>`
+7. **Run deploy:** `python3 agents/shared/deploy.py <agent-id>`.
+   The tool installs workspace files (chattr-aware), registers all
+   crons, configures channels, and writes a pre-deploy backup tarball.
+   Safeguard prompts will stop the run if anything looks wrong —
+   review and confirm.
+8. **Smoke test:** `oc cron run <heartbeat-id>`, check Telegram.
+   Or run with `--smoke-test` on step 7 to have it automatic.
+9. **Set bot commands:** `bash ~/openclaw/scripts/set-bot-commands.sh`
+   (OpenClaw overwrites bot commands on every restart; this script
+   re-applies all agents).
+10. **Test suite:** `bash ~/openclaw-tests/test-agent.sh <agent-id>`
 
 ## Writing a SOUL.md
 
@@ -70,15 +93,37 @@ The emoji and name make Telegram messages instantly recognizable. Each agent sho
 
 ## Five rules (learned the hard way)
 
-1. **Use the deploy script template.** Copy `agents/fix-it/deploy.sh` and customize. The correct CLI syntax is baked in. Never write OpenClaw commands from scratch — the docs are wrong in several places.
+1. **Write a `manifest.json`, not a `deploy.sh`.** The old per-agent
+   shell scripts are gone — the unified `agents/shared/deploy.py`
+   reads every agent's manifest and handles file install, cron
+   registration, channel setup, and approvals in one place. Never
+   hand-edit live workspace files on the VPS directly — the tool's
+   drift detection will refuse your next deploy, and any VPS-side
+   edit that doesn't make it back to local git is lost on the next
+   `git pull` + deploy. See `DEPLOY.md` for the canonical workflow.
 
-2. **Red/green TDD.** Write test scripts (`tests/{agent-name}/T1-*.sh`) BEFORE deploying. Confirm they fail. Deploy the agent. Confirm they pass. Don't discover bugs after deployment.
+2. **Red/green TDD.** Write tests first, confirm fail, implement,
+   confirm pass. Applies to agent scripts AND to any changes to
+   deploy/backup infrastructure under `agents/shared/`. The
+   deploy tool has its own pytest suite at `agents/shared/tests/`
+   (18/18 passing as of commit `2c3f2af`). New safeguards land only
+   after a failing test exists. See
+   `~/.claude/projects/…/memory/feedback_tdd_mandatory_for_infra.md`.
 
-3. **Never touch `openclaw.json` directly.** Use `openclaw config set` inside the container. SCP'ing a local copy wipes agent registrations, channel accounts, and bindings.
+3. **Never touch `openclaw.json` directly.** Use `openclaw config set`
+   inside the container. SCP'ing a local copy wipes agent
+   registrations, channel accounts, and bindings.
 
-4. **Never experiment on the live channel.** Test new features (ACP, hooks, plugins) on a scratch bot first. ACP was tested on Mr Fixit's live channel and hijacked it for hours.
+4. **Never experiment on the live channel.** Test new features (ACP,
+   hooks, plugins) on a scratch bot first. ACP was tested on Mr Fixit's
+   live channel and hijacked it for hours.
 
-5. **Follow [AGENTS-PATTERN.md](../AGENTS-PATTERN.md).** All patterns are codified there. When a pattern changes, update the doc.
+5. **NO ON-VPS DEV.** Every line of code lives in local git first.
+   The VPS `~/.openclaw/<agent>-workspace/` is a *deploy target*,
+   not a dev surface. SSH to the VPS is read-only by convention —
+   no `vim`, no `sed -i`, no manual `echo > file`. See
+   `feedback_no_on_vps_dev.md` memory. The hardened deploy tool
+   enforces this mechanically via the drift-detection safeguard.
 
 ## Timed delivery: fetch at T-10, deliver at T
 

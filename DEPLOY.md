@@ -1,245 +1,208 @@
-# DEPLOY.md — Deploying an OpenClaw Agent (Docker)
+# DEPLOY.md — Deploying an OpenClaw Agent
 
-Step-by-step instructions for deploying an agent on your VPS.
-Battle-tested with Mr Fixit on 2026-04-02, migrated to Docker on 2026-04-03.
+Canonical workflow for deploying or updating an agent on the VPS. This
+file supersedes the pre-2026-04-12 shell-script flow; all five
+non-fix-it agents (shopping, family-calendar, meetings-coach,
+news-digest, connector) are now deployed via
+`agents/shared/deploy.py` driven by a per-agent `manifest.json`.
 
 ---
 
-## Prerequisites
+## The canonical workflow
 
-- VPS provisioned via Terraform (`terraform apply`)
-- Docker container running: `cd ~/openclaw && docker compose up -d`
-- Gateway healthy: `oc health` (see helper function below)
-- Telegram channel configured and working
-- Shared brain at `~/Dropbox/openclaw-backup/` (Dropbox syncing)
-- `validate.py` at `~/Dropbox/openclaw-backup/scripts/validate.py`
-- Device pairing approved: `oc devices list` → `oc devices approve <request-id>`
+```bash
+# 1. Edit locally in the Dropbox Clawford repo
+#    (E:/Dropbox/Startup/Clawford on Windows)
+vim agents/shopping/scripts/costco-orders.py
 
-### Helper Function
+# 2. Commit — required. deploy.py refuses dirty sources.
+git add agents/shopping/scripts/costco-orders.py
+git commit -m "shopping: costco-orders timeout bump"
 
-All OpenClaw CLI commands run inside the Docker container. Define this in your SSH session:
+# 3. Push to GitHub
+git push origin master
+
+# 4. Pull on the VPS
+ssh openclaw@198.51.100.42 "cd ~/repo && git pull"
+
+# 5. Run the hardened deploy tool
+ssh openclaw@198.51.100.42 \
+  "cd ~/repo && python3 agents/shared/deploy.py shopping"
+```
+
+**Do not** `scp` local files directly into `~/repo/` on the VPS. The
+2026-04-12 deploy regression happened because a Claude session SCP'd
+uncommitted local files into VPS `~/repo/` and ran `deploy.py` over
+them, propagating stale content to production workspaces with no audit
+trail. The source-cleanliness gate (Safeguard 2) now refuses that
+pattern, but the norm is: every change flows through `git commit →
+push → pull`.
+
+---
+
+## What deploy.py does and does not do
+
+**Does:**
+- Copies manifest-listed config files and scripts from
+  `~/repo/agents/<agent>/` → `~/.openclaw/<agent>-workspace/`, honoring
+  the chattr-immutable flag on SOUL.md / IDENTITY.md.
+- Seeds manifest-listed state files (`grocery-list.json`, etc.) only
+  if absent — preserves live accumulated data across reruns.
+- Syncs cron definitions via `openclaw cron edit --message` for
+  UPDATEs and `cron add` for new. Never creates duplicates.
+- Ensures the Telegram channel account + agent binding are registered
+  (idempotent).
+- Adds each manifest-listed exec allowlist pattern.
+- Writes pre-deploy backup tarballs.
+
+**Does not:**
+- Read VPS workspace state back into the source repo. Flow is
+  strictly `local git → VPS workspace`, one direction. **Any edit
+  made directly on the VPS workspace is overwritten on the next
+  deploy unless committed back to local git first.**
+- Overwrite config files that have drifted from the last deploy's
+  recorded state (Safeguard 4 refuses unless `--accept-drift`).
+- Apply UPDATEs silently — every UPDATE shows a unified diff and
+  requires y/N confirmation unless `--yes-updates` is passed.
+- Delete orphan crons (live but not in manifest) unless
+  `--remove-orphans`. Warns by default.
+
+---
+
+## Six safeguards
+
+| # | Name | Flag to override | What it prevents |
+|---|---|---|---|
+| 1 | Pre-deploy backup | (none — mandatory) | Unrecoverable rollbacks — tar written to `~/.openclaw/deploy-backups/` + mirrored to `~/Dropbox/openclaw-backup/deploy-backups/` |
+| 2 | Source-clean gate | `--allow-dirty` | SCP'ing uncommitted local files into `~/repo/` and deploying them |
+| 3 | UPDATE diff + confirm | `--yes-updates` | Silent overwrite of a file that shouldn't change |
+| 4 | Drift detection (blocking) | `--accept-drift` | Deploys wiping VPS-side edits without audit |
+| 5 | Deploy banner | (none — cosmetic) | Ambiguity about source, target, git HEAD, flow direction |
+| 6 | Smoke-test hook | `--smoke-test` activates it | Silent regressions — restores backup on cron failure |
+
+All six are test-covered under `agents/shared/tests/` (18/18 passing
+offline, no VPS required).
+
+---
+
+## Recovery from a bad deploy
+
+```bash
+# Find the most recent backup
+ls -t ~/.openclaw/deploy-backups/<agent>-*.tar.gz | head -5
+
+# Or from local (if VPS is gone)
+ls -t ~/Dropbox/openclaw-backup/deploy-backups/<agent>-*.tar.gz | head -5
+
+# Restore
+BACKUP=$(ls -t ~/.openclaw/deploy-backups/<agent>-*.tar.gz | head -1)
+rm -rf ~/.openclaw/<agent>-workspace/*
+tar -xzf $BACKUP -C ~/.openclaw/ --strip-components=0
+```
+
+If Safeguard 6 (`--smoke-test`) was active, the restore is automatic
+on cron failure — no human intervention needed.
+
+---
+
+## Manifest schema
+
+Each agent has `agents/<agent_id>/manifest.json`. Minimal example:
+
+```json
+{
+  "agent_id": "shopping",
+  "display_name": "Hilda Hippo",
+  "workspace": "~/.openclaw/shopping-workspace",
+  "status_file": "~/Dropbox/openclaw-backup/agents/shopping.status.md",
+  "telegram": {
+    "account": "shopping",
+    "bot_token_env": "SHOPPING_BOT_TOKEN"
+  },
+  "config_files": [
+    {"src": "SOUL.md", "immutable": true},
+    {"src": "IDENTITY.md", "immutable": true},
+    {"src": "TOOLS.md"},
+    {"src": "AGENTS.md"},
+    {"src": "USER.md"},
+    {"src": "HEARTBEAT.md"},
+    {"src": "MEMORY.md"},
+    {"src": "CRONS.md"}
+  ],
+  "scripts": ["scripts/amazon-orders.py", "scripts/costco-orders.py"],
+  "state_files": [
+    {
+      "path": "grocery-list.json",
+      "seed_if_absent": {"updated_at": null, "items": []}
+    }
+  ],
+  "approvals": {
+    "allowlist": ["/usr/bin/*", "/bin/*", "/usr/local/bin/*"]
+  },
+  "crons": [
+    {
+      "name": "delivery-digest",
+      "cron": "0 14 * * *",
+      "announce": true,
+      "no_deliver": false,
+      "message": "Generate the daily delivery report. ..."
+    }
+  ],
+  "smoke_test": {
+    "cron_name": "heartbeat",
+    "max_wait_s": 120
+  }
+}
+```
+
+Bootstrap an existing agent's manifest from its legacy `deploy.sh`:
+
+```bash
+python3 agents/shared/import_from_deploy_sh.py shopping
+```
+
+---
+
+## First-deploy checklist for a new agent
+
+For a brand-new agent that has never been onboarded:
+
+1. Create the Telegram bot via @BotFather, save token in VPS `~/openclaw/.env`
+2. Write SOUL.md, IDENTITY.md, TOOLS.md, AGENTS.md, USER.md, HEARTBEAT.md,
+   MEMORY.md, CRONS.md in `agents/<new-agent>/`
+3. Write the agent's scripts under `agents/<new-agent>/scripts/`
+4. Write a `manifest.json` (or generate from a skeleton `deploy.sh` via
+   `import_from_deploy_sh.py`)
+5. Commit everything to local git and push
+6. On the VPS: `oci agents add <new-agent>` (interactive onboarding —
+   can't be automated by `deploy.py` yet)
+7. `/start` the bot on Telegram, `oc pairing approve telegram <CODE>`
+8. `cd ~/repo && git pull && python3 agents/shared/deploy.py <new-agent>`
+
+For a RE-deploy (updating an existing agent): skip steps 1-3 and 6-7.
+Just commit, push, pull, deploy.
+
+---
+
+## OpenClaw CLI quick reference
+
+All commands prefixed with `oc` (Docker exec wrapper — define in your shell):
 
 ```bash
 oc() { docker compose -f ~/openclaw/docker-compose.yml exec -T openclaw-gateway openclaw "$@"; }
-```
-
-Or for interactive commands (like `agents add`):
-
-```bash
 oci() { docker compose -f ~/openclaw/docker-compose.yml exec -it openclaw-gateway openclaw "$@"; }
 ```
 
----
-
-## Step 0: Transfer Files to VPS
-
-From your local machine (or Claude Code — it has SSH key access and can SCP directly):
-
-```bash
-scp -i ~/.ssh/id_ed25519 \
-  deploy.sh SOUL.md IDENTITY.md TOOLS.md \
-  openclaw@{VPS_IP}:/tmp/
-```
-
-Also transfer `.env` with secrets if not already on the VPS:
-
-```bash
-scp -i ~/.ssh/id_ed25519 .env openclaw@{VPS_IP}:/tmp/.env
-```
-
----
-
-## Step 1: Create the Agent (Interactive)
-
-SSH into your VPS and run inside the container:
-
-```bash
-oci agents add {agent-name}
-```
-
-During onboarding:
-- **Workspace directory:** `.openclaw/{agent-name}-workspace`
-- **Auth profiles:** Copy from "main"
-- **Chat channels:** Telegram only
-- **Identity/personality:** Install via deploy script if not asked
-- **Tools:** Skip interactive setup — deploy script handles this
-
----
-
-## Step 2: Ensure Gateway is Running
-
-```bash
-# Check health
-oc health
-
-# If container is down:
-cd ~/openclaw && docker compose up -d
-sleep 10
-oc health
-```
-
----
-
-## Step 3: Run the Deploy Script
-
-```bash
-bash /tmp/deploy-{agent}.sh
-```
-
-The script handles (all via Docker exec):
-- Copying SOUL.md, IDENTITY.md, TOOLS.md to the workspace
-- Initializing the status file in the shared brain
-- Configuring per-agent Telegram bot + binding
-- Setting exec approvals:
-  - Allowlist: `/usr/bin/*`, `/bin/*`, `/usr/local/bin/*`
-  - Allowlist: `python3 ~/.openclaw/{agent}-workspace/scripts/*`
-  - Allowlist: `python3 -` (for inline Python)
-  - **Exec policy: `security=full, ask=off`** — the LLM generates compound shell commands (redirects, pipes, heredocs) that don't match simple allowlist patterns. For a private VPS running trusted agents, `security=full + ask=off` is the right posture — no human approval needed. Set via `oc config set tools.exec.security full` and `oc config set tools.exec.ask off`. Also set `defaults: {security: "full", ask: "off"}` in `~/.openclaw/exec-approvals.json`.
-- Registering all cron jobs with `--to <chatId> --account <agent-id> --announce`
-- Security hardening (`chattr +i` on SOUL.md and IDENTITY.md)
-- Verification output
-
-**Important:** After running deploy.sh, verify the exec policy is applied globally:
-
-```bash
-# Check gateway config
-oc config get tools.exec
-# Should show: {"security":"full","ask":"off","strictInlineEval":true}
-
-# Check exec-approvals.json defaults
-cat ~/.openclaw/exec-approvals.json | python3 -c "
-import sys, json; d=json.load(sys.stdin)
-print(d.get('defaults'))"
-# Should show: {'security': 'full', 'ask': 'off'}
-
-# Restart gateway after config changes
-cd ~/openclaw && docker compose restart openclaw-gateway
-```
-
----
-
-## Step 4: Pair Telegram Bot
-
-1. Send `/start` to the agent's Telegram bot
-2. If a pairing code appears, approve it:
-
-```bash
-oc pairing approve telegram {CODE}
-```
-
----
-
-## Step 5: Smoke Test
-
-```bash
-# Trigger a cron manually (use ID from `oc cron list`)
-oc cron run {job-id}
-
-# Check results
-oc cron runs --id {job-id}
-
-# Check status file
-cat ~/Dropbox/openclaw-backup/agents/{agent-name}.status.md
-```
-
-Verify you receive a Telegram message from the agent's bot.
-
----
-
-## Step 6: Set Telegram Bot Commands
-
-```bash
-# Add the new agent's commands to the script first:
-vim ~/openclaw/scripts/set-bot-commands.sh
-
-# Then run it (re-applies commands for ALL agents):
-bash ~/openclaw/scripts/set-bot-commands.sh
-```
-
-OpenClaw overwrites bot commands with its own 48 slash commands on every gateway start. This script must be run after every deploy and every `docker compose restart`.
-
----
-
-## Step 7: Run Test Suite
-
-```bash
-bash ~/openclaw-tests/test-agent.sh {agent-name}
-```
-
-Expected: all tests PASS. Key failures:
-- T1 fail = agent can't write files (all write-dependent crons broken)
-- T6 fail = `chattr +i` not applied (boundary enforcement missing)
-
----
-
-## Post-Deploy Checklist
-
-- [ ] Agent registered: `oc agents list`
-- [ ] Status file initialized: `cat ~/Dropbox/openclaw-backup/agents/{agent-name}.status.md`
-- [ ] All crons registered: `oc cron list` (filter visually by agent)
-- [ ] SOUL.md in workspace
-- [ ] IDENTITY.md in workspace
-- [ ] TOOLS.md in workspace
-- [ ] Exec allowlist configured: `oc approvals get`
-- [ ] Cron fires and updates status file
-- [ ] Telegram delivery working (message arrives from agent's bot)
-- [ ] SOUL.md and IDENTITY.md immutable: `lsattr ~/.openclaw/{agent}-workspace/SOUL.md`
-- [ ] Bot commands set: `bash ~/openclaw/scripts/set-bot-commands.sh`
-- [ ] Test suite passes: `bash ~/openclaw-tests/test-agent.sh {agent-name}`
-
----
-
-## Rollback
-
-```bash
-# Remove crons by ID (get IDs from `oc cron list`)
-oc cron rm {cron-id-1}
-oc cron rm {cron-id-2}
-# ... repeat for each cron
-
-# Remove the agent
-oc agents delete {agent-name}
-```
-
-The shared brain is untouched — agents only append, never destructively edit.
-
----
-
-## OpenClaw CLI Quick Reference (Docker)
-
-All commands prefixed with `oc` (the Docker exec wrapper):
-
 | Action | Command |
 |--------|---------|
-| Health check | `oc health` |
-| Add agent (interactive) | `oci agents add {name}` |
+| Health | `oc health` |
 | List agents | `oc agents list` |
-| Add channel account | `oc channels add --channel telegram --token {token} --account {id} --name "{Name}"` |
-| Bind agent to channel | `oc agents bind --agent {id} --bind telegram:{account-id}` |
-| Pair Telegram bot | User `/start`s bot → `oc pairing approve telegram {CODE}` |
-| Add cron | `oc cron add --agent {id} --name "{name}" --cron "{expr}" --message "{text}" --to {chatId} --account {agent-id} --announce` |
+| Add agent (interactive) | `oci agents add {name}` |
 | List crons | `oc cron list` |
-| Run cron manually | `oc cron run {job-id}` |
-| View cron history | `oc cron runs --id {job-id}` |
-| Edit cron | `oc cron edit {job-id} --flag value` |
-| Remove cron | `oc cron rm {job-id}` |
-| Add exec allowlist | `oc approvals allowlist add --agent {id} "/usr/bin/*"` |
+| Trigger cron | `oc cron run {cron-id}` |
+| View cron history | `oc cron runs --id {cron-id}` |
+| Edit cron | `oc cron edit {cron-id} --message "..."` |
+| Pair Telegram | `oc pairing approve telegram {CODE}` |
 | View approvals | `oc approvals get` |
-| Device pairing | `oc devices list` / `oc devices approve {request-id}` |
-| Container logs | `cd ~/openclaw && docker compose logs --tail 20` |
-| Restart container | `cd ~/openclaw && docker compose restart` |
-| Rebuild image | `cd ~/openclaw && docker compose build --no-cache && docker compose up -d` |
 
-**Common pitfalls:**
-- `cron` is singular, not `crons`
-- `--cron` (not `--schedule`), `--message` (not `--prompt`)
-- `--tools` flag on `cron add` causes API errors — omit it
-- `cron run` and `cron rm` take **job ID** (UUID), not name
-- `cron list` has no `--agent` filter — filter visually
-- Always add `--to {chatId} --account {agent-id} --announce` to crons
-- Each agent needs its own Telegram bot (create via @BotFather)
-- Python3 must be in the Docker image for `validate.py` to work
-- The brain directory must be mounted as a Docker volume
-- After rebuilding the container, re-check `oc health` and `oc agents list`
-- **Exec approvals need both allowlist AND global policy.** Adding allowlist patterns is not enough. The LLM generates compound shell commands (`cmd > /tmp/x && cat /tmp/x`, `python3 - <<'PY'...`) that don't match simple patterns. Set global `tools.exec.security=full` and `tools.exec.ask=off`, plus `defaults: {security: "full", ask: "off"}` in exec-approvals.json. Without this, crons fail with "exec denied: Cron runs cannot wait for interactive exec approval."
-- **Always add `python3 scripts/*` to the allowlist.** System path wildcards (`/usr/bin/*`) match the `python3` binary but not the full `python3 path/to/script.py` command string. Allowlist-only mode won't work anyway (see above) but keep these patterns for audit trail and defense-in-depth.
+See `guide/09-cli-reference.md` for the full reference.

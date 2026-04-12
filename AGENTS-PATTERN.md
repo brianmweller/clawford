@@ -85,11 +85,62 @@ OpenClaw auto-loads exactly 8 files at every session start. ALL must exist in th
 
 ## Deployment
 
-See [DEPLOY.md](DEPLOY.md) for the full step-by-step. The pattern:
-1. Create Telegram bot
-2. Write SOUL.md, IDENTITY.md, TOOLS.md, CRONS.md
-3. Write deploy.sh
-4. SCP to VPS, create agent, run deploy script
-5. Pair Telegram bot
-6. Security hardening (chattr)
-7. Run test suite
+See [DEPLOY.md](DEPLOY.md) for the full step-by-step. The pattern
+(post 2026-04-12 refactor):
+
+1. Create Telegram bot via @BotFather
+2. Write workspace files (SOUL.md, IDENTITY.md, TOOLS.md, AGENTS.md,
+   USER.md, HEARTBEAT.md, MEMORY.md, CRONS.md) locally in the Clawford
+   repo
+3. Write a `manifest.json` next to the workspace files (or generate
+   one from a legacy `deploy.sh` via
+   `agents/shared/import_from_deploy_sh.py`)
+4. **Commit everything locally and push to GitHub.** No SCP-bypass.
+5. On the VPS: `cd ~/repo && git pull`
+6. Interactive onboarding (first time only):
+   `oci agents add <agent-id>`, then `/start` the bot and approve
+   pairing
+7. Deploy: `python3 agents/shared/deploy.py <agent-id>`
+   (the tool handles file install, cron registration, channel
+   binding, approvals, chattr locking, and backup)
+
+## Deployment Invariants
+
+These invariants are enforced by `agents/shared/deploy.py` and
+documented in the three memory entries linked in the canonical memory
+index. Violating them requires an explicit override flag, which logs a
+warning (or an audit record in the case of drift violations).
+
+1. **Local git is the source of truth.** The VPS workspace is
+   ephemeral — it gets rebuilt from local git on every deploy. Never
+   edit a workspace file directly on the VPS; if you do, commit it
+   back to local git before the next deploy runs or your edit will
+   be lost.
+2. **Every deploy is preceded by a clean git commit.** `deploy.py`
+   refuses to run if the agent's source directory has uncommitted
+   modifications or untracked files. Override: `--allow-dirty`.
+3. **Every deploy produces a backup tarball** at
+   `~/.openclaw/deploy-backups/<agent>-<ts>.tar.gz` AND mirrors it
+   to `~/Dropbox/openclaw-backup/deploy-backups/` for off-VPS
+   retention. Recovery from a bad deploy is `tar -xzf`.
+4. **Every UPDATE is reviewed via diff before landing.** The tool
+   prints a unified diff for each changed file and waits for y/N.
+   Override: `--yes-updates`.
+5. **Workspace drift between deploys is a blocking error.** If the
+   workspace has changed since the last recorded manifest, the next
+   deploy refuses. Override: `--accept-drift` (logs a violation).
+6. **Infrastructure code is built test-first.** See
+   `feedback_tdd_mandatory_for_infra.md` memory — the deploy tool
+   itself, any backup scripts, any cron editors — all built red/green.
+
+## Deployment workflow rules (human-facing)
+
+- NO ON-VPS DEV. Edits happen in local git, full stop.
+- Never `scp` files directly into `~/repo/` on the VPS. Use `git pull`.
+- Never hand-write cron messages with `chr()`, compound shell pipes,
+  or heredocs — OpenClaw's exec layer can trip approval flows even
+  under `policy=full, ask=off`. Use Python scripts invoked via
+  `python3 /home/node/.openclaw/<agent>-workspace/scripts/<name>.py`.
+- Never commit secrets. API keys, bot tokens, passwords live in
+  `.env` (gitignored) and are sourced into deploy environment at
+  runtime.

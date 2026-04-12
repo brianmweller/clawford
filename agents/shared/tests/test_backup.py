@@ -89,6 +89,41 @@ def test_backup_directory_created_if_missing(
     assert backups_dir.exists(), "backup directory should be auto-created"
 
 
+def test_backup_mirrors_to_dropbox(
+    deploy_module, prepopulated_workspace, monkeypatch, tmp_path
+):
+    """Every backup tarball must also be written to the Dropbox mirror
+    location so the user's local machine has an off-VPS copy with 180-day
+    version history. This is the safety net that makes regression
+    incidents recoverable from outside the VPS filesystem."""
+    backups_dir = tmp_path / "deploy-backups"
+    dropbox_dir = tmp_path / "dropbox-openclaw-backup" / "deploy-backups"
+    monkeypatch.setattr(
+        deploy_module, "BACKUPS_ROOT", backups_dir, raising=False
+    )
+    monkeypatch.setattr(
+        deploy_module, "DROPBOX_BACKUP_ROOT", dropbox_dir, raising=False
+    )
+    _run_deploy_apply(deploy_module)
+
+    # Primary backup exists
+    primary = sorted(backups_dir.glob("testagent-*.tar.gz"))
+    assert len(primary) == 1, f"primary backup missing: {list(backups_dir.iterdir())}"
+
+    # Dropbox mirror exists with the same filename
+    mirrored = sorted(dropbox_dir.glob("testagent-*.tar.gz"))
+    assert len(mirrored) == 1, (
+        f"dropbox mirror missing at {dropbox_dir}: "
+        f"{list(dropbox_dir.iterdir()) if dropbox_dir.exists() else 'no dir'}"
+    )
+    assert mirrored[0].name == primary[0].name, "filenames must match"
+
+    # Both tarballs have the same content (byte-equal)
+    assert mirrored[0].read_bytes() == primary[0].read_bytes(), (
+        "mirror content differs from primary — copy failed"
+    )
+
+
 def test_no_backup_when_workspace_is_empty(
     deploy_module, fake_workspace, monkeypatch, tmp_path
 ):

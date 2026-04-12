@@ -52,6 +52,12 @@ except Exception:
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # .../Clawford
 GATEWAY_CONTAINER = "openclaw-openclaw-gateway-1"
 BACKUPS_ROOT = Path(os.path.expanduser("~/.openclaw/deploy-backups"))
+# Off-VPS mirror: Dropbox syncs this path to the user's workstation with
+# 180-day version history. Critical safety net for regression recovery —
+# without it, a bad deploy destroys local-to-VPS data with no escape path.
+DROPBOX_BACKUP_ROOT = Path(
+    os.path.expanduser("~/Dropbox/openclaw-backup/deploy-backups")
+)
 BACKUP_RETENTION = 10  # keep last N backups per agent
 
 
@@ -540,13 +546,25 @@ def backup_workspace(mf: "Manifest") -> Path | None:
         tf.add(workspace, arcname=mf.agent_id)
     log(f"backup OK     {tarball.name}", "ok")
 
-    # Rotate: keep last BACKUP_RETENTION per agent
-    existing = sorted(BACKUPS_ROOT.glob(f"{mf.agent_id}-*.tar.gz"))
-    for old in existing[:-BACKUP_RETENTION]:
-        try:
-            old.unlink()
-        except Exception as e:
-            log(f"backup rotate failed for {old.name}: {e}", "warn")
+    # Mirror to Dropbox for off-VPS retention with version history.
+    try:
+        DROPBOX_BACKUP_ROOT.mkdir(parents=True, exist_ok=True)
+        mirror = DROPBOX_BACKUP_ROOT / tarball.name
+        shutil.copy2(tarball, mirror)
+        log(f"backup MIRROR {mirror}", "ok")
+    except Exception as e:
+        log(f"backup MIRROR failed: {e}", "warn")
+
+    # Rotate: keep last BACKUP_RETENTION per agent (both locations).
+    for root in (BACKUPS_ROOT, DROPBOX_BACKUP_ROOT):
+        if not root.exists():
+            continue
+        existing = sorted(root.glob(f"{mf.agent_id}-*.tar.gz"))
+        for old in existing[:-BACKUP_RETENTION]:
+            try:
+                old.unlink()
+            except Exception as e:
+                log(f"backup rotate failed for {old.name}: {e}", "warn")
     return tarball
 
 
