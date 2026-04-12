@@ -75,7 +75,7 @@ fi
 
 # Copy scripts
 mkdir -p "$WORKSPACE/scripts"
-for script in timed-deliver.py heartbeat-write.py; do
+for script in heartbeat.py timed-deliver.py heartbeat-write.py security-audit.py diagnose-approval.py; do
     if [ -f "/tmp/scripts/$script" ]; then
         cp "/tmp/scripts/$script" "$WORKSPACE/scripts/$script"
         echo "  Copied scripts/$script -> $WORKSPACE/scripts/$script"
@@ -83,6 +83,10 @@ for script in timed-deliver.py heartbeat-write.py; do
         echo "  WARNING: /tmp/scripts/$script not found — skipping"
     fi
 done
+
+# Ensure the agent (running as `node` in container) can read/write its own scripts.
+# Past deployments left some scripts root-owned, blocking self-repair.
+chmod -R u+rwX,g+rX,o+rX "$WORKSPACE/scripts" 2>/dev/null || true
 
 echo ""
 
@@ -289,6 +293,9 @@ oc cron add \
 echo "  [6/9] monthly-archival"
 
 # 7. Security audit — weekly Sunday 04:00 UTC
+# Script-based to avoid the chr()-obfuscated python -c that was previously
+# embedded here. The script gathers policies, runs openclaw security audit --deep,
+# applies enrichment rules, and prints the formatted report.
 oc cron add \
   --agent fix-it \
   --name "security-audit" \
@@ -296,40 +303,10 @@ oc cron add \
   --to "$TELEGRAM_CHAT_ID" \
   --account "$TELEGRAM_ACCOUNT" \
   --announce \
-  --message "Security audit. Do not ask for permission. Execute ALL steps, then send ONE Telegram report.
+  --message "Run: python3 /home/node/.openclaw/fix-it-workspace/scripts/security-audit.py
 
-STEP 1 — Run openclaw security audit --deep. Capture its output.
-
-STEP 2 — Check per-agent exec policies. Run: python3 -c \"import json; d=json.load(open('/home/node/.openclaw/exec-approvals.json')); [(print(f'{a}: {c.get(chr(112)+chr(111)+chr(108)+chr(105)+chr(99)+chr(121),chr(63))}')) for a,c in d.get('agents',{}).items()]\"
-
-STEP 3 — Compose the report. Format EXACTLY like this:
-
-🦊🔧 Security Audit — {date}
-
-🔒 Exec Policies
-{for each agent from STEP 2, one line: • {agent}: {policy}}
-{All agents should be policy=full — this is intentional. See note below.}
-
-🔴 CRITICAL ({count})
-• {finding}
-
-🟠 HIGH ({count})
-• {finding}
-
-🟡 MEDIUM ({count})
-• {finding}
-
-🟢 LOW ({count})
-• {finding}
-
-Remediation: {one sentence per critical/high}
-
-ENRICHMENT RULES for STEP 1 findings:
-• tools.exec.security_full_configured — do NOT report this raw finding. Replace it with the 🔒 Exec Policies section from STEP 2. All agents having policy=full is EXPECTED and correct — OpenClaw's allowlist matches binary paths only, and shell chains/redirections are unsupported in allowlist mode. Since LLMs generate compound commands, policy=full is the only option that works. This is per-agent scoped, not global. Do NOT flag as CRITICAL.
-• plugins.tools_reachable_permissive_policy — suppress if plugins.allow is set and no untrusted extensions are installed.
-
-FORMAT RULES: use the emoji severity headers shown above. Group by severity. Include counts. Omit empty sections. If zero issues send just: ✅ Security audit clean. Do NOT run --fix. Do NOT run checks beyond what these steps specify."
-echo "  [7/9] security-audit"
+The script reads /home/node/.openclaw/exec-approvals.json directly, runs openclaw security audit --deep, applies enrichment rules (suppresses tools.exec.security_full_configured and plugins.tools_reachable_permissive_policy), and prints the formatted emoji-headed severity report. Send the entire stdout to Telegram as ONE message. Do NOT use python3 -c. Do NOT use heredocs. Do NOT regenerate the report yourself — just run the script and forward its output verbatim."
+echo "  [7/9] security-audit (script-based)"
 
 # 8. Update check — weekly Wednesday 04:00 UTC
 oc cron add \
@@ -365,6 +342,18 @@ oc cron add \
   --failure-alert --failure-alert-to "$TELEGRAM_CHAT_ID" --failure-alert-account-id "$TELEGRAM_ACCOUNT" --failure-alert-channel telegram \
   --message "Run: python3 ~/Dropbox/openclaw-backup/scripts/obsidian-briefing/generate.py. If it succeeds: produce NO output. If it fails: send the error on Telegram."
 echo "  [10/10] obsidian-briefing (silent on success, generates Obsidian daily briefing)"
+
+# 11. Probation-end reminder — fires once on 2026-04-25 16:00 UTC (09:00 PT)
+# Probation started 2026-04-11. Sam decides on the 25th: keep, extend, or retire.
+oc cron add \
+  --agent fix-it \
+  --name "probation-end-reminder" \
+  --cron "0 16 25 4 *" \
+  --to "$TELEGRAM_CHAT_ID" \
+  --account "$TELEGRAM_ACCOUNT" \
+  --announce \
+  --message "🦊🔧 Probation review reminder. Today is 2026-04-25 — your 14-day probation window ends today. Read ~/Dropbox/openclaw-backup/fix-it/probation.md for the failure ledger Sam has been keeping. Send Sam one Telegram message: 'Probation ends today. Failures logged: {N}. Verdict requested: keep / extend / retire.' Then stop. Do not propose a verdict yourself — that is Sam's decision. Retirement command if needed: bash ~/repo/agents/fix-it/retire.sh"
+echo "  [11/11] probation-end-reminder (one-shot 2026-04-25 16:00 UTC)"
 
 echo ""
 

@@ -107,6 +107,23 @@ claude -p "now fix Y" --output-format text --add-dir ~/Dropbox/openclaw-backup/ 
 
 ## Monitoring Scripts
 
+### diagnose-approval.py — RUN THIS FIRST when asked about an approval ID
+- **Path:** `~/.openclaw/fix-it-workspace/scripts/diagnose-approval.py`
+- **Purpose:** Trace an approval ID to its source cron and agent. This is the FIRST tool you run when Sam asks "what is approval X?" or "what fired this prompt?". You MUST run it before answering. See SOUL.md "Diagnostic Discipline" rule 1.
+- **Usage:**
+  - `python3 diagnose-approval.py 2f2894a3` — find approval by id prefix
+  - `python3 diagnose-approval.py --by-time 04:01` — find crons that fire at a UTC time (when approval has expired)
+  - `python3 diagnose-approval.py --recent` — list approvals from last 24h
+- **Why it exists:** On 2026-04-11 you confabulated a diagnosis ("heartbeat-check") for an approval that came from `security-audit` because you had no tool to map the id to its source. This tool is that map. Use it.
+- **Quote its output in your reply.** Sam flags any diagnosis that asserts a cron name without quoted evidence — that is a P1 probation violation.
+
+### security-audit.py
+- **Path:** `~/.openclaw/fix-it-workspace/scripts/security-audit.py`
+- **Purpose:** Replaces the chr()-obfuscated `python3 -c` that previously lived in the security-audit cron prompt. Reads `/home/node/.openclaw/exec-approvals.json` directly, runs `openclaw security audit --deep`, applies enrichment rules, prints emoji-headed severity report.
+- **Usage:** `python3 security-audit.py` — prints report to stdout.
+- **Called by:** the security-audit cron (Sunday 04:00 UTC). The cron prompt now just runs the script and forwards stdout to Telegram. Do NOT regenerate the report yourself.
+- **Exit code:** always 0. Audit results are reported, not failed on.
+
 ### validate.py
 - **Path:** `~/Dropbox/openclaw-backup/scripts/validate.py`
 - **What it checks:** Directory structure integrity, file format compliance, ID uniqueness, required fields, date format validity, broken subject references in facts.

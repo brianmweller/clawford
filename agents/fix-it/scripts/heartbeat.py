@@ -46,14 +46,30 @@ def parse_timestamp(raw):
 
 
 def get_registered_agents():
-    """Get agent names from openclaw agents list --json."""
+    """Get agent names. Try --json (added in 2026.4.10), fall back to plain text."""
     try:
         r = subprocess.run(
             ["openclaw", "agents", "list", "--json"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=30, check=True,
         )
         agents = json.loads(r.stdout)
         names = {a["id"] for a in agents if a.get("id")}
+        names.discard("main")
+        if names:
+            return names
+    except Exception:
+        pass
+
+    try:
+        r = subprocess.run(
+            ["openclaw", "agents", "list"],
+            capture_output=True, text=True, timeout=30, check=True,
+        )
+        names = set()
+        for line in r.stdout.splitlines():
+            m = re.match(r"^[-*\s]*([a-z][a-z0-9-]+)\b", line.strip())
+            if m and m.group(1) not in {"id", "name", "agents", "agent"}:
+                names.add(m.group(1))
         names.discard("main")
         return names
     except Exception:
