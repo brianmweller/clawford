@@ -54,17 +54,52 @@ def load_item_map():
 
 
 def extract_engagement(text):
-    """Parse a message for /like N or /dislike N. Returns (action, item_num) or None."""
-    # Match /like 3, /dislike 5, like:3, dislike:5 (callback data)
-    m = re.search(r"(?:/like|like[:\s])\s*(\d+)", text, re.I)
-    if m:
-        return ("thumbs_up", m.group(1))
+    """Parse a message for /like N, /dislike N, or /more N.
 
-    m = re.search(r"(?:/dislike|dislike[:\s])\s*(\d+)", text, re.I)
-    if m:
-        return ("thumbs_down", m.group(1))
+    Returns (action, item_num) on first match, where action is one of
+    `thumbs_up`, `thumbs_down`, or `expand`. Returns None if no engagement
+    pattern is found.
 
-    return None
+    Each verb has three accepted forms so we cover every way the signal
+    can arrive in a session transcript:
+
+      1. `/like 3` — slash command typed manually
+      2. `like:3`  — inline keyboard button callback_data (openclaw
+                     forwards callback_data into the transcript as text)
+      3. `like 3`  — freeform prose where the user wrote the verb
+                     and number without a slash or colon
+
+    Order is load-bearing: check `dislike` BEFORE `like` so the trailing
+    "like" inside "dislike" doesn't misclassify a negative signal as
+    positive. (Pre-2026-04-13 bug: the old implementation matched
+    `like` as a bare substring and turned every `/dislike N` into a
+    `thumbs_up`.)
+
+    Item number must be at least one digit and follow either a space,
+    a colon, or end-of-prefix whitespace — guards against picking up
+    item numbers from unrelated text ("in 2025 I liked x"). The verb
+    must be at a word boundary so `unlike`, `childlike`, `dislikes`
+    don't trigger.
+    """
+    # (verb_regex, result_action). Each regex matches the verb at a word
+    # boundary followed by a space, colon, or explicit underscore, then
+    # captures the item number. We scan for ALL matches across all verbs
+    # and return the one at the leftmost position, so if two signals
+    # happen to appear in the same transcript line the one the user
+    # wrote first wins.
+    patterns: list[tuple[str, str]] = [
+        (r"(?<![a-z])/?dislike[:_\s]\s*(\d+)", "thumbs_down"),
+        (r"(?<![a-z])/?like[:_\s]\s*(\d+)",    "thumbs_up"),
+        (r"(?<![a-z])/?more[:_\s]\s*(\d+)",    "expand"),
+    ]
+    best: tuple[int, str, str] | None = None  # (start_pos, action, item_num)
+    for pattern, action in patterns:
+        m = re.search(pattern, text, re.I)
+        if m and (best is None or m.start() < best[0]):
+            best = (m.start(), action, m.group(1))
+    if best is None:
+        return None
+    return (best[1], best[2])
 
 
 def main():

@@ -341,3 +341,232 @@ def test_wait_until_target_skips_if_target_far_away(fake_fleet, monkeypatch):
 
     mod.wait_until_target_utc_hour(12)
     assert slept_for == [], "must not sleep for pathologically long intervals"
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Per-item inline keyboard delivery (Option B)
+#
+# news-digest writes cache/morning-items.json alongside the plain text
+# brief. When present, morning-fleet-deliver reads it and sends each
+# item as its own Telegram message with a [👍 like][👎 dislike][📖 more]
+# inline keyboard row. callback_data = "like:N" / "dislike:N" / "more:N"
+# — engagement-poller.py parses those out of the session transcript
+# after the user taps.
+# ────────────────────────────────────────────────────────────────────────
+
+
+def _write_items(base: Path, agent_id: str, items: list, age_s: float = 0) -> Path:
+    ws = base / f"{agent_id}-workspace" / "cache"
+    ws.mkdir(parents=True, exist_ok=True)
+    f = ws / "morning-items.json"
+    f.write_text(json.dumps(items), encoding="utf-8")
+    if age_s:
+        mt = time.time() - age_s
+        os.utime(str(f), (mt, mt))
+    return f
+
+
+SAMPLE_ITEMS = [
+    {
+        "num": 1,
+        "category": "🤖 AI & Tech",
+        "extended_headline": "Hospitals roll out chatbots to reclaim the first patient interaction.",
+        "url": "https://statnews.com/hospitals",
+        "source_label": "STAT",
+    },
+    {
+        "num": 2,
+        "category": "🤖 AI & Tech",
+        "extended_headline": "TSMC headed for another record quarter on AI demand.",
+        "url": "https://reuters.com/tsmc",
+        "source_label": "Reuters",
+    },
+    {
+        "num": 3,
+        "category": "💰 Economics",
+        "extended_headline": "Oil climbs above $100 as Hormuz blockade looms.",
+        "url": "https://wsj.com/oil",
+        "source_label": "WSJ",
+    },
+]
+
+
+def test_read_items_returns_ok_for_fresh_file(fake_fleet):
+    _write_items(fake_fleet["base"], "news-digest", SAMPLE_ITEMS)
+    items, status = fake_fleet["mod"].read_items("news-digest")
+    assert status == "ok"
+    assert items == SAMPLE_ITEMS
+
+
+def test_read_items_missing_file(fake_fleet):
+    items, status = fake_fleet["mod"].read_items("news-digest")
+    assert status == "missing"
+    assert items is None
+
+
+def test_read_items_stale_file(fake_fleet):
+    _write_items(fake_fleet["base"], "news-digest", SAMPLE_ITEMS, age_s=3 * 60 * 60)
+    items, status = fake_fleet["mod"].read_items("news-digest")
+    assert status == "stale"
+
+
+def test_read_items_empty_list(fake_fleet):
+    _write_items(fake_fleet["base"], "news-digest", [])
+    items, status = fake_fleet["mod"].read_items("news-digest")
+    assert status == "empty"
+
+
+def test_read_items_malformed_json(fake_fleet):
+    ws = fake_fleet["base"] / "news-digest-workspace" / "cache"
+    ws.mkdir(parents=True, exist_ok=True)
+    (ws / "morning-items.json").write_text("not json at all", encoding="utf-8")
+    items, status = fake_fleet["mod"].read_items("news-digest")
+    assert status == "error"
+
+
+def test_format_item_message_includes_num_and_url(fake_fleet):
+    text = fake_fleet["mod"]._format_item_message(SAMPLE_ITEMS[0])
+    assert "1." in text
+    assert "Hospitals roll out chatbots" in text
+    assert "https://statnews.com/hospitals" in text
+    assert "🤖 AI & Tech" in text
+    assert "STAT" in text
+
+
+def test_buttons_for_item_uses_callback_data_format(fake_fleet):
+    buttons = fake_fleet["mod"]._buttons_for_item(5)
+    assert "inline_keyboard" in buttons
+    row = buttons["inline_keyboard"][0]
+    cbs = {b["callback_data"] for b in row}
+    assert cbs == {"like:5", "dislike:5", "more:5"}
+    # Button labels are human-readable, not command syntax
+    labels = [b["text"] for b in row]
+    assert any("like" in l.lower() for l in labels)
+    assert any("dislike" in l.lower() for l in labels)
+    assert any("more" in l.lower() for l in labels)
+
+
+def test_deliver_items_sends_one_call_per_item_with_buttons(fake_fleet):
+    sent_args = []
+    def fake_send(bot_token, chat_id, text, silent=False, reply_markup=None):
+        sent_args.append({
+            "text": text,
+            "silent": silent,
+            "reply_markup": reply_markup,
+        })
+        return True
+    with patch.object(fake_fleet["mod"], "send_telegram", side_effect=fake_send):
+        sent, failed = fake_fleet["mod"].deliver_items_with_buttons(
+            "FAKE_TOKEN", "CHAT", SAMPLE_ITEMS, footer_text="🐛 done"
+        )
+    assert failed == 0
+    assert sent == len(SAMPLE_ITEMS) + 1  # 3 items + 1 footer
+    # Every non-footer call has a reply_markup
+    item_calls = sent_args[:-1]
+    assert all(c["reply_markup"] is not None for c in item_calls), (
+        "every per-item send must carry an inline keyboard"
+    )
+    # Footer call has NO reply_markup (it's just a summary message)
+    assert sent_args[-1]["reply_markup"] is None
+
+
+def test_deliver_items_silences_all_but_footer(fake_fleet):
+    sent_args = []
+    def fake_send(bot_token, chat_id, text, silent=False, reply_markup=None):
+        sent_args.append({"silent": silent})
+        return True
+    with patch.object(fake_fleet["mod"], "send_telegram", side_effect=fake_send):
+        fake_fleet["mod"].deliver_items_with_buttons(
+            "FAKE_TOKEN", "CHAT", SAMPLE_ITEMS, footer_text="🐛 done"
+        )
+    # All item sends silent, footer audible
+    for i, c in enumerate(sent_args[:-1]):
+        assert c["silent"] is True, f"item {i} should be silent"
+    assert sent_args[-1]["silent"] is False, "footer should be audible"
+
+
+def test_deliver_items_no_footer_last_item_audible(fake_fleet):
+    """When no footer, the last item itself is the one audible ding."""
+    sent_args = []
+    def fake_send(bot_token, chat_id, text, silent=False, reply_markup=None):
+        sent_args.append({"silent": silent})
+        return True
+    with patch.object(fake_fleet["mod"], "send_telegram", side_effect=fake_send):
+        fake_fleet["mod"].deliver_items_with_buttons(
+            "FAKE_TOKEN", "CHAT", SAMPLE_ITEMS,  # no footer
+        )
+    assert sent_args[-1]["silent"] is False
+    for c in sent_args[:-1]:
+        assert c["silent"] is True
+
+
+def test_main_dispatches_news_digest_to_items_path(fake_fleet):
+    """When morning-items.json exists, news-digest is delivered per-item
+    with buttons, NOT via plain text chunks."""
+    base = fake_fleet["base"]
+    _write_items(base, "news-digest", SAMPLE_ITEMS)
+    # Still write a plain text brief so the path NOT taken can be
+    # distinguished: if send_telegram is called with the text brief body,
+    # the items path was bypassed.
+    _write_brief(base, "news-digest", "PLAIN TEXT BRIEF BODY")
+
+    call_kwargs: list[dict] = []
+    def fake_send(bot_token, chat_id, text, silent=False, reply_markup=None):
+        call_kwargs.append({
+            "text": text,
+            "reply_markup": reply_markup,
+        })
+        return True
+    with patch.object(fake_fleet["mod"], "send_telegram", side_effect=fake_send):
+        rc = fake_fleet["mod"].main()
+
+    assert rc == 0
+    # News-digest sent 3 items + 1 footer = 4 messages
+    nd_calls = [c for c in call_kwargs if "PLAIN TEXT BRIEF BODY" not in c["text"]]
+    assert len(nd_calls) == 4
+    # First 3 have inline keyboards
+    assert all(
+        c["reply_markup"] is not None
+        for c in nd_calls[:3]
+    )
+
+
+def test_main_falls_back_to_text_when_items_missing(fake_fleet):
+    """If morning-items.json is missing, news-digest uses the plain
+    text brief path (backwards compat)."""
+    base = fake_fleet["base"]
+    _write_brief(base, "news-digest", "JUST PLAIN TEXT, NO ITEMS FILE")
+
+    call_kwargs: list[dict] = []
+    def fake_send(bot_token, chat_id, text, silent=False, reply_markup=None):
+        call_kwargs.append({"text": text, "reply_markup": reply_markup})
+        return True
+    with patch.object(fake_fleet["mod"], "send_telegram", side_effect=fake_send):
+        rc = fake_fleet["mod"].main()
+
+    assert rc == 0
+    # Only plain-text news-digest message, no buttons
+    nd_calls = [c for c in call_kwargs if "JUST PLAIN TEXT" in c["text"]]
+    assert len(nd_calls) == 1
+    assert nd_calls[0]["reply_markup"] is None
+
+
+def test_main_other_agents_still_use_plain_text(fake_fleet):
+    """Option B is news-digest-only. Mistress Mouse, Sergeant Murphy,
+    Mr Fixit, Hilda Hippo still deliver plain text briefs with no
+    inline keyboards."""
+    base = fake_fleet["base"]
+    for agent in ("family-calendar", "meetings-coach", "fix-it", "shopping"):
+        _write_brief(base, agent, f"plain text from {agent}")
+    # news-digest has NO items file and NO text file → skipped
+
+    call_kwargs: list[dict] = []
+    def fake_send(bot_token, chat_id, text, silent=False, reply_markup=None):
+        call_kwargs.append({"reply_markup": reply_markup})
+        return True
+    with patch.object(fake_fleet["mod"], "send_telegram", side_effect=fake_send):
+        fake_fleet["mod"].main()
+
+    assert len(call_kwargs) == 4
+    # None of the 4 other agents attach inline keyboards
+    assert all(c["reply_markup"] is None for c in call_kwargs)

@@ -47,6 +47,18 @@ FLEET = [
 CACHE_FILENAME = "cache/morning-brief-ready.txt"
 FRESHNESS_SECONDS = 2 * 60 * 60  # 2 hours
 
+# news-digest uses a structured items file to enable per-item inline
+# keyboard buttons instead of plain text chunks. Format:
+#   [{"num": 1, "category": "🤖 AI & Tech", "title": "...",
+#     "extended_headline": "...", "url": "...",
+#     "source_label": "Google AI"}, ...]
+# When this file exists AND its mtime is within FRESHNESS_SECONDS,
+# news-digest's brief is delivered item-by-item with 👍/👎/📖 buttons.
+# Otherwise we fall back to sending morning-brief-ready.txt as plain
+# chunks.
+ITEMS_FILENAME = "cache/morning-items.json"
+NEWS_DIGEST_AGENT_ID = "news-digest"
+
 # Target delivery hour. The cron is scheduled a few minutes early (55 11 * * *)
 # to buffer against fix-it queue serialization; the script holds until this
 # UTC hour before calling send_telegram so all 5 bots fire at the same
@@ -73,6 +85,142 @@ WORKSPACE_BASE = os.environ.get(
 
 def workspace_brief_path(agent_id: str) -> Path:
     return Path(WORKSPACE_BASE) / f"{agent_id}-workspace" / CACHE_FILENAME
+
+
+def workspace_items_path(agent_id: str) -> Path:
+    return Path(WORKSPACE_BASE) / f"{agent_id}-workspace" / ITEMS_FILENAME
+
+
+def read_items(agent_id: str) -> tuple[list[dict] | None, str]:
+    """Return (items_list, status_code) for an agent's structured items file.
+
+    Only news-digest uses this. Format:
+      [{"num": 1, "category": "🤖 AI & Tech",
+        "title": "...", "extended_headline": "...",
+        "url": "...", "source_label": "Google AI"}, ...]
+
+    status_code is one of:
+      ok      — file exists, fresh, parseable, non-empty list
+      missing — file does not exist
+      stale   — file exists but older than FRESHNESS_SECONDS
+      empty   — file exists, fresh, but list is empty
+      error   — unreadable or malformed
+    """
+    path = workspace_items_path(agent_id)
+    if not path.exists():
+        return None, "missing"
+    try:
+        age = time.time() - path.stat().st_mtime
+    except OSError:
+        return None, "error"
+    if age > FRESHNESS_SECONDS:
+        return None, "stale"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None, "error"
+    if not isinstance(data, list) or not data:
+        return None, "empty"
+    return data, "ok"
+
+
+def _format_item_message(item: dict) -> str:
+    """Render a single digest item as the text of one Telegram message.
+
+    Format:
+        {category_emoji} {Category}
+
+        {num}. {extended_headline}
+        {url}
+
+    Everything except num and extended_headline is optional — missing
+    fields are simply dropped. category is shown only when present
+    (the caller can skip repeating the same heading across consecutive
+    items; we include it unconditionally because each message stands
+    alone in the Telegram chat).
+    """
+    lines: list[str] = []
+    category = (item.get("category") or "").strip()
+    if category:
+        lines.append(category)
+        lines.append("")
+    num = item.get("num")
+    headline = (item.get("extended_headline") or item.get("title") or "").strip()
+    source_label = (item.get("source_label") or "").strip()
+    head = f"{num}. {headline}" if num is not None else headline
+    if source_label:
+        head = f"{head} — {source_label}"
+    lines.append(head)
+    url = (item.get("url") or item.get("link") or "").strip()
+    if url:
+        lines.append(url)
+    return "\n".join(lines)
+
+
+def _buttons_for_item(num: int) -> dict:
+    """Build the inline keyboard for a single digest item's reactions.
+
+    callback_data uses the `like:N` / `dislike:N` / `more:N` form that
+    engagement-poller.py's extract_engagement() parses out of the
+    openclaw session transcript (openclaw forwards callback_data into
+    the agent's session as text).
+    """
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "👍 like",    "callback_data": f"like:{num}"},
+                {"text": "👎 dislike", "callback_data": f"dislike:{num}"},
+                {"text": "📖 more",    "callback_data": f"more:{num}"},
+            ]
+        ]
+    }
+
+
+def deliver_items_with_buttons(
+    bot_token: str,
+    chat_id: str,
+    items: list[dict],
+    footer_text: str | None = None,
+) -> tuple[int, int]:
+    """Send each digest item as its own Telegram message with an inline
+    keyboard for per-item engagement (👍 like / 👎 dislike / 📖 more).
+
+    Returns (sent_count, failed_count). Every message except the last
+    is sent silently so Sam gets exactly one notification ding — the
+    footer message (or the final item, if no footer) is the single
+    audible delivery.
+    """
+    sent = 0
+    failed = 0
+    n = len(items)
+    for i, item in enumerate(items):
+        is_last = i == n - 1 and not footer_text
+        text = _format_item_message(item)
+        num = item.get("num")
+        buttons = _buttons_for_item(num) if num is not None else None
+        ok = send_telegram(
+            bot_token, chat_id, text,
+            silent=not is_last,
+            reply_markup=buttons,
+        )
+        if ok:
+            sent += 1
+        else:
+            failed += 1
+        # Rate-limit gap between sends. Telegram's per-chat limit is
+        # 1 msg/sec for regular messages; 300ms gives us headroom and
+        # avoids "Too Many Requests: retry after N".
+        if not is_last:
+            time.sleep(0.3)
+
+    if footer_text:
+        ok = send_telegram(bot_token, chat_id, footer_text, silent=False)
+        if ok:
+            sent += 1
+        else:
+            failed += 1
+
+    return sent, failed
 
 
 def read_brief(agent_id: str) -> tuple[str | None, str]:
@@ -222,23 +370,35 @@ def wait_until_target_utc_hour(target_hour: int = TARGET_UTC_HOUR) -> None:
     time.sleep(delta_s)
 
 
-def send_telegram(bot_token: str, chat_id: str, text: str, silent: bool = False) -> bool:
+def send_telegram(
+    bot_token: str,
+    chat_id: str,
+    text: str,
+    silent: bool = False,
+    reply_markup: dict | None = None,
+) -> bool:
     """Send a single message via the Telegram Bot API. Returns True on success.
 
     The caller is responsible for chunking long briefs via chunk_text()
     — this function sends whatever it's given up to Telegram's 4096-char
     hard limit. Anything larger will fail at the API boundary rather
     than be silently truncated.
+
+    Pass `reply_markup` to attach an inline keyboard (used by the
+    per-item news-digest delivery path for 👍/👎/📖 engagement buttons).
     """
     if not bot_token or not chat_id:
         return False
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = json.dumps({
+    body: dict = {
         "chat_id": chat_id,
         "text": text,
         "disable_web_page_preview": True,
         "disable_notification": silent,
-    }).encode("utf-8")
+    }
+    if reply_markup is not None:
+        body["reply_markup"] = reply_markup
+    payload = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
         url,
         data=payload,
@@ -300,14 +460,25 @@ def main() -> int:
     # Pre-read all briefs BEFORE waiting. The caches are already written
     # by the 11:30 UTC gather crons; we don't need to burn the hold window
     # doing I/O.
-    briefs: list[tuple[str, str, str, str]] = []  # (agent_id, token_env, display, text)
+    # Each brief is one of two shapes:
+    #   ("items", list_of_item_dicts)  — news-digest per-item + buttons
+    #   ("text",  plain_text_string)   — all other agents, chunked
+    briefs: list[tuple[str, str, str, str, object]] = []  # (agent_id, token_env, display, kind, payload)
     skipped: list[tuple[str, str]] = []
     for agent_id, token_env, display in FLEET:
+        if agent_id == NEWS_DIGEST_AGENT_ID:
+            items, items_status = read_items(agent_id)
+            if items_status == "ok" and items:
+                briefs.append((agent_id, token_env, display, "items", items))
+                continue
+            # Fall through to plain-text brief if items file is missing
+            # or stale — backwards compatibility while the morning-edition
+            # cron is still catching up on writing morning-items.json.
         text, status = read_brief(agent_id)
         if status != "ok":
             skipped.append((agent_id, status))
             continue
-        briefs.append((agent_id, token_env, display, text))
+        briefs.append((agent_id, token_env, display, "text", text))
 
     # Hold until the target UTC hour so all 5 bots fire at the same
     # wall-clock moment regardless of cron queue delay.
@@ -317,36 +488,51 @@ def main() -> int:
     delivered: list[str] = []
     failed: list[tuple[str, str]] = []
 
-    for agent_id, token_env, display, text in briefs:
+    for agent_id, token_env, display, kind, payload in briefs:
         bot_token = os.environ.get(token_env, "")
         if not bot_token:
             failed.append((agent_id, f"{token_env} not in env"))
             continue
 
-        # Chunk at paragraph boundaries; send each chunk as its own
-        # Telegram message. Non-final chunks are silent so Sam hears
-        # one ding per agent, not 3 ×.
-        chunks = chunk_text(text)
-        if not chunks:
-            failed.append((agent_id, "empty after chunking"))
-            continue
-
         all_ok = True
-        for i, chunk in enumerate(chunks):
-            is_last = i == len(chunks) - 1
-            chunk_ok = send_telegram(
-                bot_token, chat_id, chunk, silent=not is_last
+        if kind == "items":
+            # news-digest: per-item messages with inline 👍/👎/📖 buttons.
+            items: list[dict] = payload  # type: ignore[assignment]
+            footer = (
+                f"🐛 {len(items)} items · tap 👍 👎 📖 on each to tune tomorrow"
             )
-            if not chunk_ok:
+            sent_n, fail_n = deliver_items_with_buttons(
+                bot_token, chat_id, items, footer_text=footer,
+            )
+            if fail_n > 0:
                 all_ok = False
-                failed.append((agent_id, f"telegram API failure on chunk {i+1}/{len(chunks)}"))
-                break
-            # Small delay between chunks to stay under Telegram's rate limits
-            if not is_last:
-                time.sleep(0.3)
+                failed.append(
+                    (agent_id, f"{fail_n}/{len(items)+1} item sends failed")
+                )
+        else:
+            # Plain text brief — chunk at paragraph boundaries and send
+            # each chunk as its own Telegram message. Non-final chunks
+            # are silent so Sam hears one ding per agent, not 3 ×.
+            text: str = payload  # type: ignore[assignment]
+            chunks = chunk_text(text)
+            if not chunks:
+                failed.append((agent_id, "empty after chunking"))
+                continue
+            for i, chunk in enumerate(chunks):
+                is_last = i == len(chunks) - 1
+                chunk_ok = send_telegram(
+                    bot_token, chat_id, chunk, silent=not is_last
+                )
+                if not chunk_ok:
+                    all_ok = False
+                    failed.append(
+                        (agent_id, f"telegram API failure on chunk {i+1}/{len(chunks)}")
+                    )
+                    break
+                if not is_last:
+                    time.sleep(0.3)
 
-        ok = all_ok
-        if ok:
+        if all_ok:
             delivered.append(agent_id)
             # Optional: truncate the cache file to mark it consumed so a
             # freshness-broken re-fire doesn't re-send. Using .consumed
