@@ -33,6 +33,7 @@ DIRECT_ENTRIES=(
   "*/5 * * * *|costco-token-refresh-host.sh|# costco-token-refresh-host"
   "0 12 * * *|morning-fleet-deliver-host.sh|# morning-fleet-deliver-host"
   "*/15 * * * *|fleet-health-host.sh|# fleet-health-host"
+  "30 10 * * *|morning-status-host.sh|# morning-status-host"
 )
 
 # Generic contract wrappers — use script-contract-host.sh with args.
