@@ -51,8 +51,15 @@ Python deploy tool at `agents/shared/deploy.py`.
    crons, configures channels, and writes a pre-deploy backup tarball.
    Safeguard prompts will stop the run if anything looks wrong —
    review and confirm.
-8. **Smoke test:** `oc cron run <heartbeat-id>`, check Telegram.
-   Or run with `--smoke-test` on step 7 to have it automatic.
+8. **Smoke test:** Fire the host-side orchestrator once and confirm
+   the new agent shows up green:
+   ```bash
+   bash ~/repo/ops/scripts/fleet-health-host.sh
+   python3 -c "import json; d=json.load(open('/home/openclaw/Dropbox/openclaw-backup/fleet-health.json')); print(d['agents'].get('<agent-id>'))"
+   ```
+   You should see the agent with `status: ok`. Or pass `--smoke-test`
+   on step 7 and `deploy.py` will fire the manifest's `smoke_test`
+   cron and auto-restore the backup on failure.
 9. **Set bot commands and descriptions:**
    ```
    bash ~/repo/ops/scripts/set-bot-commands.sh
@@ -187,7 +194,7 @@ This pattern is used by all agents with timed delivery:
 
 7. **Run the OAuth flow on your local machine, not the VPS.** The auth flow opens a browser for consent. Run it locally with `InstalledAppFlow.run_local_server(port=8080)`, save `token.json`, then SCP to VPS. Don't try to run it inside Docker.
 
-8. **Multiple agents share cron names — filter by agent.** If three agents have a cron named "heartbeat", `openclaw cron list | grep heartbeat` returns all of them. Use the cron UUID directly, or grep for the agent name in the same line.
+8. **Multiple agents share cron names — filter by agent.** If three agents have a cron named "conflict-scan", `openclaw cron list | grep conflict-scan` returns all of them. Use the cron UUID directly, or grep for the agent name in the same line.
 
 9. **Dockerfile pip changes require image rebuild.** Adding packages with `pip install` at runtime is lost on container restart. Edit the Dockerfile, `docker compose build --no-cache`, `docker compose up -d`. Existing agents survive the restart — their data is on host volumes.
 

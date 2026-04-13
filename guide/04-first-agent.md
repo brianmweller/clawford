@@ -6,21 +6,47 @@ Your first agent will hit every obstacle. That's why Fix-It is first — it moni
 
 ## What Mr Fixit does
 
-Mr Fixit is the IT admin of your agent network. It runs 9 scheduled cron jobs:
+Mr Fixit is the IT admin of your agent network. It runs 10 scheduled
+agent-side cron jobs, plus two host-side crons that watch the whole
+fleet:
 
 | Cron | Frequency | Telegram |
 |------|-----------|----------|
-| Heartbeat check | Every 30 min | Silent on all-clear, alerts on unhealthy agent |
-| Morning status | Daily 06:00 UTC | Always (your daily briefing) |
 | Brain validation | Every 6 hours | Silent on pass, alerts on failure |
 | Dropbox conflict scan | Every 2 hours | Silent on clean, alerts on conflict |
 | File size monitor | Daily 12:00 UTC | Silent on clean, alerts on large file |
-| Monthly archival | 1st of month | Always (reports what was archived) |
-| Security audit | Weekly Sunday | Always (reports findings) |
-| Update check | Weekly Wednesday | Always (reports version) |
-| Cron self-check | Daily midnight | Silent on pass, alerts on missing crons |
+| Monthly archival | 1st of month 03:00 UTC | Always (reports what was archived) |
+| Security audit | Weekly Sunday 04:00 UTC | Always (reports findings) |
+| Update check | Weekly Wednesday 04:00 UTC | Always (reports version) |
+| Cron self-check | Daily 00:00 UTC | Silent on pass, alerts on missing crons |
+| Obsidian briefing | Daily 12:10 UTC | Silent on success, alerts on failure |
+| Workspace snapshot | Daily 03:30 UTC | Silent on success, alerts on failure |
+| Probation end reminder | One-shot (date-gated) | Always (if fired) |
 
-Routine checks use `--no-deliver` + `--failure-alert` so you only get notified when something needs attention. Reports (morning status, archival, security, updates) always deliver.
+Routine checks use `--no-deliver` + `--failure-alert` so you only get
+notified when something needs attention. Reports (monthly archival,
+security, updates) always deliver.
+
+### Fleet health is a host cron, not an agent cron
+
+The per-agent `heartbeat-check` and LLM-driven `morning-status` crons
+that earlier versions of this guide documented are **retired**. Fleet
+health now runs as two direct host crons (no `docker exec`, no LLM
+tokens, no agent workspace):
+
+| Host cron | Schedule | What it does |
+|---|---|---|
+| `fleet-health` | `*/15 * * * *` | `ops/scripts/fleet-health-host.sh` invokes `ops/scripts/fleet-health.py`, which calls each agent's `probe()` via `ops/scripts/probe-agent.py` and writes `~/Dropbox/openclaw-backup/fleet-health.json`. If any agent reports non-`ok`, the wrapper pushes one aggregated Telegram alert. |
+| `morning-status` | `30 10 * * *` | `ops/scripts/morning-status-host.sh` invokes `agents/fix-it/scripts/morning-status.py`, which reads `fleet-health.json` + `fix-it/KNOWN_ISSUES.md` and writes `cache/morning-brief-ready.txt` for `morning-fleet-deliver` to pick up at 12:00 UTC. |
+
+Both are registered by `ops/scripts/install-host-cron.sh`. Mr Fixit's
+own agent-side probe (`agents/fix-it/scripts/heartbeat.py::probe`)
+only monitors `fleet-health.json` freshness — if `generated_at` is
+more than 30 minutes old it alerts that the orchestrator itself is
+broken. Per-agent `.status.md` files in
+`~/Dropbox/openclaw-backup/agents/` are a legacy artifact; nothing
+writes them on a schedule anymore. `fleet-health.json` is the
+authoritative registry.
 
 ## Step 1: Create a Telegram bot
 
@@ -146,25 +172,35 @@ Some setups auto-pair from the backup — if the bot responds without a code, yo
 
 ## Step 7: Smoke test
 
-Get a cron job ID from the list:
+Two things to verify: (a) fix-it's agent-side crons are registered
+and firable, and (b) the host-side `fleet-health` cron reaches
+fix-it's `probe()` and gets a healthy response.
+
+**(a) Agent-side cron.** List the crons and fire one as a sanity check:
 
 ```bash
 oc cron list
+oc cron run {conflict-scan-uuid}
 ```
 
-Trigger the heartbeat check:
+Pick `conflict-scan` (every 2 hours, silent on clean) or
+`brain-validation` (every 6 hours, silent on pass) — both should
+return quickly and produce no Telegram output on success.
+
+**(b) Host-side fleet-health.** Fire the orchestrator directly and
+read the result:
 
 ```bash
-oc cron run {heartbeat-check-uuid}
+bash ~/repo/ops/scripts/fleet-health-host.sh
+python3 -c "import json; d=json.load(open('/home/openclaw/Dropbox/openclaw-backup/fleet-health.json')); print(d['generated_at']); [print(f'  {k}: {v[\"status\"]}') for k,v in d['agents'].items()]"
 ```
 
-Check your Telegram — you should get a message from Mr Fixit within 60 seconds. Also check the status file:
-
-```bash
-cat ~/Dropbox/openclaw-backup/agents/fix-it.status.md
-```
-
-The `last_heartbeat` should show the current time.
+`fleet-health.json` should have a fresh `generated_at` and show
+`fix-it: ok` alongside every other deployed agent. If fix-it shows
+`error` with an alert about `fleet-health.json missing`, the
+orchestrator hasn't run yet — re-fire the wrapper and check
+`~/.openclaw/logs/fleet-health-host.log` for the last run's exit
+code and any Python traceback.
 
 ## The nine obstacles
 
@@ -186,18 +222,24 @@ These are the obstacles we hit during the first deployment. You may hit them too
 Routine health checks shouldn't wake you up. Use `--no-deliver` + `--failure-alert` on crons where "all clear" is boring:
 
 ```bash
-oc cron edit {heartbeat-id} \
+oc cron edit {cron-uuid} \
   --no-deliver \
   --failure-alert \
   --failure-alert-to {chatId} \
   --failure-alert-account-id {agent-id} \
   --failure-alert-channel telegram \
-  --message "...If ALL agents are healthy: update the status file silently and produce NO output. If any agent is unhealthy: send me a Telegram message..."
+  --message "...If the check passes: produce NO output. If it fails: send me a Telegram message..."
 ```
 
-Apply this to: heartbeat-check, conflict-scan, brain-validation, file-size-monitor, cron-self-check.
+Apply this to: `conflict-scan`, `brain-validation`, `file-size-monitor`, `cron-self-check`, `obsidian-briefing`, `workspace-snapshot`.
 
-Keep these noisy (always deliver): morning-status, monthly-archival, security-audit, update-check.
+Keep these noisy (always deliver): `monthly-archival`, `security-audit`, `update-check`, `probation-end-reminder`.
+
+Fleet-level alerting (agent degraded, `fleet-health.json` stale)
+comes from the host-side `fleet-health` cron — not from an agent
+cron — so there is nothing to `--no-deliver` for it. Its wrapper
+(`fleet-health-host.sh`) pushes to Telegram only when
+`summarize()` returns non-`ok`.
 
 ## Claude Code (via shell, NOT ACP)
 
@@ -240,7 +282,7 @@ Always include `--add-dir ~/Dropbox/openclaw-backup/` — without it, Claude Cod
 
 **Single-shot** (simple diagnostics):
 ```bash
-claude -p "analyze ~/Dropbox/openclaw-backup/agents/fix-it.status.md" \
+claude -p "analyze ~/Dropbox/openclaw-backup/fleet-health.json" \
   --output-format text --add-dir ~/Dropbox/openclaw-backup/
 ```
 
@@ -273,12 +315,14 @@ Report Claude's findings in your own voice. Never let Claude respond directly.
 ## Post-deploy checklist
 
 - [ ] Agent registered: `oc agents list` shows fix-it
-- [ ] Status file created with heartbeat timestamp
-- [ ] All 9 crons registered: `oc cron list`
-- [ ] All 8 workspace files populated: SOUL.md, IDENTITY.md, TOOLS.md, AGENTS.md, USER.md, HEARTBEAT.md, MEMORY.md (no BOOTSTRAP.md)
+- [ ] All 10 agent-side crons registered: `oc cron list` (brain-validation, conflict-scan, file-size-monitor, monthly-archival, security-audit, update-check, cron-self-check, obsidian-briefing, probation-end-reminder, workspace-snapshot)
+- [ ] Host-side `fleet-health` cron installed: `crontab -l | grep fleet-health`
+- [ ] `fleet-health.json` generated and fresh: `ls -la ~/Dropbox/openclaw-backup/fleet-health.json` shows a timestamp within the last 15 minutes
+- [ ] fix-it's entry in `fleet-health.json` is `ok`
+- [ ] All workspace files populated: SOUL.md, IDENTITY.md, TOOLS.md, AGENTS.md, USER.md, HEARTBEAT.md, CRONS.md, probation.md (no BOOTSTRAP.md)
 - [ ] Exec allowlist configured: `oc approvals get`
-- [ ] Cron fires and updates status file
-- [ ] Telegram message arrives from Mr Fixit bot
+- [ ] An agent-side cron (e.g. `conflict-scan`) fires cleanly
+- [ ] Telegram message arrives from Mr Fixit bot on a failing-state test
 - [ ] SOUL.md and IDENTITY.md are immutable: `lsattr ~/.openclaw/fix-it-workspace/SOUL.md`
 - [ ] Silent crons configured: routine checks don't notify on all-clear
 - [ ] Claude Code working: agent can invoke `claude -p` and report findings in its own voice

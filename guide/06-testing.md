@@ -46,6 +46,14 @@ Corrupts `fix-it.status.md`, asks Mr Fixit to repair it, verifies the file was f
 
 **If this fails:** The agent cannot write to files. All crons that modify state are broken. Check exec approvals and Docker volume mounts.
 
+> **Note (post-R3+R6):** `fix-it.status.md` is a legacy artifact —
+> `fleet-health.json` is now the live source of fleet state, and no
+> cron writes the per-agent `.status.md` files on a schedule anymore.
+> T1 still exercises the "can fix-it edit a file it owns" capability,
+> but the file it's editing is no longer load-bearing. Retarget T1 at
+> any file fix-it is allowed to write (e.g. a scratch file under
+> `fix-it-workspace/`) if you update the harness.
+
 ### T2: Dropbox Conflict Detection
 
 Creates a fake conflict file (`*conflicted copy*`), triggers the conflict-scan cron, verifies the agent detected it.

@@ -78,7 +78,7 @@ Dropbox says "Up to date" but files aren't syncing. `dropbox filestatus ~/Dropbo
 
 After SSH disconnect, the daemon may stop. It does not produce an error.
 
-**Fix:** Run under systemd or check `dropbox status` periodically. Fix-It's heartbeat cron will detect if the brain files stop updating.
+**Fix:** Run under systemd or check `dropbox status` periodically. The host-side `fleet-health` cron will detect it indirectly — if agents can't write their workspace state and `fleet-health.json` starts reflecting degraded probes, Mr Fixit's morning status report will flag it. But the most reliable tripwire is to monitor `dropbox status` directly from a host cron.
 
 ### "Dropbox isn't responding"
 

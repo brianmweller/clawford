@@ -799,9 +799,13 @@ and always exits 0 can be invoked via
 `ops/scripts/script-contract-host.sh` with a per-agent bot token
 and Telegram will get the `alert` field on non-ok status. See
 `ops/scripts/script-contract-host.sh` (commit `6185415`) for the
-pattern; `shopping/heartbeat`, `meetings-coach/heartbeat`,
-`fix-it/heartbeat-check`, and `news-digest/linkedin-keepalive` are
-already migrated.
+pattern; the per-agent heartbeat/keepalive host crons that used
+this wrapper were later subsumed by the single `fleet-health`
+host cron (R3, commit `949e99a`) which calls every agent's
+`probe()` directly via `ops/scripts/probe-agent.py` and writes
+`~/Dropbox/openclaw-backup/fleet-health.json`. The wrapper is
+still the right pattern for per-agent SCRIPT_CONTRACT scripts
+that shouldn't be aggregated into the fleet snapshot.
 
 ---
 

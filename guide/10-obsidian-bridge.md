@@ -31,7 +31,8 @@ The brain stays the system of record for agent knowledge. Obsidian stays your sy
 
 ### What stays out
 
-- `agents/*.status.md` — high-churn telemetry, pollutes search
+- `agents/*.status.md` — legacy per-agent heartbeat files (nothing writes them on a schedule since R3+R6; `fleet-health.json` is the live source)
+- `fleet-health.json` — machine-readable fleet snapshot; use the rendered morning brief instead
 - `notes/inbox.md` — internal triage state
 - `facts/` — verbose, agent-formatted with confidence/decay metadata
 - `archive/` — historical, low-signal
@@ -82,12 +83,18 @@ A Python script (no LLM, zero cost) that compiles agent outputs into an Obsidian
 1. Mr Fixit's cron fires at 12:10 UTC (5:10 AM PT) — 10 minutes after Mistress Mouse's morning briefing
 2. The script reads:
    - Mistress Mouse's cached morning briefing (`~/.openclaw/family-calendar-workspace/cache/morning-briefing.txt`)
-   - Agent status files (`~/Dropbox/openclaw-backup/agents/*.status.md`)
+   - Fleet health snapshot (`~/Dropbox/openclaw-backup/fleet-health.json`) — post-R3, replaces the old `agents/*.status.md` glob
    - Open commitments (`commitments/active.md`)
    - Open tasks (`tasks/queue.md`)
 3. Assembles into markdown with YAML frontmatter and `[[wikilinks]]`
 4. Writes to `~/Dropbox/openclaw-backup/obsidian/briefings/YYYY-MM-DD.md`
 5. Dropbox syncs to local → appears in Obsidian via the junction
+
+> **Note:** If your `obsidian-briefing/parsers.py` still globs
+> `agents/*.status.md`, it's reading stale data. The `.status.md`
+> files are a legacy artifact that nothing refreshes on a schedule
+> after R3+R6. Point the parser at `fleet-health.json` instead — see
+> `agents/fix-it/scripts/morning-status.py` for the pattern.
 
 Silent on success. No Telegram notification — you just open Obsidian and the briefing is there.
 
