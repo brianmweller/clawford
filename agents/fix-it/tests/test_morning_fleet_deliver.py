@@ -142,6 +142,24 @@ def test_main_writes_consumed_marker_on_success(fake_fleet):
     assert consumed.exists()
 
 
+def test_main_skips_when_already_delivered_today(fake_fleet):
+    """R1 idempotency: second cron fire on the same day must not re-send.
+    Writes a marker on first run, checks it on second run."""
+    base = fake_fleet["base"]
+    _write_brief(base, "shopping", "today's deliveries")
+
+    with patch.object(fake_fleet["mod"], "send_telegram", return_value=True) as send1:
+        rc1 = fake_fleet["mod"].main()
+    assert rc1 == 0
+    assert send1.call_count == 1
+
+    # Second run: marker exists → skip entirely, no more sends
+    with patch.object(fake_fleet["mod"], "send_telegram", return_value=True) as send2:
+        rc2 = fake_fleet["mod"].main()
+    assert rc2 == 0
+    assert send2.call_count == 0, "second run should be a no-op when marker exists"
+
+
 def test_main_does_not_send_to_wrong_bot_if_token_missing(fake_fleet):
     """If a bot token isn't in env, skip that agent and don't substitute
     another token."""

@@ -112,7 +112,45 @@ def send_telegram(bot_token: str, chat_id: str, text: str, silent: bool = False)
         return False
 
 
+def today_idempotency_marker() -> Path:
+    """Path to the per-day idempotency marker. Prevents double-delivery
+    if the cron re-fires (observed R1 pattern on gather crons)."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return Path(WORKSPACE_BASE) / "fix-it-workspace" / "cache" / f"morning-fleet-delivered-{today}.json"
+
+
+def already_delivered_today() -> bool:
+    return today_idempotency_marker().exists()
+
+
+def mark_delivered_today(delivered: list[str], failed: list[tuple[str, str]]) -> None:
+    marker = today_idempotency_marker()
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(
+            json.dumps({
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "delivered": delivered,
+                "failed": failed,
+            }, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        print(f"  marker write failed: {e}", file=sys.stderr)
+
+
 def main() -> int:
+    # Idempotency: refuse to re-deliver if today's marker exists.
+    # This prevents R1 (morning double-fire) from producing duplicate
+    # Telegram messages even if the delivery cron is re-triggered.
+    if already_delivered_today():
+        print(json.dumps({
+            "status": "skipped",
+            "reason": "already_delivered_today",
+            "marker": str(today_idempotency_marker()),
+        }))
+        return 0
+
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
     if not chat_id:
         print("ERROR: TELEGRAM_CHAT_ID not set in environment", file=sys.stderr)
@@ -147,6 +185,14 @@ def main() -> int:
                 pass
         else:
             failed.append((agent_id, "telegram API failure"))
+
+    # Write the per-day idempotency marker after attempting delivery.
+    # Writing on BOTH success and failure — a re-fire shouldn't retry
+    # a failed send (that could double-send if the first send actually
+    # succeeded but the API response was garbled). Explicit manual
+    # rerun is done by deleting the marker.
+    if delivered or failed:
+        mark_delivered_today(delivered, failed)
 
     # Emit a compact result summary to stdout for the cron LLM to see.
     # Not to Telegram — the individual messages are already sent.
