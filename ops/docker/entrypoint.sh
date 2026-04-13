@@ -50,6 +50,25 @@ if [[ -x "$STARTUP" ]]; then
 fi
 
 ###############################################################################
+# Belt-and-suspenders Telegram bot-command restore
+#
+# Durable path: openclaw.json's per-account customCommands + commands.native:false
+# is the authoritative source (DEPLOY.md step 10a). openclaw's channel-sync
+# pushes it during gateway startup. This hook is step 10b: a direct Bot API
+# setMyCommands call that runs ~25s AFTER the gateway starts, so any stale
+# openclaw sync clobber gets overwritten by our canonical commands. No-op
+# if openclaw.json already pushed the correct set.
+#
+# The script is bind-mounted via /home/node/repo so updates flow through
+# git without rebuilding the image.
+###############################################################################
+BOT_CMDS="/home/node/repo/ops/scripts/set-bot-commands.sh"
+if [[ -x "$BOT_CMDS" ]]; then
+  echo "[entrypoint] Scheduling bot-command restore in 25s ..."
+  (sleep 25 && bash "$BOT_CMDS" 2>&1 | sed 's/^/[bot-cmds] /') &
+fi
+
+###############################################################################
 # Hand off to the real command (CMD from docker-compose)
 ###############################################################################
 exec "$@"

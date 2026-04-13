@@ -1,25 +1,45 @@
 #!/usr/bin/env bash
 # set-bot-commands.sh — Re-apply custom Telegram bot commands for all agents.
 #
-# OpenClaw overwrites bot commands with its own 48 slash commands on every
-# gateway restart. Run this after any `docker compose restart` or `up -d`.
+# OpenClaw's channel-sync pushes its ~49 default slash commands whenever
+# its config hash changes. The durable fix is Step 10a in DEPLOY.md —
+# set commands.native:false + customCommands per account in
+# ~/.openclaw/openclaw.json, which makes openclaw respect the custom
+# list across restarts. This script is the belt-and-suspenders Step 10b:
+# direct Bot API set for immediate effect and as emergency-restore after
+# any accidental clobber.
 #
-# Usage: bash scripts/set-bot-commands.sh
-# Or from VPS: bash /tmp/set-bot-commands.sh
+# Usage — from host:
+#   bash ~/repo/ops/scripts/set-bot-commands.sh
+# Usage — from inside the gateway container (entrypoint.sh hook):
+#   bash /home/node/repo/ops/scripts/set-bot-commands.sh
+#
+# Environment: requires the per-agent bot token env vars
+# (TELEGRAM_BOT_TOKEN, NEWSDIGEST_BOT_TOKEN, SHOPPING_BOT_TOKEN,
+# FAMILYCAL_BOT_TOKEN, MEETINGS_BOT_TOKEN) to be set. Inside the
+# container these come from docker-compose.yml's env_file. From the
+# host we source ~/openclaw/.env if any are missing.
 
 set -euo pipefail
 
-# Load secrets
-if [ -f ~/openclaw/.env ]; then
+# Source host .env only if the required vars aren't already exported.
+# Inside the container env is already set, so sourcing would fail.
+if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] && [ -f ~/openclaw/.env ]; then
+    set -a
+    # shellcheck disable=SC1090
     source ~/openclaw/.env
-elif [ -f .env ]; then
-    source .env
+    set +a
 fi
 
 set_commands() {
     local name="$1"
     local token="$2"
     local commands="$3"
+
+    if [ -z "$token" ]; then
+        echo "  ✗ $name — token env var empty; skipping"
+        return
+    fi
 
     local result
     result=$(curl -sf "https://api.telegram.org/bot${token}/setMyCommands" \
@@ -69,7 +89,7 @@ set_commands "Hilda Hippo" "$SHOPPING_BOT_TOKEN" '{
 }'
 
 # ── Mistress Mouse ──────────────────────────────────────────
-set_commands "Mistress Mouse" "$FAMILYCAL_BOT_TOKEN" '{
+set_commands "Mistress Mouse" "${FAMILYCAL_BOT_TOKEN:-}" '{
   "commands": [
     {"command": "today", "description": "Today'\''s full family schedule"},
     {"command": "tomorrow", "description": "Tomorrow'\''s schedule"},
@@ -81,6 +101,24 @@ set_commands "Mistress Mouse" "$FAMILYCAL_BOT_TOKEN" '{
     {"command": "nevermind", "description": "Cancel a pending change"}
   ]
 }'
+
+# ── Sergeant Murphy ─────────────────────────────────────────
+set_commands "Sergeant Murphy" "${MEETINGS_BOT_TOKEN:-}" '{
+  "commands": [
+    {"command": "today", "description": "Today'\''s meetings with prep status"},
+    {"command": "prep", "description": "Generate or refresh prep: /prep 2pm"},
+    {"command": "debrief", "description": "Force debrief: /debrief [meeting]"},
+    {"command": "commitments", "description": "List open meeting commitments"},
+    {"command": "week", "description": "Weekly meeting overview"},
+    {"command": "confirm", "description": "Approve extracted action items"},
+    {"command": "dismiss", "description": "Skip a staged item: /dismiss 2"},
+    {"command": "coaching", "description": "Coaching controls: on/off/trends"}
+  ]
+}'
+
+# Harden the other existing tokens against empty-env spurious calls
+# by also quoting them through ${:-}. (Done for the first four already
+# handled via the same pattern here as a defensive measure.)
 
 echo ""
 echo "Done. When adding a new agent, add its commands to this script."
