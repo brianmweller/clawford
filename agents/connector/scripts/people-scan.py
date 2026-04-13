@@ -26,6 +26,7 @@ import json
 import os
 import re
 import sys
+import traceback
 from datetime import datetime, timezone
 
 BRAIN_PEOPLE = os.path.expanduser("~/Dropbox/openclaw-backup/people")
@@ -51,9 +52,7 @@ def parse_args():
 def load_config():
     """Load circle cadences from connector-config.json."""
     if not os.path.exists(CONFIG_FILE):
-        print(json.dumps({"error": f"Config not found: {CONFIG_FILE}"}))
-        sys.exit(1)
-
+        raise FileNotFoundError(f"Config not found: {CONFIG_FILE}")
     with open(CONFIG_FILE) as f:
         return json.load(f)
 
@@ -114,7 +113,7 @@ def get_cadence_for_person(person, config):
     return best_cadence, best_circle
 
 
-def main():
+def run() -> dict:
     overdue_only, circle_filter, person_filter = parse_args()
     config = load_config()
 
@@ -209,7 +208,7 @@ def main():
     max_per_day = config.get("nudge", {}).get("max_per_day", 5)
     overdue_display = overdue[:max_per_day]
 
-    result = {
+    return {
         "status": "ok",
         "overdue": overdue_display,
         "overdue_total": len(overdue),
@@ -224,8 +223,19 @@ def main():
         },
     }
 
-    print(json.dumps(result, indent=2))
+
+def main() -> int:
+    try:
+        result = run()
+    except Exception as e:
+        result = {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc().splitlines()[-3:],
+        }
+    print(json.dumps(result))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

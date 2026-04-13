@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-timed-deliver.py — Hold and deliver a message at the top of the hour.
+"""timed-deliver.py — Hold and deliver a message at the top of the hour.
 
 Reads a message from a file, waits until :00 UTC, then sends via Telegram
 Bot API with disable_web_page_preview and disable_notification.
@@ -13,54 +12,72 @@ script handles the timed delivery.
 The --token-env flag specifies which env var holds the bot token.
 If omitted, falls back to TELEGRAM_BOT_TOKEN. Never falls back to
 another agent's token — that sends messages to the wrong bot.
+
+Conforms to agents/shared/SCRIPT_CONTRACT.md: always exits 0, prints
+one JSON line to stdout with a `status` field. All error paths raise
+and are caught in main().
 """
 
 import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
+import traceback
 import urllib.request
+from datetime import datetime, timezone
 
 
-def get_config():
-    """Parse args and resolve bot token. Fail loudly if token is missing."""
+def _parse_argv(argv: list[str]) -> tuple[str, bool, str]:
+    """Return (msg_file, silent, token_env_name). Raises on bad args."""
     token_env = "TELEGRAM_BOT_TOKEN"
-    for i, arg in enumerate(sys.argv):
-        if arg == "--token-env" and i + 1 < len(sys.argv):
-            token_env = sys.argv[i + 1]
+    positional: list[str] = []
+    skip_next = False
+    for i, arg in enumerate(argv):
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--token-env":
+            if i + 1 >= len(argv):
+                raise ValueError("--token-env requires an argument")
+            token_env = argv[i + 1]
+            skip_next = True
+            continue
+        positional.append(arg)
 
+    if not positional or positional[0].startswith("--"):
+        raise ValueError(
+            "usage: timed-deliver.py <message_file> [--silent] [--token-env ENV_VAR]"
+        )
+    msg_file = positional[0]
+    silent = "--silent" in positional
+    return msg_file, silent, token_env
+
+
+def _resolve_creds(token_env: str) -> tuple[str, str]:
+    """Return (bot_token, chat_id). Raises if either is missing."""
     bot_token = os.environ.get(token_env, "")
     if not bot_token:
-        print(f"ERROR: {token_env} not set in environment", file=sys.stderr)
-        sys.exit(1)
-
+        raise RuntimeError(f"{token_env} not set in environment")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
     if not chat_id:
-        print("ERROR: TELEGRAM_CHAT_ID not set in environment", file=sys.stderr)
-        sys.exit(1)
-
+        raise RuntimeError("TELEGRAM_CHAT_ID not set in environment")
     return bot_token, chat_id
 
 
-BOT_TOKEN, CHAT_ID = get_config()
-
-
-def send_telegram(text, silent=False):
-    if not BOT_TOKEN or not CHAT_ID:
-        print(f"[dry-run] {text[:100]}...", file=sys.stderr)
-        return True
-
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = json.dumps({
-        "chat_id": CHAT_ID,
-        "text": text,
-        "disable_web_page_preview": True,
-        "disable_notification": silent,
-    }).encode("utf-8")
-
+def _send_telegram(bot_token: str, chat_id: str, text: str, silent: bool) -> bool:
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = json.dumps(
+        {
+            "chat_id": chat_id,
+            "text": text,
+            "disable_web_page_preview": True,
+            "disable_notification": silent,
+        }
+    ).encode("utf-8")
     try:
-        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+        req = urllib.request.Request(
+            url, data=payload, headers={"Content-Type": "application/json"}
+        )
         resp = urllib.request.urlopen(req, timeout=10)
         return json.loads(resp.read()).get("ok", False)
     except Exception as e:
@@ -68,64 +85,46 @@ def send_telegram(text, silent=False):
         return False
 
 
-def wait_for_top_of_hour():
-    """Wait until :00 of the next hour if we're in the gather window (:40-:59).
+def _wait_for_top_of_hour() -> None:
+    """Hold until :00 of the next hour if we're in the gather window (:40-:59).
 
     If we arrive past :00 (processing overshot the window), log a warning
     and deliver immediately — the message is already late.
     """
     now = datetime.now(timezone.utc)
     if now.minute >= 40:
-        # In the gather window — hold until :00
         wait_seconds = (60 - now.minute) * 60 - now.second
         if 0 < wait_seconds <= 1200:
             print(f"Holding delivery for {wait_seconds}s until :00", file=sys.stderr)
             time.sleep(wait_seconds)
     elif now.minute <= 10:
-        # Overshot — we're past the target :00. Deliver immediately but warn.
-        print(f"WARNING: arrived at :{now.minute:02d} — overshot the :00 target, delivering now", file=sys.stderr)
+        print(
+            f"WARNING: arrived at :{now.minute:02d} — overshot :00 target, delivering now",
+            file=sys.stderr,
+        )
 
 
-def main():
-    # Filter out --token-env and its value from positional args
-    positional = []
-    skip_next = False
-    for arg in sys.argv[1:]:
-        if skip_next:
-            skip_next = False
-            continue
-        if arg == "--token-env":
-            skip_next = True
-            continue
-        positional.append(arg)
-
-    if not positional or positional[0].startswith("--"):
-        print("Usage: timed-deliver.py <message_file> [--silent] [--token-env ENV_VAR]")
-        sys.exit(1)
-
-    msg_file = positional[0]
-    silent = "--silent" in positional
+def run() -> dict:
+    msg_file, silent, token_env = _parse_argv(sys.argv[1:])
+    bot_token, chat_id = _resolve_creds(token_env)
 
     if not os.path.exists(msg_file):
-        print(f"Message file not found: {msg_file}", file=sys.stderr)
-        sys.exit(1)
+        raise FileNotFoundError(f"message file not found: {msg_file}")
 
-    with open(msg_file) as f:
+    with open(msg_file, encoding="utf-8") as f:
         message = f.read().strip()
 
     if not message:
-        print("Empty message file", file=sys.stderr)
-        sys.exit(1)
+        raise ValueError(f"empty message file: {msg_file}")
 
-    wait_for_top_of_hour()
+    _wait_for_top_of_hour()
 
-    # Split on double newlines to send as separate messages if needed
-    # (Telegram has 4096 char limit)
+    sent_chunks = 0
     if len(message) <= 4000:
-        send_telegram(message, silent=silent)
+        if _send_telegram(bot_token, chat_id, message, silent=silent):
+            sent_chunks = 1
     else:
-        # Split into chunks at paragraph boundaries
-        chunks = []
+        chunks: list[str] = []
         current = ""
         for line in message.split("\n"):
             if len(current) + len(line) + 1 > 3900:
@@ -135,14 +134,34 @@ def main():
                 current += ("\n" + line) if current else line
         if current:
             chunks.append(current)
-
         for i, chunk in enumerate(chunks):
-            is_last = (i == len(chunks) - 1)
-            send_telegram(chunk, silent=(not is_last) if not silent else True)
+            is_last = i == len(chunks) - 1
+            if _send_telegram(
+                bot_token, chat_id, chunk, silent=(not is_last) if not silent else True
+            ):
+                sent_chunks += 1
             time.sleep(0.3)
 
-    print(json.dumps({"status": "ok", "chars": len(message)}))
+    return {
+        "status": "ok",
+        "chars": len(message),
+        "chunks_sent": sent_chunks,
+        "silent": silent,
+    }
+
+
+def main() -> int:
+    try:
+        result = run()
+    except Exception as e:
+        result = {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc().splitlines()[-3:],
+        }
+    print(json.dumps(result))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
