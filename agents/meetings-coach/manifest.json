@@ -5,7 +5,7 @@
   "status_file": "~/Dropbox/openclaw-backup/agents/meetings-coach.status.md",
   "telegram": {
     "account": "murphy",
-    "bot_token_env": "MURPHY_BOT_TOKEN"
+    "bot_token_env": "MEETINGS_BOT_TOKEN"
   },
   "config_files": [
     {
