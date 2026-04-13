@@ -137,13 +137,6 @@
       "no_deliver": true
     },
     {
-      "name": "heartbeat",
-      "cron": "*/30 * * * *",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Run: python3 /home/node/.openclaw/meetings-coach-workspace/scripts/heartbeat.py\n\nThis script checks auth state, reads cron caches, verifies required files, prunes stale preps, and writes meetings-coach.status.md automatically. You do NOT write the status file \u2014 the script does it.\n\nParse the JSON output. If `status` is `ok`: return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. If `status` is `degraded` or `error`: send the value of the `alert` field to Telegram verbatim. Do NOT write to meetings-coach.status.md yourself. Do NOT wrap or rewrite the script's output. Do NOT use python3 -c or heredocs. Just run the script and relay the alert field when non-ok.",
-      "announce": false,
-      "no_deliver": true
-    },
-    {
       "name": "weekly-review",
       "cron": "0 0 * * 5",
       "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Generate the weekly meeting review. 1) Run gcal-fetch.py --days 7 to look back at this week's meetings. 2) Run commitment-tracker.py to get open commitments. 3) Compile: meetings held, prep generated, transcripts processed, commitments created/resolved/overdue. 4) List all unresolved commitments. 5) Format using the template in CRONS.md. 6) Deliver to Telegram.",
