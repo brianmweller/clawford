@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        OPENCLAW_VERSION: "2026.4.1"
+        OPENCLAW_VERSION: "2026.4.11"
     env_file:
       - .env
       - secrets.env
