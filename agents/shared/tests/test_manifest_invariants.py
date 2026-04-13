@@ -140,6 +140,37 @@ class TestManifestInvariants:
             f"or stop calling them from cron messages."
         )
 
+    def test_no_claude_cli_in_tracked_scripts(self, manifest_path):
+        """No tracked Python script may subprocess-call `claude -p` for
+        LLM inference. Per feedback_no_claude_cli_in_agents.md, scripts
+        must use the openclaw subscription-backed provider (`openclaw
+        infer model run`) instead.
+
+        This is a grep-style lint — catches the specific anti-pattern
+        `"claude", "-p"` in a subprocess argv list. Safe against merely
+        mentioning "claude" in a comment.
+        """
+        deploy = _import_deploy()
+        mf = deploy.load_manifest(manifest_path)
+        violators = []
+        for script in mf.scripts:
+            if not script.endswith(".py"):
+                continue
+            src = manifest_path.parent / script
+            try:
+                text = src.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            # Look for ["claude", "-p" or ["claude","-p" in an argv list
+            for pattern in ('"claude", "-p"', '"claude","-p"', "'claude', '-p'", "'claude','-p'"):
+                if pattern in text:
+                    violators.append((script, pattern))
+                    break
+        assert not violators, (
+            f"{mf.agent_id}: tracked scripts still subprocess-call `claude -p`: "
+            f"{violators}. Replace with `openclaw infer model run --prompt ... --json`."
+        )
+
     def test_no_narration_silence_clauses(self, manifest_path):
         """Cron messages must not tell the agent to "produce NO output".
 

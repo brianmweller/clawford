@@ -161,6 +161,59 @@ def fetch_single_feed(feed_config):
         return [], {"source": label, "error": str(e)}
 
 
+def _summarize_linkedin_thread(sender: str, full_messages: list[str]) -> str | None:
+    """Summarize a LinkedIn message thread via `openclaw infer model run`.
+
+    Uses Sam's subscription-backed codex provider (no API keys). Returns
+    None on any failure so the caller falls back to the raw preview.
+
+    Requires openclaw >= 2026.4.2 for the `infer` subcommand.
+    """
+    import subprocess
+    thread_text = "\n".join(full_messages[-10:])[:1200]
+    prompt = (
+        f"Summarize this LinkedIn message thread with {sender} in 1-2 sentences. "
+        f"Focus on what was discussed, any action items, and the current status. "
+        f"Be concise.\n\nThread:\n{thread_text}"
+    )
+    try:
+        result = subprocess.run(
+            ["openclaw", "infer", "model", "run", "--prompt", prompt, "--json"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except FileNotFoundError:
+        print(f"  [linkedin-summary] openclaw CLI not on PATH", file=sys.stderr)
+        return None
+    except subprocess.TimeoutExpired:
+        print(f"  [linkedin-summary] timeout for sender={sender}", file=sys.stderr)
+        return None
+
+    if result.returncode != 0:
+        print(
+            f"  [linkedin-summary] openclaw infer exited {result.returncode}: "
+            f"{(result.stderr or '')[:200]}",
+            file=sys.stderr,
+        )
+        return None
+
+    # --json output shape:
+    #   { "provider": "...", "model": "...", "outputs": [{"text": "..."}] }
+    try:
+        data = json.loads(result.stdout)
+        outputs = data.get("outputs") or []
+        if outputs and isinstance(outputs, list):
+            text = outputs[0].get("text", "").strip()
+            if text:
+                return text
+    except (json.JSONDecodeError, AttributeError) as e:
+        # Fallback: try to use stdout as plain text (if --json wasn't honored)
+        plain = result.stdout.strip()
+        if plain and not plain.startswith("{"):
+            return plain
+        print(f"  [linkedin-summary] could not parse openclaw infer output: {e}", file=sys.stderr)
+    return None
+
+
 def fetch_linkedin_browser():
     """Fetch LinkedIn content by running the Playwright scraper script.
 
@@ -266,7 +319,10 @@ def fetch_linkedin_browser():
             "_is_notification": True,
         })
 
-    # Summarize message threads via LLM
+    # Summarize message threads via the openclaw subscription-backed LLM.
+    # Previously used "claude -p" which violates the feedback_no_claude_cli rule
+    # and was silently swallowing FileNotFoundError inside a try/except — the
+    # LLM summarization has not actually worked in production.
     for msg in data.get("messages", []):
         sender = msg.get("sender", "")
         full_messages = msg.get("full_messages", [])
@@ -275,25 +331,9 @@ def fetch_linkedin_browser():
         if not sender:
             continue
 
-        # If we have full thread messages, summarize with LLM
         summary = preview
         if full_messages and len(full_messages) > 1:
-            try:
-                import subprocess
-                thread_text = "\n".join(full_messages[-10:])
-                prompt = (
-                    f"Summarize this LinkedIn message thread with {sender} in 1-2 sentences. "
-                    f"Focus on what was discussed, any action items, and the current status. "
-                    f"Be concise.\n\nThread:\n{thread_text[:1000]}"
-                )
-                result = subprocess.run(
-                    ["claude", "-p", prompt, "--output-format", "text", "--model", "haiku"],
-                    capture_output=True, text=True, timeout=20,
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    summary = result.stdout.strip()
-            except Exception as e:
-                print(f"  Message summarization failed for {sender}: {e}", file=sys.stderr)
+            summary = _summarize_linkedin_thread(sender, full_messages) or preview
 
         url = msg.get("url", "https://www.linkedin.com/messaging/")
         time_ago = msg.get("time_ago", "")
