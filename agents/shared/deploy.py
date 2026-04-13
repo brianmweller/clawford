@@ -503,6 +503,58 @@ def seed_state_file(path: Path, content: Any) -> str:
 # ────────────────────────────────────────────────────────────────────────
 
 
+# Forbidden shell-operator substrings in cron message bodies — see
+# agents/shared/SCRIPT_CONTRACT.md and tests/test_cron_message_hygiene.py.
+# An LLM reading a cron message tends to copy commands verbatim into its
+# exec tool call. openclaw 2026.4.11's hardcoded preflight rejects any
+# interpreter invocation combined with these patterns, which cascaded the
+# entire fleet into "approval required" messages on 2026-04-13.
+# Safeguard 9 enforces these patterns don't reach the fleet.
+CRON_MESSAGE_FORBIDDEN_PATTERNS: list[str] = [
+    "; echo $?",
+    "; printf",
+    "; echo __EXIT",
+    '; echo "EXIT',
+    "; echo EXIT",
+    "$?",
+    "sh -lc 'python",
+    'sh -lc "python',
+    "bash -lc 'python",
+    'bash -lc "python',
+    "&& python3",
+    "&& python ",
+    "| python3 ",
+    "> /tmp/",
+    ">> /tmp/",
+    "2>&1",
+    "2>/dev/null",
+    "$(python",
+]
+
+
+def check_cron_message_hygiene(manifest: "Manifest") -> list[str]:
+    """Return a list of hygiene errors across the manifest's cron messages.
+
+    Walks every cron's `message` field and flags each occurrence of a
+    forbidden shell-operator pattern from CRON_MESSAGE_FORBIDDEN_PATTERNS.
+    Each returned string names the offending cron + the matched pattern,
+    so the deploy log shows the user exactly where the violation is.
+
+    Returns an empty list when everything is clean. Non-empty → deploy.py
+    refuses to proceed with exit code 8.
+    """
+    errors: list[str] = []
+    for cron in manifest.crons:
+        msg = cron.message or ""
+        for pattern in CRON_MESSAGE_FORBIDDEN_PATTERNS:
+            if pattern in msg:
+                errors.append(
+                    f"cron {cron.name!r}: message contains forbidden pattern "
+                    f"{pattern!r}"
+                )
+    return errors
+
+
 def check_exec_approvals_baseline() -> list[str]:
     """Return a list of drift errors from the ops/exec-approvals-baseline.json invariant.
 
@@ -1207,6 +1259,22 @@ def deploy_one(agent_id: str, args: argparse.Namespace) -> int:
         log("Baseline: ops/exec-approvals-baseline.json", "err")
         return 7
     log("exec-approvals matches baseline", "ok")
+
+    # Safeguard 9: refuse if any cron message contains a forbidden
+    # shell-operator pattern (`; echo $?`, `sh -lc python`, `> /tmp/`, …).
+    # Catches the 2026-04-13 class of bug where an LLM copies the pattern
+    # from the message verbatim into its exec tool call, hits openclaw's
+    # hardcoded preflight, and cascades "approval required" alerts across
+    # the fleet. See agents/shared/SCRIPT_CONTRACT.md.
+    cron_hygiene_errors = check_cron_message_hygiene(mf)
+    if cron_hygiene_errors:
+        log(f"cron message hygiene failed ({len(cron_hygiene_errors)} issue(s)):", "err")
+        for e in cron_hygiene_errors:
+            log(f"  {e}", "err")
+        log("Refuse to deploy — rewrite the cron message(s).", "err")
+        log("See agents/shared/SCRIPT_CONTRACT.md for the allowed shape.", "err")
+        return 8
+    log("cron messages clean", "ok")
 
     # Safeguard 2: refuse if the source agent dir has uncommitted edits or
     # untracked files, unless --allow-dirty. Prevents the 2026-04-12 incident
