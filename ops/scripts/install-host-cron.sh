@@ -32,13 +32,13 @@ WRAPPER_DIR="$REPO_ROOT/ops/scripts"
 DIRECT_ENTRIES=(
   "*/5 * * * *|costco-token-refresh-host.sh|# costco-token-refresh-host"
   "0 12 * * *|morning-fleet-deliver-host.sh|# morning-fleet-deliver-host"
+  "*/15 * * * *|fleet-health-host.sh|# fleet-health-host"
 )
 
 # Generic contract wrappers — use script-contract-host.sh with args.
 # Format: "<schedule>|<logname>|<container-script-path>|<bot-token-env>|<timeout-s>"
 # Marker is derived from logname: "# script-contract-<logname>"
 CONTRACT_ENTRIES=(
-  "*/15 * * * *|fleet-health|/home/node/repo/ops/scripts/fleet-health.py|TELEGRAM_BOT_TOKEN|180"
   "0 */6 * * *|linkedin-keepalive|/home/node/.openclaw/news-digest-workspace/scripts/linkedin-keepalive.py|NEWSDIGEST_BOT_TOKEN|300"
   "*/5 * * * *|family-calendar-reminder-check|/home/node/.openclaw/family-calendar-workspace/scripts/reminder-check.py|FAMILYCAL_BOT_TOKEN|90"
   "*/5 * * * *|news-digest-engagement-poll|/home/node/.openclaw/news-digest-workspace/scripts/engagement-poller.py|NEWSDIGEST_BOT_TOKEN|60"
@@ -47,13 +47,12 @@ CONTRACT_ENTRIES=(
 # Markers for old entries to REMOVE on next install run. Used by the
 # remove-stale step below — any crontab line containing one of these
 # markers is dropped before adding the new CONTRACT_ENTRIES. This
-# closes the install-host-cron.sh "yo-yo" gap from the R3 transition:
-# previously we asked the operator to manually `crontab -e` to drop
-# the old entries; now this script does it.
+# closes the install-host-cron.sh "yo-yo" gap from the R3 transition.
 STALE_MARKERS=(
   "# script-contract-shopping-heartbeat"
   "# script-contract-meetings-coach-heartbeat"
   "# script-contract-fix-it-heartbeat-check"
+  "# script-contract-fleet-health"
 )
 
 NEW_LINES=()
