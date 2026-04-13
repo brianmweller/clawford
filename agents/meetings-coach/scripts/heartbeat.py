@@ -51,14 +51,46 @@ def check_auth():
     # Workflowy
     auth["workflowy_auth"] = "ok" if os.environ.get("WORKFLOWY_API_KEY") else "missing"
 
-    # Krisp
+    # Krisp — staleness-aware check.
+    #
+    # Previously this just asserted file-exists-and-not-empty, which
+    # returned "ok" even after Krisp's server-side revoked the
+    # refresh_token (the file was still present with stale content).
+    # The 2026-04-12 audit caught 46 consecutive post-meeting-scan
+    # 401s while status.md still said krisp_auth: ok.
+    #
+    # Now the truth source is:
+    #   (a) if no tokens.json at all -> missing
+    #   (b) if cache/krisp-last-401.json was written within the last
+    #       KRISP_AUTH_FAIL_STALE_S seconds -> expired
+    #   (c) otherwise -> ok
     krisp_path = os.path.join(WORKSPACE, "cache", "krisp-tokens", "tokens.json")
-    if os.path.exists(krisp_path) and os.path.getsize(krisp_path) > 0:
-        auth["krisp_auth"] = "ok"
-    else:
+    krisp_fail_path = os.path.join(WORKSPACE, "cache", "krisp-last-401.json")
+    if not (os.path.exists(krisp_path) and os.path.getsize(krisp_path) > 0):
         auth["krisp_auth"] = "missing"
+    elif _krisp_recently_failed(krisp_fail_path):
+        auth["krisp_auth"] = "expired"
+    else:
+        auth["krisp_auth"] = "ok"
 
     return auth
+
+
+KRISP_AUTH_FAIL_STALE_S = 60 * 60  # 60 min — older than this, don't trust the 401 marker
+
+
+def _krisp_recently_failed(fail_path: str) -> bool:
+    """Return True iff cache/krisp-last-401.json was written within the
+    staleness window. Used by check_auth() to mark krisp_auth as
+    "expired" when post-meeting-scan has recently observed a 401.
+    """
+    if not os.path.exists(fail_path):
+        return False
+    try:
+        mtime = os.path.getmtime(fail_path)
+    except OSError:
+        return False
+    return (time.time() - mtime) < KRISP_AUTH_FAIL_STALE_S
 
 
 def read_cron_caches():
