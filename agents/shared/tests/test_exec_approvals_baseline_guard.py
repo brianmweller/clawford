@@ -96,6 +96,35 @@ def test_baseline_flags_per_agent_policy_drift(deploy_module, monkeypatch):
     assert any("main" in e and "policy" in e for e in errors)
 
 
+def test_baseline_handles_wrapped_file_shape(deploy_module, monkeypatch):
+    """openclaw 2026.4.11 `approvals get --json` wraps the actual data under
+    a top-level `.file` key alongside `.path`, `.exists`, `.hash`, and
+    `.effectivePolicy`. The helper must unwrap it so the guard compares
+    against the real defaults/agents, not against an empty top level."""
+    wrapped = {
+        "path": "/home/node/.openclaw/exec-approvals.json",
+        "exists": True,
+        "hash": "deadbeef",
+        "file": {
+            "version": 1,
+            "socket": {"path": "/fake.sock", "token": "xyz"},
+            "defaults": {"security": "full", "ask": "off"},
+            "agents": {
+                "main":      {"security": "full", "policy": "full", "ask": "off", "allowlist": []},
+                "testagent": {"security": "full", "policy": "full", "ask": "off", "allowlist": []},
+            },
+        },
+        "effectivePolicy": {"scopes": []},
+    }
+    def fake_oc_json(*args, **kw):
+        if args[:2] == ("config", "validate"): return {"valid": True}
+        if args[:2] == ("approvals", "get"): return wrapped
+        return {"jobs": []}
+    monkeypatch.setattr(deploy_module, "oc_json", fake_oc_json)
+    errors = deploy_module.check_exec_approvals_baseline()
+    assert errors == [], f"wrapped .file shape must be unwrapped; got {errors}"
+
+
 def test_baseline_tolerates_extra_allowlist_entries(deploy_module, monkeypatch):
     """Live allowlist patterns are volatile; baseline ignores them."""
     live = json.loads(json.dumps(HEALTHY_LIVE))

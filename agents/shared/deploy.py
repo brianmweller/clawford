@@ -542,6 +542,15 @@ def check_exec_approvals_baseline() -> list[str]:
     if not isinstance(live, dict):
         return [f"openclaw approvals get returned unexpected shape: {type(live).__name__}"]
 
+    # openclaw 2026.4.11 wraps the actual exec-approvals.json contents under
+    # a top-level `.file` key alongside path/exists/hash/effectivePolicy.
+    # Older versions (and tests) may return defaults/agents at the top level.
+    # Accept both shapes.
+    if "file" in live and isinstance(live["file"], dict) and (
+        "defaults" in live["file"] or "agents" in live["file"]
+    ):
+        live = live["file"]
+
     errors: list[str] = []
 
     # defaults.* check
