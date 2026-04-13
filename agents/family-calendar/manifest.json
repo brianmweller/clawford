@@ -87,28 +87,28 @@
     {
       "name": "reminder-check",
       "cron": "*/5 * * * *",
-      "message": "Check for upcoming events that need reminders. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/reminder-check.py. Read the JSON output. If the output contains reminders: for each one, send a Telegram message '🐭 Heads up — {emoji} {person} {event} in {minutes} min ({location})'. If the output is empty (no reminders needed): produce NO output — do not send any message. Update your status file only if reminders were sent.",
+      "message": "Check for upcoming events that need reminders. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/reminder-check.py. Read the JSON output. If the output contains reminders: for each one, send a Telegram message '🐭 Heads up — {emoji} {person} {event} in {minutes} min ({location})'. If the output is empty (no reminders needed): return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. Update your status file only if reminders were sent.",
       "announce": false,
       "no_deliver": true
     },
     {
       "name": "heartbeat",
       "cron": "*/30 * * * *",
-      "message": "Update your heartbeat. Write the current UTC timestamp to last_heartbeat in ~/Dropbox/openclaw-backup/agents/family-calendar.status.md. Verify these files exist: calendar-config.json, sent-reminders.json. Check if sent-reminders.json has entries older than 48 hours — if so, prune them. Produce NO output if everything is normal.",
+      "message": "Update your heartbeat. Write the current UTC timestamp to last_heartbeat in ~/Dropbox/openclaw-backup/agents/family-calendar.status.md. Verify these files exist: calendar-config.json, sent-reminders.json. Check if sent-reminders.json has entries older than 48 hours — if so, prune them. If everything is normal, return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent.",
       "announce": false,
       "no_deliver": true
     },
     {
       "name": "activity-email-check",
       "cron": "15 */2 * * *",
-      "message": "Check Gmail for emails from activity providers. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/activity-email-check.py. Read the JSON output — these are emails from Example Preschool, Example Swim School, and Example Ballet Studio in the last 48 hours. For each email with schedule-relevant content (closures, cancellations, action items, event changes): classify the urgency and send a Telegram message. Closures/cancellations: '🐭 ⚠️ {source}: {summary}'. Action items: '🐭 📋 {source}: {summary}'. Events/FYI: '🐭 📌 {source}: {summary}'. If no actionable items found: produce NO output. Update your status file.",
+      "message": "Check Gmail for emails from activity providers. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/activity-email-check.py. Read the JSON output — these are emails from Example Preschool, Example Swim School, and Example Ballet Studio in the last 48 hours. For each email with schedule-relevant content (closures, cancellations, action items, event changes): classify the urgency and send a Telegram message. Closures/cancellations: '🐭 ⚠️ {source}: {summary}'. Action items: '🐭 📋 {source}: {summary}'. Events/FYI: '🐭 📌 {source}: {summary}'. If no actionable items found, return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. Update your status file.",
       "announce": false,
       "no_deliver": true
     },
     {
       "name": "gmail-invite-check",
       "cron": "30 */3 * * *",
-      "message": "Check Gmail for calendar invites. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/gmail-invite-check.py. Read the JSON output — these are new calendar invites (ICS attachments with METHOD:REQUEST). For each invite: send a Telegram message '🐭 New invite: {subject} on {date} from {organizer}. Accept?'. If no new invites: produce NO output.",
+      "message": "Check Gmail for calendar invites. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/gmail-invite-check.py. Read the JSON output — these are new calendar invites (ICS attachments with METHOD:REQUEST). For each invite: send a Telegram message '🐭 New invite: {subject} on {date} from {organizer}. Accept?'. If no new invites, return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent.",
       "announce": false,
       "no_deliver": true
     },
@@ -122,7 +122,7 @@
     {
       "name": "whatsapp-chat-scan",
       "cron": "45 */2 * * *",
-      "message": "Scan WhatsApp messages for schedule-relevant content. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/chat-parse-schedule.py. Read the JSON output — these are recent WhatsApp messages from the familycal-wa channel. For each message with schedule-relevant content (cancellations, time changes, pickup changes, new events): send a Telegram alert to Sam: '🐭 📱 WhatsApp: {person} — {summary}. Suggested action: {action}.' If no schedule-relevant messages: produce NO output. NEVER post to WhatsApp groups automatically — all output goes to Sam on Telegram.",
+      "message": "Scan WhatsApp messages for schedule-relevant content. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/chat-parse-schedule.py. Read the JSON output — these are recent WhatsApp messages from the familycal-wa channel. For each message with schedule-relevant content (cancellations, time changes, pickup changes, new events): send a Telegram alert to Sam: '🐭 📱 WhatsApp: {person} — {summary}. Suggested action: {action}.' If no schedule-relevant messages, return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. NEVER post to WhatsApp groups automatically — all output goes to Sam on Telegram.",
       "announce": false,
       "no_deliver": true
     },

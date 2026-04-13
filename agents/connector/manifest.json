@@ -126,14 +126,14 @@
     {
       "name": "notes-triage",
       "cron": "0 8,20 * * *",
-      "message": "Triage untriaged notes from the inbox. Run: python3 ~/.openclaw/connector-workspace/scripts/notes-triage.py. Read the JSON output. If no untriaged notes: produce NO output. If untriaged notes exist: read pending-triage.json to skip already-presented notes. For each new note, categorize it (fact/commitment/task/shopping/unclear). Present up to 10 on Telegram with categories and '/confirm to save · /dismiss N to skip item N'. Record presented note IDs in pending-triage.json.",
+      "message": "Triage untriaged notes from the inbox. Run: python3 ~/.openclaw/connector-workspace/scripts/notes-triage.py. Read the JSON output. If no untriaged notes, return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. If untriaged notes exist: read pending-triage.json to skip already-presented notes. For each new note, categorize it (fact/commitment/task/shopping/unclear). Present up to 10 on Telegram with categories and '/confirm to save · /dismiss N to skip item N'. Record presented note IDs in pending-triage.json.",
       "announce": false,
       "no_deliver": true
     },
     {
       "name": "heartbeat",
       "cron": "*/30 * * * *",
-      "message": "Update your heartbeat. Write the current UTC timestamp to last_heartbeat in ~/Dropbox/openclaw-backup/agents/connector.status.md. Verify these files exist: connector-config.json, pending-triage.json. Check cache/ for files older than 14 days — prune if found. Prune pending-triage.json entries older than 48 hours. Produce NO output if everything is normal.",
+      "message": "Update your heartbeat. Write the current UTC timestamp to last_heartbeat in ~/Dropbox/openclaw-backup/agents/connector.status.md. Verify these files exist: connector-config.json, pending-triage.json. Check cache/ for files older than 14 days — prune if found. Prune pending-triage.json entries older than 48 hours. If everything is normal, return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent.",
       "announce": false,
       "no_deliver": true
     },

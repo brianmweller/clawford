@@ -140,6 +140,29 @@ class TestManifestInvariants:
             f"or stop calling them from cron messages."
         )
 
+    def test_no_narration_silence_clauses(self, manifest_path):
+        """Cron messages must not tell the agent to "produce NO output".
+
+        That phrasing invites the LLM to narrate "I produced no output"
+        instead of literally returning an empty string. Burns ~25s/token
+        budget per run silently. The replacement phrasing is "return
+        EXACTLY the empty string (zero bytes, no narration)".
+
+        This test is a lint, not a functional assertion — it prevents
+        regression of the P5 audit fix.
+        """
+        deploy = _import_deploy()
+        mf = deploy.load_manifest(manifest_path)
+        bad: list[tuple[str, str]] = []
+        for cron in mf.crons:
+            for phrase in ("produce NO output", "Produce NO output", "produce no output"):
+                if phrase in cron.message:
+                    bad.append((cron.name, phrase))
+        assert not bad, (
+            f"{mf.agent_id}: cron messages use narration-inducing phrase: {bad}. "
+            f"Use 'return EXACTLY the empty string (zero bytes, no narration)' instead."
+        )
+
     def test_bot_token_env_is_in_docker_compose(self, manifest_path):
         """Every agent's `telegram.bot_token_env` must appear as a key
         in ops/docker-compose.yml's `environment:` block. Catches

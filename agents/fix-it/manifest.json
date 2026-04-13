@@ -59,7 +59,7 @@
     {
       "name": "heartbeat-check",
       "cron": "*/30 * * * *",
-      "message": "Run: python3 /home/node/.openclaw/fix-it-workspace/scripts/heartbeat.py\n\nThis script checks all agent status files, determines healthy/degraded, and writes fix-it.status.md automatically. You do NOT write the status file — the script does it.\n\nIf the script exits 0: all agents healthy. Produce NO output.\nIf the script exits 1: an agent is degraded. The script prints the alert message to stdout. Send that exact message on Telegram.\nIf the script exits 2: script error. Send a Telegram alert: \"❌ fix-it heartbeat: script error\" with the output.\n\nDo NOT write to fix-it.status.md yourself. Do NOT use python3 -c. Do NOT use heredocs. Just run the script and relay its output if non-zero.",
+      "message": "Run: python3 /home/node/.openclaw/fix-it-workspace/scripts/heartbeat.py\n\nThis script checks all agent status files, determines healthy/degraded, and writes fix-it.status.md automatically. You do NOT write the status file — the script does it.\n\nIf the script exits 0: all agents healthy, return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent.\nIf the script exits 1: an agent is degraded. The script prints the alert message to stdout. Send that exact message on Telegram.\nIf the script exits 2: script error. Send a Telegram alert: \"❌ fix-it heartbeat: script error\" with the output.\n\nDo NOT write to fix-it.status.md yourself. Do NOT use python3 -c. Do NOT use heredocs. Just run the script and relay its output if non-zero.",
       "announce": false,
       "no_deliver": true
     },
@@ -73,21 +73,21 @@
     {
       "name": "brain-validation",
       "cron": "0 */6 * * *",
-      "message": "Run: python3 ~/Dropbox/openclaw-backup/scripts/validate.py. If validation PASSES: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If validation FAILS: send me a Telegram message with the specific failures immediately.",
+      "message": "Run: python3 ~/Dropbox/openclaw-backup/scripts/validate.py. If validation PASSES: return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary) AND do not touch fix-it.status.md (the heartbeat-check cron is the only writer). If validation FAILS: send me a Telegram message with the specific failures immediately.",
       "announce": false,
       "no_deliver": true
     },
     {
       "name": "conflict-scan",
       "cron": "0 */2 * * *",
-      "message": "Run: find ~/Dropbox/openclaw-backup/ -name '*conflicted copy*' -type f. If NO conflicts found: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If conflicts ARE found: send me a Telegram message with the filenames. Do NOT attempt to merge.",
+      "message": "Run: find ~/Dropbox/openclaw-backup/ -name '*conflicted copy*' -type f. If NO conflicts found: return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary) AND do not touch fix-it.status.md (the heartbeat-check cron is the only writer). If conflicts ARE found: send me a Telegram message with the filenames. Do NOT attempt to merge.",
       "announce": false,
       "no_deliver": true
     },
     {
       "name": "file-size-monitor",
       "cron": "0 12 * * *",
-      "message": "Run: find ~/Dropbox/openclaw-backup/ -type f -size +500k. If NO large files found: produce NO output and DO NOT touch fix-it.status.md (the heartbeat-check cron is the only writer). If large files ARE found: send me a Telegram message with the filenames and sizes.",
+      "message": "Run: find ~/Dropbox/openclaw-backup/ -type f -size +500k. If NO large files found: return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary) AND do not touch fix-it.status.md (the heartbeat-check cron is the only writer). If large files ARE found: send me a Telegram message with the filenames and sizes.",
       "announce": false,
       "no_deliver": true
     },
@@ -115,14 +115,14 @@
     {
       "name": "cron-self-check",
       "cron": "0 0 * * *",
-      "message": "Check crons for ALL agents and re-register any missing ones. 1) Run: openclaw cron list. 2) Read ~/.openclaw/fix-it-workspace/expected-crons.json — this contains the full cron config for every agent: name, schedule, delivery mode (no_deliver/announce), account, to, AND the complete message prompt. 3) For each agent in the config, check that every expected cron name appears in the live cron list. 4) If ALL present: produce NO output. 5) If any are missing: re-register using the FULL config from the JSON — openclaw cron add --agent {agent} --name {name} --cron {schedule} --to {to} --account {account} {--no-deliver if no_deliver else --announce} --message {the full message from the JSON}. This restores the cron with its complete original prompt, not a placeholder. 6) After re-registering, send a Telegram alert: '🦊🔧 Cron repair: re-registered {list of agent:cron pairs}'. DO NOT touch fix-it.status.md.",
+      "message": "Check crons for ALL agents and re-register any missing ones. 1) Run: openclaw cron list. 2) Read ~/.openclaw/fix-it-workspace/expected-crons.json — this contains the full cron config for every agent: name, schedule, delivery mode (no_deliver/announce), account, to, AND the complete message prompt. 3) For each agent in the config, check that every expected cron name appears in the live cron list. 4) If ALL present, return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. 5) If any are missing: re-register using the FULL config from the JSON — openclaw cron add --agent {agent} --name {name} --cron {schedule} --to {to} --account {account} {--no-deliver if no_deliver else --announce} --message {the full message from the JSON}. This restores the cron with its complete original prompt, not a placeholder. 6) After re-registering, send a Telegram alert: '🦊🔧 Cron repair: re-registered {list of agent:cron pairs}'. DO NOT touch fix-it.status.md.",
       "announce": false,
       "no_deliver": true
     },
     {
       "name": "obsidian-briefing",
       "cron": "10 12 * * *",
-      "message": "Run: python3 ~/Dropbox/openclaw-backup/scripts/obsidian-briefing/generate.py. If it succeeds: produce NO output. If it fails: send the error on Telegram.",
+      "message": "Run: python3 ~/Dropbox/openclaw-backup/scripts/obsidian-briefing/generate.py. If it succeeds, return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. If it fails: send the error on Telegram.",
       "announce": false,
       "no_deliver": true
     },
@@ -136,7 +136,7 @@
     {
       "name": "workspace-snapshot",
       "cron": "30 3 * * *",
-      "message": "Run: python3 /home/node/repo/agents/shared/workspace-snapshot.py. This tars each agent's workspace to ~/Dropbox/openclaw-backup/workspace-snapshots/<agent>-<date>.tar.gz with 14-day retention. Dropbox syncs the result off-VPS for regression recovery. If the script exits 0: produce NO output. If it exits non-zero: send a Telegram alert with the error. Do NOT use python3 -c. Do NOT use heredocs.",
+      "message": "Run: python3 /home/node/repo/agents/shared/workspace-snapshot.py. This tars each agent's workspace to ~/Dropbox/openclaw-backup/workspace-snapshots/<agent>-<date>.tar.gz with 14-day retention. Dropbox syncs the result off-VPS for regression recovery. If the script exits 0, return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. If it exits non-zero: send a Telegram alert with the error. Do NOT use python3 -c. Do NOT use heredocs.",
       "announce": false,
       "no_deliver": true
     }

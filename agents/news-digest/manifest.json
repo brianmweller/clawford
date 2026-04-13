@@ -216,28 +216,28 @@
     {
       "name": "preference-update",
       "cron": "0 23 * * *",
-      "message": "Process today's engagement signals and update the preference model. Run: python3 ~/.openclaw/news-digest-workspace/scripts/update-preferences.py. This reads new entries from preferences/engagement.jsonl, applies multiplicative weight updates (thumbs_up: topic ×1.1 source ×1.05, thumbs_down: topic ×0.85 source ×0.95, expand: topic ×1.05), clamps weights to safe ranges, and writes updated model to preferences/model.json. If there are no new engagement events, skip the update silently. Update your status file with the number of events processed and produce NO output.",
+      "message": "Process today's engagement signals and update the preference model. Run: python3 ~/.openclaw/news-digest-workspace/scripts/update-preferences.py. This reads new entries from preferences/engagement.jsonl, applies multiplicative weight updates (thumbs_up: topic ×1.1 source ×1.05, thumbs_down: topic ×0.85 source ×0.95, expand: topic ×1.05), clamps weights to safe ranges, and writes updated model to preferences/model.json. If there are no new engagement events, skip the update silently. Update your status file with the number of events processed and otherwise, return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent.",
       "announce": false,
       "no_deliver": true
     },
     {
       "name": "heartbeat",
       "cron": "*/30 * * * *",
-      "message": "Update your heartbeat. Write the current UTC timestamp to last_heartbeat in ~/Dropbox/openclaw-backup/agents/news-digest.status.md. Produce NO output.",
+      "message": "Update your heartbeat. Write the current UTC timestamp to last_heartbeat in ~/Dropbox/openclaw-backup/agents/news-digest.status.md. Otherwise, return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent.",
       "announce": false,
       "no_deliver": true
     },
     {
       "name": "engagement-poll",
       "cron": "*/5 * * * *",
-      "message": "Process engagement signals. Run: python3 ~/.openclaw/news-digest-workspace/scripts/engagement-poller.py. This reads session transcripts for /like and /dislike commands, looks up articles in the item-map, and appends events to preferences/engagement.jsonl. Produce NO output.",
+      "message": "Process engagement signals. Run: python3 ~/.openclaw/news-digest-workspace/scripts/engagement-poller.py. This reads session transcripts for /like and /dislike commands, looks up articles in the item-map, and appends events to preferences/engagement.jsonl. Otherwise, return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent.",
       "announce": false,
       "no_deliver": true
     },
     {
       "name": "linkedin-keepalive",
       "cron": "0 */6 * * *",
-      "message": "Keep LinkedIn session alive. Run: python3 ~/.openclaw/news-digest-workspace/scripts/linkedin-keepalive.py. If it succeeds: produce NO output. If it reports session expired: send a Telegram alert: '🔑 LinkedIn session expired — re-run linkedin-auth.py'.",
+      "message": "Keep LinkedIn session alive. Run: python3 ~/.openclaw/news-digest-workspace/scripts/linkedin-keepalive.py. If it succeeds, return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. If it reports session expired: send a Telegram alert: '🔑 LinkedIn session expired — re-run linkedin-auth.py'.",
       "announce": false,
       "no_deliver": true
     }
