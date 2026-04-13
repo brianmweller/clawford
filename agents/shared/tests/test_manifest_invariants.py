@@ -72,6 +72,27 @@ class TestManifestInvariants:
             f"that don't exist under agents/{mf.agent_id}/: {missing}"
         )
 
+    def test_every_python_script_parses(self, manifest_path):
+        """Every .py script in manifest.scripts[] must be a valid
+        Python source file. Catches syntax errors in rescued/imported
+        scripts before they reach production."""
+        import ast
+        deploy = _import_deploy()
+        mf = deploy.load_manifest(manifest_path)
+        broken: list[tuple[str, str]] = []
+        for script in mf.scripts:
+            if not script.endswith(".py"):
+                continue
+            src = manifest_path.parent / script
+            try:
+                ast.parse(src.read_text(encoding="utf-8"))
+            except SyntaxError as e:
+                broken.append((script, f"{e.__class__.__name__}: {e}"))
+        assert not broken, (
+            f"{mf.agent_id}: {len(broken)} tracked Python scripts failed "
+            f"to parse: {broken}"
+        )
+
     def test_every_config_file_exists(self, manifest_path):
         deploy = _import_deploy()
         mf = deploy.load_manifest(manifest_path)
