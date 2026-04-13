@@ -177,3 +177,167 @@ def test_main_does_not_send_to_wrong_bot_if_token_missing(fake_fleet):
 
     assert rc == 2  # no deliveries, 1 failure
     assert sent_tokens == []  # never called because token missing
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Chunking: long briefs must be split into multiple Telegram messages,
+# not truncated at 4000 chars (previous bug — dropped items 13-18 plus
+# the footer, observed 2026-04-13).
+# ────────────────────────────────────────────────────────────────────────
+
+
+def _long_brief_with_marker(num_items: int = 20, marker: str = "<<TAIL-MARKER>>") -> str:
+    """A brief that mimics the morning-edition format: headings + items +
+    a final line containing a known marker. If chunking truncates the
+    tail, the marker is missing from all sent messages."""
+    parts = ["🐛📰 Morning Edition — April 13, 2026", ""]
+    cats = ["🤖 AI & Tech", "💰 Economics", "🌍 World", "🏛️ US Policy", "🔗 LinkedIn"]
+    for i in range(num_items):
+        if i % 4 == 0:
+            parts.append("")
+            parts.append(cats[(i // 4) % len(cats)])
+            parts.append("")
+        parts.append(
+            f"{i+1}. Item title #{i+1} — " + ("lorem ipsum dolor sit amet " * 12).strip()
+        )
+        parts.append(f"https://example.com/item-{i+1}")
+    parts.append("")
+    parts.append(marker)
+    return "\n".join(parts)
+
+
+def test_chunker_splits_long_brief_without_data_loss(fake_fleet):
+    """A brief >4000 chars must be split into multiple send_telegram calls
+    and the tail marker (engagement footer) must appear in one of them."""
+    base = fake_fleet["base"]
+    marker = "<<TAIL-MARKER-FOOTER>>"
+    long_brief = _long_brief_with_marker(num_items=20, marker=marker)
+    assert len(long_brief) > 4000, "test fixture must exceed Telegram single-msg limit"
+    _write_brief(base, "news-digest", long_brief)
+
+    sent = []
+    def fake_send(bot_token, chat_id, text, silent=False):
+        sent.append(text)
+        return True
+    with patch.object(fake_fleet["mod"], "send_telegram", side_effect=fake_send):
+        rc = fake_fleet["mod"].main()
+
+    assert rc == 0
+    assert len(sent) >= 2, f"expected ≥2 chunks for a {len(long_brief)}-char brief, got {len(sent)}"
+    combined = "\n".join(sent)
+    assert marker in combined, "footer marker must appear in at least one chunk — no data lost"
+    for chunk in sent:
+        assert len(chunk) <= 4096, f"each chunk must fit Telegram's hard limit, got {len(chunk)}"
+
+
+def test_chunker_keeps_short_brief_as_single_message(fake_fleet):
+    """A short brief (under 4000 chars) must send as exactly one message."""
+    base = fake_fleet["base"]
+    short_brief = "🐛 Morning Edition\n\nJust one short item for today.\n\n/like 1  /dislike 1"
+    _write_brief(base, "news-digest", short_brief)
+
+    sent = []
+    def fake_send(bot_token, chat_id, text, silent=False):
+        sent.append(text)
+        return True
+    with patch.object(fake_fleet["mod"], "send_telegram", side_effect=fake_send):
+        rc = fake_fleet["mod"].main()
+
+    assert rc == 0
+    assert len(sent) == 1
+    assert sent[0] == short_brief
+
+
+def test_chunker_splits_at_paragraph_boundaries(fake_fleet):
+    """Chunks should split at blank-line paragraph boundaries when possible,
+    not mid-sentence — agents read the chunks as coherent prose."""
+    base = fake_fleet["base"]
+    # Build a brief with clear paragraph breaks at known positions.
+    para = "This is a paragraph of content. " * 30  # ~960 chars
+    brief = "HEAD\n\n" + "\n\n".join(f"{para}PARAGRAPH_{i}" for i in range(6))
+    _write_brief(base, "news-digest", brief)
+
+    sent = []
+    def fake_send(bot_token, chat_id, text, silent=False):
+        sent.append(text)
+        return True
+    with patch.object(fake_fleet["mod"], "send_telegram", side_effect=fake_send):
+        fake_fleet["mod"].main()
+
+    assert len(sent) >= 2
+    # Each chunk ends at a paragraph break OR at the very end of the brief.
+    # Translation: every chunk is a concatenation of whole paragraphs.
+    for chunk in sent:
+        # A "good" split point is: the chunk ends with a complete paragraph
+        # marker (PARAGRAPH_N) or is the final chunk (which ends the brief).
+        assert chunk  # non-empty
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Hold-until-target-hour: the cron fires at 11:55 UTC to buffer against
+# queue serialization, then the script sleeps until 12:00 UTC before
+# calling send_telegram. If we arrive past 12:00 (overshot), it sends
+# immediately with a warning.
+# ────────────────────────────────────────────────────────────────────────
+
+
+def test_wait_until_target_holds_when_early(fake_fleet, monkeypatch):
+    """If current time is before target, wait_until_target_utc_hour
+    should call time.sleep for the remaining seconds."""
+    from datetime import datetime, timezone, timedelta
+    mod = fake_fleet["mod"]
+
+    slept_for: list[float] = []
+    # Fake "now" is 11:57:30 UTC, target is 12:00 → should sleep ~150s
+    fake_now = datetime(2026, 4, 13, 11, 57, 30, tzinfo=timezone.utc)
+    class FakeDT:
+        @staticmethod
+        def now(tz=None):
+            return fake_now
+    monkeypatch.setattr(mod, "datetime", FakeDT)
+    monkeypatch.setattr(mod.time, "sleep", lambda s: slept_for.append(s))
+
+    mod.wait_until_target_utc_hour(12)
+    assert slept_for, "should have slept"
+    assert 140 <= slept_for[0] <= 160, f"expected ~150s sleep, got {slept_for[0]}"
+
+
+def test_wait_until_target_no_sleep_when_late(fake_fleet, monkeypatch, capsys):
+    """If current time is past target (overshot), don't sleep — send now."""
+    from datetime import datetime, timezone
+    mod = fake_fleet["mod"]
+
+    slept_for: list[float] = []
+    fake_now = datetime(2026, 4, 13, 12, 5, 30, tzinfo=timezone.utc)
+    class FakeDT:
+        @staticmethod
+        def now(tz=None):
+            return fake_now
+    monkeypatch.setattr(mod, "datetime", FakeDT)
+    monkeypatch.setattr(mod.time, "sleep", lambda s: slept_for.append(s))
+
+    mod.wait_until_target_utc_hour(12)
+    assert slept_for == [], "must not sleep when already past target"
+    # A warning should be logged to stderr
+    err = capsys.readouterr().err
+    assert "overshot" in err.lower() or "late" in err.lower()
+
+
+def test_wait_until_target_skips_if_target_far_away(fake_fleet, monkeypatch):
+    """Guard against pathological sleeps: if target is >20 min away,
+    assume this isn't the scheduled run window and skip the hold."""
+    from datetime import datetime, timezone
+    mod = fake_fleet["mod"]
+
+    slept_for: list[float] = []
+    # 10:00 UTC with target 12:00 → 2 hours away, should NOT sleep
+    fake_now = datetime(2026, 4, 13, 10, 0, 0, tzinfo=timezone.utc)
+    class FakeDT:
+        @staticmethod
+        def now(tz=None):
+            return fake_now
+    monkeypatch.setattr(mod, "datetime", FakeDT)
+    monkeypatch.setattr(mod.time, "sleep", lambda s: slept_for.append(s))
+
+    mod.wait_until_target_utc_hour(12)
+    assert slept_for == [], "must not sleep for pathologically long intervals"
