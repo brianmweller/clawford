@@ -10,6 +10,13 @@ http://localhost:19823/callback.
 
 Usage:
   python3 krisp-auth-manual.py
+
+Token storage — cross-platform `~/.openclaw/meetings-coach-workspace/
+cache/krisp-tokens/`. This mirrors the VPS workspace layout exactly so
+the scp-to-VPS step is trivial (identical paths on both sides). The
+`~/.openclaw/` tree is outside the git repo, so tokens never risk
+accidental commit. The OLD hardcoded E:/Dropbox/Startup/Flux/data/
+path is no longer used — it coupled Clawford to the Flux project.
 """
 
 import base64
@@ -25,7 +32,7 @@ from threading import Thread
 
 import httpx
 
-TOKEN_DIR = Path("E:/Dropbox/Startup/Flux/data/krisp_tokens")
+TOKEN_DIR = Path.home() / ".openclaw" / "meetings-coach-workspace" / "cache" / "krisp-tokens"
 AUTH_ENDPOINT = "https://api.krisp.ai/platform/v1/oauth2/authorize"
 TOKEN_ENDPOINT = "https://api.krisp.ai/platform/v1/oauth2/token"
 REDIRECT_URI = "http://localhost:19823/callback"
@@ -79,10 +86,19 @@ def pkce_pair():
 
 
 def main():
+    # Ensure the token dir exists (cross-platform, no-op if already there)
+    TOKEN_DIR.mkdir(parents=True, exist_ok=True)
+
     # Load client_info
     client_info_path = TOKEN_DIR / "client_info.json"
     if not client_info_path.exists():
         print(f"ERROR: {client_info_path} not found", file=sys.stderr)
+        print(
+            f"HINT: copy client_info.json to {TOKEN_DIR} — this file holds "
+            f"the Krisp OAuth client_id + client_secret, which are long-lived "
+            f"credentials registered once with Krisp.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     client_info = json.loads(client_info_path.read_text())
