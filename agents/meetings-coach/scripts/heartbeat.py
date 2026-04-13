@@ -140,26 +140,54 @@ def prune_stale_preps():
             pass
 
 
-def run() -> dict:
-    now = datetime.now(timezone.utc)
-    now_str = now.strftime("%Y-%m-%d %H:%M UTC")
+def probe() -> dict:
+    """Pure meetings-coach health probe. No status.md side effects.
 
+    Fleet-health.py orchestrator (R3) calls this directly via
+    docker exec to populate fleet-health.json without touching
+    the per-agent .status.md files.
+    """
     auth = check_auth()
     cache_ts, cache_name, cache_summary = read_cron_caches()
     missing_files = check_required_files()
-    prune_stale_preps()
+    prune_stale_preps()  # housekeeping side effect on prep-*.json files
 
-    errors = []
+    errors: list[str] = []
     if missing_files:
         errors.append(f"missing: {', '.join(missing_files)}")
 
     degraded = any(v == "missing" for v in auth.values()) or bool(missing_files)
     status = "degraded" if degraded else "ok"
-
-    last_cron_run = cache_ts or now_str
-    last_cron_name = cache_name or "heartbeat"
-    last_cron_result = cache_summary or "heartbeat ran"
     error_log = "; ".join(errors) if errors else "none"
+
+    result: dict = {
+        "status": status,
+        "auth": auth,
+        "missing_files": missing_files,
+        "last_cron_run": cache_ts,
+        "last_cron_name": cache_name,
+        "last_cron_result": cache_summary,
+        "error_log": error_log,
+    }
+    if degraded:
+        details = [f"{k}={v}" for k, v in auth.items() if v == "missing"]
+        result["alert"] = (
+            f"⚠️ meetings-coach degraded: {', '.join(details + errors) or 'missing files'}"
+        )
+    return result
+
+
+def _write_status_md(probe_result: dict) -> None:
+    """Render the probe result as the meetings-coach.status.md schema."""
+    now = datetime.now(timezone.utc)
+    now_str = now.strftime("%Y-%m-%d %H:%M UTC")
+
+    auth = probe_result.get("auth", {})
+    status = probe_result.get("status", "ok")
+    last_cron_run = probe_result.get("last_cron_run") or now_str
+    last_cron_name = probe_result.get("last_cron_name") or "heartbeat"
+    last_cron_result = probe_result.get("last_cron_result") or "heartbeat ran"
+    error_log = probe_result.get("error_log", "none")
 
     content = f"""# Meetings Coach — Status
 
@@ -167,30 +195,25 @@ def run() -> dict:
 - **status:** {status}
 - **last_cron_run:** {last_cron_run} — {last_cron_name}
 - **last_cron_result:** {last_cron_result}
-- **google_auth:** {auth['google_auth']}
-- **workflowy_auth:** {auth['workflowy_auth']}
-- **krisp_auth:** {auth['krisp_auth']}
+- **google_auth:** {auth.get('google_auth', 'missing')}
+- **workflowy_auth:** {auth.get('workflowy_auth', 'missing')}
+- **krisp_auth:** {auth.get('krisp_auth', 'missing')}
 - **error_log:** {error_log}
 - **token_usage_today:** —
 """
     try:
         os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
-        with open(OUTPUT_FILE, "w") as f:
+        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
             f.write(content)
     except Exception as e:
         raise RuntimeError(f"status file write failed: {e}") from e
 
-    out: dict = {
-        "status": status,
-        "auth": auth,
-        "missing_files": missing_files,
-    }
-    if degraded:
-        details = [f"{k}={v}" for k, v in auth.items() if v == "missing"]
-        out["alert"] = (
-            f"⚠️ meetings-coach degraded: {', '.join(details + errors) or 'missing files'}"
-        )
-    return out
+
+def run() -> dict:
+    """Call probe() + write status.md (transition behavior)."""
+    result = probe()
+    _write_status_md(result)
+    return result
 
 
 def main() -> int:

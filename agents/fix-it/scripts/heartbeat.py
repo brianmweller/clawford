@@ -82,9 +82,16 @@ def get_registered_agents():
         return set()
 
 
-def run() -> dict:
+def probe() -> dict:
+    """Pure fix-it health probe. Reads all agent status.md files,
+    classifies them as fresh or stale, returns a structured dict.
+
+    No status.md write — fleet-health.py orchestrator (R3) calls this
+    directly. The R6 transition retains _write_status_md() which run()
+    still calls so fix-it/morning-status's existing scrape path keeps
+    working until R4 + R6 land.
+    """
     now = datetime.now(timezone.utc)
-    now_str = now.strftime("%Y-%m-%d %H:%M UTC")
 
     registered = get_registered_agents()
     if not registered:
@@ -131,10 +138,33 @@ def run() -> dict:
         error_line = "none"
         alert = None
 
-    # Write status file atomically. Status file uses "healthy" for the
-    # human-facing marker; the script status field uses the contract
-    # vocabulary ("ok"/"degraded"/"error").
+    result: dict = {
+        "status": status,
+        "checked": checked,
+        "stale_count": len(stale),
+        "last_cron_run": None,  # heartbeat-check is its own cron, no separate cache
+        "last_cron_name": "heartbeat-check",
+        "last_cron_result": result_line,
+        "error_log": error_line,
+    }
+    if stale:
+        result["stale"] = [{"agent": a, "heartbeat": h} for a, h in stale]
+        result["alert"] = alert
+    return result
+
+
+def _write_status_md(probe_result: dict) -> None:
+    """Render the probe result as fix-it.status.md using the existing
+    `healthy` human-facing label (preserved for backwards compat with
+    the morning-status aggregator's classification rules)."""
+    now = datetime.now(timezone.utc)
+    now_str = now.strftime("%Y-%m-%d %H:%M UTC")
+
+    status = probe_result.get("status", "ok")
     human_status = "healthy" if status == "ok" else status
+    result_line = probe_result.get("last_cron_result", "")
+    error_line = probe_result.get("error_log", "none")
+
     content = f"""# Fix-It — Status
 
 - **last_heartbeat:** {now_str}
@@ -145,20 +175,17 @@ def run() -> dict:
 - **token_usage_today:** —
 """
     try:
-        with open(OUTPUT_FILE, "w") as f:
+        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
             f.write(content)
     except Exception as e:
         raise RuntimeError(f"status file write failed: {e}") from e
 
-    out: dict = {
-        "status": status,
-        "checked": checked,
-        "stale_count": len(stale),
-    }
-    if stale:
-        out["stale"] = [{"agent": a, "heartbeat": h} for a, h in stale]
-        out["alert"] = alert
-    return out
+
+def run() -> dict:
+    """Call probe() + write status.md (transition behavior)."""
+    result = probe()
+    _write_status_md(result)
+    return result
 
 
 def main() -> int:

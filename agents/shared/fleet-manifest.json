@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "_comment": "Fleet-wide agent registry consumed by ops/scripts/fleet-health.py (R3) and agents/fix-it/scripts/morning-status.py (R4). Each entry describes one agent's metadata and the probe entrypoint the orchestrator invokes to collect health data. The probe_entrypoint format is '<relative-path-from-workspace>::<function-name>'. expected_probes is informational — it documents which field names the agent's probe() function returns, so fix-it/morning-status can classify them against KNOWN_ISSUES.md.",
+  "agents": [
+    {
+      "id": "shopping",
+      "display_name": "Hilda Hippo",
+      "workspace": "~/.openclaw/shopping-workspace",
+      "bot_token_env": "SHOPPING_BOT_TOKEN",
+      "probe_entrypoint": "scripts/heartbeat.py::probe",
+      "expected_probes": [
+        "costco_session",
+        "amazon_session",
+        "pending_actions",
+        "stale_actions"
+      ]
+    },
+    {
+      "id": "connector",
+      "display_name": "Huckle Cat",
+      "workspace": "~/.openclaw/connector-workspace",
+      "bot_token_env": "CONNECTOR_BOT_TOKEN",
+      "probe_entrypoint": "scripts/heartbeat.py::probe",
+      "expected_probes": [
+        "missing_files",
+        "pruned_triage",
+        "pruned_cache"
+      ]
+    },
+    {
+      "id": "family-calendar",
+      "display_name": "Mistress Mouse",
+      "workspace": "~/.openclaw/family-calendar-workspace",
+      "bot_token_env": "FAMILYCAL_BOT_TOKEN",
+      "probe_entrypoint": "scripts/heartbeat.py::probe",
+      "expected_probes": [
+        "missing_files",
+        "google_auth",
+        "calendars_configured",
+        "pruned_reminders"
+      ]
+    },
+    {
+      "id": "meetings-coach",
+      "display_name": "Sergeant Murphy",
+      "workspace": "~/.openclaw/meetings-coach-workspace",
+      "bot_token_env": "MEETINGS_BOT_TOKEN",
+      "probe_entrypoint": "scripts/heartbeat.py::probe",
+      "expected_probes": [
+        "auth",
+        "missing_files"
+      ]
+    },
+    {
+      "id": "news-digest",
+      "display_name": "Lowly Worm",
+      "workspace": "~/.openclaw/news-digest-workspace",
+      "bot_token_env": "NEWSDIGEST_BOT_TOKEN",
+      "probe_entrypoint": "scripts/heartbeat.py::probe",
+      "expected_probes": [
+        "missing_files",
+        "linkedin_profile",
+        "morning_edition",
+        "items_count"
+      ]
+    },
+    {
+      "id": "fix-it",
+      "display_name": "Mr Fixit",
+      "workspace": "~/.openclaw/fix-it-workspace",
+      "bot_token_env": "TELEGRAM_BOT_TOKEN",
+      "probe_entrypoint": "scripts/heartbeat.py::probe",
+      "expected_probes": [
+        "checked",
+        "stale_count"
+      ]
+    }
+  ]
+}
