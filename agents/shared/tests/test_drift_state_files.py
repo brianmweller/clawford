@@ -101,7 +101,12 @@ def deploy_module_stateagent(source_repo_with_state_file, monkeypatch):
     def fake_oc(*args, **kwargs):
         return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
     monkeypatch.setattr(deploy, "oc", fake_oc)
-    monkeypatch.setattr(deploy, "oc_json", lambda *a, **kw: {"jobs": []})
+
+    def fake_oc_json(*args, **kwargs):
+        if args[:2] == ("config", "validate"):
+            return {"valid": True, "path": "/fake/openclaw.json"}
+        return {"jobs": []}
+    monkeypatch.setattr(deploy, "oc_json", fake_oc_json)
     return deploy
 
 

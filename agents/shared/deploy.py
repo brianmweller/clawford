@@ -503,6 +503,56 @@ def seed_state_file(path: Path, content: Any) -> str:
 # ────────────────────────────────────────────────────────────────────────
 
 
+def check_openclaw_config_valid() -> list[str]:
+    """Return a list of validation errors from `openclaw config validate`.
+
+    Empty list means the config is schema-valid and the gateway will
+    accept it on boot. A non-empty list means deploy should refuse to
+    proceed — applying cron edits or file writes to a gateway whose
+    own config is broken will just add to the pile of problems
+    (observed during the P1 force-recreate, where a silent schema
+    downgrade put the container in a restart loop).
+
+    Exceptions from the oc_json subprocess (e.g. the gateway container
+    is restarting, docker exec failed) are themselves treated as a
+    validation failure — that's the right behavior: don't deploy
+    against a gateway we can't talk to.
+
+    Supports both string-list and dict-list error shapes because
+    `openclaw config validate --json` has returned both in different
+    versions.
+    """
+    try:
+        result = oc_json("config", "validate", "--json")
+    except Exception as e:
+        return [f"config validate failed to run: {e}"]
+
+    if not isinstance(result, dict):
+        return [f"config validate returned unexpected shape: {type(result).__name__}"]
+
+    if result.get("valid") is True:
+        return []
+
+    raw_errors = result.get("errors") or []
+    if not isinstance(raw_errors, list):
+        return [f"config validate reported invalid but no errors list: {result}"]
+
+    flattened: list[str] = []
+    for err in raw_errors:
+        if isinstance(err, str):
+            flattened.append(err)
+        elif isinstance(err, dict):
+            path = err.get("path") or err.get("field") or ""
+            msg = err.get("message") or err.get("error") or str(err)
+            flattened.append(f"{path}: {msg}" if path else msg)
+        else:
+            flattened.append(str(err))
+
+    if not flattened:
+        flattened = ["config validate reported invalid (no structured errors)"]
+    return flattened
+
+
 def check_source_clean(source_dir: Path, agent_subpath: str) -> list[str]:
     """Return a list of problem strings if the source git state is not clean.
 
@@ -1048,6 +1098,21 @@ def deploy_one(agent_id: str, args: argparse.Namespace) -> int:
     # Safeguard 5: banner with workflow contract
     agent_subpath_for_banner = f"agents/{agent_id}"
     print_banner(mf, agent_subpath_for_banner)
+
+    # Safeguard 7: refuse if openclaw's own config is schema-invalid.
+    # Catches the class of bug where a CLI version change rejects the
+    # existing config shape and the gateway is in a restart loop —
+    # deploying against that state will only add more broken state.
+    note("Config validation")
+    config_errors = check_openclaw_config_valid()
+    if config_errors:
+        log(f"openclaw config validation failed ({len(config_errors)} issue(s)):", "err")
+        for e in config_errors:
+            log(f"  {e}", "err")
+        log("Refuse to deploy — fix openclaw.json first.", "err")
+        log("Hint: openclaw doctor --fix", "err")
+        return 6
+    log("openclaw.json schema valid", "ok")
 
     # Safeguard 2: refuse if the source agent dir has uncommitted edits or
     # untracked files, unless --allow-dirty. Prevents the 2026-04-12 incident

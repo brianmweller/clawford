@@ -126,6 +126,10 @@ def deploy_module(fake_source_repo: Path, monkeypatch):
         return result
     monkeypatch.setattr(deploy, "oc", fake_oc)
     def fake_oc_json(*args, **kwargs):
+        # Route by subcommand so the config-validate safety gate (Safeguard 7)
+        # passes in fixture setup without each test having to re-mock it.
+        if args[:2] == ("config", "validate"):
+            return {"valid": True, "path": "/fake/openclaw.json"}
         return {"jobs": []}
     monkeypatch.setattr(deploy, "oc_json", fake_oc_json)
     return deploy
