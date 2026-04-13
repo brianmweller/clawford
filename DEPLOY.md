@@ -1,10 +1,11 @@
 # DEPLOY.md — Deploying an OpenClaw Agent
 
 Canonical workflow for deploying or updating an agent on the VPS. This
-file supersedes the pre-2026-04-12 shell-script flow; all five
-non-fix-it agents (shopping, family-calendar, meetings-coach,
-news-digest, connector) are now deployed via
-`agents/shared/deploy.py` driven by a per-agent `manifest.json`.
+file supersedes the pre-2026-04-12 shell-script flow; all six
+agents (shopping, family-calendar, meetings-coach, news-digest,
+connector, fix-it) are now deployed via `agents/shared/deploy.py`
+driven by a per-agent `manifest.json`, guarded by eight test-covered
+safeguards.
 
 ---
 
@@ -66,10 +67,17 @@ push → pull`.
   requires y/N confirmation unless `--yes-updates` is passed.
 - Delete orphan crons (live but not in manifest) unless
   `--remove-orphans`. Warns by default.
+- Touch the shared brain at `~/Dropbox/openclaw-backup/`. The brain
+  has two layers: **declarative config/code** at `ops/brain/*` in
+  git (flow: git → VPS, pushed manually via
+  `ops/scripts/sync-brain-to-vps.sh`) and **runtime state** in
+  Dropbox-only paths (status files, people/, facts/, commitments/,
+  tasks/, queues). State is agent-owned; never rescue it into git.
+  See `memory/feedback_brain_rescue_boundary.md`.
 
 ---
 
-## Six safeguards
+## Eight safeguards
 
 | # | Name | Flag to override | What it prevents |
 |---|---|---|---|
@@ -79,9 +87,15 @@ push → pull`.
 | 4 | Drift detection (blocking) | `--accept-drift` | Deploys wiping VPS-side edits without audit |
 | 5 | Deploy banner | (none — cosmetic) | Ambiguity about source, target, git HEAD, flow direction |
 | 6 | Smoke-test hook | `--smoke-test` activates it | Silent regressions — restores backup on cron failure |
+| 7 | `openclaw.json` schema validate | (none — mandatory) | Deploying against a gateway whose config is invalid — e.g. a version downgrade that rejects the `streaming: {mode: ...}` object shape, putting the gateway in a restart loop |
+| 8 | `exec-approvals` baseline drift guard | (none — mandatory) | `defaults.security=allowlist` or per-agent `policy=allowlist` quietly blocking every cron session after an openclaw upgrade starts enforcing the stricter side — see Gotcha §7 below |
 
-All six are test-covered under `agents/shared/tests/` (18/18 passing
-offline, no VPS required).
+All eight are test-covered under `agents/shared/tests/` (85/85 passing
+offline, no VPS required). On drift Safeguard 8 refuses with exit
+code 7 and a per-key error list pointing at the drift — fix
+`~/.openclaw/exec-approvals.json` first, or update the baseline at
+`ops/exec-approvals-baseline.json` if the invariant itself is changing
+(e.g., new agent).
 
 ---
 
@@ -417,6 +431,107 @@ saw the file but couldn't extract anything.
 `agents/connector/scripts/people-scan.py`. Future format drift will
 need a better safeguard: parser should warn when a file has
 `- **` prefixes that don't match the regex.
+
+### 7. exec-approvals layered security: "stricter side wins" (2026-04-13)
+
+**Symptom:** Every agent across the fleet suddenly shows
+`approval required` on every script the crons run. Mr Fixit's
+heartbeat, Hilda's costco-keepalive, Lowly Worm's fetch-and-rank
+— all blocked on `/approve <uuid>` prompts, none of them firing
+the allowlist wildcards their manifests declared.
+
+**Root cause:** `~/.openclaw/exec-approvals.json` had
+`defaults.security = "allowlist"` (not `"full"`), plus
+`agents.main.policy = "allowlist"` with only 2 patterns
+(`/usr/local/bin/openclaw`, `/usr/bin/sleep`). This had been latent
+for weeks. An openclaw upgrade started intersecting defaults with
+per-agent policy more strictly ("stricter side wins"), and the
+agents that had individually declared `policy=full` suddenly had
+their effective policy narrowed back to the intersection with
+`main.policy=allowlist`. Every cron hit approval prompts that
+no human was there to resolve.
+
+**Fix (now permanent):**
+1. `~/.openclaw/exec-approvals.json` patched in place:
+   `defaults.security="full"`, every agent `security=full policy=full
+   ask=off` (backup at `.bak-pre-full`).
+2. Committed an invariant schema to git at
+   `ops/exec-approvals-baseline.json` — NOT the raw file (too
+   volatile: `lastUsedAt`, `lastUsedCommand`, `lastResolvedPath`
+   update every exec), just the 2 `defaults` fields and 3
+   `agents.<id>` fields that actually define the policy.
+3. Wired **Safeguard 8** in `deploy.py` to compare the live
+   `openclaw approvals get --json` output to the baseline on every
+   deploy and refuse with exit 7 on drift. Extra allowlist entries
+   in the live file are tolerated; only the baseline keys are enforced.
+
+**Lesson:** Do not commit volatile config files raw. Commit the
+invariant schema — the things that must be true for the system to
+work — and write a test-covered guard that checks live state
+against it. "Raw file in git drifts every minute" is a sign that
+you need a schema commitment, not a raw commitment.
+
+### 8. `openclaw.json` account bindings that reference non-existent accounts (2026-04-13)
+
+**Symptom:** Half the bots "forgot their commands." Mr Fixit's
+slash menu shrinks from 3 custom commands to 1. Sergeant Murphy's
+menu disappears entirely. No git change triggered it. Nothing in
+the logs mentions the Telegram bot.
+
+**Root cause:** `~/.openclaw/openclaw.json` had a stale
+`bindings[]` entry whose `match.accountId = "fixit"` pointed at
+an account that no longer existed (it had been renamed to
+`default` months earlier). When openclaw's startup command-sync
+pass walks bindings, it treats an unmatched binding as "agent has
+no custom commands" and pushes an empty command list to the bot,
+clobbering whatever was set via the Bot API in Step 10b.
+
+**Fix (now permanent):**
+1. `~/.openclaw/openclaw.json`: `bindings[6].match.accountId` fixed
+   from `"fixit"` to `"default"`; backup at `.bak-pre-route-fix`.
+2. Added `ops/scripts/set-bot-commands.sh` (belt-and-suspenders
+   Step 10b) to reapply the full command set via the Bot API for
+   all 5 accounts. Idempotent, safe to re-run.
+3. Every account in openclaw.json now has `commands.native: false`
+   plus its `customCommands` array spelled out, so openclaw's
+   sync pass is a no-op rather than a clobber.
+
+**Lesson:** Stale config pointing at removed objects is a latent
+landmine. Either openclaw should WARN on unmatched bindings at
+startup (it doesn't), or deploy-time validation should walk
+bindings and verify every `accountId`/`agentId` they reference
+still exists. For now: if a bot's menu silently regresses, suspect
+openclaw's command sync, not the Bot API.
+
+### 9. `docker compose up --build` can downgrade openclaw (2026-04-12)
+
+**Symptom:** `deploy.py` refuses with
+`channels.telegram.streaming: Invalid input` across every agent.
+The streaming config was unchanged in git. The gateway is in a
+restart loop.
+
+**Root cause:** `docker compose -f ~/openclaw/docker-compose.yml up
+-d --build` rebuilds the image **without refreshing the
+`OPENCLAW_VERSION` build arg** — if the Dockerfile's default
+`OPENCLAW_VERSION` is behind the latest published version, the
+build downgrades the CLI inside the image. The older CLI
+doesn't understand the newer config's `streaming: {mode: "off"}`
+object shape (it expected a bare string), so schema validation
+fails, gateway loops, every deploy halts.
+
+**Fix (now permanent):**
+1. `ops/Dockerfile` `ARG OPENCLAW_VERSION=2026.4.11` kept in sync
+   with the currently-targeted release.
+2. **Safeguard 7** added to `deploy.py` — shells to
+   `openclaw config validate --json` before any file writes and
+   refuses on schema errors. Would have caught this class at the
+   very first agent re-deploy instead of silently proceeding.
+
+**Lesson:** Build args don't autobump. Either pin the version in
+the Dockerfile and treat it as a tracked dependency (what we do),
+or pass `--build-arg OPENCLAW_VERSION=...` on every compose up.
+And add a config-validate gate *before* file writes so an invalid
+config never costs you a recovery round.
 
 ---
 
