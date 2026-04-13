@@ -77,7 +77,7 @@ push → pull`.
 
 ---
 
-## Eight safeguards
+## Nine safeguards
 
 | # | Name | Flag to override | What it prevents |
 |---|---|---|---|
@@ -89,13 +89,15 @@ push → pull`.
 | 6 | Smoke-test hook | `--smoke-test` activates it | Silent regressions — restores backup on cron failure |
 | 7 | `openclaw.json` schema validate | (none — mandatory) | Deploying against a gateway whose config is invalid — e.g. a version downgrade that rejects the `streaming: {mode: ...}` object shape, putting the gateway in a restart loop |
 | 8 | `exec-approvals` baseline drift guard | (none — mandatory) | `defaults.security=allowlist` or per-agent `policy=allowlist` quietly blocking every cron session after an openclaw upgrade starts enforcing the stricter side — see Gotcha §7 below |
+| 9 | Cron message hygiene | (none — mandatory) | Manifest cron messages containing shell-operator bug-attractors (`; echo $?`, `sh -lc python`, `> /tmp/`, `2>&1`, `$(python`) that an LLM would copy verbatim into its exec tool call and hit the openclaw preflight — see Gotcha §10 below |
 
-All eight are test-covered under `agents/shared/tests/` (85/85 passing
+All nine are test-covered under `agents/shared/tests/` (200+ passing
 offline, no VPS required). On drift Safeguard 8 refuses with exit
 code 7 and a per-key error list pointing at the drift — fix
 `~/.openclaw/exec-approvals.json` first, or update the baseline at
 `ops/exec-approvals-baseline.json` if the invariant itself is changing
-(e.g., new agent).
+(e.g., new agent). Safeguard 9 refuses with exit code 8 and the
+offending cron name + matched pattern.
 
 ---
 
@@ -532,6 +534,247 @@ the Dockerfile and treat it as a tracked dependency (what we do),
 or pass `--build-arg OPENCLAW_VERSION=...` on every compose up.
 And add a config-validate gate *before* file writes so an invalid
 config never costs you a recovery round.
+
+### 10. Telegram clickable commands strip their args on tap (2026-04-13)
+
+**Symptom:** Digest messages show `/like 1`, `/dislike 2`, `/more 3`
+per item. Sam taps a link. Worm replies: "I got the like, but I
+need the item number. Send /like 1 or just like:1 and I'll note it."
+
+**Root cause:** Telegram's auto-detected slash commands render the
+`/verb` as a clickable hyperlink AND parse any following tokens as
+arguments. When the user TAPS the link, only the command part
+(`/like`) is sent — the space-separated arg (`1`) is stripped.
+The typed form (user manually types `/like 1` into the input) does
+send the full message, but the tap form does not. There's no way
+to make auto-detected commands include args on tap.
+
+**Fix (now the default for news-digest):** Use inline keyboard
+buttons with `callback_data`:
+
+```python
+buttons = {
+    "inline_keyboard": [[
+        {"text": "👍 like",    "callback_data": f"like:{num}"},
+        {"text": "👎 dislike", "callback_data": f"dislike:{num}"},
+        {"text": "📖 more",    "callback_data": f"more:{num}"},
+    ]]
+}
+send_telegram(token, chat, text, reply_markup=buttons)
+```
+
+Tap = instant, arbitrary display text, `callback_data` is delivered
+verbatim. Openclaw forwards the callback_query into the agent's
+session transcript as a text message containing the callback_data
+value, which `engagement-poller.py` matches via
+`re.search(r"(?<![a-z])/?(like|dislike|more)[:_\s]\s*(\d+)", ...)`.
+
+See `agents/fix-it/scripts/morning-fleet-deliver.py::_buttons_for_item`
+and the pattern revived from commit `52bc358`.
+
+**Fallback for plain text** (when `reply_markup` isn't available):
+the underscore form `/like_1 /dislike_1 /more_1` sends the full token
+on tap because underscore is part of the command name per the Bot
+API spec.
+
+**Pre-existing bug caught while fixing this:** the old
+`extract_engagement` regex `(?:/like|like[:\s])\s*(\d+)` matched
+"like" as a substring of "dislike", so every `/dislike N` was
+silently misclassified as `thumbs_up`. New regex uses a word-boundary
+lookbehind `(?<![a-z])` and scans for the leftmost match across all
+three verbs. Memory: `feedback_telegram_clickable_commands.md`.
+
+### 11. OpenClaw LLM cron 600s hard timeout (2026-04-13)
+
+**Symptom:** `morning-edition` cron fires, runs for exactly 10
+minutes, then finishes with
+`{"status": "error", "error": "cron: job execution timed out"}`.
+Neither the `morning-items.json` nor the `morning-brief-ready.txt`
+output file exists. Next run's scheduled time is written but the
+current session produced nothing.
+
+**Root cause:** openclaw caps LLM cron executions at **600 seconds**
+(10 min) hard. No checkpointing, no partial output. When the budget
+runs out, the session is killed and everything it was doing is lost.
+
+Observed trigger: the new Option B `morning-edition` prompt asks the
+LLM to produce TWO files (a structured JSON array plus a plain text
+brief) and to read several intermediate cache files. One of those
+files (`cache/linkedin-2026-04-13.json`) was missing — the LLM hit
+ENOENT, retried, retried, and burned through the 10-minute budget
+before making progress.
+
+**Fix (design principle):** For deterministic structured-output
+work, bypass the LLM cron entirely and call `openclaw infer model
+run --prompt ... --json` from a plain Python wrapper. Each `infer`
+call is a one-shot outside the agent cron scheduler, so the 600s
+budget doesn't apply. Example pattern:
+
+- `fetch-and-rank.py` writes `cache/ranked-<date>.json` (structured
+  data)
+- A new Python composer reads the ranked file, calls `openclaw
+  infer` once per item to generate the extended headline, writes
+  `cache/morning-items.json`
+- `morning-fleet-deliver.py` reads `morning-items.json` and sends
+  per-item Telegram messages with inline keyboards
+
+The LLM is still doing the creative work (1-sentence editorial
+headlines), but it's being driven by a Python script that can't
+time out the same way a cron session does. This pattern is live
+in `agents/news-digest/scripts/update-preferences.py::call_judge_llm`
+(commit `844a251`) for the nightly judge LLM that extracts
+fine-grained subtopic tags from engagement events.
+
+**Emergency bypass** (when a cron is stuck and you need to unblock
+delivery RIGHT NOW):
+
+```python
+ssh openclaw@vps "python3 - <<'PY'
+import json
+from pathlib import Path
+data = json.loads(Path('cache/ranked-2026-04-13.json').read_text())
+items = [
+    {'num': i+1, 'category': a.get('category'), 'title': a.get('title'),
+     'extended_headline': a.get('summary', '')[:250],
+     'url': a.get('link'), 'source_label': a.get('source_label')}
+    for i, a in enumerate(data['articles'][:15])
+]
+Path('cache/morning-items.json').write_text(json.dumps(items, indent=2))
+PY"
+```
+
+Then run the delivery script directly. You skip the LLM cron
+entirely for that run. Used 2026-04-13 to unblock Option B
+verification. Memory: `feedback_openclaw_cron_timeout.md`.
+
+### 12. Playwright `.click()` default 30s retry blows scraper budgets (2026-04-13)
+
+**Symptom:** `linkedin-scrape.py` repeatedly returns
+`messages: 0` despite the recency filter accepting 15 threads.
+Running the scraper directly shows Playwright logs spinning on
+"element is visible, enabled and stable … element is outside of
+the viewport … retrying click action" for minutes at a time, and
+the overall scraper hits its 180-second timeout before any thread's
+content is read.
+
+**Root cause:** Playwright's default `click()` waits up to **30
+seconds** for the element to be visible-AND-stable-AND-inside-the-
+viewport before giving up. LinkedIn's inbox puts message list items
+outside the visible viewport when the list is long, so Playwright
+enters the "visible but outside viewport" retry loop. One stuck
+thread eats 30s, and 15 × 30s = 450s is way more than any reasonable
+scraper budget.
+
+**Fix (now permanent):** explicit 3-step bounded click:
+
+```python
+try:
+    thread_el.scroll_into_view_if_needed(timeout=3000)
+except Exception:
+    pass
+try:
+    thread_el.click(timeout=5000)
+    clicked = True
+except Exception:
+    try:
+        thread_el.click(force=True, timeout=3000)
+        clicked = True
+    except Exception:
+        clicked = False
+if not clicked:
+    enriched.append(thread)  # keep the preview, skip click-through
+    continue
+```
+
+See `agents/news-digest/scripts/linkedin-scrape.py::scrape_messages`
+(commit `eba5fa4`). Worst-case ~11s per thread, 15 × 11s = 165s,
+fits the 180s budget. Failed clicks fall through to "preview-only"
+mode rather than blocking the whole scraper.
+
+**Lesson:** Any Playwright `.click()` inside a bounded-budget
+scraper needs an explicit `timeout=` and a fallback path. The
+30-second default is fine for interactive debugging and wrong for
+cron-invoked scrapers.
+
+### 13. LinkedIn seen-set dedup returns 0 — not broken, just quiet (2026-04-13)
+
+**Symptom:** LinkedIn scraper finishes cleanly, extracts 15 threads,
+but `linkedin-<date>.json` contains `messages: 0`. The digest has
+no LinkedIn content. First instinct: the scraper is broken.
+
+**Actual behavior:** `linkedin-seen.json` tracks a set of content
+hashes for every thread/post/notification ever surfaced. On each
+run, the scraper hashes each newly-extracted thread and drops any
+hash that's already in the seen-set. Result: if the user hasn't
+received a new reply in any thread since the previous successful
+scrape, all 15 threads hash the same way and `messages_skipped == 15`
+and `messages == 0`.
+
+**Verification (safe and reversible):**
+
+```bash
+# Back up the current seen-set
+mv ~/.openclaw/news-digest-workspace/cache/linkedin-seen.json{,.bak-test}
+
+# Delete today's cache to force a fresh scrape
+rm ~/.openclaw/news-digest-workspace/cache/linkedin-2026-04-13.json
+
+# Run the scraper
+docker exec openclaw-gateway python3 \
+  /home/node/.openclaw/news-digest-workspace/scripts/linkedin-scrape.py
+
+# If messages > 0 appears, dedup WAS over-aggressive (unlikely but possible)
+# If messages == 0 still, the user genuinely has no new content
+# — 0 is the correct, working answer.
+
+# Restore the backup so tomorrow's scrape doesn't re-surface 15 stale threads
+mv ~/.openclaw/news-digest-workspace/cache/linkedin-seen.json{.bak-test,}
+rm ~/.openclaw/news-digest-workspace/cache/linkedin-2026-04-13.json
+```
+
+Ask the user "did you get any new LinkedIn replies today?" before
+treating `messages: 0` as a bug. 2026-04-13: Sam confirmed "no
+new messages today" and the pipeline was working correctly end-to-end.
+
+### 14. Morning delivery runs off the LLM cron scheduler via host cron (2026-04-13)
+
+**Context:** openclaw's LLM cron scheduler runs agent sessions
+**serially per agent**. The morning compose burst (5 agents × a
+5-7 minute gather LLM session each) hit a queue window where
+`morning-fleet-deliver`'s 11:55 UTC LLM session couldn't dispatch
+until the `connector/morning-relationship-nudge` finished at ~12:04
+UTC. The hold-until-12:00 barrier in the script had already passed
+and delivery went out at 5:05 AM PDT instead of 5:00.
+
+**Fix (commit `4e97b90`):**
+
+1. **Shift 5 compose crons 11:30 → 10:30 UTC**. Gives the composers
+   90 minutes of slack before the 12:00 deliver target (was 30 min)
+   and moves the morning burst out of the 11:30-12:00 window that
+   was blocking `*/5` reminder-check, `*/5` engagement-poll,
+   heartbeats, and the fleet deliver.
+
+2. **Move `morning-fleet-deliver` OFF the LLM cron entirely** onto
+   a plain host crontab entry at `0 12 * * *`. The wrapper at
+   `ops/scripts/morning-fleet-deliver-host.sh` does a `docker exec`
+   into the gateway container and invokes the existing
+   `morning-fleet-deliver.py` script unchanged. The script's
+   `wait_until_target_utc_hour(12)` barrier becomes a no-op (host
+   cron fires exactly at 12:00) but remains as a defensive layer.
+
+**Architecture boundary:** openclaw LLM cron is for work that
+genuinely needs the agent's SOUL/TOOLS context (conversational
+replies, multi-step tool use, personality-bearing responses). Host
+cron is for deterministic scripted work (delivery, deduplication,
+snapshotting, health probes). Script-contract compliance makes the
+host-cron migration trivial: any script that prints compliant JSON
+and always exits 0 can be invoked via
+`ops/scripts/script-contract-host.sh` with a per-agent bot token
+and Telegram will get the `alert` field on non-ok status. See
+`ops/scripts/script-contract-host.sh` (commit `6185415`) for the
+pattern; `shopping/heartbeat`, `meetings-coach/heartbeat`,
+`fix-it/heartbeat-check`, and `news-digest/linkedin-keepalive` are
+already migrated.
 
 ---
 
