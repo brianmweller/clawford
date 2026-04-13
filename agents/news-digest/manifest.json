@@ -208,10 +208,10 @@
   "crons": [
     {
       "name": "morning-edition",
-      "cron": "0 12 * * *",
-      "message": "Generate and deliver the morning news digest. Run: python3 ~/.openclaw/news-digest-workspace/scripts/fetch-and-rank.py. This fetches all RSS feeds (NYT, WSJ, WaPo, Slate, Google News) and LinkedIn updates, deduplicates articles, extracts topics, and ranks them using the preference model at preferences/model.json. Read the ranked output from cache/ranked-$(date +%Y-%m-%d).json. Select the top 15-20 items. For each item, generate an extended headline: the original headline plus one sentence of context explaining why it matters or what's new. Group items by topic (🤖 AI & Tech, 💰 Economics, 🌍 World, 🏛️ US Policy, 🔗 LinkedIn, 📋 Also Noted). Format using the template in CRONS.md. Include item numbers so the reader can use /like, /dislike, /more commands. End with: 🐛 {count} items · {source_count} sources · Reply: /like 1, /more 3, /ask [topic]. If any feed failed, note it at the bottom. Update your status file with results.",
-      "announce": true,
-      "no_deliver": false
+      "cron": "30 11 * * *",
+      "message": "Generate the morning news digest. Run: python3 ~/.openclaw/news-digest-workspace/scripts/fetch-and-rank.py. This fetches all RSS feeds (NYT, WSJ, WaPo, Slate, Google News) and LinkedIn updates, deduplicates articles, extracts topics, and ranks them using the preference model at preferences/model.json. Read the ranked output from cache/ranked-$(date +%Y-%m-%d).json. Select the top 15-20 items. For each item, generate an extended headline: the original headline plus one sentence of context explaining why it matters or what's new. Group items by topic (🤖 AI & Tech, 💰 Economics, 🌍 World, 🏛️ US Policy, 🔗 LinkedIn, 📋 Also Noted). Format using the template in CRONS.md. Include item numbers so the reader can use /like, /dislike, /more commands. End with: 🐛 {count} items · {source_count} sources · Reply: /like 1, /more 3, /ask [topic]. If any feed failed, note it at the bottom. \n\nFor LinkedIn message thread items (source: linkedin, source_label: LinkedIn Message), the article's title already contains the sender name and the summary field already contains an LLM-generated thread summary produced by fetch-and-rank.py. Use those as-is. \n\nIMPORTANT: Write the final formatted digest to ~/.openclaw/news-digest-workspace/cache/morning-brief-ready.txt and exit. Do NOT send the digest to Telegram — the fleet-delivery cron (fix-it/morning-fleet-deliver at 12:00 UTC = 5:00 AM PT) reads this cache file and sends the digest alongside the other agents' morning briefs via the NEWSDIGEST_BOT_TOKEN. Update your status file with items count and any errors.",
+      "announce": false,
+      "no_deliver": true
     },
     {
       "name": "preference-update",
