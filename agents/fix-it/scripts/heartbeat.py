@@ -1,162 +1,155 @@
 #!/usr/bin/env python3
-"""heartbeat.py — Fix-It heartbeat: check all agents, write status file.
+"""heartbeat.py — Fix-It probe: monitor fleet-health.json freshness.
 
-Reads all *.status.md files from the shared brain, cross-references with
-`openclaw agents list`, determines healthy/degraded, writes
-fix-it.status.md atomically.
+R4+ rewrite. Fix-it's probe used to scrape per-agent .status.md
+files under ~/Dropbox/openclaw-backup/agents/*.status.md. That
+pathway was orphaned by R3+R6 — fleet-health.py now calls each
+agent's probe() via probe-agent.py, bypassing run() so no
+.status.md side effects fire. Scraping that stale directory
+produced false-positive "agent unresponsive" alerts.
 
-Conforms to agents/shared/SCRIPT_CONTRACT.md: always exits 0 and
-prints one JSON line to stdout. The cron message parses the JSON and
-decides whether to send a Telegram alert based on the `status` field:
+New responsibility: fix-it's probe monitors the ONE thing
+fleet-health.py cannot report about itself — that fleet-health.py
+is actually running and writing fleet-health.json on schedule.
+Cross-agent alerting (connector degraded, shopping error, …)
+is already handled by fleet-health.py's summarize(), so fix-it's
+probe intentionally does NOT duplicate per-agent alert text.
 
-  {"status": "ok",        "checked": N}           → no alert
-  {"status": "degraded",  "alert": "...text..."}  → cron sends alert
-  {"status": "error",     "error": "..."}         → cron sends alert
+Contract:
+  probe() → {status, checked, stale_count, last_cron_*, error_log,
+             [alert]}          — pure, no side effects
+  run()   → probe() + _write_status_md() as a side effect (kept
+             for standalone invocation + for the installed
+             fix-it.status.md artifact; fleet-health.py calls
+             probe() directly through probe-agent.py)
+  main()  → SCRIPT_CONTRACT wrapper, one JSON line to stdout
 
-The `alert` field (when present) is the human-readable text to forward
-to Telegram, suitable for a direct `sendMessage` call.
+Conforms to agents/shared/SCRIPT_CONTRACT.md.
 """
 
-import glob
+from __future__ import annotations
+
 import json
 import os
-import re
-import subprocess
-import sys
 import traceback
 from datetime import datetime, timedelta, timezone
 
 BRAIN = os.path.expanduser("~/Dropbox/openclaw-backup")
 STATUS_DIR = os.path.join(BRAIN, "agents")
 OUTPUT_FILE = os.path.join(STATUS_DIR, "fix-it.status.md")
-STALE_THRESHOLD_MIN = 90
+FLEET_HEALTH_PATH = os.path.join(BRAIN, "fleet-health.json")
+
+# fleet-health.py runs every 15 min. 30 min ≈ 2 missed runs before we alarm.
+FLEET_HEALTH_STALE_MIN = 30
 
 
-def parse_timestamp(raw):
-    """Parse either 'YYYY-MM-DD HH:MM UTC' or ISO-8601 with Z."""
-    if not raw or raw.strip() in ("—", "-", "missing", ""):
+def _parse_generated_at(raw: str) -> datetime | None:
+    if not raw:
         return None
-    raw = raw.strip()
-    for fmt in ("%Y-%m-%d %H:%M UTC", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S%z"):
-        try:
-            dt = datetime.strptime(raw, fmt)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt
-        except ValueError:
-            continue
     try:
         return datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except Exception:
+    except (ValueError, AttributeError):
         return None
-
-
-def get_registered_agents():
-    """Get agent names. Try --json (added in 2026.4.10), fall back to plain text."""
-    try:
-        r = subprocess.run(
-            ["openclaw", "agents", "list", "--json"],
-            capture_output=True, text=True, timeout=30, check=True,
-        )
-        agents = json.loads(r.stdout)
-        names = {a["id"] for a in agents if a.get("id")}
-        names.discard("main")
-        if names:
-            return names
-    except Exception:
-        pass
-
-    try:
-        r = subprocess.run(
-            ["openclaw", "agents", "list"],
-            capture_output=True, text=True, timeout=30, check=True,
-        )
-        names = set()
-        for line in r.stdout.splitlines():
-            m = re.match(r"^[-*\s]*([a-z][a-z0-9-]+)\b", line.strip())
-            if m and m.group(1) not in {"id", "name", "agents", "agent"}:
-                names.add(m.group(1))
-        names.discard("main")
-        return names
-    except Exception:
-        return set()
 
 
 def probe() -> dict:
-    """Pure fix-it health probe. Reads all agent status.md files,
-    classifies them as fresh or stale, returns a structured dict.
+    """Pure fix-it health probe. Reads fleet-health.json, reports on
+    its freshness. Returns a structured dict — no .status.md write.
 
-    No status.md write — fleet-health.py orchestrator (R3) calls this
-    directly. The R6 transition retains _write_status_md() which run()
-    still calls so fix-it/morning-status's existing scrape path keeps
-    working until R4 + R6 land.
+    Called directly by fleet-health.py via probe-agent.py during the
+    */15 orchestrator tick; also invoked by run() when fix-it's
+    heartbeat.py is run standalone.
     """
     now = datetime.now(timezone.utc)
 
-    registered = get_registered_agents()
-    if not registered:
-        raise RuntimeError("could not get agent list from openclaw")
+    if not os.path.exists(FLEET_HEALTH_PATH):
+        return {
+            "status": "error",
+            "checked": 0,
+            "stale_count": 0,
+            "last_cron_run": None,
+            "last_cron_name": "heartbeat-check",
+            "last_cron_result": "fleet-health.json missing",
+            "error_log": "fleet-health.json missing",
+            "alert": (
+                "⚠️ fleet-health.json missing at "
+                f"{FLEET_HEALTH_PATH}. fleet-health-host.sh may be broken."
+            ),
+        }
 
-    stale: list[tuple[str, str]] = []
-    checked = 0
+    try:
+        with open(FLEET_HEALTH_PATH, encoding="utf-8") as f:
+            report = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        return {
+            "status": "error",
+            "checked": 0,
+            "stale_count": 0,
+            "last_cron_run": None,
+            "last_cron_name": "heartbeat-check",
+            "last_cron_result": f"fleet-health.json unreadable: {e}",
+            "error_log": f"fleet-health.json unreadable: {e}",
+            "alert": f"⚠️ fleet-health.json unreadable: {e}",
+        }
 
-    for path in sorted(glob.glob(os.path.join(STATUS_DIR, "*.status.md"))):
-        agent = os.path.basename(path).replace(".status.md", "")
-        if agent not in registered:
-            continue
+    generated_at_raw = report.get("generated_at", "")
+    generated_at = _parse_generated_at(generated_at_raw)
+    agents = report.get("agents", {}) or {}
+    checked = len(agents)
+    stale_count = sum(
+        1 for a in agents.values()
+        if isinstance(a, dict) and a.get("status") not in ("ok",)
+    )
 
-        checked += 1
-        try:
-            text = open(path).read()
-        except Exception:
-            stale.append((agent, "unreadable"))
-            continue
+    if generated_at is None:
+        return {
+            "status": "error",
+            "checked": checked,
+            "stale_count": stale_count,
+            "last_cron_run": None,
+            "last_cron_name": "heartbeat-check",
+            "last_cron_result": "fleet-health.json has no parseable generated_at",
+            "error_log": "unparseable generated_at",
+            "alert": "⚠️ fleet-health.json has no parseable generated_at.",
+        }
 
-        m = re.search(r"last_heartbeat:\*\*\s*(.+)", text)
-        if not m:
-            stale.append((agent, "missing"))
-            continue
+    age = now - generated_at
+    if age > timedelta(minutes=FLEET_HEALTH_STALE_MIN):
+        age_min = int(age.total_seconds() // 60)
+        return {
+            "status": "error",
+            "checked": checked,
+            "stale_count": stale_count,
+            "last_cron_run": generated_at_raw,
+            "last_cron_name": "heartbeat-check",
+            "last_cron_result": f"fleet-health.json stale ({age_min} min old)",
+            "error_log": f"fleet-health.json stale ({age_min} min old)",
+            "alert": (
+                f"⚠️ fleet-health.json stale — last generated {age_min} min ago "
+                f"(> {FLEET_HEALTH_STALE_MIN} min threshold). "
+                "fleet-health-host.sh may be broken."
+            ),
+        }
 
-        dt = parse_timestamp(m.group(1))
-        if dt is None:
-            stale.append((agent, m.group(1).strip()))
-            continue
-
-        age = now - dt
-        if age > timedelta(minutes=STALE_THRESHOLD_MIN):
-            stale.append((agent, m.group(1).strip()))
-
-    if stale:
-        status = "degraded"
-        first_agent, first_hb = stale[0]
-        result_line = f"{first_agent} stale, last heartbeat {first_hb}"
-        error_line = f"{first_agent} unhealthy: heartbeat stale"
-        alert = f"⚠️ {first_agent} unresponsive. Last heartbeat: {first_hb}. Investigate."
-    else:
-        status = "ok"
-        result_line = f"all {checked} agents within {STALE_THRESHOLD_MIN}-min threshold"
-        error_line = "none"
-        alert = None
-
-    result: dict = {
-        "status": status,
+    result_line = (
+        f"fleet-health fresh, {checked} agents "
+        f"({checked - stale_count} ok, {stale_count} non-ok)"
+    )
+    return {
+        "status": "ok",
         "checked": checked,
-        "stale_count": len(stale),
-        "last_cron_run": None,  # heartbeat-check is its own cron, no separate cache
+        "stale_count": stale_count,
+        "last_cron_run": generated_at_raw,
         "last_cron_name": "heartbeat-check",
         "last_cron_result": result_line,
-        "error_log": error_line,
+        "error_log": "none",
     }
-    if stale:
-        result["stale"] = [{"agent": a, "heartbeat": h} for a, h in stale]
-        result["alert"] = alert
-    return result
 
 
 def _write_status_md(probe_result: dict) -> None:
-    """Render the probe result as fix-it.status.md using the existing
-    `healthy` human-facing label (preserved for backwards compat with
-    the morning-status aggregator's classification rules)."""
+    """Render the probe result as fix-it.status.md. Kept for
+    standalone invocation — fleet-health.py no longer triggers this
+    path (it calls probe() via probe-agent.py)."""
     now = datetime.now(timezone.utc)
     now_str = now.strftime("%Y-%m-%d %H:%M UTC")
 
@@ -182,7 +175,7 @@ def _write_status_md(probe_result: dict) -> None:
 
 
 def run() -> dict:
-    """Call probe() + write status.md (transition behavior)."""
+    """Call probe() + write status.md (standalone path)."""
     result = probe()
     _write_status_md(result)
     return result
@@ -203,4 +196,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

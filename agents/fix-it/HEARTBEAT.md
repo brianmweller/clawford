@@ -1,6 +1,16 @@
 # HEARTBEAT.md — Mr Fixit's 30-Minute Checklist
 
-This file is read by OpenClaw every 30 minutes during the heartbeat cycle.
+> **⚠️ RETIRED as of R3+R6 (2026-04-13).** The LLM-native `heartbeat-check`
+> cron that this file described was replaced by the host-side
+> `fleet-health` cron (`ops/scripts/fleet-health.py`, every 15 min), which
+> calls each agent's `probe()` function directly via `probe-agent.py`. Fix-it's
+> own probe now lives in `scripts/heartbeat.py::probe` and monitors
+> `~/Dropbox/openclaw-backup/fleet-health.json` freshness — it no longer
+> scrapes per-agent `.status.md` files. Cross-agent alerting is handled by
+> `fleet-health.py`'s `summarize()`. This document is kept for historical
+> context only; do not run the procedures below.
+
+This file WAS read by OpenClaw every 30 minutes during the heartbeat cycle.
 Only include lightweight, fast checks here. Heavy operations go in crons.
 
 ## Heartbeat vs Morning Status — scope split

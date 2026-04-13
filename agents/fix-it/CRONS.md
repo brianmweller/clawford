@@ -6,19 +6,20 @@ Workspace: .openclaw/fix-it-workspace/
 
 ---
 
-## Heartbeat Check — Every 30 Minutes
+## Heartbeat Check — RETIRED (R3+R6, 2026-04-13)
 
-**Schedule:** `*/30 * * * *`
-**Command:** Read all `~/Dropbox/openclaw-backup/agents/*.status.md` files. Compare `last_heartbeat` to current time. Any agent with a heartbeat older than 90 minutes is flagged as potentially unhealthy.
+The per-agent LLM `heartbeat-check` cron is retired. Fleet health is now
+orchestrated by `ops/scripts/fleet-health.py` (host cron, `*/15 * * * *`),
+which invokes each agent's `probe()` directly via `probe-agent.py` and
+writes `~/Dropbox/openclaw-backup/fleet-health.json`. Cross-agent alerting
+is handled by `fleet-health.py`'s `summarize()` and pushed to Telegram
+via `ops/scripts/fleet-health-host.sh`.
 
-**On success:** Write your own heartbeat to `agents/fix-it.status.md`.
-**On failure (agent unhealthy):**
-1. Log the agent name and last heartbeat time
-2. Check if the agent's gateway process is running (`openclaw agents status {name}`)
-3. If process is down, attempt restart: `openclaw agents restart {name}`
-4. If restart fails, alert human via Telegram: "⚠️ {agent} unresponsive. Last heartbeat: {time}. Restart failed."
-
-**Telegram output:** Only on failures or after repairs. Silent on success unless this is the first run of the day (06:00 UTC check doubles as morning status).
+Fix-it's own probe (`scripts/heartbeat.py::probe`) now monitors
+`fleet-health.json` freshness — it alerts only if `generated_at` is >30 min
+old, i.e. the orchestrator itself has stopped running. It no longer scrapes
+`*.status.md` files (that pathway became orphaned once R6 stopped writing
+them every tick).
 
 ---
 
@@ -208,7 +209,7 @@ This is the "who watches the watchman" cron. If this one breaks, the human will 
 
 | Cron | Frequency | Telegram | Auto-action |
 |------|-----------|----------|-------------|
-| Heartbeat check | Every 30 min | On failure only | Restart attempt |
+| ~~Heartbeat check~~ | RETIRED — R3+R6, replaced by host `fleet-health` | — | — |
 | Morning status | Daily 11:50 UTC (deliver at 12:00) | Always | Gather state, classify, timed-deliver |
 | Brain validation | Every 6 hours | On failure only | None (log + alert) |
 | Dropbox conflicts | Every 2 hours | On detection | None (alert only) |
