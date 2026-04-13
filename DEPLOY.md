@@ -436,7 +436,7 @@ need a better safeguard: parser should warn when a file has
 
 **Symptom:** Every agent across the fleet suddenly shows
 `approval required` on every script the crons run. Mr Fixit's
-heartbeat, Hilda's costco-keepalive, Lowly Worm's fetch-and-rank
+heartbeat, Hilda's costco-token-daemon, Lowly Worm's fetch-and-rank
 — all blocked on `/approve <uuid>` prompts, none of them firing
 the allowlist wildcards their manifests declared.
 
