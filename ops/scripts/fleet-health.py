@@ -68,15 +68,22 @@ def _import_fleet_types():
     return mod
 
 
+PROBE_AGENT_WRAPPER = "/home/node/repo/ops/scripts/probe-agent.py"
+
+
 def invoke_agent_probe(spec, run_subprocess) -> dict:
-    """Run one agent's heartbeat.py inside the container and return
-    a probe-shape dict. `run_subprocess` is the subprocess.run
+    """Run one agent's probe() function inside the container and
+    return a probe-shape dict. `run_subprocess` is the subprocess.run
     callable, injected so tests can stub it.
 
-    The container path for the heartbeat script is derived from the
-    agent's workspace + probe_entrypoint. The script's main() prints
-    one JSON line; we parse the LAST line to tolerate any logging
-    noise that may precede it.
+    Invocation goes through ops/scripts/probe-agent.py rather than
+    calling the heartbeat.py directly. probe-agent.py imports the
+    heartbeat module dynamically and calls probe() — bypassing
+    run() and main(), so no .status.md side effects fire on every
+    */15 orchestrator tick (R6).
+
+    The script's stdout is one JSON line per SCRIPT_CONTRACT; we
+    parse the LAST non-empty line to tolerate any logging noise.
     """
     workspace_inside_container = (
         spec.workspace.replace("~", "/home/node")
@@ -88,7 +95,7 @@ def invoke_agent_probe(spec, run_subprocess) -> dict:
 
     cmd = [
         "docker", "exec", CONTAINER_NAME,
-        "python3", script_path,
+        "python3", PROBE_AGENT_WRAPPER, script_path,
     ]
     try:
         proc = run_subprocess(
