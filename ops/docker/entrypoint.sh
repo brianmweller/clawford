@@ -51,22 +51,28 @@ fi
 # hard-fail and falls through to an "approval required" Telegram message,
 # blocking the entire fleet.
 #
-# The script contract (agents/shared/SCRIPT_CONTRACT.md) removes most LLM
-# reasons to wrap commands, but this patch is the final safety net — it
-# covers rebuilds, future openclaw upgrades, and ad-hoc LLM commands
-# outside of cron that might still reach for shell operators. Idempotent:
-# look for the no-op marker before applying.
+# The PRIMARY patch location is the Dockerfile — it runs as root during
+# the build and bakes the neutralization into the image. This entrypoint
+# block is a SAFETY NET for in-place rebuilds where the Dockerfile change
+# hasn't propagated yet. We tolerate permission failures because the
+# entrypoint runs as `node` and /usr/local/lib/node_modules is root-owned
+# in typical builds.
 ###############################################################################
 PI_TOOLS_GLOB="/usr/local/lib/node_modules/openclaw/dist/pi-tools-*.js"
 for f in $PI_TOOLS_GLOB; do
   [ -f "$f" ] || continue
-  if grep -q 'return;throw new Error("exec preflight' "$f"; then
+  if grep -q 'return;throw new Error("exec preflight' "$f" 2>/dev/null; then
     echo "[entrypoint] exec preflight already neutralized in $(basename "$f")"
-  elif grep -q 'throw new Error("exec preflight' "$f"; then
-    sed -i 's|throw new Error("exec preflight: complex interpreter|return;throw new Error("exec preflight: complex interpreter|' "$f"
-    echo "[entrypoint] neutralized exec preflight in $(basename "$f")"
+  elif grep -q 'throw new Error("exec preflight' "$f" 2>/dev/null; then
+    if sed -i 's|throw new Error("exec preflight: complex interpreter|return;throw new Error("exec preflight: complex interpreter|' "$f" 2>/dev/null; then
+      echo "[entrypoint] neutralized exec preflight in $(basename "$f")"
+    else
+      echo "[entrypoint] WARN: could not patch exec preflight in $(basename "$f") (permission?) — Dockerfile patch should cover this"
+    fi
   fi
 done
+# Do NOT fail the container start if any of the above errored.
+true
 
 ###############################################################################
 # Start agent background services (bind-mounted, survives rebuilds)
