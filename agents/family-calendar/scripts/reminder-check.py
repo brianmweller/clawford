@@ -43,6 +43,35 @@ TOKEN_PATH = os.environ.get(
     os.path.join(WORKSPACE, "token.json"),
 )
 
+# Mistress Mouse / Sergeant Murphy routing boundary: events present in
+# Murphy's workflowy-links.json are "meetings" (his domain). Mistress
+# Mouse must NOT fire reminders for those — Murphy owns them via
+# pre-meeting-alert. See memory: project_meeting_event_routing.md.
+WORKFLOWY_LINKS_PATH = os.environ.get(
+    "WORKFLOWY_LINKS_PATH",
+    os.path.expanduser(
+        "~/.openclaw/meetings-coach-workspace/cache/workflowy-links.json"
+    ),
+)
+
+
+def load_workflowy_linked_event_ids() -> set:
+    """Return the set of GCal event IDs that have a Workflowy link.
+
+    File-missing → empty set (degrade open: if Murphy hasn't recorded
+    any meetings yet, don't over-filter).
+    """
+    if not os.path.exists(WORKFLOWY_LINKS_PATH):
+        return set()
+    try:
+        with open(WORKFLOWY_LINKS_PATH) as f:
+            data = json.load(f)
+    except Exception:
+        return set()
+    if not isinstance(data, dict):
+        return set()
+    return set(data.keys())
+
 TRAVEL_KEYWORDS = re.compile(
     r"airport|doctor|dentist|hospital|clinic|urgent care|emergency",
     re.IGNORECASE,
@@ -165,6 +194,11 @@ def main():
     sent_data = prune_old_reminders(sent_data)
     sent_reminders = sent_data.get("reminders", {})
 
+    # Mistress Mouse / Sergeant Murphy routing boundary: load Murphy's
+    # workflowy-links.json and skip reminders for any event that has a
+    # Workflowy item (those are Murphy's pre-meeting-alert domain).
+    workflowy_linked_ids = load_workflowy_linked_event_ids()
+
     # Fetch events from all calendars
     reminders_to_send = []
 
@@ -195,6 +229,11 @@ def main():
                     continue
 
                 event_id = event.get("id", "")
+
+                # Routing boundary: Murphy owns Workflowy-linked events.
+                if event_id in workflowy_linked_ids:
+                    continue
+
                 summary = event.get("summary", "(No title)")
                 location = event.get("location", "")
                 start_time = start.get("dateTime", "")

@@ -42,11 +42,47 @@ CREDENTIALS_PATH = os.environ.get(
 )
 CACHE_DIR = os.path.join(WORKSPACE, "cache")
 
+# Cross-agent read: Sergeant Murphy's workflowy-links.json is the
+# authoritative signal for "this calendar event is a meeting". Per the
+# Mistress-Mouse/Sergeant-Murphy routing boundary (memory:
+# project_meeting_event_routing.md), events with a Workflowy link are
+# owned by Murphy; everything else is Mistress Mouse. We read Murphy's
+# cache file directly since both workspaces are on the same volume.
+WORKFLOWY_LINKS_PATH = os.path.expanduser(
+    "~/.openclaw/meetings-coach-workspace/cache/workflowy-links.json"
+)
+
+
+def load_workflowy_linked_event_ids() -> set:
+    """Return the set of GCal event IDs that have a Workflowy link.
+
+    These events are owned by Sergeant Murphy under the Mistress Mouse /
+    Sergeant Murphy routing boundary. Mistress Mouse should EXCLUDE them
+    from morning briefings and reminders so Sam doesn't get duplicate
+    coverage for the same event.
+
+    File-missing → empty set (degrade open: if Murphy hasn't recorded
+    any meetings yet, don't over-filter).
+    """
+    # Allow override via env for tests.
+    path = os.environ.get("WORKFLOWY_LINKS_PATH", WORKFLOWY_LINKS_PATH)
+    if not os.path.exists(path):
+        return set()
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except Exception:
+        return set()
+    if not isinstance(data, dict):
+        return set()
+    return set(data.keys())
+
 
 def parse_args():
     target_date = None
     days = 1
     calendar_id = None
+    skip_meetings = False
 
     i = 1
     while i < len(sys.argv):
@@ -59,10 +95,15 @@ def parse_args():
         elif sys.argv[i] == "--calendar-id" and i + 1 < len(sys.argv):
             calendar_id = sys.argv[i + 1]
             i += 2
+        elif sys.argv[i] == "--skip-meetings":
+            # Mistress Mouse / Sergeant Murphy boundary: skip events that
+            # have a Workflowy link (those are Murphy's, not Mistress Mouse's).
+            skip_meetings = True
+            i += 1
         else:
             i += 1
 
-    return target_date, days, calendar_id
+    return target_date, days, calendar_id, skip_meetings
 
 
 def load_config():
@@ -200,7 +241,7 @@ def dedup_events(events):
 
 
 def main():
-    target_date, days, filter_calendar_id = parse_args()
+    target_date, days, filter_calendar_id, skip_meetings = parse_args()
 
     # Load config
     config, err = load_config()
@@ -279,6 +320,21 @@ def main():
     # Dedup shared events
     all_events = dedup_events(all_events)
 
+    # Annotate each event with the Workflowy-link flag (cross-agent check).
+    # This is the Mistress Mouse / Sergeant Murphy routing boundary:
+    # events present in Murphy's workflowy-links.json are "meetings" (his
+    # domain); others are "events" (Mistress Mouse's domain).
+    workflowy_linked_ids = load_workflowy_linked_event_ids()
+    for event in all_events:
+        event["has_workflowy_item"] = event.get("id", "") in workflowy_linked_ids
+
+    # Apply --skip-meetings filter: drop the events that Murphy owns.
+    skipped_count = 0
+    if skip_meetings:
+        before = len(all_events)
+        all_events = [e for e in all_events if not e.get("has_workflowy_item")]
+        skipped_count = before - len(all_events)
+
     # Detect conflicts
     conflicts = detect_conflicts(all_events)
 
@@ -295,6 +351,8 @@ def main():
         "conflicts": conflicts,
         "errors": errors,
         "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "skip_meetings": skip_meetings,
+        "skipped_meetings_count": skipped_count,
     }
 
     with open(cache_path, "w") as f:
