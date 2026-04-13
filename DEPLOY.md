@@ -281,15 +281,42 @@ during the Huckle Cat (2026-04-12) build.
     call("setMyShortDescription", {"short_description": "..."})
     ```
 
+    **In practice, do not write the `python -c` by hand.** Two
+    canonical scripts live in `ops/scripts/` and run automatically
+    on every container start via `entrypoint.sh` hooks:
+
+    - `ops/scripts/set-bot-commands.sh` — sets `setMyCommands` for
+      all 6 agent bots. Runs ~25s after gateway start.
+    - `ops/scripts/set-bot-descriptions.sh` — sets `setMyDescription`
+      + `setMyShortDescription` for all 6 agent bots. Runs ~30s
+      after gateway start. Without this the empty-chat window is
+      blank — no hint of what the agent does. Voice matches Huckle
+      Cat's "Part of the Busytown OpenClaw network" tagline.
+
+    Both scripts are idempotent. Edit the script in git, push, pull,
+    and either `docker compose restart` (auto-runs both via the
+    entrypoint hooks) OR run them once by hand:
+
+    ```
+    ssh openclaw@198.51.100.42 "bash ~/repo/ops/scripts/set-bot-commands.sh"
+    ssh openclaw@198.51.100.42 "bash ~/repo/ops/scripts/set-bot-descriptions.sh"
+    ```
+
     **Gotchas:**
     - git-bash `curl` on Windows mangles UTF-8 quotes in JSON bodies.
-      Use Python's `urllib.request` with explicit UTF-8 encoding.
+      Use Python's `urllib.request` with explicit UTF-8 encoding —
+      both canonical scripts already do this.
     - After setting via Bot API, force-refresh the Telegram client to
       clear its cache: pull-down on the chat, or close/reopen the app.
-      Telegram caches command menus aggressively on the client side.
+      Telegram caches command menus AND descriptions aggressively on
+      the client side; you may need to close+reopen the chat entirely
+      to see new descriptions in the empty-chat window.
     - If commands were previously wrong, wipe the openclaw hash cache
       before restarting:
       `rm /home/node/.openclaw/telegram/command-hash-<account>-*.txt`
+    - openclaw NEVER touches the description fields (only commands),
+      so set-bot-descriptions.sh has no clobber risk — it's in the
+      entrypoint hook only to survive `docker compose up --build`.
 
 11. Smoke-test via Telegram: send a message, confirm the agent reads
     SOUL.md and runs its scripts without approval prompts.

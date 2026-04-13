@@ -113,6 +113,27 @@ if [[ -x "$BOT_CMDS" ]]; then
 fi
 
 ###############################################################################
+# Telegram bot description restore
+#
+# Sets setMyDescription + setMyShortDescription for every Busytown agent
+# bot. These fields populate the empty-chat window header (long) and the
+# chat list preview (short). Without this hook the empty chat is just
+# blank — no hint of what the agent does.
+#
+# Idempotent and cheap (one HTTP call per agent × 2). Runs ~30s after
+# gateway startup, slightly after set-bot-commands.sh so logs interleave
+# in a predictable order. openclaw never touches description fields, so
+# unlike commands there's no clobber risk — the only reason this is in
+# entrypoint.sh is to make it survive `docker compose up --build` cycles
+# without operator intervention.
+###############################################################################
+BOT_DESCS="/home/node/repo/ops/scripts/set-bot-descriptions.sh"
+if [[ -x "$BOT_DESCS" ]]; then
+  echo "[entrypoint] Scheduling bot-description restore in 30s ..."
+  (sleep 30 && bash "$BOT_DESCS" 2>&1 | sed 's/^/[bot-descs] /') &
+fi
+
+###############################################################################
 # Hand off to the real command (CMD from docker-compose)
 ###############################################################################
 exec "$@"
