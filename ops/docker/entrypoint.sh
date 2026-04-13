@@ -61,10 +61,20 @@ fi
 PI_TOOLS_GLOB="/usr/local/lib/node_modules/openclaw/dist/pi-tools-*.js"
 for f in $PI_TOOLS_GLOB; do
   [ -f "$f" ] || continue
+  # First, revert the earlier broken `return;throw` patch if it leaked
+  # into a running image — that approach inverted the if-check and
+  # triggered the preflight on innocent commands.
   if grep -q 'return;throw new Error("exec preflight' "$f" 2>/dev/null; then
+    sed -i 's|return;throw new Error("exec preflight|throw new Error("exec preflight|' "$f" 2>/dev/null \
+      && echo "[entrypoint] reverted broken return;throw patch in $(basename "$f")" \
+      || echo "[entrypoint] WARN: could not revert broken patch in $(basename "$f")"
+  fi
+  # Apply the correct `false &&` patch that turns the if-condition into
+  # a dead branch regardless of the actual predicates.
+  if grep -q 'if (false && hasInterpreterInvocation' "$f" 2>/dev/null; then
     echo "[entrypoint] exec preflight already neutralized in $(basename "$f")"
-  elif grep -q 'throw new Error("exec preflight' "$f" 2>/dev/null; then
-    if sed -i 's|throw new Error("exec preflight: complex interpreter|return;throw new Error("exec preflight: complex interpreter|' "$f" 2>/dev/null; then
+  elif grep -q 'if (hasInterpreterInvocation ' "$f" 2>/dev/null; then
+    if sed -i 's|if (hasInterpreterInvocation |if (false \&\& hasInterpreterInvocation |' "$f" 2>/dev/null; then
       echo "[entrypoint] neutralized exec preflight in $(basename "$f")"
     else
       echo "[entrypoint] WARN: could not patch exec preflight in $(basename "$f") (permission?) — Dockerfile patch should cover this"

@@ -78,14 +78,21 @@ RUN npm install -g openclaw@${OPENCLAW_VERSION}
 # combined with shell operators (`;`, `&&`, redirects, `sh -lc`, exit-code
 # capture). LLMs reflexively wrap cron commands that way, cascading the
 # entire fleet into "approval required" messages. There's no config flag
-# to disable it, so we sed-patch the throw into a no-op at build time.
-# See agents/shared/SCRIPT_CONTRACT.md and DEPLOY.md Gotcha §10.
+# to disable it, so we patch the condition to `false &&` at build time,
+# turning the `if` into a dead branch. See agents/shared/SCRIPT_CONTRACT.md.
+#
+# We also revert the earlier `return;throw` patch if it's present — that
+# approach inverted the check and was worse than the original bug.
 RUN for f in /usr/local/lib/node_modules/openclaw/dist/pi-tools-*.js; do \
       [ -f "$f" ] || continue; \
       if grep -q 'return;throw new Error("exec preflight' "$f"; then \
+        sed -i 's|return;throw new Error("exec preflight|throw new Error("exec preflight|' "$f" \
+          && echo "reverted broken return;throw patch in $(basename "$f")"; \
+      fi; \
+      if grep -q 'if (false && hasInterpreterInvocation' "$f"; then \
         echo "exec preflight already neutralized in $(basename "$f")"; \
-      elif grep -q 'throw new Error("exec preflight' "$f"; then \
-        sed -i 's|throw new Error("exec preflight: complex interpreter|return;throw new Error("exec preflight: complex interpreter|' "$f" \
+      elif grep -q 'if (hasInterpreterInvocation ' "$f"; then \
+        sed -i 's|if (hasInterpreterInvocation |if (false \&\& hasInterpreterInvocation |' "$f" \
           && echo "neutralized exec preflight in $(basename "$f")"; \
       fi; \
     done
