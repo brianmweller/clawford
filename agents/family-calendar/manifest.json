@@ -79,7 +79,7 @@
   "crons": [
     {
       "name": "morning-briefing",
-      "cron": "30 11 * * *",
+      "cron": "30 10 * * *",
       "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Generate and deliver the morning family briefing. 1) Run: python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 2 --skip-meetings. Read the JSON output \u2014 these are today's and tomorrow's events across all family calendars. 2) Format the briefing using the template in CRONS.md. Group events by time blocks (Morning, Afternoon, Evening). Use family member emoji (\ud83d\udc68 Sam, \ud83d\udc69 Alex, \ud83e\uddd2 Avery, \ud83d\udc76 Jordan, \ud83c\udfe0 Jamie). Flag any conflicts with \u26a0\ufe0f. Include a tomorrow preview. Check if today is a standard routine day (see MEMORY.md) \u2014 if no extra events, say 'Standard {weekday} \u2014 no exceptions.' Note the pickup arrangement for today (Mon=Sam+swimming, Fri=Sam, other=Jamie). 3) Write the formatted output to cache/morning-brief-ready.txt \u2014 this is the fleet-delivery cache file read by fix-it/morning-fleet-deliver at 12:00 UTC. Do NOT call timed-deliver.py; the fleet deliver cron handles the send. 5) Update your status file.",
       "announce": false,
       "no_deliver": true
