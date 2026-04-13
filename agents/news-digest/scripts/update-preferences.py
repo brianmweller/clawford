@@ -13,6 +13,7 @@ Usage: python3 update-preferences.py
 
 import json
 import os
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,8 +36,9 @@ TOPIC_WEIGHT_MAX = 3.0
 SOURCE_WEIGHT_MIN = 0.5
 SOURCE_WEIGHT_MAX = 2.0
 
-# Brave Search API key for the judge (reuse existing env var)
-BRAVE_API_KEY = os.environ.get("BRAVE_API_KEY", "")
+# Judge LLM call timeout. Generous because openclaw infer can have
+# variable latency depending on provider routing.
+JUDGE_TIMEOUT_S = 30
 
 
 def clamp(value, lo, hi):
@@ -80,56 +82,93 @@ def load_new_events(last_updated):
 
 
 def call_judge_llm(title, summary, topics, source, action):
-    """Call a cheap LLM via OpenAI to analyze WHY the user reacted.
+    """Call the judge LLM via `openclaw infer model run` to analyze WHY
+    the user reacted to an item.
 
-    Uses gpt-5.4-nano (cheapest, fastest) via the OpenAI API. Authenticates
-    using OPENAI_API_KEY from the environment.
+    Uses Sam's openclaw codex subscription, NOT a raw OpenAI API key.
+    See memory/feedback_no_api_keys_ever.md — scripts must never carry
+    raw API keys; always go through the openclaw inference layer.
 
     Returns a dict with:
-    - reason: one of IRRELEVANT_SUBTOPIC, LOW_QUALITY, STALE, WRONG_FRAMING, TOO_NICHE
-    - subtopics: list of finer-grained topic tags to adjust
-    - quality_signal: -1 (bad), 0 (neutral), 1 (good) for the source
-    - explanation: brief human-readable reason
-    """
-    from openai import OpenAI
+      - reason: one of IRRELEVANT_SUBTOPIC | LOW_QUALITY | STALE |
+                WRONG_FRAMING | TOO_NICHE | GOOD_CONTENT | IMPORTANT_TOPIC
+      - subtopics: list of finer-grained topic tags to adjust
+      - quality_signal: -1 (bad) / 0 (neutral) / 1 (good) for the source
+      - explanation: brief human-readable reason
 
+    Returns None on any failure so the caller falls back to coarse
+    multiplicative weight updates without subtopic enrichment.
+    """
     action_word = "liked" if action == "thumbs_up" else "disliked"
 
     prompt = (
-        f'The user {action_word} this news article in their morning digest.\n\n'
-        f'Title: {title}\n'
-        f'Summary: {summary[:300]}\n'
-        f'Current topics: {", ".join(topics)}\n'
-        f'Source: {source}\n\n'
-        f'Analyze why the user probably {action_word} this. '
-        f'Return ONLY valid JSON with these fields:\n'
-        f'{{"reason": "IRRELEVANT_SUBTOPIC|LOW_QUALITY|STALE|WRONG_FRAMING|TOO_NICHE|GOOD_CONTENT|IMPORTANT_TOPIC", '
+        f"The user {action_word} this news article in their morning digest.\n\n"
+        f"Title: {title}\n"
+        f"Summary: {summary[:300]}\n"
+        f"Current topics: {', '.join(topics)}\n"
+        f"Source: {source}\n\n"
+        f"Analyze why the user probably {action_word} this. "
+        f"Return ONLY valid JSON with these fields:\n"
+        f'{{"reason": "IRRELEVANT_SUBTOPIC|LOW_QUALITY|STALE|WRONG_FRAMING|'
+        f'TOO_NICHE|GOOD_CONTENT|IMPORTANT_TOPIC", '
         f'"subtopics": ["specific_tag_1", "specific_tag_2"], '
         f'"quality_signal": -1, '
         f'"explanation": "one sentence why"}}'
     )
 
     try:
-        client = OpenAI()
-        response = client.chat.completions.create(
-            model="gpt-5.4-nano",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            max_tokens=256,
+        result = subprocess.run(
+            ["openclaw", "infer", "model", "run", "--prompt", prompt, "--json"],
+            capture_output=True,
+            text=True,
+            timeout=JUDGE_TIMEOUT_S,
         )
-        output = response.choices[0].message.content.strip()
+    except FileNotFoundError:
+        print("  [judge] openclaw CLI not on PATH", file=sys.stderr)
+        return None
+    except subprocess.TimeoutExpired:
+        print(f"  [judge] timeout after {JUDGE_TIMEOUT_S}s", file=sys.stderr)
+        return None
 
-        # Parse JSON from the response (may be wrapped in markdown code block)
-        if output.startswith("```"):
-            output = output.split("```")[1]
-            if output.startswith("json"):
-                output = output[4:]
-        output = output.strip()
+    if result.returncode != 0:
+        print(
+            f"  [judge] openclaw infer exited {result.returncode}: "
+            f"{(result.stderr or '')[:200]}",
+            file=sys.stderr,
+        )
+        return None
 
-        return json.loads(output)
+    # `openclaw infer model run --json` shape:
+    #   {"ok": true, "provider": "...", "model": "...",
+    #    "outputs": [{"text": "<the model's response>", "mediaUrl": null}]}
+    try:
+        envelope = json.loads(result.stdout)
+        outputs = envelope.get("outputs") or []
+        if not (outputs and isinstance(outputs, list)):
+            return None
+        text = (outputs[0].get("text") or "").strip()
+    except (json.JSONDecodeError, AttributeError) as e:
+        print(f"  [judge] could not parse openclaw envelope: {e}", file=sys.stderr)
+        return None
 
-    except Exception as e:
-        print(f"  Judge LLM error: {e}", file=sys.stderr)
+    if not text:
+        return None
+
+    # Strip markdown fence if present (```json … ``` is common).
+    if text.startswith("```"):
+        # Drop leading fence + optional language tag, then trailing fence.
+        body = text[3:]
+        if body.lower().startswith("json"):
+            body = body[4:]
+        body = body.strip()
+        if body.endswith("```"):
+            body = body[:-3].strip()
+        text = body
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        print(f"  [judge] model output was not valid JSON: {e}", file=sys.stderr)
         return None
 
 
