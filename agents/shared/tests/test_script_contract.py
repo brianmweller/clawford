@@ -153,11 +153,6 @@ def test_cron_message_is_hygienic(agent_id: str, cron_name: str, msg: str) -> No
 # but the soft `test_script_is_natively_compliant` test marks them xfail
 # until converted. Add a reason when listing a script.
 NATIVE_COMPLIANCE_XFAIL: set[str] = {
-    # Heartbeat scripts use exit codes 0/1/2 as ok/degraded/error signals
-    # (Phase 4 redesign pending).
-    "fix-it/heartbeat.py",
-    "meetings-coach/heartbeat.py",
-    "shopping/heartbeat.py",
     # Module-level sys.exit patterns, pending conversion:
     "connector/notes-triage.py",
     "connector/commitment-scan.py",

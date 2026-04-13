@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
-"""
-heartbeat.py — Meetings Coach heartbeat: check auth, cron caches, write status.
+"""heartbeat.py — Meetings Coach heartbeat: check auth, cron caches, write status.
 
 Checks Google/Workflowy/Krisp auth, reads per-cron caches, verifies required
 files, prunes stale prep files, writes meetings-coach.status.md atomically.
 
-Exit codes:
-  0 = ok (cron should produce NO output)
-  1 = degraded (cron should send Telegram alert with the output)
-  2 = error (script bug)
+Conforms to agents/shared/SCRIPT_CONTRACT.md: always exits 0, prints one
+JSON line to stdout. The cron message parses the JSON and decides
+whether to send a Telegram alert based on the `status` field.
 """
 
 import glob
@@ -16,6 +14,7 @@ import json
 import os
 import sys
 import time
+import traceback
 from datetime import datetime, timezone
 
 WORKSPACE = os.path.expanduser("~/.openclaw/meetings-coach-workspace")
@@ -141,7 +140,7 @@ def prune_stale_preps():
             pass
 
 
-def main():
+def run() -> dict:
     now = datetime.now(timezone.utc)
     now_str = now.strftime("%Y-%m-%d %H:%M UTC")
 
@@ -154,20 +153,12 @@ def main():
     if missing_files:
         errors.append(f"missing: {', '.join(missing_files)}")
 
-    # Determine status
-    degraded = False
-    for field, val in auth.items():
-        if val == "missing":
-            degraded = True
-    if missing_files:
-        degraded = True
-
+    degraded = any(v == "missing" for v in auth.values()) or bool(missing_files)
     status = "degraded" if degraded else "ok"
 
     last_cron_run = cache_ts or now_str
     last_cron_name = cache_name or "heartbeat"
     last_cron_result = cache_summary or "heartbeat ran"
-
     error_log = "; ".join(errors) if errors else "none"
 
     content = f"""# Meetings Coach — Status
@@ -182,21 +173,39 @@ def main():
 - **error_log:** {error_log}
 - **token_usage_today:** —
 """
-
     try:
+        os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
         with open(OUTPUT_FILE, "w") as f:
             f.write(content)
     except Exception as e:
-        print(f"Write failed: {e}", file=sys.stderr)
-        sys.exit(2)
+        raise RuntimeError(f"status file write failed: {e}") from e
 
+    out: dict = {
+        "status": status,
+        "auth": auth,
+        "missing_files": missing_files,
+    }
     if degraded:
         details = [f"{k}={v}" for k, v in auth.items() if v == "missing"]
-        print(f"⚠️ meetings-coach degraded: {', '.join(details + errors)}")
-        sys.exit(1)
-    else:
-        sys.exit(0)
+        out["alert"] = (
+            f"⚠️ meetings-coach degraded: {', '.join(details + errors) or 'missing files'}"
+        )
+    return out
+
+
+def main() -> int:
+    try:
+        result = run()
+    except Exception as e:
+        result = {
+            "status": "error",
+            "error": str(e),
+            "alert": f"⚠️ meetings-coach heartbeat crashed: {e}",
+            "traceback": traceback.format_exc().splitlines()[-3:],
+        }
+    print(json.dumps(result))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
