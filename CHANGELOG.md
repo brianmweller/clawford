@@ -47,4 +47,4 @@
 - Per-agent Telegram bot pattern
 - Security hardening (chattr +i for SOUL/IDENTITY files)
 - Exec allowlist for agent shell access
-- GitHub repo (samsmith/clawford, private)
+- GitHub repo (private, your own handle)

@@ -68,6 +68,33 @@ clawford/
 
 Start here: **[guide/index.md](guide/index.md)** — a 10-chapter field manual covering VPS provisioning, shared brain, Dropbox sync, agent deployment, testing, and security hardening.
 
+## First-time setup: populate local config files
+
+Agent config / identity / state files (`USER.md`, `SOUL.md`, `MEMORY.md`, `manifest.json`, etc. under `agents/*/`) contain personal data — real names, calendar IDs, DOBs, contact emails — that isn't tracked in git. Only their sanitized `.example` templates are committed. On a fresh clone:
+
+```bash
+# Copy every agent-config .example template to its real name, then edit in your values.
+find agents -name '*.example' | while read f; do
+  target="${f%.example}"
+  if [ ! -e "$target" ]; then
+    cp "$f" "$target"
+    echo "Created $target — edit in your values"
+  fi
+done
+```
+
+Files you'll want to review and personalize after the copy:
+- `agents/*/USER.md` — your name, timezone, Telegram ID, communication preferences
+- `agents/*/SOUL.md`, `agents/*/MEMORY.md` — agent behavior + persistent context
+- `agents/family-calendar/calendar-config.json` — your Google Calendar IDs
+- `agents/meetings-coach/meeting-config.json` — your work calendar + speaker names for transcript coaching
+- `agents/connector/scripts/mine/family_map.py` + `mining-config.json` — your family email map and contact mining config
+- `agents/*/manifest.json` — cron schedules + Telegram bot bindings
+
+Templates use an obviously-fake placeholder family (Sam Smith / Alex Rivera / Avery Smith-Rivera / Jordan Smith-Rivera / Jamie Park). Replace with your own identities.
+
+Also copy `.env.example` to `.env` and fill in your secrets (Telegram bot tokens, OpenAI API key, VPS host, etc.).
+
 ## Security
 
 - Agent SOUL.md and IDENTITY.md files are immutable on the VPS (`chattr +i`)

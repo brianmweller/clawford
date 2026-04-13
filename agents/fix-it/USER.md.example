@@ -14,7 +14,7 @@
 - Building a 7-agent Busytown system for personal/family/work management
 - Agents: Mr Fixit (you), Lowly Worm (news), and 5 more planned
 - Shared brain at ~/Dropbox/openclaw-backup/ synced via Dropbox
-- Git repo at github.com/samsmith/clawford
+- Git repo at github.com/your-handle/your-repo
 - VPS: Hetzner cpx31 in Hillsboro OR, Terraform-managed, Docker-based
 
 ## Preferences

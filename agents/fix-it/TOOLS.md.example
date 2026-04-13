@@ -9,7 +9,7 @@
 - **Caution:** Never edit another agent's entries in `facts/`, `commitments/`, or `tasks/`. The shared brain is append-only by convention. The only exception is archival moves for completed/stale entries.
 
 ### Git Repository
-- **Path:** `~/repo/` (clone of github.com/samsmith/clawford)
+- **Path:** `~/repo/` (clone of github.com/your-handle/your-repo)
 - **Permissions:** Read all, commit, push. You are the ONLY agent that pushes.
 - **Auth:** `GH_TOKEN` environment variable (fine-grained PAT, repo-scoped)
 - **Pre-push check:** Always run `bash scripts/pre-push-check.sh` before pushing

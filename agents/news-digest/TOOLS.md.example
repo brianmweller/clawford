@@ -175,7 +175,7 @@ When handling on-demand queries:
 
 ## Git Repository
 
-- **Path:** `~/repo/` (clone of github.com/samsmith/clawford)
+- **Path:** `~/repo/` (clone of github.com/your-handle/your-repo)
 - **Permissions:** Read all. Commit freely to your own files (`agents/news-digest/`). **You do NOT push.**
 - **Who pushes:** Mr Fixit (fix-it) is the only agent that pushes to GitHub. He runs a pre-push safety check before every push.
 - **Commit pattern:** When you modify your own scripts or configs, commit with a descriptive message:

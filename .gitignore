@@ -33,3 +33,31 @@ __pycache__/
 # Google OAuth secrets
 credentials.json
 token.json
+
+# Local Claude Code settings (contains hardcoded paths + VPS IP)
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
+# === PII remediation (2026-04) ===
+# Agent config / identity / state files hold real names, DOBs, emails,
+# calendar IDs, and similar. Only the *.example templates are tracked;
+# the real unsuffixed files live on the operator's working tree only.
+# On a fresh clone, copy each *.example to its unsuffixed name and edit
+# in your own values. See DEPLOY.md "First-time setup" for the full list.
+agents/*/AGENTS.md
+agents/*/CRONS.md
+agents/*/HEARTBEAT.md
+agents/*/IDENTITY.md
+agents/*/MEMORY.md
+agents/*/SOUL.md
+agents/*/TOOLS.md
+agents/*/USER.md
+agents/*/manifest.json
+agents/family-calendar/calendar-config.json
+agents/connector/connector-config.json
+agents/meetings-coach/meeting-config.json
+agents/fix-it/expected-crons.json
+agents/fix-it/KNOWN_ISSUES.md
+agents/fix-it/probation.md
+agents/connector/scripts/mine/family_map.py
+agents/connector/scripts/mine/mining-config.json
