@@ -230,13 +230,6 @@
       "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Update your heartbeat. Write the current UTC timestamp to last_heartbeat in ~/Dropbox/openclaw-backup/agents/news-digest.status.md. Otherwise, return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent.",
       "announce": false,
       "no_deliver": true
-    },
-    {
-      "name": "engagement-poll",
-      "cron": "*/5 * * * *",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Process engagement signals. Run: python3 ~/.openclaw/news-digest-workspace/scripts/engagement-poller.py. This reads session transcripts for /like and /dislike commands, looks up articles in the item-map, and appends events to preferences/engagement.jsonl. Otherwise, return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent.",
-      "announce": false,
-      "no_deliver": true
     }
   ]
 }

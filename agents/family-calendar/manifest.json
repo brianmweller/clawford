@@ -85,13 +85,6 @@
       "no_deliver": true
     },
     {
-      "name": "reminder-check",
-      "cron": "*/5 * * * *",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Check for upcoming events that need reminders. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/reminder-check.py. Read the JSON output. If the output contains reminders: for each one, send a Telegram message '\ud83d\udc2d Heads up \u2014 {emoji} {person} {event} in {minutes} min ({location})'. If the output is empty (no reminders needed): return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. Update your status file only if reminders were sent.",
-      "announce": false,
-      "no_deliver": true
-    },
-    {
       "name": "heartbeat",
       "cron": "*/30 * * * *",
       "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Update your heartbeat. Write the current UTC timestamp to last_heartbeat in ~/Dropbox/openclaw-backup/agents/family-calendar.status.md. Verify these files exist: calendar-config.json, sent-reminders.json. Check if sent-reminders.json has entries older than 48 hours \u2014 if so, prune them. If everything is normal, return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent.",

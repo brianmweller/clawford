@@ -33,6 +33,7 @@ import json
 import os
 import re
 import sys
+import urllib.request as urllib_request
 from datetime import datetime, timedelta, timezone
 
 WORKSPACE = os.path.expanduser("~/.openclaw/family-calendar-workspace")
@@ -124,6 +125,60 @@ def classify_tier(summary, location):
     return "30min", 30
 
 
+def format_reminder_message(reminder: dict) -> str:
+    """Render one reminder as the Telegram body text.
+
+    Output shape:
+      "🐭 Heads up — {emoji} {label} {summary} in {minutes} min ({location})"
+    Emoji and location are both optional — each is omitted gracefully
+    when empty.
+    """
+    emoji = reminder.get("calendar_emoji", "")
+    label = reminder.get("calendar_label", "")
+    summary = reminder.get("summary", "(No title)")
+    minutes = reminder.get("starts_in_min", 0)
+    location = reminder.get("location", "")
+
+    who = f"{emoji} {label}".strip()
+    base = f"🐭 Heads up — {who} {summary} in {minutes} min"
+    if location:
+        base += f" ({location})"
+    return base
+
+
+def send_telegram(bot_token: str, chat_id: str, text: str) -> bool:
+    """POST one reminder to the Telegram Bot API.
+
+    Returns True only if the API responds with body.ok == True. Empty
+    bot_token or chat_id returns False without hitting the network
+    (useful so tests can confirm the host wrapper's env plumbing).
+
+    Any exception (network, auth, rate-limit) logs to stderr and
+    returns False — callers use the bool to decide whether to update
+    the sent-reminders dedup cache.
+    """
+    if not bot_token or not chat_id:
+        return False
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = json.dumps({
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": True,
+    }).encode("utf-8")
+    req = urllib_request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        resp = urllib_request.urlopen(req, timeout=15)
+        body = json.loads(resp.read())
+        return bool(body.get("ok"))
+    except Exception as e:
+        print(f"Telegram send failed: {e}", file=sys.stderr)
+        return False
+
+
 def get_credentials():
     """Load OAuth2 credentials."""
     try:
@@ -162,8 +217,8 @@ def get_credentials():
 def main():
     # Load config
     if not os.path.exists(CONFIG_PATH):
-        print(json.dumps([]))
-        sys.exit(0)
+        print(json.dumps({"status": "ok", "sent": 0}))
+        return
 
     with open(CONFIG_PATH) as f:
         config = json.load(f)
@@ -171,18 +226,24 @@ def main():
     # Get credentials
     creds, err = get_credentials()
     if err:
-        print(json.dumps({"status": "error", "message": err}), file=sys.stderr)
-        print(json.dumps([]))
-        sys.exit(1)
+        print(json.dumps({
+            "status": "error",
+            "sent": 0,
+            "alert": f"🐭 reminder-check auth failed: {err}",
+        }))
+        return
 
     # Build service
     try:
         from googleapiclient.discovery import build
         service = build("calendar", "v3", credentials=creds)
     except Exception as e:
-        print(json.dumps({"status": "error", "message": str(e)}), file=sys.stderr)
-        print(json.dumps([]))
-        sys.exit(1)
+        print(json.dumps({
+            "status": "error",
+            "sent": 0,
+            "alert": f"🐭 reminder-check gcal build failed: {e}",
+        }))
+        return
 
     # Time window: now to now+60min
     now = datetime.now(timezone.utc)
@@ -277,17 +338,39 @@ def main():
         except Exception as e:
             print(f"Error fetching {label}: {e}", file=sys.stderr)
 
-    # Mark reminders as sent
+    # Send each reminder via Telegram, and only mark the dedup key in
+    # sent_reminders AFTER the POST returns ok. This fixes a pre-existing
+    # bug where the old LLM cron marked reminders sent BEFORE actually
+    # calling the Telegram tool — a failed send left the user without
+    # a reminder but with a "sent" flag that blocked retry.
+    bot_token = os.environ.get("FAMILYCAL_BOT_TOKEN", "")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+    sent_count = 0
+    failed_count = 0
     for reminder in reminders_to_send:
-        key = reminder.pop("_dedup_key")
-        sent_reminders[key] = now.isoformat()
+        dedup_key = reminder.pop("_dedup_key")
+        msg = format_reminder_message(reminder)
+        if send_telegram(bot_token, chat_id, msg):
+            sent_reminders[dedup_key] = now.isoformat()
+            sent_count += 1
+        else:
+            failed_count += 1
 
     # Save updated sent reminders
     sent_data["reminders"] = sent_reminders
     save_sent_reminders(sent_data)
 
-    # Output
-    print(json.dumps(reminders_to_send, indent=2))
+    # SCRIPT_CONTRACT-compliant stdout line.
+    result: dict = {"status": "ok", "sent": sent_count}
+    if failed_count:
+        result["status"] = "degraded"
+        result["failed"] = failed_count
+        result["alert"] = (
+            f"🐭 reminder-check: {failed_count} telegram send(s) failed "
+            f"(FAMILYCAL_BOT_TOKEN or TELEGRAM_CHAT_ID missing?)"
+        )
+    print(json.dumps(result))
 
 
 if __name__ == "__main__":

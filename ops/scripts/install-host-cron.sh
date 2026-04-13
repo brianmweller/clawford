@@ -11,10 +11,12 @@
 #   0 12 * * *   morning-fleet-deliver-host.sh  (5:00 AM PDT — morning briefs)
 #
 # Registered entries (via generic script-contract-host.sh wrapper):
-#   */30 * * * *  shopping-heartbeat           → SHOPPING_BOT_TOKEN
-#   */30 * * * *  meetings-coach-heartbeat     → MEETINGS_BOT_TOKEN
-#   */30 * * * *  fix-it-heartbeat-check       → TELEGRAM_BOT_TOKEN
-#   0 */6 * * *   linkedin-keepalive           → NEWSDIGEST_BOT_TOKEN
+#   */30 * * * *  shopping-heartbeat              → SHOPPING_BOT_TOKEN
+#   */30 * * * *  meetings-coach-heartbeat        → MEETINGS_BOT_TOKEN
+#   */30 * * * *  fix-it-heartbeat-check          → TELEGRAM_BOT_TOKEN
+#   0 */6 * * *   linkedin-keepalive              → NEWSDIGEST_BOT_TOKEN
+#   */5 * * * *   family-calendar-reminder-check  → FAMILYCAL_BOT_TOKEN
+#   */5 * * * *   news-digest-engagement-poll     → NEWSDIGEST_BOT_TOKEN
 #
 # Usage: ssh openclaw@198.51.100.42 "/home/openclaw/repo/ops/scripts/install-host-cron.sh"
 set -euo pipefail
@@ -37,6 +39,8 @@ CONTRACT_ENTRIES=(
   "*/30 * * * *|meetings-coach-heartbeat|/home/node/.openclaw/meetings-coach-workspace/scripts/heartbeat.py|MEETINGS_BOT_TOKEN|120"
   "*/30 * * * *|fix-it-heartbeat-check|/home/node/.openclaw/fix-it-workspace/scripts/heartbeat.py|TELEGRAM_BOT_TOKEN|120"
   "0 */6 * * *|linkedin-keepalive|/home/node/.openclaw/news-digest-workspace/scripts/linkedin-keepalive.py|NEWSDIGEST_BOT_TOKEN|300"
+  "*/5 * * * *|family-calendar-reminder-check|/home/node/.openclaw/family-calendar-workspace/scripts/reminder-check.py|FAMILYCAL_BOT_TOKEN|90"
+  "*/5 * * * *|news-digest-engagement-poll|/home/node/.openclaw/news-digest-workspace/scripts/engagement-poller.py|NEWSDIGEST_BOT_TOKEN|60"
 )
 
 NEW_LINES=()
