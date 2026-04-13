@@ -1,0 +1,41 @@
+services:
+  openclaw-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        OPENCLAW_VERSION: "2026.4.1"
+    env_file:
+      - .env
+      - secrets.env
+    restart: unless-stopped
+    environment:
+      HOME: /home/node
+      NODE_ENV: production
+      TERM: xterm-256color
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+      OPENCLAW_GATEWAY_PORT: ${OPENCLAW_GATEWAY_PORT:-18789}
+      OPENCLAW_GATEWAY_BIND: ${OPENCLAW_GATEWAY_BIND:-0.0.0.0}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      NEWSDIGEST_BOT_TOKEN: ${NEWSDIGEST_BOT_TOKEN:-}
+      SHOPPING_BOT_TOKEN: ${SHOPPING_BOT_TOKEN:-}
+      BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+      LINKEDIN_USER: ${LINKEDIN_USER:-}
+      LINKEDIN_PASS: ${LINKEDIN_PASS:-}
+      LINKEDIN_LI_AT: ${LINKEDIN_LI_AT:-}
+      LINKEDIN_JSESSIONID: ${LINKEDIN_JSESSIONID:-}
+      APIFY_API_TOKEN: ${APIFY_API_TOKEN:-}
+      GH_TOKEN: ${GH_TOKEN:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      MEETINGS_BOT_TOKEN: ${MEETINGS_BOT_TOKEN:-}
+      WORKFLOWY_API_KEY: ${WORKFLOWY_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      FAMILYCAL_BOT_TOKEN: ${FAMILYCAL_BOT_TOKEN:-}
+    volumes:
+      - /home/openclaw/.openclaw:/home/node/.openclaw
+      - /home/openclaw/.openclaw/workspace:/home/node/.openclaw/workspace
+      - /home/openclaw/Dropbox/openclaw-backup:/home/node/Dropbox/openclaw-backup
+      - /home/openclaw/repo:/home/node/repo
+    ports:
+      - "127.0.0.1:18789:18789"
+    command: openclaw gateway --bind lan --port 18789
