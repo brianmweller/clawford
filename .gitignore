@@ -1,6 +1,13 @@
 # Secrets
 .env
 
+# Deploy-infra secrets (ops/ contains deploy infrastructure rescued
+# from the VPS; these specific files contain bot tokens / Amazon
+# TOTP / channel bot config inline — NEVER commit them.)
+ops/.env
+ops/secrets.env
+ops/config/openclaw.json
+
 # Large binaries
 *.pdf
 
