@@ -28,7 +28,11 @@
     "scripts/on-demand.py",
     "scripts/linkedin-scrape.py",
     "scripts/linkedin-keepalive.py",
-    "scripts/linkedin-auth.py"
+    "scripts/linkedin-auth.py",
+    "scripts/linkedin-extract.js",
+    "scripts/linkedin-messages-extract.js",
+    "scripts/linkedin-notifs-extract.js",
+    "scripts/linkedin-viewers-extract.js"
   ],
   "state_files": [
     {
