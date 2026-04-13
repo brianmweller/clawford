@@ -40,7 +40,8 @@
     "scripts/timed-deliver.py",
     "scripts/activity-email-check.py",
     "scripts/gmail-invite-check.py",
-    "scripts/chat-parse-schedule.py"
+    "scripts/chat-parse-schedule.py",
+    "scripts/heartbeat.py"
   ],
   "state_files": [
     {

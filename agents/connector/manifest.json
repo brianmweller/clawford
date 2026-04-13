@@ -36,7 +36,8 @@
     "scripts/people-scan.py",
     "scripts/notes-triage.py",
     "scripts/commitment-scan.py",
-    "scripts/timed-deliver.py"
+    "scripts/timed-deliver.py",
+    "scripts/heartbeat.py"
   ],
   "state_files": [
     {

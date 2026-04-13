@@ -32,7 +32,8 @@
     "scripts/linkedin-extract.js",
     "scripts/linkedin-messages-extract.js",
     "scripts/linkedin-notifs-extract.js",
-    "scripts/linkedin-viewers-extract.js"
+    "scripts/linkedin-viewers-extract.js",
+    "scripts/heartbeat.py"
   ],
   "state_files": [
     {
