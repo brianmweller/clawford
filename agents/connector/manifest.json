@@ -132,13 +132,6 @@
       "no_deliver": true
     },
     {
-      "name": "heartbeat",
-      "cron": "*/30 * * * *",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Update your heartbeat. Write the current UTC timestamp to last_heartbeat in ~/Dropbox/openclaw-backup/agents/connector.status.md. Verify these files exist: connector-config.json, pending-triage.json. Check cache/ for files older than 14 days \u2014 prune if found. Prune pending-triage.json entries older than 48 hours. If everything is normal, return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent.",
-      "announce": false,
-      "no_deliver": true
-    },
-    {
       "name": "weekly-review",
       "cron": "0 0 * * 0",
       "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Generate the weekly relationship review. 1) Run people-scan.py to get current check-in state. 2) Read checkin-log.json for this week's check-ins. 3) Compile: check-ins recorded, notes triaged, facts added, people tracked, still-overdue contacts. 4) Format using the template in CRONS.md. 5) Deliver to Telegram.",

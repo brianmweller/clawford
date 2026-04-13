@@ -86,13 +86,6 @@
       "no_deliver": true
     },
     {
-      "name": "heartbeat",
-      "cron": "*/30 * * * *",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Update your heartbeat. Write the current UTC timestamp to last_heartbeat in ~/Dropbox/openclaw-backup/agents/family-calendar.status.md. Verify these files exist: calendar-config.json, sent-reminders.json. Check if sent-reminders.json has entries older than 48 hours \u2014 if so, prune them. If everything is normal, return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent.",
-      "announce": false,
-      "no_deliver": true
-    },
-    {
       "name": "activity-email-check",
       "cron": "15 */2 * * *",
       "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Check Gmail for emails from activity providers. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/activity-email-check.py. Read the JSON output \u2014 these are emails from Example Preschool, Example Swim School, and Example Ballet Studio in the last 48 hours. For each email with schedule-relevant content (closures, cancellations, action items, event changes): classify the urgency and send a Telegram message. Closures/cancellations: '\ud83d\udc2d \u26a0\ufe0f {source}: {summary}'. Action items: '\ud83d\udc2d \ud83d\udccb {source}: {summary}'. Events/FYI: '\ud83d\udc2d \ud83d\udccc {source}: {summary}'. If no actionable items found, return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. Update your status file.",

@@ -224,13 +224,6 @@
       "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Process today's engagement signals and update the preference model. Run: python3 ~/.openclaw/news-digest-workspace/scripts/update-preferences.py. This reads new entries from preferences/engagement.jsonl, applies multiplicative weight updates (thumbs_up: topic \u00d71.1 source \u00d71.05, thumbs_down: topic \u00d70.85 source \u00d70.95, expand: topic \u00d71.05), clamps weights to safe ranges, and writes updated model to preferences/model.json. If there are no new engagement events, skip the update silently. Update your status file with the number of events processed and otherwise, return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent.",
       "announce": false,
       "no_deliver": true
-    },
-    {
-      "name": "heartbeat",
-      "cron": "*/30 * * * *",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Update your heartbeat. Write the current UTC timestamp to last_heartbeat in ~/Dropbox/openclaw-backup/agents/news-digest.status.md. Otherwise, return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent.",
-      "announce": false,
-      "no_deliver": true
     }
   ]
 }

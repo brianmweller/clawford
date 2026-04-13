@@ -11,12 +11,15 @@
 #   0 12 * * *   morning-fleet-deliver-host.sh  (5:00 AM PDT — morning briefs)
 #
 # Registered entries (via generic script-contract-host.sh wrapper):
-#   */30 * * * *  shopping-heartbeat              → SHOPPING_BOT_TOKEN
-#   */30 * * * *  meetings-coach-heartbeat        → MEETINGS_BOT_TOKEN
-#   */30 * * * *  fix-it-heartbeat-check          → TELEGRAM_BOT_TOKEN
+#   */15 * * * *  fleet-health                    → TELEGRAM_BOT_TOKEN  (R3 — replaces per-agent heartbeats)
 #   0 */6 * * *   linkedin-keepalive              → NEWSDIGEST_BOT_TOKEN
 #   */5 * * * *   family-calendar-reminder-check  → FAMILYCAL_BOT_TOKEN
 #   */5 * * * *   news-digest-engagement-poll     → NEWSDIGEST_BOT_TOKEN
+#
+# Removed in R3 (replaced by fleet-health):
+#   */30 * * * *  shopping-heartbeat              → covered by fleet-health
+#   */30 * * * *  meetings-coach-heartbeat        → covered by fleet-health
+#   */30 * * * *  fix-it-heartbeat-check          → covered by fleet-health
 #
 # Usage: ssh openclaw@198.51.100.42 "/home/openclaw/repo/ops/scripts/install-host-cron.sh"
 set -euo pipefail
@@ -35,12 +38,22 @@ DIRECT_ENTRIES=(
 # Format: "<schedule>|<logname>|<container-script-path>|<bot-token-env>|<timeout-s>"
 # Marker is derived from logname: "# script-contract-<logname>"
 CONTRACT_ENTRIES=(
-  "*/30 * * * *|shopping-heartbeat|/home/node/.openclaw/shopping-workspace/scripts/heartbeat.py|SHOPPING_BOT_TOKEN|120"
-  "*/30 * * * *|meetings-coach-heartbeat|/home/node/.openclaw/meetings-coach-workspace/scripts/heartbeat.py|MEETINGS_BOT_TOKEN|120"
-  "*/30 * * * *|fix-it-heartbeat-check|/home/node/.openclaw/fix-it-workspace/scripts/heartbeat.py|TELEGRAM_BOT_TOKEN|120"
+  "*/15 * * * *|fleet-health|/home/node/repo/ops/scripts/fleet-health.py|TELEGRAM_BOT_TOKEN|180"
   "0 */6 * * *|linkedin-keepalive|/home/node/.openclaw/news-digest-workspace/scripts/linkedin-keepalive.py|NEWSDIGEST_BOT_TOKEN|300"
   "*/5 * * * *|family-calendar-reminder-check|/home/node/.openclaw/family-calendar-workspace/scripts/reminder-check.py|FAMILYCAL_BOT_TOKEN|90"
   "*/5 * * * *|news-digest-engagement-poll|/home/node/.openclaw/news-digest-workspace/scripts/engagement-poller.py|NEWSDIGEST_BOT_TOKEN|60"
+)
+
+# Markers for old entries to REMOVE on next install run. Used by the
+# remove-stale step below — any crontab line containing one of these
+# markers is dropped before adding the new CONTRACT_ENTRIES. This
+# closes the install-host-cron.sh "yo-yo" gap from the R3 transition:
+# previously we asked the operator to manually `crontab -e` to drop
+# the old entries; now this script does it.
+STALE_MARKERS=(
+  "# script-contract-shopping-heartbeat"
+  "# script-contract-meetings-coach-heartbeat"
+  "# script-contract-fix-it-heartbeat-check"
 )
 
 NEW_LINES=()
@@ -86,8 +99,37 @@ for entry in "${CONTRACT_ENTRIES[@]}"; do
   NEW_LINES+=("$schedule $CONTRACT_WRAPPER $logname $script_path $token_env $timeout_s $marker")
 done
 
-if [[ ${#NEW_LINES[@]} -eq 0 ]]; then
+# Drop any stale crontab lines whose marker matches STALE_MARKERS.
+# This handles the install-host-cron.sh "yo-yo" case where a prior
+# version of this script registered an entry that's since been
+# replaced (e.g. R3 replacing 3 per-agent heartbeat crons with one
+# fleet-health entry). Without this the operator would have to
+# `crontab -e` manually to remove the old lines.
+STALE_REMOVED=0
+if [[ ${#STALE_MARKERS[@]} -gt 0 ]]; then
+  CURRENT=$(crontab -l 2>/dev/null || true)
+  if [[ -n "$CURRENT" ]]; then
+    FILTERED="$CURRENT"
+    for marker in "${STALE_MARKERS[@]}"; do
+      if echo "$FILTERED" | grep -Fq "$marker"; then
+        FILTERED=$(echo "$FILTERED" | grep -vF "$marker")
+        STALE_REMOVED=$((STALE_REMOVED + 1))
+        echo "[install-host-cron] removed stale entry: $marker"
+      fi
+    done
+    if [[ "$STALE_REMOVED" -gt 0 ]]; then
+      echo "$FILTERED" | crontab -
+    fi
+  fi
+fi
+
+if [[ ${#NEW_LINES[@]} -eq 0 ]] && [[ "$STALE_REMOVED" -eq 0 ]]; then
   echo "[install-host-cron] all entries already registered — nothing to do"
+  exit 0
+fi
+
+if [[ ${#NEW_LINES[@]} -eq 0 ]]; then
+  echo "[install-host-cron] removed $STALE_REMOVED stale entries; no new lines to add"
   exit 0
 fi
 
