@@ -128,10 +128,18 @@ def test_deploy_one_proceeds_when_config_valid(
 ):
     """Happy path: valid config → deploy proceeds normally."""
     monkeypatch.setattr(deploy_module, "BACKUPS_ROOT", tmp_path / "backups", raising=False)
-    monkeypatch.setattr(
-        deploy_module,
-        "oc_json",
-        lambda *a, **kw: {"valid": True, "path": "/fake"},
-    )
+    def fake_oc_json(*args, **kw):
+        if args[:2] == ("config", "validate"):
+            return {"valid": True, "path": "/fake"}
+        if args[:2] == ("approvals", "get"):
+            return {
+                "defaults": {"security": "full", "ask": "off"},
+                "agents": {
+                    "main":      {"security": "full", "policy": "full", "ask": "off", "allowlist": []},
+                    "testagent": {"security": "full", "policy": "full", "ask": "off", "allowlist": []},
+                },
+            }
+        return {"jobs": []}
+    monkeypatch.setattr(deploy_module, "oc_json", fake_oc_json)
     rc = deploy_module.deploy_one("testagent", _make_args())
     assert rc == 0

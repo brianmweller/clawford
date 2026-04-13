@@ -503,6 +503,75 @@ def seed_state_file(path: Path, content: Any) -> str:
 # ────────────────────────────────────────────────────────────────────────
 
 
+def check_exec_approvals_baseline() -> list[str]:
+    """Return a list of drift errors from the ops/exec-approvals-baseline.json invariant.
+
+    Reads the baseline from ops/exec-approvals-baseline.json (a small
+    invariant schema that encodes "every agent must have
+    security=full, policy=full, ask=off; defaults must match"). Fetches
+    the live exec-approvals state via
+    `openclaw approvals get --json` and flat-compares each declared key.
+
+    Extra live allowlist entries are fine — they're volatile and not
+    part of the baseline. We only check the specific keys declared in
+    the baseline file.
+
+    Returns an empty list on clean. Non-empty → deploy.py refuses to
+    proceed with exit code 7.
+
+    Context: the 2026-04-13 "every agent shows approval required"
+    incident was caused by `defaults.security: "allowlist"` + `agents.main`
+    with only 2 allowlist patterns. Everything worked for weeks until an
+    openclaw upgrade started enforcing the stricter side, at which
+    point every cron session was blocked. This guard catches that
+    class of regression at deploy time.
+    """
+    baseline_path = REPO_ROOT / "ops" / "exec-approvals-baseline.json"
+    if not baseline_path.exists():
+        return [f"baseline file not found: {baseline_path}"]
+    try:
+        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        return [f"baseline file unreadable: {e}"]
+
+    try:
+        live = oc_json("approvals", "get", "--json")
+    except Exception as e:
+        return [f"openclaw approvals get failed: {e}"]
+
+    if not isinstance(live, dict):
+        return [f"openclaw approvals get returned unexpected shape: {type(live).__name__}"]
+
+    errors: list[str] = []
+
+    # defaults.* check
+    baseline_defaults = baseline.get("defaults", {}) or {}
+    live_defaults = live.get("defaults", {}) or {}
+    for k, expected in baseline_defaults.items():
+        actual = live_defaults.get(k)
+        if actual != expected:
+            errors.append(
+                f"defaults.{k}: expected {expected!r}, got {actual!r}"
+            )
+
+    # agents.* check
+    baseline_agents = baseline.get("agents", {}) or {}
+    live_agents = live.get("agents", {}) or {}
+    for agent_id, expected_fields in baseline_agents.items():
+        if agent_id not in live_agents:
+            errors.append(f"agents.{agent_id}: missing from live exec-approvals")
+            continue
+        live_agent = live_agents[agent_id] or {}
+        for k, expected in (expected_fields or {}).items():
+            actual = live_agent.get(k)
+            if actual != expected:
+                errors.append(
+                    f"agents.{agent_id}.{k}: expected {expected!r}, got {actual!r}"
+                )
+
+    return errors
+
+
 def check_openclaw_config_valid() -> list[str]:
     """Return a list of validation errors from `openclaw config validate`.
 
@@ -1113,6 +1182,22 @@ def deploy_one(agent_id: str, args: argparse.Namespace) -> int:
         log("Hint: openclaw doctor --fix", "err")
         return 6
     log("openclaw.json schema valid", "ok")
+
+    # Safeguard 8: refuse if exec-approvals drifts from the committed baseline.
+    # Catches the 2026-04-13 "every agent shows approval required" class: the
+    # live exec-approvals.json quietly regressed to defaults.security=allowlist
+    # and main.policy=allowlist, blocking every cron session. The baseline
+    # lives at ops/exec-approvals-baseline.json and encodes "defaults=full/off,
+    # every agent=full/full/off".
+    approval_errors = check_exec_approvals_baseline()
+    if approval_errors:
+        log(f"exec-approvals drift from baseline ({len(approval_errors)} issue(s)):", "err")
+        for e in approval_errors:
+            log(f"  {e}", "err")
+        log("Refuse to deploy — fix ~/.openclaw/exec-approvals.json first.", "err")
+        log("Baseline: ops/exec-approvals-baseline.json", "err")
+        return 7
+    log("exec-approvals matches baseline", "ok")
 
     # Safeguard 2: refuse if the source agent dir has uncommitted edits or
     # untracked files, unless --allow-dirty. Prevents the 2026-04-12 incident

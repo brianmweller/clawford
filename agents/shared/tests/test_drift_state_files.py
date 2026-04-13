@@ -78,6 +78,19 @@ def source_repo_with_state_file(tmp_path: Path) -> Path:
         json.dumps(manifest, indent=2), encoding="utf-8"
     )
 
+    ops_dir = repo / "ops"
+    ops_dir.mkdir(exist_ok=True)
+    baseline = {
+        "defaults": {"security": "full", "ask": "off"},
+        "agents": {
+            "main":       {"security": "full", "policy": "full", "ask": "off"},
+            "stateagent": {"security": "full", "policy": "full", "ask": "off"},
+        },
+    }
+    (ops_dir / "exec-approvals-baseline.json").write_text(
+        json.dumps(baseline, indent=2), encoding="utf-8"
+    )
+
     _run(["git", "init", "-q"], cwd=repo)
     _run(["git", "config", "user.email", "test@example.com"], cwd=repo)
     _run(["git", "config", "user.name", "test"], cwd=repo)
@@ -105,6 +118,14 @@ def deploy_module_stateagent(source_repo_with_state_file, monkeypatch):
     def fake_oc_json(*args, **kwargs):
         if args[:2] == ("config", "validate"):
             return {"valid": True, "path": "/fake/openclaw.json"}
+        if args[:2] == ("approvals", "get"):
+            return {
+                "defaults": {"security": "full", "ask": "off"},
+                "agents": {
+                    "main":       {"security": "full", "policy": "full", "ask": "off", "allowlist": []},
+                    "stateagent": {"security": "full", "policy": "full", "ask": "off", "allowlist": []},
+                },
+            }
         return {"jobs": []}
     monkeypatch.setattr(deploy, "oc_json", fake_oc_json)
     return deploy

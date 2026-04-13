@@ -1,0 +1,44 @@
+{
+  "_comment": "Invariant baseline for ~/.openclaw/exec-approvals.json. Enforced by deploy.py Safeguard 8. Only the keys present here are checked; the live file may have additional allowlist entries + volatile fields (lastUsedAt, lastUsedCommand) that this baseline ignores.",
+  "defaults": {
+    "security": "full",
+    "ask": "off"
+  },
+  "agents": {
+    "main": {
+      "security": "full",
+      "policy": "full",
+      "ask": "off"
+    },
+    "connector": {
+      "security": "full",
+      "policy": "full",
+      "ask": "off"
+    },
+    "family-calendar": {
+      "security": "full",
+      "policy": "full",
+      "ask": "off"
+    },
+    "fix-it": {
+      "security": "full",
+      "policy": "full",
+      "ask": "off"
+    },
+    "meetings-coach": {
+      "security": "full",
+      "policy": "full",
+      "ask": "off"
+    },
+    "news-digest": {
+      "security": "full",
+      "policy": "full",
+      "ask": "off"
+    },
+    "shopping": {
+      "security": "full",
+      "policy": "full",
+      "ask": "off"
+    }
+  }
+}
