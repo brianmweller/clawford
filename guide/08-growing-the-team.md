@@ -53,9 +53,19 @@ Python deploy tool at `agents/shared/deploy.py`.
    review and confirm.
 8. **Smoke test:** `oc cron run <heartbeat-id>`, check Telegram.
    Or run with `--smoke-test` on step 7 to have it automatic.
-9. **Set bot commands:** `bash ~/openclaw/scripts/set-bot-commands.sh`
-   (OpenClaw overwrites bot commands on every restart; this script
-   re-applies all agents).
+9. **Set bot commands and descriptions:**
+   ```
+   bash ~/repo/ops/scripts/set-bot-commands.sh
+   bash ~/repo/ops/scripts/set-bot-descriptions.sh
+   ```
+   The first re-applies the slash-command menus (OpenClaw clobbers
+   them on restart). The second sets the long + short descriptions
+   that show in the empty-chat window — without it, opening a fresh
+   chat with the bot looks blank. Both run automatically via
+   `entrypoint.sh` hooks on container start; this is the
+   belt-and-suspenders manual fire after adding a new agent. See
+   [chapter 5 — Telegram bots](05-telegram-bots.md#commands-and-descriptions)
+   for the full pattern.
 10. **Test suite:** `bash ~/openclaw-tests/test-agent.sh <agent-id>`
 
 ## Writing a SOUL.md
