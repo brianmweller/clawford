@@ -807,6 +807,172 @@ host cron (R3, commit `949e99a`) which calls every agent's
 still the right pattern for per-agent SCRIPT_CONTRACT scripts
 that shouldn't be aggregated into the fleet snapshot.
 
+### 15. fix-it's cron-self-check will recreate stale entries in expected-crons.json (2026-04-14)
+
+**Context:** Mr Fixit has a daily `cron-self-check` LLM cron
+(`0 0 * * *`) that reads `~/.openclaw/fix-it-workspace/expected-crons.json`,
+compares it against `openclaw cron list`, and re-registers any
+"missing" entries. The instruction message only asked it to verify
+the 9 fix-it-owned crons, but in practice the gpt-5.4 LLM reads the
+whole file and re-creates anything it finds missing — across every
+agent listed in that file.
+
+**Symptom on 2026-04-14 at 00:01 UTC:** Telegram alert from Mr Fixit —
+"🦊🔧 Cron repair: re-registered meetings-coach:heartbeat,
+news-digest:heartbeat, news-digest:engagement-poll, shopping:heartbeat,
+fix-it:heartbeat-check, fix-it:morning-status,
+family-calendar:reminder-check, family-calendar:heartbeat". All 8 of
+those crons had been *intentionally deleted* in the R3 fleet-health
+consolidation (commit `5df91bd`) and moved to host cron via
+`install-host-cron.sh`. But `expected-crons.json` still listed them.
+Every midnight UTC, fix-it "repaired" them back into the LLM
+gateway scheduler. Every next deployment removed them. Yo-yo.
+
+**Worst of the duplicates:** `fix-it:morning-status` at `50 11 * * *`
+vs the host-cron `morning-status-host.sh` at `30 10 * * *` — the operator
+would get *two* morning status reports 80 minutes apart.
+
+**Fix:** prune `agents/fix-it/expected-crons.json` (and the
+`.example` template) of all entries that have been moved to host
+cron. After today's cleanup the file lists:
+- meetings-coach: pre-meeting-alert, post-meeting-scan, morning-meeting-brief, commitment-follow-up, weekly-review (5)
+- news-digest: morning-edition, preference-update (2)
+- shopping: costco-token-refresh, morning-delivery-brief, delivery-digest, subscribe-save-review (4)
+- fix-it: cron-self-check, conflict-scan, brain-validation, security-audit, probation-end-reminder, file-size-monitor, obsidian-briefing, update-check, monthly-archival (9)
+- family-calendar: whatsapp-chat-scan, activity-email-check, gmail-invite-check, morning-briefing, whatsapp-schedule-post, weekly-overview (6)
+
+And the cron-self-check's message was rewritten to explicitly name
+the 9 fix-it LLM crons *and* enumerate the host crons that are
+**out of scope** (fleet-health, morning-status, reminder-check,
+engagement-poll, costco-token-refresh, morning-fleet-deliver,
+linkedin-keepalive) with a hard "do not re-register them even if
+they look missing from openclaw cron list."
+
+**Rule:** `expected-crons.json` is the ground truth for **LLM
+gateway scheduler crons only**. Any cron moved to host cron (via
+`install-host-cron.sh`) must be deleted from `expected-crons.json`
+in the *same* commit — otherwise fix-it will silently yo-yo them
+back in at midnight UTC and either duplicate work or waste LLM
+cron budget.
+
+**How to detect the yo-yo:** `docker exec openclaw-openclaw-gateway-1
+openclaw cron list --json | python3 -c 'import json,sys; d=json.load(sys.stdin); [print(j["createdAtMs"], j["agentId"], j["name"]) for j in sorted(d,key=lambda x:x["createdAtMs"])]'` — if a cluster of crons share a `createdAtMs` within a couple minutes of midnight UTC, Mr Fixit put them there.
+
+### 16. Costco refresh_token grant needs the public client, not WCS (2026-04-14)
+
+**Context:** `costco-token-daemon.py` has a five-level refresh
+hierarchy: (0) cached id_token, (1) HTTP `refresh_token` grant via
+`costco_refresh_headless.py`, (2) Hetzner silent-refresh in
+Camoufox, (3) residential-proxy silent-refresh, (4) full credential
+reauth. Level 1 is the fast path — a single HTTP POST to
+`https://signin.costco.com/…/oauth2/v2.0/token` with
+`grant_type=refresh_token`, ~1 second, no browser, no Akamai
+contact. When it works, levels 2–4 become pure fallback and stay
+idle for weeks at a time.
+
+**Symptom on 2026-04-14 at 00:00 UTC:** Akamai's bot-reputation
+scoring for Costco flipped at the midnight UTC policy boundary and
+started serving "Access Denied" on `signin.costco.com` to *both*
+the direct VPS IP and the dataimpulse residential proxy. Level 2
+and level 3 began hanging for 120–240s per run, tripping the 120s
+`costco-token-refresh-host.sh` wrapper timeout, filing
+`exit_code=1` to `cache/last-token-refresh.json`, and firing the
+daemon's "two consecutive failures" Telegram alert. Confirmed via
+manual `--step hetzner` run: `[hetzner] Reload #1 (title='Access
+Denied')` → `[hetzner] Reload #2 (title='Access Denied')` →
+`Persistent Access Denied — exiting early`.
+
+**Root cause (the real one, not the Akamai flip):** the level 1
+fast path has been permanently starved since at least 2026-04-13
+because `refresh_token` in `costco-tokens.json` was persistently
+empty string. Every browser silent-refresh success called
+`_success_exit` → `try_refresh_token_exchange(code)` → POST to
+`/token` with `client_id=WCS_CLIENT_ID = 4900eb1f-...` (the
+**confidential** Costco WCS client) → Costco returned
+`AADB2C90079: Clients must send a client_secret when redeeming a
+confidential grant` → returned `None` → `save_token(refresh_token=None)`
+unconditionally truncate-wrote the file with `refresh_token=""`.
+Net effect: every successful browser refresh wiped the fast-path
+credential, forcing the next cron tick back through the browser
+path that Akamai was about to start blocking.
+
+**Fix (three commits):**
+
+1. **Prevent the wipe.** `save_token` in `costco-token-daemon.py`
+   rewritten as read-merge-write: if a caller passes
+   `refresh_token=None`, preserve whatever is already in the file.
+   Same pattern the `costco_refresh_headless._save_state` helper
+   already uses. Covered by 5 new tests in `test_costco_token_daemon.py`
+   including `test_save_token_preserves_refresh_token_when_none_passed`
+   and `test_success_exit_preserves_existing_refresh_token`.
+
+2. **Delete the dead exchange.** `try_refresh_token_exchange` and
+   its call in `_success_exit` removed entirely — the confidential
+   client cannot succeed here without a client_secret we do not
+   have, so every call was a guaranteed 400 round-trip that polluted
+   the logs and (pre-fix 1) wiped the credential.
+
+3. **Bootstrap the refresh_token via the public client + PKCE.**
+   `costco-pkce-probe.py` already implemented the correct flow,
+   discovered and empirically GREEN-verified on 2026-04-12: the
+   public B2C client `a3a5186b-7c89-4b4c-93a8-dd604e930757` accepts
+   PKCE code_verifier + refresh_token grants against the same
+   `B2C_1A_SSO_WCS_signup_signin_201` policy, without a
+   client_secret. Added a `--bootstrap` flag that, on the first
+   GREEN candidate, merges the captured refresh_token into
+   `costco-tokens.json` via
+   `costco_refresh_headless._save_state` (atomic .tmp rename).
+
+**Run the bootstrap when the fast path is dead:**
+
+```bash
+docker exec openclaw-openclaw-gateway-1 python3 \
+  /home/node/.openclaw/shopping-workspace/scripts/costco-pkce-probe.py \
+  --bootstrap
+```
+
+Expected output:
+
+```
+[bootstrap] wrote refresh_token to …/costco-tokens.json (1535 chars)
+GATE: GREEN
+```
+
+Precondition: the SSO cookie in `costco-session.json` must still
+be valid (6-month TTL — should be fine unless it's been wiped).
+The probe uses the saved cookies to silently capture the authorize
+redirect without a credential prompt.
+
+**Verification:** after bootstrap, run the daemon directly once
+with a forced-stale id_token (backdate the `exp` claim) and
+confirm:
+
+```
+[headless] Attempting refresh_token grant via public client...
+[refresh-headless] SUCCESS — id_token N chars, rotated=True
+SUCCESS via headless refresh_token grant (N chars)
+real    0m1.165s
+```
+
+The full cycle — cached short-circuit *or* refresh_token grant —
+must complete in under 2 seconds. If you see Camoufox launch,
+something is wrong with the fast path and it's falling through to
+levels 2+.
+
+**Client-ID reference card (put this somewhere you can find it in
+3 months when the refresh_token ages out):**
+
+| Client ID | Type | Used for | Reference |
+|---|---|---|---|
+| `4900eb1f-0c10-4bd9-99c3-c59e6c1ecebf` | confidential (WCS) | Browser silent-refresh authorize URL via `make_authorize_url` — captures id_token in the OAuthLogonCmd form-POST. **Cannot** do `/token` exchange. | `WCS_CLIENT_ID` in `costco-token-daemon.py` |
+| `a3a5186b-7c89-4b4c-93a8-dd604e930757` | public (PKCE) | HTTP-only refresh_token grants at `/oauth2/v2.0/token`. **Required** for level 1 fast path. | `PUBLIC_CLIENT_ID` in `costco_refresh_headless.py`; candidates list in `costco-pkce-probe.py` |
+
+Don't try to exchange a WCS-issued authorization code with the
+public client — codes are client-bound and AADB2C will reject it.
+The bootstrap flow issues a fresh PKCE code against the public
+client; the browser silent-refresh path stays on the WCS client
+for its id_token capture only.
+
 ---
 
 ## Meta-lesson: why deploy was hard
