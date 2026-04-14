@@ -42,8 +42,11 @@ token.json
 # Agent config / identity / state files hold real names, DOBs, emails,
 # calendar IDs, and similar. Only the *.example templates are tracked;
 # the real unsuffixed files live on the operator's working tree only.
-# On a fresh clone, copy each *.example to its unsuffixed name and edit
-# in your own values. See DEPLOY.md "First-time setup" for the full list.
+# On a fresh clone, run:
+#   python3 agents/shared/deploy.py <agent> --bootstrap-configs
+# to scaffold the real files from their .example siblings. .md files get
+# a CLAWFORD_BOOTSTRAP_UNEDITED sentinel comment that deploy.py refuses
+# until you replace the dummy values and delete the sentinel line.
 agents/*/AGENTS.md
 agents/*/CRONS.md
 agents/*/HEARTBEAT.md

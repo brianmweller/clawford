@@ -99,17 +99,23 @@ class TestManifestInvariants:
             f"to parse: {broken}"
         )
 
-    def test_every_config_file_exists(self, manifest_path):
+    def test_every_config_file_has_source_or_template(self, manifest_path):
+        """Every config_files entry must resolve to either the real file or
+        an .example sibling. Real files are gitignored after the 2026-04-13
+        PII sanitization — a fresh clone only has templates, which the
+        operator turns into real files via --bootstrap-configs. A manifest
+        that references neither is broken (Safeguard 10 exit 5)."""
         deploy = _import_deploy()
         mf = deploy.load_manifest(manifest_path)
-        missing = []
+        broken = []
         for cf in mf.config_files:
             src = manifest_path.parent / cf.src
-            if not src.exists():
-                missing.append(cf.src)
-        assert not missing, (
-            f"{mf.agent_id}: manifest.config_files[] lists {len(missing)} files "
-            f"that don't exist: {missing}"
+            template = manifest_path.parent / (cf.src + ".example")
+            if not src.exists() and not template.exists():
+                broken.append(cf.src)
+        assert not broken, (
+            f"{mf.agent_id}: manifest.config_files[] lists {len(broken)} files "
+            f"with neither a real source nor an .example template: {broken}"
         )
 
     def test_scripts_referenced_by_crons_are_tracked(self, manifest_path):
