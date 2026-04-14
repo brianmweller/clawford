@@ -116,30 +116,61 @@ def save_seen(seen):
         json.dump(seen_list, f)
 
 
+# A text/plain part shorter than this is assumed to be a "please view
+# in HTML" stub (Smore, Mailchimp, and similar senders) — fall through
+# to the text/html part instead. Real newsletter plaintext runs into
+# the thousands of characters, so 100 is comfortably below any real
+# content and well above typical stubs (4–50 chars).
+PLAIN_STUB_THRESHOLD = 100
+
+
+def _iter_leaves(part):
+    """Yield every leaf MIME part in depth-first order.
+
+    A payload without a `parts` array is itself a leaf — this is how
+    top-level text/html emails (common from Tutu School's mailer) get
+    reached. Containers like multipart/mixed recurse into their
+    children.
+    """
+    children = part.get("parts") or []
+    if not children:
+        yield part
+        return
+    for child in children:
+        yield from _iter_leaves(child)
+
+
+def _decode_body(part):
+    data = (part.get("body") or {}).get("data") or ""
+    if not data:
+        return ""
+    return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+
+
 def get_email_body(msg):
-    """Extract plain text body from Gmail message."""
-    payload = msg.get("payload", {})
+    """Extract readable body text from a Gmail message.
 
-    if payload.get("mimeType", "").startswith("text/plain"):
-        data = payload.get("body", {}).get("data", "")
-        if data:
-            return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+    Prefers text/plain when it carries real content; falls through to
+    HTML-stripped text/html when text/plain is absent or a stub. Walks
+    multipart containers recursively so nested structures
+    (multipart/mixed → multipart/alternative → plain+html) reach their
+    leaves.
+    """
+    payload = msg.get("payload") or {}
+    plain = ""
+    html = ""
+    for leaf in _iter_leaves(payload):
+        mime = leaf.get("mimeType", "")
+        if mime == "text/plain" and not plain:
+            plain = _decode_body(leaf)
+        elif mime == "text/html" and not html:
+            html = _decode_body(leaf)
 
-    parts = payload.get("parts", [])
-    for part in parts:
-        if part.get("mimeType") == "text/plain":
-            data = part.get("body", {}).get("data", "")
-            if data:
-                return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
-
-    for part in parts:
-        if part.get("mimeType") == "text/html":
-            data = part.get("body", {}).get("data", "")
-            if data:
-                html = base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
-                return re.sub(r"<[^>]+>", " ", html)[:3000]
-
-    return ""
+    if len(plain.strip()) >= PLAIN_STUB_THRESHOLD:
+        return plain
+    if html:
+        return re.sub(r"<[^>]+>", " ", html)
+    return plain
 
 
 def main():
