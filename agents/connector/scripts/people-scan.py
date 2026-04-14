@@ -216,8 +216,17 @@ def run() -> dict:
         # Component C: a confirmed upcoming meeting demotes the
         # person out of overdue/approaching. Healthy people are
         # unaffected — the filter only prevents false nudges.
-        person_email = (person.get("email") or "").lower()
-        has_upcoming = bool(person_email) and person_email in upcoming_emails
+        # Checks both the primary `email` and any `alt_emails` listed.
+        person_emails = set()
+        primary_email = (person.get("email") or "").lower().strip()
+        if primary_email and "@" in primary_email:
+            person_emails.add(primary_email)
+        alt = person.get("alt_emails") or ""
+        for part in alt.split(","):
+            addr = part.strip().lower()
+            if "@" in addr:
+                person_emails.add(addr)
+        has_upcoming = bool(person_emails & upcoming_emails)
 
         if days_overdue > 0:
             if has_upcoming:

@@ -103,6 +103,43 @@ def test_build_email_index_maps_emails_lowercased(tmp_path, dr):
     assert idx["alice@example.com"][0].name == "alice.md"
 
 
+def test_build_email_index_includes_alt_emails(tmp_path, dr):
+    """A person with an `alt_emails:` field gets one index entry per
+    email (comma-separated), all pointing at the same file. Used when
+    someone has a work email in the primary `email:` slot but schedules
+    personal meetings from a Gmail address, or vice versa."""
+    people = tmp_path / "people"
+    people.mkdir()
+    (people / "andrew-patton.md").write_text(
+        "# Andrew Patton\n"
+        "- **email:** andrew.patton@duke.edu\n"
+        "- **alt_emails:** pattonandrewj@gmail.com, a.patton@other.org\n"
+        "- **last_interaction:** 2026-03-16\n",
+        encoding="utf-8",
+    )
+    idx = dr.build_email_index(people)
+    assert set(idx.keys()) == {
+        "andrew.patton@duke.edu",
+        "pattonandrewj@gmail.com",
+        "a.patton@other.org",
+    }
+    # All three entries point at the same file, same last_interaction
+    for addr in idx:
+        assert idx[addr][0].name == "andrew-patton.md"
+        assert idx[addr][1] == "2026-03-16"
+
+
+def test_build_email_index_ignores_dash_alt_emails(tmp_path, dr):
+    people = tmp_path / "people"
+    people.mkdir()
+    (people / "bob.md").write_text(
+        "# Bob\n- **email:** bob@x.io\n- **alt_emails:** —\n",
+        encoding="utf-8",
+    )
+    idx = dr.build_email_index(people)
+    assert set(idx.keys()) == {"bob@x.io"}
+
+
 # ── merge_signals ────────────────────────────────────────────────────
 
 

@@ -39,7 +39,7 @@ WORKSPACE = Path(os.path.expanduser("~/.openclaw/connector-workspace"))
 UPCOMING_CACHE = WORKSPACE / "upcoming-meetings.json"
 MC_CACHE = Path(os.path.expanduser("~/.openclaw/meetings-coach-workspace/cache"))
 
-LOOKBACK_DAYS = 14
+LOOKBACK_DAYS = 30
 LOOKAHEAD_DAYS = 14
 KRISP_ATTENDEE_CAP = 6
 GMAIL_PAGE_SIZE = 500
@@ -74,11 +74,19 @@ def build_email_index(people_dir: Path) -> dict[str, tuple[Path, str | None]]:
             text = fp.read_text(encoding="utf-8")
         except OSError:
             continue
-        email_val = _parse_field(text, "email")
-        if not email_val or "@" not in email_val:
-            continue
         last = _parse_field(text, "last_interaction")
-        idx[email_val.lower()] = (fp, last)
+        addrs: list[str] = []
+        primary = _parse_field(text, "email")
+        if primary and "@" in primary:
+            addrs.append(primary.lower())
+        alts = _parse_field(text, "alt_emails")
+        if alts:
+            for part in alts.split(","):
+                addr = part.strip().lower()
+                if "@" in addr:
+                    addrs.append(addr)
+        for addr in addrs:
+            idx[addr] = (fp, last)
     return idx
 
 

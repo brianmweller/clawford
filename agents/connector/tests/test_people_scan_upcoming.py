@@ -182,6 +182,32 @@ def test_run_case_insensitive_email_match(stub_brain):
     assert any(p["slug"] == "bob" for p in result["demoted_upcoming"])
 
 
+def test_run_alt_emails_match_upcoming(stub_brain):
+    """A meeting scheduled under a secondary email (alt_emails) still
+    demotes the person."""
+    (stub_brain.people / "andrew-patton.md").write_text(
+        "# Andrew Patton\n"
+        "- **slug:** andrew-patton\n"
+        "- **circles:** friends-close\n"
+        "- **preferred_channel:** iMessage\n"
+        "- **tone:** warm\n"
+        "- **email:** andrew.patton@duke.edu\n"
+        "- **alt_emails:** pattonandrewj@gmail.com\n"
+        "- **phone:** —\n"
+        "- **platforms:** email\n"
+        f"- **last_interaction:** {_days_ago_iso(45)}\n",
+        encoding="utf-8",
+    )
+
+    (stub_brain.workspace / "upcoming-meetings.json").write_text(json.dumps({
+        "emails": {"pattonandrewj@gmail.com": "2026-04-20"},
+    }))
+
+    result = stub_brain.ps.run()
+    assert any(p["slug"] == "andrew-patton" for p in result["demoted_upcoming"])
+    assert not any(p["slug"] == "andrew-patton" for p in result["overdue"])
+
+
 def test_run_upcoming_filter_does_not_affect_healthy_people(stub_brain):
     """Someone fresh (well inside cadence) with an upcoming meeting
     should stay in healthy, not move to demoted_upcoming."""
