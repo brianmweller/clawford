@@ -1,0 +1,375 @@
+"""agents/shared/llm.py — Clawford LLM broker.
+
+Calls ChatGPT-subscription-backed OpenAI Responses API directly at
+https://chatgpt.com/backend-api/codex/responses, using the OAuth
+credentials stored in ~/.codex/auth.json (shared with the codex CLI).
+
+This is the same wire protocol OpenClaw's openai-codex provider uses at
+scale — we replicate it directly in Python, bypassing the codex binary
+to avoid the ~8k-token-per-call agent framing the CLI prepends.
+
+Per-call overhead dropped from ~8100 tokens (codex CLI agentic framing)
+to ~25 tokens (just the model's own system-prompt tokens for the shim's
+tiny instructions string + the user prompt). A ~260x reduction.
+
+Contract: infer(prompt, ...) → InferResult. Always returned, never
+raises. Check .ok to branch on success/failure.
+
+Behavior:
+- Loads auth from ~/.codex/auth.json (path overridable via
+  CLAWFORD_CODEX_AUTH_PATH env var).
+- POSTs to /backend-api/codex/responses with {model, instructions,
+  input, store:false, stream:true} — those fields are all required
+  by the endpoint; dropping any of them produces a 400.
+- Parses SSE stream for the final `response.output_text.done` and
+  `response.completed` events.
+- On 401, calls https://auth.openai.com/oauth/token with the
+  refresh_token to get a new access_token, persists the rotated
+  tokens back to auth.json atomically, and retries the original call
+  once.
+
+Example:
+    from llm import infer
+    r = infer("summarize this: ...", json_mode=True, timeout=30)
+    if not r.ok:
+        print(f"llm failed: {r.error}")
+        return None
+    return json.loads(r.text)
+"""
+from __future__ import annotations
+
+import json
+import os
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Endpoints and constants
+# ---------------------------------------------------------------------------
+
+CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
+OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
+
+# Public PKCE client id used by the codex CLI for the ChatGPT OAuth flow.
+# Confirmed in codex-rs/login/src/auth/manager.rs:
+#   pub const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+
+AUTH_PATH_ENV_VAR = "CLAWFORD_CODEX_AUTH_PATH"
+DEFAULT_AUTH_PATH = "~/.codex/auth.json"
+
+DEFAULT_MODEL = "gpt-5.4"
+DEFAULT_INSTRUCTIONS = "You are a terse, helpful assistant."
+DEFAULT_TIMEOUT_S = 90
+
+CLAWFORD_VERSION = "0.1.0"
+CLAWFORD_USER_AGENT = f"clawford/{CLAWFORD_VERSION}"
+
+
+# ---------------------------------------------------------------------------
+# Result type
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class InferResult:
+    """Normalized result of an LLM inference call.
+
+    On success: text/model populated, usage counts set, returncode==0,
+    error is None, .ok is True.
+
+    On failure: .ok is False, .error carries a human-readable reason,
+    .text may be empty. Token counts may be zero or partial depending
+    on where the failure occurred.
+    """
+
+    text: str = ""
+    model: str = ""
+    provider: str = "openai-codex"
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    returncode: int = 0
+    error: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.returncode == 0 and self.error is None
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+
+
+def infer(
+    prompt: str,
+    *,
+    instructions: str = DEFAULT_INSTRUCTIONS,
+    model: str = DEFAULT_MODEL,
+    json_mode: bool = False,
+    timeout: int = DEFAULT_TIMEOUT_S,
+) -> InferResult:
+    """Run an LLM inference call through the ChatGPT-subscription codex
+    responses endpoint.
+
+    Args:
+        prompt: User message.
+        instructions: System-prompt-equivalent sent as the `instructions`
+            field. Keep this small — every token costs.
+        model: Model ID. Default "gpt-5.4". Pass "gpt-5.3-codex" if you
+            hit model routing issues.
+        json_mode: If True, sets text.format.type=json_object so the
+            model returns valid JSON directly. The caller can then
+            json.loads(result.text) without fence-stripping hacks.
+        timeout: Socket timeout in seconds for the HTTPS call.
+
+    Returns:
+        InferResult. Always returned, never raises — check .ok.
+    """
+    auth_path = _auth_path()
+    try:
+        auth = _load_auth(auth_path)
+    except FileNotFoundError:
+        return InferResult(
+            returncode=127,
+            error=f"auth.json not found at {auth_path}",
+        )
+    except (json.JSONDecodeError, KeyError) as e:
+        return InferResult(
+            returncode=127,
+            error=f"auth.json at {auth_path} is malformed: {e}",
+        )
+
+    body = _build_request_body(
+        prompt=prompt,
+        instructions=instructions,
+        model=model,
+        json_mode=json_mode,
+    )
+
+    try:
+        response = _post_responses(auth, body, timeout=timeout)
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            # Token expired. Refresh once and retry.
+            try:
+                auth = _refresh_access_token(auth, auth_path)
+            except urllib.error.HTTPError as refresh_err:
+                return InferResult(
+                    returncode=401,
+                    error=_format_refresh_error(refresh_err),
+                )
+            except (urllib.error.URLError, OSError, KeyError, json.JSONDecodeError) as refresh_err:
+                return InferResult(
+                    returncode=401,
+                    error=f"refresh call failed: {refresh_err}",
+                )
+            # Retry the original call with the new access token.
+            try:
+                response = _post_responses(auth, body, timeout=timeout)
+            except urllib.error.HTTPError as retry_err:
+                return InferResult(
+                    returncode=retry_err.code,
+                    error=_format_http_error(retry_err),
+                )
+            except (urllib.error.URLError, TimeoutError, OSError) as retry_err:
+                return InferResult(
+                    returncode=500,
+                    error=f"network error after refresh: {retry_err}",
+                )
+        else:
+            return InferResult(
+                returncode=e.code,
+                error=_format_http_error(e),
+            )
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        return InferResult(
+            returncode=500,
+            error=f"network error: {e}",
+        )
+
+    try:
+        return _parse_sse_response(response)
+    finally:
+        try:
+            response.close()
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Internals
+# ---------------------------------------------------------------------------
+
+
+def _auth_path() -> Path:
+    raw = os.environ.get(AUTH_PATH_ENV_VAR, DEFAULT_AUTH_PATH)
+    return Path(os.path.expanduser(raw))
+
+
+def _load_auth(auth_path: Path) -> dict:
+    with open(auth_path, "r", encoding="utf-8") as f:
+        auth = json.load(f)
+    # Validate required fields exist so KeyError is raised here, not deeper.
+    _ = auth["tokens"]["access_token"]
+    return auth
+
+
+def _build_request_body(
+    *,
+    prompt: str,
+    instructions: str,
+    model: str,
+    json_mode: bool,
+) -> dict:
+    body: dict = {
+        "model": model,
+        "instructions": instructions,
+        "input": [{"role": "user", "content": prompt}],
+        "store": False,
+        "stream": True,
+    }
+    if json_mode:
+        body["text"] = {"format": {"type": "json_object"}}
+    return body
+
+
+def _post_responses(auth: dict, body: dict, *, timeout: int):
+    """POST to the codex/responses endpoint and return the open HTTP
+    response for SSE streaming. Caller must iterate/read it and then
+    close it."""
+    access_token = auth["tokens"]["access_token"]
+    account_id = auth["tokens"].get("account_id", "") or ""
+    req = urllib.request.Request(
+        CODEX_RESPONSES_URL,
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+            "chatgpt-account-id": account_id,
+            "User-Agent": CLAWFORD_USER_AGENT,
+            "originator": "clawford",
+        },
+        method="POST",
+    )
+    return urllib.request.urlopen(req, timeout=timeout)
+
+
+def _parse_sse_response(response) -> InferResult:
+    """Read an SSE stream and extract text + usage.
+
+    Events of interest:
+      - response.output_text.done: has the final text in `.text`
+      - response.completed: has model, usage in `.response.{model,usage}`
+    """
+    final_text = ""
+    model = ""
+    input_tokens = 0
+    output_tokens = 0
+    total_tokens = 0
+
+    for raw_line in response:
+        try:
+            line = raw_line.decode("utf-8", errors="replace").rstrip()
+        except AttributeError:
+            line = str(raw_line).rstrip()
+        if not line.startswith("data: "):
+            continue
+        payload = line[6:]
+        try:
+            event = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        etype = event.get("type", "")
+        if etype == "response.output_text.done":
+            final_text = event.get("text", "")
+        elif etype == "response.completed":
+            resp = event.get("response") or {}
+            model = resp.get("model", "") or model
+            usage = resp.get("usage") or {}
+            input_tokens = usage.get("input_tokens", 0) or 0
+            output_tokens = usage.get("output_tokens", 0) or 0
+            total_tokens = usage.get("total_tokens", 0) or (input_tokens + output_tokens)
+
+    return InferResult(
+        text=final_text,
+        model=model,
+        provider="openai-codex",
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        returncode=0,
+    )
+
+
+def _refresh_access_token(auth: dict, auth_path: Path) -> dict:
+    """Post to https://auth.openai.com/oauth/token with the refresh_token
+    and get a new access_token. Persist the rotated tokens to auth.json
+    atomically. Return the updated auth dict.
+
+    Raises the underlying HTTPError/URLError on failure so the caller
+    can decide what to do.
+    """
+    refresh_token = auth["tokens"]["refresh_token"]
+    req_body = {
+        "client_id": OAUTH_CLIENT_ID,
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+    }
+    req = urllib.request.Request(
+        OAUTH_TOKEN_URL,
+        data=json.dumps(req_body).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": CLAWFORD_USER_AGENT,
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        raw = resp.read()
+    new_tokens = json.loads(raw)
+
+    # Merge the rotated fields into the existing auth dict. We keep
+    # everything else (auth_mode, account_id, etc.) intact.
+    auth["tokens"]["access_token"] = new_tokens["access_token"]
+    if "id_token" in new_tokens:
+        auth["tokens"]["id_token"] = new_tokens["id_token"]
+    if "refresh_token" in new_tokens:
+        auth["tokens"]["refresh_token"] = new_tokens["refresh_token"]
+    auth["last_refresh"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    # Atomic write: write to a sibling tmp file, then rename.
+    tmp_path = auth_path.with_name(auth_path.name + ".tmp")
+    tmp_path.write_text(json.dumps(auth, indent=2), encoding="utf-8")
+    tmp_path.replace(auth_path)
+    try:
+        os.chmod(auth_path, 0o600)
+    except OSError:
+        # Windows filesystems may reject chmod — ignore, the posix
+        # semantic isn't meaningful there anyway.
+        pass
+
+    return auth
+
+
+def _format_http_error(e: urllib.error.HTTPError) -> str:
+    body = ""
+    try:
+        body = e.read().decode("utf-8", errors="replace")[:300]
+    except Exception:
+        pass
+    return f"HTTP {e.code} {e.reason}: {body}"
+
+
+def _format_refresh_error(e: urllib.error.HTTPError) -> str:
+    body = ""
+    try:
+        body = e.read().decode("utf-8", errors="replace")[:300]
+    except Exception:
+        pass
+    return f"token refresh failed: HTTP {e.code} {e.reason}: {body}"
