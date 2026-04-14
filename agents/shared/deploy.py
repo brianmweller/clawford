@@ -1298,6 +1298,67 @@ def sync_scripts(mf: Manifest, yes_updates: bool = False) -> tuple[int, int]:
     return updated, skipped
 
 
+# Runtime modules agents import from `agents.shared`. Anything NOT in
+# this list stays in the repo (deploy.py, workspace-snapshot.py,
+# contract_wrap.py, tests/, SCRIPT_CONTRACT.md, fleet-manifest.json,
+# …). Expand as new shared modules ship.
+SHARED_RUNTIME_MODULES: tuple[str, ...] = (
+    "brain.py",
+    "camoufox_proxy.py",
+    "fleet_health_types.py",
+    "google_oauth.py",
+    "heartbeat_base.py",
+    "llm.py",
+    "playwright_profile.py",
+    "retry_policy.py",
+    "telegram_api.py",
+)
+
+
+def sync_shared_library(mf: Manifest) -> tuple[int, int]:
+    """Mirror the runtime `agents/shared/*.py` modules into
+    `<workspace>/agents/shared/*.py` so scripts running inside the
+    gateway container can `from agents.shared import X` via a small
+    sys.path shim.
+
+    Returns (updated_count, skipped_count). Creates the target dir if
+    missing. Honors _DRY (no file writes, logs planned actions). Only
+    copies the modules in SHARED_RUNTIME_MODULES — deploy-only tools
+    and the tests/ subdir stay in the repo.
+    """
+    updated = skipped = 0
+    workspace = mf.expanded_workspace
+    src_dir = REPO_ROOT / "agents" / "shared"
+    dst_dir = workspace / "agents" / "shared"
+
+    if not src_dir.is_dir():
+        log(f"shared source dir missing at {src_dir}", "err")
+        return updated, skipped
+
+    if not _DRY:
+        dst_dir.mkdir(parents=True, exist_ok=True)
+
+    for name in SHARED_RUNTIME_MODULES:
+        src = src_dir / name
+        if not src.is_file():
+            # A listed module is missing from the source tree — skip
+            # silently so the allowlist can list future modules without
+            # breaking the current deploy.
+            continue
+        dst = dst_dir / name
+        action = copy_with_immutable(src, dst, immutable=False, yes_updates=True)
+        if action in ("updated", "created"):
+            log(
+                f"shared {('UPDATE' if action == 'updated' else 'CREATE')} {name}",
+                "plan",
+            )
+            updated += 1
+        else:
+            skipped += 1
+
+    return updated, skipped
+
+
 def sync_state_files(mf: Manifest) -> tuple[int, int]:
     created = preserved = 0
     workspace = mf.expanded_workspace
@@ -1506,6 +1567,8 @@ def deploy_one(agent_id: str, args: argparse.Namespace) -> int:
         sync_files(mf, yes_updates=getattr(args, "yes_updates", False))
         note("Scripts")
         sync_scripts(mf, yes_updates=getattr(args, "yes_updates", False))
+        note("Shared library")
+        sync_shared_library(mf)
         note("State files")
         sync_state_files(mf)
 
