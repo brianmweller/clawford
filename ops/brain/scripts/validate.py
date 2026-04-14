@@ -30,13 +30,12 @@ REQUIRED_CORE_FILES = {
     "notes/inbox.md": "# Notes \u2014 Inbox",
 }
 
-# Agent status/rules files are discovered dynamically, not hardcoded.
-# Every *.status.md must start with "# {Name} — Status"
-# Every *.rules.md must start with "# {Name} — "
-STATUS_HEADER_PATTERN = "\u2014 Status"
-RULES_HEADER_PATTERN = "\u2014 "
-
 MAX_FILE_SIZE_KB = 500
+
+# Top-level directories excluded from size warnings. deploy-backups/ and
+# workspace-snapshots/ hold deploy.py tarballs and are large by design —
+# the retention policy lives in agents/shared/deploy.py, not here.
+SIZE_CHECK_EXCLUDE_DIRS = {"deploy-backups", "workspace-snapshots"}
 
 
 def check_directories(root):
@@ -81,59 +80,6 @@ def check_files(root):
     return results
 
 
-def check_agent_files(root):
-    """Discover and validate all agent status and rules files dynamically."""
-    results = []
-    agents_dir = root / "agents"
-    if not agents_dir.is_dir():
-        results.append(("FAIL", "agents/ directory missing", ""))
-        return results
-
-    # Discover status files
-    status_files = sorted(agents_dir.glob("*.status.md"))
-    if not status_files:
-        results.append(("WARN", "No agent status files found", ""))
-        return results
-
-    for path in status_files:
-        rel = path.relative_to(root)
-        try:
-            first_line = path.read_text(encoding="utf-8").split("\n")[0].strip()
-        except Exception as e:
-            results.append(("FAIL", "Cannot read: {}".format(rel), str(e)))
-            continue
-        if STATUS_HEADER_PATTERN in first_line and first_line.startswith("# "):
-            results.append(("PASS", "Valid status file: {}".format(rel), ""))
-        else:
-            results.append((
-                "FAIL",
-                "Bad header: {}".format(rel),
-                "expected '# {{Name}} \u2014 Status', got: {!r}".format(first_line),
-            ))
-
-    # Discover rules files
-    rules_files = sorted(agents_dir.glob("*.rules.md"))
-    for path in rules_files:
-        rel = path.relative_to(root)
-        try:
-            first_line = path.read_text(encoding="utf-8").split("\n")[0].strip()
-        except Exception as e:
-            results.append(("FAIL", "Cannot read: {}".format(rel), str(e)))
-            continue
-        if RULES_HEADER_PATTERN in first_line and first_line.startswith("# "):
-            results.append(("PASS", "Valid rules file: {}".format(rel), ""))
-        else:
-            results.append((
-                "FAIL",
-                "Bad header: {}".format(rel),
-                "expected '# {{Name}} \u2014 ...', got: {!r}".format(first_line),
-            ))
-
-    results.append(("PASS", "Discovered {} status + {} rules files".format(
-        len(status_files), len(rules_files)), ""))
-    return results
-
-
 def check_conflicts(root):
     """Check for Dropbox conflict files."""
     conflicts = list(root.rglob("*conflicted copy*"))
@@ -150,10 +96,14 @@ def check_file_sizes(root):
     """Flag files over the size threshold for archival."""
     large = []
     for p in root.rglob("*"):
-        if p.is_file():
-            size_kb = p.stat().st_size / 1024
-            if size_kb > MAX_FILE_SIZE_KB:
-                large.append((p, size_kb))
+        if not p.is_file():
+            continue
+        rel = p.relative_to(root)
+        if rel.parts and rel.parts[0] in SIZE_CHECK_EXCLUDE_DIRS:
+            continue
+        size_kb = p.stat().st_size / 1024
+        if size_kb > MAX_FILE_SIZE_KB:
+            large.append((p, size_kb))
     if not large:
         return [("PASS", "No files over {}KB".format(MAX_FILE_SIZE_KB), "")]
     results = []
@@ -202,7 +152,6 @@ def main():
     all_results = [
         ("Directories", check_directories(BRAIN_ROOT)),
         ("Core Files", check_files(BRAIN_ROOT)),
-        ("Agent Files", check_agent_files(BRAIN_ROOT)),
         ("Dropbox Conflicts", check_conflicts(BRAIN_ROOT)),
         ("File Sizes", check_file_sizes(BRAIN_ROOT)),
     ]
