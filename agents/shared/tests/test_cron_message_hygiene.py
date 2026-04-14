@@ -104,6 +104,33 @@ def test_detects_stdout_redirect(deploy_module, fake_source_repo):
     assert any("redir-cron" in e for e in errors)
 
 
+def test_detects_update_your_status_file_clause(deploy_module, fake_source_repo):
+    """Post-R6 regression guard: cron messages must not tell the LLM to
+    write per-agent .status.md files. fleet-health.json is the authoritative
+    health source — the LLM writing a status file drifts to whatever schema
+    it picks (this is how the 2026-04-14 12:03 UTC brain-validation FAIL
+    with '# family-calendar status' header happened)."""
+    manifest_path = fake_source_repo / "agents" / "testagent" / "manifest.json"
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    data["crons"] = [
+        {
+            "name": "legacy-cron",
+            "cron": "30 10 * * *",
+            "message": "Run python3 foo.py. Update your status file.",
+            "announce": False,
+            "no_deliver": True,
+        }
+    ]
+    manifest_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    mf = deploy_module.load_manifest(manifest_path)
+    errors = deploy_module.check_cron_message_hygiene(mf)
+    assert errors, "should flag the legacy status-file-write clause"
+    assert any("legacy-cron" in e for e in errors), f"error should name the cron: {errors}"
+    assert any("status file" in e.lower() or "Update your status" in e for e in errors), (
+        f"error message should cite the violating clause: {errors}"
+    )
+
+
 def test_detects_multiple_violations_in_one_cron(deploy_module, fake_source_repo):
     """Multiple forbidden patterns in one message → all listed."""
     manifest_path = fake_source_repo / "agents" / "testagent" / "manifest.json"

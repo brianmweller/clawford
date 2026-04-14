@@ -60,6 +60,12 @@ DROPBOX_BACKUP_ROOT = Path(
 )
 BACKUP_RETENTION = 10  # keep last N backups per agent
 
+# Sentinel prepended to bootstrapped .md config files. Safeguard 10 refuses
+# to deploy any config file whose first line still carries it — this is how
+# we prevent fake-PII template content from silently shipping to a live
+# workspace after --bootstrap-configs but before the operator hand-edits.
+BOOTSTRAP_SENTINEL = "CLAWFORD_BOOTSTRAP_UNEDITED"
+
 # VPS-side secrets file. The gateway container reads this at boot, but a
 # human running `python3 deploy.py` from a fresh shell wouldn't have its
 # values in os.environ — so load it explicitly before the cron-sync step
@@ -482,6 +488,20 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def _has_bootstrap_sentinel(path: Path) -> bool:
+    """Return True if the first line of path contains the bootstrap sentinel.
+
+    Only meaningful for text files. Returns False for missing or unreadable
+    paths — Safeguard 10's caller classifies those separately.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            first_line = f.readline()
+    except OSError:
+        return False
+    return BOOTSTRAP_SENTINEL in first_line
+
+
 def seed_state_file(path: Path, content: Any) -> str:
     """Create path with JSON-serialized content only if it doesn't exist."""
     if path.exists():
@@ -529,6 +549,13 @@ CRON_MESSAGE_FORBIDDEN_PATTERNS: list[str] = [
     "2>&1",
     "2>/dev/null",
     "$(python",
+    # Post-R6 regression guard: per-agent .status.md files are no longer
+    # authoritative (fleet-health.json is). Cron messages that tell the
+    # LLM to "Update your status file" produced the 2026-04-14 bad-header
+    # brain-validation FAIL — the LLM drifts to whatever schema it picks.
+    # The canonical guard wording is "DO NOT touch <agent>.status.md —
+    # fleet-health.json (R6 orchestrator) is the authoritative health source."
+    "Update your status file",
 ]
 
 
@@ -1122,6 +1149,85 @@ def ensure_approvals(mf: Manifest) -> None:
 # ────────────────────────────────────────────────────────────────────────
 
 
+def _ensure_config_sources_present(mf: Manifest) -> int:
+    """Safeguard 10: classify each config file source and refuse the deploy
+    if any can't be resolved.
+
+    Real config files (SOUL.md, IDENTITY.md, USER.md, …) are gitignored
+    because they carry PII — only the .example templates are tracked.
+    Returns 0 on success, 5 on any problem (errors logged). The caller
+    (deploy_one) gates this check on `not args.skip_files` so a partial
+    bootstrap can still iterate on crons/approvals.
+    """
+    needs_bootstrap: list[tuple[str, Path, Path]] = []
+    truly_broken: list[tuple[str, Path]] = []
+    sentinel_present: list[tuple[str, Path]] = []
+
+    for cf in mf.config_files:
+        src = mf.source_dir / cf.src
+        template = mf.source_dir / (cf.src + ".example")
+        if not src.exists():
+            if template.exists():
+                needs_bootstrap.append((cf.src, src, template))
+            else:
+                truly_broken.append((cf.src, src))
+        elif _has_bootstrap_sentinel(src):
+            sentinel_present.append((cf.src, src))
+
+    if truly_broken:
+        log(
+            f"config source(s) missing with no .example template "
+            f"({len(truly_broken)} file(s)):",
+            "err",
+        )
+        for name, src in truly_broken:
+            log(f"  {src}", "err")
+        log(
+            "Manifest references files that don't exist and have no template "
+            "to bootstrap from. Fix the manifest or restore the missing files.",
+            "err",
+        )
+        return 5
+
+    if needs_bootstrap:
+        log(
+            f"config source(s) missing ({len(needs_bootstrap)} file(s)) — "
+            f"real files are gitignored after PII sanitization:",
+            "err",
+        )
+        for name, src, tmpl in needs_bootstrap:
+            log(f"  missing:  {src}", "err")
+            log(f"  template: {tmpl}", "err")
+        log(
+            f"Run: python3 agents/shared/deploy.py {mf.agent_id} "
+            f"--bootstrap-configs",
+            "err",
+        )
+        log(
+            "Then edit each scaffolded file with real values and delete "
+            f"the first-line {BOOTSTRAP_SENTINEL} comment before redeploying.",
+            "err",
+        )
+        return 5
+
+    if sentinel_present:
+        log(
+            f"config source(s) still carry the {BOOTSTRAP_SENTINEL} sentinel "
+            f"({len(sentinel_present)} file(s)):",
+            "err",
+        )
+        for name, src in sentinel_present:
+            log(f"  {src}", "err")
+        log(
+            f"Remove the first-line <!-- {BOOTSTRAP_SENTINEL} ... --> comment "
+            "after replacing the dummy values with real ones.",
+            "err",
+        )
+        return 5
+
+    return 0
+
+
 def sync_files(mf: Manifest, yes_updates: bool = False) -> tuple[int, int]:
     """Returns (updated, skipped) counts."""
     updated = skipped = 0
@@ -1210,6 +1316,77 @@ def sync_state_files(mf: Manifest) -> tuple[int, int]:
 # ────────────────────────────────────────────────────────────────────────
 # Main deploy flow
 # ────────────────────────────────────────────────────────────────────────
+
+
+def bootstrap_configs(agent_id: str) -> int:
+    """Scaffold missing real config files from their .example siblings.
+
+    After the 2026-04-13 PII sanitization, real config files are
+    gitignored — a fresh checkout only has .example templates. This
+    function walks agents/<agent_id>/**/*.example and copies each to its
+    unsuffixed sibling, prepending a BOOTSTRAP_SENTINEL marker to .md
+    files so the operator physically cannot deploy unedited fake values.
+
+    Idempotent: refuses to overwrite existing real files. Operates on the
+    filesystem without loading manifest.json (manifest.json.example itself
+    may be one of the files that needs scaffolding on a fresh clone).
+
+    Returns 0 on success, 2 if the agent directory doesn't exist.
+    """
+    agent_dir = REPO_ROOT / "agents" / agent_id
+    if not agent_dir.is_dir():
+        log(f"no agent directory at {agent_dir}", "err")
+        return 2
+
+    note(f"=== bootstrap-configs: {agent_id} ===")
+    templates = sorted(agent_dir.rglob("*.example"))
+    if not templates:
+        log(f"no .example templates found under {agent_dir}", "warn")
+        return 0
+
+    created = 0
+    skipped = 0
+    for template in templates:
+        # Strip the trailing ".example" suffix to compute the real path.
+        real = template.with_name(template.name[: -len(".example")])
+        rel = real.relative_to(agent_dir)
+
+        if real.exists():
+            log(f"✓ already present: {rel}", "ok")
+            skipped += 1
+            continue
+
+        if not _DRY:
+            real.parent.mkdir(parents=True, exist_ok=True)
+            if real.suffix == ".md":
+                body = template.read_text(encoding="utf-8")
+                wrapped = (
+                    f"<!-- {BOOTSTRAP_SENTINEL}: replace the dummy values "
+                    f"below with real ones and delete this line before "
+                    f"deploying -->\n\n"
+                ) + body
+                real.write_text(wrapped, encoding="utf-8")
+                log(f"+ scaffolded: {rel} [sentinel]", "plan")
+            else:
+                # JSON / .py / everything else — copy verbatim. A sentinel
+                # comment would break JSON parsing and Python syntax for
+                # shebang lines.
+                shutil.copy2(template, real)
+                log(f"+ scaffolded: {rel}", "plan")
+        else:
+            marker = " [sentinel]" if real.suffix == ".md" else ""
+            log(f"+ would scaffold: {rel}{marker}", "plan")
+        created += 1
+
+    note(f"bootstrap-configs: {created} created, {skipped} already present")
+    if created and not _DRY:
+        log(
+            "Next: hand-edit each scaffolded file with real values. For .md "
+            f"files, delete the first-line {BOOTSTRAP_SENTINEL} comment — "
+            "deploy.py will refuse them until you do.",
+            "info",
+        )
+    return 0
 
 
 def deploy_one(agent_id: str, args: argparse.Namespace) -> int:
@@ -1316,6 +1493,15 @@ def deploy_one(agent_id: str, args: argparse.Namespace) -> int:
     pre_deploy_backup = backup_workspace(mf)
 
     if not args.skip_files:
+        # Safeguard 10: refuse if any config file source is missing or
+        # still carries the bootstrap sentinel. Gated on skip_files so a
+        # partial bootstrap can still iterate on crons/approvals.
+        note("Config source resolution")
+        rc10 = _ensure_config_sources_present(mf)
+        if rc10 != 0:
+            return rc10
+        log("config sources resolved", "ok")
+
         note("Config files")
         sync_files(mf, yes_updates=getattr(args, "yes_updates", False))
         note("Scripts")
@@ -1393,11 +1579,36 @@ def main() -> int:
         "--smoke-test", action="store_true",
         help="Fire the manifest's smoke_test cron post-apply; auto-restore on fail",
     )
+    ap.add_argument(
+        "--bootstrap-configs", action="store_true",
+        help=(
+            "Scaffold missing real config files from their .example siblings "
+            "(agents/<agent>/SOUL.md.example → SOUL.md). Prepends a sentinel "
+            "to .md files — deploy.py refuses until you hand-edit and remove "
+            "the sentinel. Does not run a deploy."
+        ),
+    )
     args = ap.parse_args()
 
     _DRY = args.dry_run
     if _DRY:
         note("*** DRY RUN — no changes will be made ***")
+
+    if args.bootstrap_configs:
+        if args.all:
+            agents_dir = REPO_ROOT / "agents"
+            rc = 0
+            for child in sorted(agents_dir.iterdir()):
+                if not child.is_dir():
+                    continue
+                if child.name in args.exclude or child.name.startswith(("_", ".", "shared")):
+                    continue
+                rc |= bootstrap_configs(child.name)
+            return rc
+        if not args.agent_id:
+            log("--bootstrap-configs requires an agent_id (or --all)", "err")
+            return 2
+        return bootstrap_configs(args.agent_id)
 
     if args.all:
         agents_dir = REPO_ROOT / "agents"
