@@ -133,8 +133,9 @@ def test_send_message_silent_false_by_default(monkeypatch):
 
 
 def test_send_message_supports_reply_markup(monkeypatch):
-    """deliver-digest.py passes inline_keyboard reply_markup for like/dislike
-    buttons — the shared library must support this shape."""
+    """morning-fleet-deliver.py sends each digest item with an inline
+    keyboard for like/dislike/more reactions — the shared library must
+    support the reply_markup shape."""
     telegram = _reload_telegram()
     stub, captured = _make_urlopen_stub(factory=_ok_response)
     monkeypatch.setattr(telegram.urllib.request, "urlopen", stub)

@@ -42,22 +42,6 @@
     }
   },
   "news-digest": {
-    "morning-edition": {
-      "cron": "55 11 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "newsdigest",
-      "to": "111111111",
-      "message": "Generate and deliver the morning news digest. Run these two scripts in order:\n\n1. python3 /home/node/.openclaw/news-digest-workspace/scripts/fetch-and-rank.py\n2. python3 /home/node/.openclaw/news-digest-workspace/scripts/deliver-digest.py\n\nThe first script fetches RSS feeds, deduplicates, ranks, and saves to cache. The second script reads the ranked cache and sends each item as a separate Telegram message directly via the Bot API \u00e2\u20ac\u201d do NOT try to send messages yourself.\n\nAfter both scripts finish, update your status file with the results. Your text response will NOT be delivered to Telegram (delivery is handled by the script), so just output a brief status summary."
-    },
-    "preference-update": {
-      "cron": "0 23 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "newsdigest",
-      "to": "111111111",
-      "message": "Process today's engagement signals and update the preference model. Run: python3 ~/.openclaw/news-digest-workspace/scripts/update-preferences.py. This reads new entries from preferences/engagement.jsonl, applies multiplicative weight updates (thumbs_up: topic x1.1 source x1.05, thumbs_down: topic x0.85 source x0.95, expand: topic x1.05), clamps weights to safe ranges, and writes updated model to preferences/model.json. If there are no new engagement events, skip the update silently. DO NOT touch ~/Dropbox/openclaw-backup/agents/news-digest.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source."
-    }
   },
   "shopping": {
     "costco-token-refresh": {

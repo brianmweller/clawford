@@ -64,10 +64,10 @@ docker compose -f "$HOME/openclaw/docker-compose.yml" exec -T openclaw-gateway \
     failures=$((failures + 1))
 }
 
-# Verify: item-map should exist (deliver-digest.py ran)
+# Verify: item-map should exist (morning-edition.py writes it alongside morning-items.json)
 docker compose -f "$HOME/openclaw/docker-compose.yml" exec -T openclaw-gateway \
     test -f "$WORKSPACE/cache/item-map-${TODAY}.json" && echo "  PASS: item-map exists" || {
-    echo "  FAIL: item-map not created (deliver-digest.py may not have run)"
+    echo "  FAIL: item-map not created (morning-edition.py may not have run)"
     failures=$((failures + 1))
 }
 
@@ -84,63 +84,14 @@ fi
 T1
 
 # ═══════════════════════════════════════════════════════════════
-# T2 — Deduplication
+# T2 — (retired) Deduplication
 # ═══════════════════════════════════════════════════════════════
-
-cat > "$BASE/tests/news-digest/T2-dedup.sh" << 'T2'
-# Does the second delivery skip already-sent items?
-test_start "T2" "Deduplication — no overlap between run 1 and run 2"
-
-WORKSPACE="/home/node/.openclaw/news-digest-workspace"
-
-# Clear history for clean test
-docker compose -f "$HOME/openclaw/docker-compose.yml" exec -T openclaw-gateway \
-    rm -f "$WORKSPACE/cache/sent-history.json" 2>/dev/null || true
-
-# Run 1: capture sent item IDs
-echo "  Run 1..."
-STDOUT1="/tmp/dedup-test-run1.json"
-docker compose -f "$HOME/openclaw/docker-compose.yml" exec -T openclaw-gateway \
-    python3 "$WORKSPACE/scripts/deliver-digest.py" > "$STDOUT1" 2>/dev/null || true
-
-RUN1_IDS=$(cat "$STDOUT1" 2>/dev/null | python3 -c "
-import sys,json
-d = json.load(sys.stdin)
-print(d.get('items_sent', 0))
-" 2>/dev/null || echo "0")
-echo "  Run 1 sent: $RUN1_IDS items"
-
-# Run 2: capture sent item IDs — should have ZERO overlap with run 1
-echo "  Run 2..."
-STDOUT2="/tmp/dedup-test-run2.json"
-docker compose -f "$HOME/openclaw/docker-compose.yml" exec -T openclaw-gateway \
-    python3 "$WORKSPACE/scripts/deliver-digest.py" > "$STDOUT2" 2>/dev/null || true
-
-RUN2_IDS=$(cat "$STDOUT2" 2>/dev/null | python3 -c "
-import sys,json
-d = json.load(sys.stdin)
-print(d.get('items_sent', 0))
-" 2>/dev/null || echo "0")
-echo "  Run 2 sent: $RUN2_IDS items"
-
-rm -f "$STDOUT1" "$STDOUT2"
-
-# The key assertion: run 2 sent items but NONE of them overlap with run 1
-# (We verify via the history — run 1 items are in history, run 2 shouldn't re-send them)
-# Since is_duplicate checks the history, if run 2 sent any items, they must be NEW items
-# The simplest check: run 1 + run 2 items should equal the total sent across both runs
-# (no double-counting)
-
-if [ "$RUN1_IDS" -gt 0 ]; then
-    echo "  PASS: run 1 sent items and run 2 sent different items (no overlap by design)"
-    test_pass
-    return 0
-else
-    echo "  FAIL: run 1 sent 0 items"
-    test_fail "run 1 should have sent items"
-    return 1
-fi
-T2
+# The cross-run dedup logic lived in deliver-digest.py's sent-history
+# tracking. Phase 3b replaced that script with morning-edition.py +
+# morning-fleet-deliver-host.sh, which dedupe by day via a separate
+# marker file (morning-fleet-delivered-YYYY-MM-DD.json). No need for
+# per-item history checks because each day has a fresh ranked file
+# and a single delivery tick.
 
 # ═══════════════════════════════════════════════════════════════
 # T3 — Preference Logging

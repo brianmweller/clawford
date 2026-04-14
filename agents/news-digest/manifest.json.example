@@ -23,7 +23,6 @@
   "scripts": [
     "scripts/fetch-and-rank.py",
     "scripts/morning-edition.py",
-    "scripts/deliver-digest.py",
     "scripts/update-preferences.py",
     "scripts/engagement-poller.py",
     "scripts/on-demand.py",

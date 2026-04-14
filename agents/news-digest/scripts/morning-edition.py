@@ -1,20 +1,35 @@
 #!/usr/bin/env python3
-"""morning-edition.py — News digest LLM composition step.
+"""morning-edition.py — News digest LLM annotation + structuring step.
 
-Phase 3b replacement for the OpenClaw LLM cron that used to compose
-the structured morning items. Pipeline:
+Phase 3b + Phase 3b-fix architecture. Pipeline:
 
-  1. Read cache/ranked-<today>.json (written by fetch-and-rank.py,
-     which the host-cron wrapper runs just before this script).
-  2. Call agents.shared.llm.infer(json_mode=True) with a prompt that
-     includes the ranked articles and asks for a structured items array.
-  3. Parse the LLM response (defensive markdown-fence unwrap).
-  4. Atomic-write cache/morning-items.json for morning-fleet-deliver.py
-     to consume at 12:00 UTC.
+  1. Read cache/ranked-<today>.json produced by fetch-and-rank.py.
+  2. Python-side select_items() chooses the top N articles with
+     deterministic LinkedIn slot reservation — so LinkedIn signal
+     survives even when news items out-rank it.
+  3. Call agents.shared.llm.infer(json_mode=True) asking the LLM to
+     annotate each selected article (keyed by id) with a category
+     and an extended_headline. The LLM does NOT do selection or
+     ordering — Python owns the final list.
+  4. Parse the wrapper {"items": [...]} the Responses API returns,
+     merge each annotation back onto the Python-owned selection
+     (with deterministic fallbacks when the LLM drops items).
+  5. Atomic-write cache/morning-items.json for morning-fleet-deliver
+     AND cache/item-map-<today>.json for engagement-poller lookup.
 
-No Telegram delivery here — the morning-fleet-deliver.py orchestrator
-at 12:00 UTC reads the items file and sends each item with the inline
-keyboard buttons via the NEWSDIGEST_BOT_TOKEN.
+Why this shape:
+
+The first Phase 3b day-in-the-life surfaced two LLM-selection bugs:
+the model disregarded the "top 15-20" soft constraint (returned 30
+items) and dropped every LinkedIn item from 7 ranked down to 0
+selected. Splitting selection (deterministic Python) from
+annotation (LLM) makes both failures impossible by construction.
+
+The item-map write was also missing — engagement-poller needs
+cache/item-map-<today>.json to resolve a like:N callback back to
+an article, and the previous architecture left that file empty.
+Every like for 2026-04-14 was silently dropped until this script
+started writing it.
 
 SCRIPT_CONTRACT-compliant: always exits 0, prints one JSON line.
 """
@@ -44,72 +59,77 @@ from agents.shared import llm
 WORKSPACE = Path(os.path.expanduser("~/.openclaw/news-digest-workspace"))
 CACHE_DIR = WORKSPACE / "cache"
 
-# Generous timeout — the prompt can be ~5k tokens once ranked articles
-# are injected, and the codex backend occasionally takes 30-60s on the
-# first cold call of the day.
+# Selection tuning. 18 total items with 4 LinkedIn reserved means the
+# digest is ~14 news + ~4 LinkedIn on a normal day, matching the
+# Phase-3a manifest target of "top 15-20" without leaving LinkedIn
+# signal to the LLM's judgment.
+TARGET_TOTAL = 18
+LINKEDIN_RESERVED = 4
+
+# Generous timeout — the annotation prompt is smaller than the
+# pre-fix compose prompt (headlines only, no article bodies) but
+# 18 items × ~200 tokens of output = ~3.5k tokens, and codex
+# backend latency can spike on the first cold call of the day.
 LLM_TIMEOUT_S = 120
 
-# The prompt template. Kept as a module constant so the script and
-# its prompt ship as one file. The `{ranked_json}` placeholder is
-# replaced at runtime with a JSON dump of the articles list.
+# Category labels the LLM must choose from. The fleet-delivery script
+# doesn't inspect the exact string — these are purely for human
+# readability in the Telegram message — but the fallback classifier
+# below matches these labels so the prompt and the Python fallback
+# stay in lockstep.
+CATEGORY_LABELS = (
+    "🤖 AI & Tech",
+    "💰 Economics",
+    "🌍 World",
+    "🏛️ US Policy",
+    "🔗 LinkedIn",
+    "📋 Also Noted",
+)
+
+
 PROMPT_TEMPLATE = """\
-Build the morning news digest for Lowly Worm (news-digest agent).
+Annotate each of the following articles for the morning news digest.
 
-Below is a JSON array of articles that fetch-and-rank.py scored against
-the user's preference model. Your job is to:
-
-  1. Select the top 15-20 items (skip boring, duplicate, or low-signal
-     entries — prioritize variety across topics).
-  2. Write a one-sentence extended headline for each that explains WHY
-     the item matters (context, stakes, who it affects).
-  3. Group items by topic category, using these exact labels (with the
-     leading emoji):
-
+For each article, produce exactly two fields:
+  - `category`: one of these labels (with the leading emoji):
         🤖 AI & Tech
         💰 Economics
         🌍 World
         🏛️ US Policy
         🔗 LinkedIn
         📋 Also Noted
+  - `extended_headline`: a one-sentence rewritten headline that
+     explains WHY the item matters — context, stakes, who it affects.
+     Keep it concrete and specific; no filler like "could be important".
 
-  4. Order items by category in the order above, then by importance
-     within each category.
-
-For LinkedIn message thread items (source=linkedin, source_label contains
-"Message"), the title already contains the sender name and the summary
-is an LLM-generated thread summary — use those as the headline fields
-directly.
+LinkedIn items (source=linkedin or source_label contains "LinkedIn")
+always go in the 🔗 LinkedIn category.
 
 Return a JSON object with a single top-level key `items` whose value
-is an array of item objects, one per selected item, in delivery order:
+is an array of objects. Each object MUST include the original `id`
+string so Python can match annotations back to the source article.
+Do not reorder, drop, or add articles — return exactly the same set
+of ids, with annotations:
 
 {
   "items": [
-    {
-      "num": 1,
-      "category": "🤖 AI & Tech",
-      "extended_headline": "<1 sentence rewritten headline + why it matters>",
-      "title": "<raw article title>",
-      "url": "<canonical url>",
-      "source_label": "<source display, e.g. Reuters>",
-      "topics": ["<topic tags from the ranked file>"]
-    }
+    {"id": "<original id>", "category": "<label>", "extended_headline": "<sentence>"}
   ]
 }
 
-Ranked articles:
-{ranked_json}
+Articles to annotate:
+{articles_json}
 """
+
+
+# ─── load_ranked_articles ────────────────────────────────────────────
 
 
 def load_ranked_articles() -> tuple[list[dict], str]:
     """Read cache/ranked-<today>.json.
 
-    Returns (articles, date_str). Raises FileNotFoundError if the ranked
-    file is missing (host-cron wrapper should have run fetch-and-rank.py
-    before this script). Raises RuntimeError if the file parses but
-    contains no articles — we don't want to hand the LLM an empty list
-    and ask it to invent a digest.
+    Returns (articles, date_str). Raises FileNotFoundError if the
+    ranked file is missing and RuntimeError if it's empty.
     """
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     ranked_file = CACHE_DIR / f"ranked-{today}.json"
@@ -123,25 +143,97 @@ def load_ranked_articles() -> tuple[list[dict], str]:
     return articles, today
 
 
-def build_prompt(articles: list[dict]) -> str:
-    """Substitute the ranked articles JSON into the prompt template."""
-    ranked_json = json.dumps(articles, indent=2)
-    return PROMPT_TEMPLATE.replace("{ranked_json}", ranked_json)
+# ─── select_items ───────────────────────────────────────────────────
 
 
-def parse_items_response(text: str) -> list[dict]:
-    """Parse the LLM response into a list of item dicts.
+def select_items(
+    articles: list[dict],
+    *,
+    target_total: int = TARGET_TOTAL,
+    linkedin_reserved: int = LINKEDIN_RESERVED,
+) -> list[dict]:
+    """Pick the digest's articles from the ranked feed.
 
-    Primary shape: {"items": [...]}. The OpenAI Responses API with
-    json_mode=True forces a JSON OBJECT return, so the prompt asks for
-    `{"items": [...]}` and this function unwraps the `items` key.
+    Deterministic selection: top-ranked non-LinkedIn plus the
+    highest-ranked LinkedIn items up to linkedin_reserved slots.
+    Total count is exactly target_total unless the ranked feed has
+    fewer articles than that. LinkedIn slots are claimed first so
+    non-LinkedIn backfill takes whatever remains.
 
-    Also accepts a bare array for forward compatibility with model
-    variants that honor an explicit array-shape prompt despite
-    json_mode being on.
+    Assigns sequential `num` (1..N) after final ordering by rank so
+    morning-fleet-deliver can label each Telegram message with a
+    stable number that matches /like N / callback_data=like:N.
+    """
+    def _rank(a: dict) -> float:
+        r = a.get("rank", 0)
+        try:
+            return float(r)
+        except (TypeError, ValueError):
+            return 0.0
 
-    Defensive markdown-fence unwrap — models sometimes wrap output
-    in ```json … ``` fences even when asked for bare JSON.
+    linkedin = sorted(
+        (a for a in articles if a.get("source") == "linkedin"),
+        key=_rank,
+        reverse=True,
+    )
+    non_linkedin = sorted(
+        (a for a in articles if a.get("source") != "linkedin"),
+        key=_rank,
+        reverse=True,
+    )
+
+    li_slot_count = min(len(linkedin), linkedin_reserved)
+    non_li_slot_count = target_total - li_slot_count
+    if non_li_slot_count < 0:
+        non_li_slot_count = 0
+
+    selected = linkedin[:li_slot_count] + non_linkedin[:non_li_slot_count]
+    # Re-sort the combined set by rank so delivery order reflects
+    # importance rather than source buckets.
+    selected.sort(key=_rank, reverse=True)
+
+    # Cap to target_total in case we have more LinkedIn than requested
+    # (possible when linkedin_reserved > target_total — defensive)
+    selected = selected[:target_total]
+
+    # Assign num 1..N
+    for i, item in enumerate(selected, 1):
+        item["num"] = i
+
+    return selected
+
+
+# ─── build_prompt ───────────────────────────────────────────────────
+
+
+def build_prompt(selected: list[dict]) -> str:
+    """Format the prompt template with a compact JSON list of
+    articles — just enough fields for the LLM to reason about
+    category + headline without the full summary text."""
+    compact = [
+        {
+            "id": item["id"],
+            "title": item.get("title", ""),
+            "source_label": item.get("source_label", ""),
+            "source": item.get("source", ""),
+            "topics": item.get("topics", []),
+            "summary": (item.get("summary") or "")[:400],
+        }
+        for item in selected
+    ]
+    articles_json = json.dumps(compact, indent=2, ensure_ascii=False)
+    return PROMPT_TEMPLATE.replace("{articles_json}", articles_json)
+
+
+# ─── parse_response ─────────────────────────────────────────────────
+
+
+def parse_response(text: str) -> list[dict]:
+    """Parse the LLM's annotation response.
+
+    Expects {"items": [{id, category, extended_headline}, ...]} per
+    the prompt contract. Strips markdown fences defensively because
+    json_mode doesn't always prevent wrapping.
     """
     text = (text or "").strip()
     if text.startswith("```"):
@@ -152,60 +244,157 @@ def parse_items_response(text: str) -> list[dict]:
         if body.endswith("```"):
             body = body[:-3].strip()
         text = body
+
     data = json.loads(text)
 
     if isinstance(data, list):
         return data
 
-    if isinstance(data, dict):
-        if "items" not in data:
-            raise ValueError(
-                "expected {\"items\": [...]} shape, "
-                f"got object with keys {sorted(data.keys())}"
-            )
-        items = data["items"]
-        if not isinstance(items, list):
-            raise ValueError(
-                f"expected items to be a list/array, got {type(items).__name__}"
-            )
-        return items
+    if not isinstance(data, dict):
+        raise ValueError(f"expected JSON object, got {type(data).__name__}")
 
-    raise ValueError(
-        f"expected JSON object or array, got {type(data).__name__}"
-    )
+    if "items" not in data:
+        raise ValueError(
+            f"expected \"items\" key in response object, got {sorted(data.keys())}"
+        )
+
+    items = data["items"]
+    if not isinstance(items, list):
+        raise ValueError(f"expected items to be a list, got {type(items).__name__}")
+    return items
+
+
+# ─── merge_annotations ──────────────────────────────────────────────
+
+
+def _fallback_category(item: dict) -> str:
+    """Pick a category from the item's topics when the LLM didn't
+    annotate it. Keeps the final output complete even if the LLM
+    drops an id from its response.
+    """
+    if item.get("source") == "linkedin":
+        return "🔗 LinkedIn"
+    topics = set(item.get("topics", []))
+    if topics & {"ai", "tech", "artificial_intelligence", "chatbots", "generative_ai"}:
+        return "🤖 AI & Tech"
+    if topics & {"economics", "markets", "business", "stocks", "startups"}:
+        return "💰 Economics"
+    if topics & {"international_politics", "world", "geopolitics"}:
+        return "🌍 World"
+    if topics & {"us_domestic_policy", "regulation"}:
+        return "🏛️ US Policy"
+    return "📋 Also Noted"
+
+
+def merge_annotations(
+    selected: list[dict],
+    annotations: list[dict],
+) -> list[dict]:
+    """Attach `category` and `extended_headline` from the LLM
+    annotations to each Python-owned selected item.
+
+    The LLM might drop items, echo extra fields, or miss ids — this
+    function defends by owning the final shape. Only `category` and
+    `extended_headline` are taken from the annotations; everything
+    else comes from the `selected` list.
+    """
+    by_id: dict[str, dict] = {}
+    for ann in annotations:
+        if not isinstance(ann, dict):
+            continue
+        id_ = ann.get("id")
+        if id_:
+            by_id[id_] = ann
+
+    merged: list[dict] = []
+    for item in selected:
+        ann = by_id.get(item["id"], {})
+        category = ann.get("category") or _fallback_category(item)
+        headline = ann.get("extended_headline") or item.get("title", "")
+        merged.append({
+            "num": item["num"],
+            "id": item["id"],
+            "category": category,
+            "extended_headline": headline,
+            "title": item.get("title", ""),
+            "url": item.get("link", ""),
+            "source_label": item.get("source_label", ""),
+            "source": item.get("source", ""),
+            "topics": item.get("topics", []),
+        })
+    return merged
+
+
+# ─── write_morning_items ────────────────────────────────────────────
 
 
 def write_morning_items(items: list[dict], date_str: str) -> Path:
-    """Atomic write to cache/morning-items.json.
-
-    The .tmp file is rewritten in place with os.replace so
-    morning-fleet-deliver.py (which reads this file at 12:00 UTC)
-    never sees a partially-written JSON array.
-    """
+    """Atomic write of the structured items list for
+    morning-fleet-deliver.py to read at 12:00 UTC."""
     path = CACHE_DIR / "morning-items.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(items, f, indent=2)
+        json.dump(items, f, indent=2, ensure_ascii=False)
     os.replace(tmp, path)
     return path
 
 
+# ─── write_item_map ─────────────────────────────────────────────────
+
+
+def write_item_map(items: list[dict], date_str: str) -> Path:
+    """Atomic write of cache/item-map-<date>.json for engagement-poller.
+
+    engagement-poller reads the short-form source (`nyt`, `linkedin`)
+    and the topic list when logging a thumbs_up — so the map's value
+    shape must match `.get('id')`, `.get('title')`, `.get('topics', [])`,
+    `.get('source', '')`. Includes `link` for future telegram command
+    handlers that want to echo the URL.
+    """
+    path = CACHE_DIR / f"item-map-{date_str}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mapping: dict[str, dict] = {}
+    for item in items:
+        mapping[str(item["num"])] = {
+            "id": item.get("id", ""),
+            "title": item.get("title", ""),
+            "topics": item.get("topics", []),
+            "source": item.get("source", ""),
+            "link": item.get("url", ""),
+        }
+    tmp = path.with_suffix(".json.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(mapping, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, path)
+    return path
+
+
+# ─── run() orchestrator ─────────────────────────────────────────────
+
+
 def run() -> dict:
     articles, date_str = load_ranked_articles()
-    prompt = build_prompt(articles)
+    selected = select_items(articles)
+    prompt = build_prompt(selected)
     result = llm.infer(prompt, json_mode=True, timeout=LLM_TIMEOUT_S)
     if not result.ok:
         raise RuntimeError(f"LLM infer failed: {result.error}")
-    items = parse_items_response(result.text or "")
-    if not items:
-        raise RuntimeError("LLM returned empty items list")
-    path = write_morning_items(items, date_str)
+    annotations = parse_response(result.text or "")
+    merged = merge_annotations(selected, annotations)
+    if not merged:
+        raise RuntimeError("merged items list is empty")
+    items_path = write_morning_items(merged, date_str)
+    map_path = write_item_map(merged, date_str)
+
+    linkedin_count = sum(1 for m in merged if m.get("source") == "linkedin")
     return {
         "status": "ok",
         "date": date_str,
-        "items_count": len(items),
-        "items_path": str(path),
+        "items_count": len(merged),
+        "linkedin_count": linkedin_count,
+        "items_path": str(items_path),
+        "item_map_path": str(map_path),
         "ranked_article_count": len(articles),
         "input_tokens": result.input_tokens,
         "output_tokens": result.output_tokens,

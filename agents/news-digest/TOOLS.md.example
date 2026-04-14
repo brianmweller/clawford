@@ -104,8 +104,10 @@
 # Fetch all RSS feeds + LinkedIn, deduplicate, rank by preferences → cache/ranked-YYYY-MM-DD.json
 python3 ~/.openclaw/news-digest-workspace/scripts/fetch-and-rank.py
 
-# Read ranked JSON, format, send to Telegram with inline reaction buttons → cache/sent-history.json
-python3 ~/.openclaw/news-digest-workspace/scripts/deliver-digest.py
+# Read ranked JSON, Python-select with LinkedIn reservation, LLM-annotate per item,
+# write cache/morning-items.json + cache/item-map-YYYY-MM-DD.json.
+# Delivery is handled later by the host-cron morning-fleet-deliver at 12:00 UTC.
+python3 ~/.openclaw/news-digest-workspace/scripts/morning-edition.py
 ```
 
 **Engagement & preferences:**

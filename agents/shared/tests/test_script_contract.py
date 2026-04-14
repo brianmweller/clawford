@@ -177,7 +177,6 @@ NATIVE_COMPLIANCE_XFAIL: set[str] = {
     "meetings-coach/person-bootstrap.py",
     "meetings-coach/krisp-auth-manual.py",
     "news-digest/fetch-and-rank.py",
-    "news-digest/deliver-digest.py",
     "news-digest/on-demand.py",
     "news-digest/linkedin-scrape.py",
     "news-digest/linkedin-keepalive.py",
