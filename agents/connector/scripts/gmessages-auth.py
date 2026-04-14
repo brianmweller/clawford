@@ -1,33 +1,41 @@
 #!/usr/bin/env python3
 """gmessages-auth.py — One-time Google Messages Web pairing flow.
 
-Follows the same xvfb + non-headless Chromium + remote-debugging-port
-pattern as news-digest/linkedin-auth.py, adapted for messages.google.com.
-The pairing is done ONCE by the operator over an SSH tunnel; afterwards
-gmessages-mine.py runs headlessly against the persistent profile.
+Drives a non-headless Chromium under Xvfb (so the QR code renders to a
+real pixel buffer), navigates to messages.google.com/web/authentication,
+screenshots the QR to a host-visible path under the openclaw-backup
+Dropbox, and polls for successful pairing — then exits cleanly so the
+persistent profile is committed to disk.
 
-Setup (run from the operator's laptop):
-    Terminal 1: ssh -L 9222:localhost:9222 -i ~/.ssh/id_ed25519 openclaw@203.0.113.10
-    Terminal 2 (on VPS via ssh): cd ~/openclaw && docker compose exec openclaw-gateway \\
-        python3 /home/node/.openclaw/connector-workspace/scripts/gmessages-auth.py
-    Browser: open chrome://inspect/#devices, Configure, add localhost:9222,
-             then click `inspect` on the "Messages" target.
-    Phone: open Google Messages on Android → three-dot menu → Device pairing →
-           scan the QR code shown in the DevTools target.
+No debug port / SSH tunnel / chrome://inspect required. the operator scans the
+screenshot with his Android Messages app (Messages menu → Device pairing
+→ QR scanner) within the 2-minute poll window.
 
-After the QR is accepted, the conversation list renders. Press Enter in
-the SSH terminal to shut down Chromium gracefully and commit the profile
-to disk. Subsequent gmessages-mine.py runs use the saved session.
+Setup:
+    1. SSH to VPS: ssh -i ~/.ssh/id_ed25519 openclaw@203.0.113.10
+    2. Run inside the gateway container:
+         cd ~/openclaw && docker compose exec openclaw-gateway \\
+             python3 /home/node/.openclaw/connector-workspace/scripts/gmessages-auth.py
+    3. Script writes /home/node/Dropbox/openclaw-backup/tmp/gmessages-qr.png
+       (= host path /home/openclaw/Dropbox/openclaw-backup/tmp/gmessages-qr.png,
+       auto-synced to the operator's laptop via Dropbox within seconds)
+    4. the operator opens the file on his laptop, scans with Android Messages
+    5. Script polls for ~2 minutes and exits as soon as the page URL
+       changes away from /authentication (indicating successful pair)
+    6. Subsequent gmessages-mine.py runs use the saved profile headlessly
 
-Profile: ~/.openclaw/connector-workspace/gmessages-profile/
+Profile path: ~/.openclaw/connector-workspace/gmessages-profile/
+QR screenshot: /home/node/Dropbox/openclaw-backup/tmp/gmessages-qr.png
 """
 from __future__ import annotations
 
+import json
 import os
-import subprocess
 import sys
 import time
+import traceback
 from pathlib import Path
+
 
 # --- shared library sys.path shim ---
 for _p in Path(__file__).resolve().parents:
@@ -36,102 +44,106 @@ for _p in Path(__file__).resolve().parents:
             sys.path.insert(0, str(_p))
         break
 
-from agents.shared.playwright_profile import (
-    cleanup_profile_lock,
-    ensure_profile_dir,
-    ensure_xvfb,
-)
 
 PROFILE_DIR = Path(
     os.path.expanduser("~/.openclaw/connector-workspace/gmessages-profile")
 )
-DEBUG_PORT = 9228  # different from LinkedIn's 9223 so both can coexist
-TUNNEL_PORT = 9222
+QR_SCREENSHOT = Path(
+    os.path.expanduser("~/Dropbox/openclaw-backup/tmp/gmessages-qr.png")
+)
+AUTH_URL = "https://messages.google.com/web/authentication"
+POST_LOAD_SETTLE_MS = 5_000
+POLL_INTERVAL_SEC = 3
+POLL_TIMEOUT_SEC = 180  # three minutes — Google refreshes the QR every ~60s
+
+
+def run() -> dict:
+    from agents.shared.playwright_profile import (
+        ensure_profile_dir,
+        cleanup_profile_lock,
+        ensure_xvfb,
+        launch_persistent_profile,
+    )
+
+    ensure_profile_dir(PROFILE_DIR)
+    cleanup_profile_lock(PROFILE_DIR)
+    QR_SCREENSHOT.parent.mkdir(parents=True, exist_ok=True)
+
+    # Xvfb is required even though Playwright's headful mode wants a
+    # display — the gateway container has no real X server.
+    ensure_xvfb(display_num=99)
+
+    print("=== gmessages-auth ===", file=sys.stderr)
+    print(f"Profile:    {PROFILE_DIR}", file=sys.stderr)
+    print(f"Screenshot: {QR_SCREENSHOT}", file=sys.stderr)
+    print("Launching Chromium under Xvfb...", file=sys.stderr)
+
+    with launch_persistent_profile(PROFILE_DIR, headless=False) as browser:
+        page = browser.pages[0] if browser.pages else browser.new_page()
+        page.goto(AUTH_URL, wait_until="domcontentloaded", timeout=60_000)
+        page.wait_for_timeout(POST_LOAD_SETTLE_MS)
+
+        page.screenshot(path=str(QR_SCREENSHOT), full_page=True)
+        print(f"QR screenshot saved to {QR_SCREENSHOT}", file=sys.stderr)
+        print(
+            "Open the file on your laptop (Dropbox sync) and scan with "
+            "Android Messages → menu → Device pairing → QR scanner.",
+            file=sys.stderr,
+        )
+        print(
+            f"Polling page URL every {POLL_INTERVAL_SEC}s for "
+            f"{POLL_TIMEOUT_SEC}s — will exit as soon as pairing completes.",
+            file=sys.stderr,
+        )
+
+        start = time.monotonic()
+        paired = False
+        while time.monotonic() - start < POLL_TIMEOUT_SEC:
+            current = page.url or ""
+            if "authentication" not in current:
+                paired = True
+                break
+            # If the QR expired, Google re-renders it on the same URL.
+            # Refresh the screenshot so the operator can re-scan the new one.
+            page.wait_for_timeout(POLL_INTERVAL_SEC * 1_000)
+            try:
+                page.screenshot(path=str(QR_SCREENSHOT), full_page=True)
+            except Exception:
+                pass
+
+        if not paired:
+            return {
+                "status": "degraded",
+                "alert": (
+                    "🐛 gmessages-auth: QR not scanned within "
+                    f"{POLL_TIMEOUT_SEC}s — re-run the script to retry"
+                ),
+                "qr_screenshot": str(QR_SCREENSHOT),
+            }
+
+        # One more settle to give the conversation list a chance to
+        # populate before we close — ensures cookies/localStorage are
+        # fully written into the persistent profile.
+        page.wait_for_timeout(5_000)
+
+    return {
+        "status": "ok",
+        "message": "Pairing saved. Run gmessages-mine.py to scrape.",
+        "profile": str(PROFILE_DIR),
+    }
 
 
 def main() -> int:
-    ensure_profile_dir(PROFILE_DIR)
-    removed = cleanup_profile_lock(PROFILE_DIR)
-    if removed:
-        print(f"Cleaned stale locks: {', '.join(removed)}")
-
-    # Kill any prior instances so the debug port is free
-    subprocess.run(["pkill", "-f", "chromium.*gmessages-profile"], capture_output=True)
-    subprocess.run(["pkill", "-f", "socat.*:9228"], capture_output=True)
-    time.sleep(1)
-
-    print(f"Profile dir: {PROFILE_DIR}")
-    print("Launching non-headless Chromium via xvfb with remote debugging...")
-    print()
-
-    xvfb = ensure_xvfb(display_num=99)
-    time.sleep(1)
-
-    chrome = subprocess.Popen(
-        [
-            "/usr/bin/chromium",
-            f"--remote-debugging-port={DEBUG_PORT}",
-            "--no-sandbox",
-            "--disable-gpu",
-            "--no-first-run",
-            "--disable-extensions",
-            "--window-size=1280,900",
-            f"--user-data-dir={PROFILE_DIR}",
-            "https://messages.google.com/web/authentication",
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-    time.sleep(3)
-
-    if chrome.poll() is not None:
-        if xvfb is not None:
-            xvfb.terminate()
-        print("ERROR: Chromium failed to start.")
-        return 1
-
-    socat = subprocess.Popen(
-        [
-            "socat",
-            f"TCP-LISTEN:{TUNNEL_PORT},fork,reuseaddr,bind=0.0.0.0",
-            f"TCP:127.0.0.1:{DEBUG_PORT}",
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-    time.sleep(1)
-
-    print("Chromium is running. Pair your Android phone:")
-    print()
-    print("  1. On your laptop, tunnel is already up at localhost:9222")
-    print("  2. Open chrome://inspect/#devices")
-    print("  3. Click Configure, add localhost:9222")
-    print("  4. Click 'inspect' on the Messages target")
-    print("  5. On Android: Messages → menu → Device pairing → QR scanner")
-    print("  6. Scan the QR code, check 'Remember this computer'")
-    print("  7. Once the conversation list renders, come back here")
-    print("  8. Press Enter to save the session and exit")
-    print()
-
     try:
-        input("Press Enter when pairing is complete...")
-    except EOFError:
-        pass
-
-    socat.terminate()
-    chrome.terminate()
-    try:
-        chrome.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        chrome.kill()
-    if xvfb is not None:
-        xvfb.terminate()
-
-    print()
-    print(f"Session saved to {PROFILE_DIR}")
-    print("gmessages-mine.py will now use this profile headlessly.")
+        result = run()
+    except Exception as e:
+        result = {
+            "status": "error",
+            "error": str(e),
+            "alert": f"🐛 gmessages-auth crashed: {e}",
+            "traceback": traceback.format_exc().splitlines()[-3:],
+        }
+    print(json.dumps(result))
     return 0
 
 
