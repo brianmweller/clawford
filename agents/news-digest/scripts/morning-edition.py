@@ -80,19 +80,22 @@ For LinkedIn message thread items (source=linkedin, source_label contains
 is an LLM-generated thread summary — use those as the headline fields
 directly.
 
-Return a JSON array. One object per selected item, in delivery order:
+Return a JSON object with a single top-level key `items` whose value
+is an array of item objects, one per selected item, in delivery order:
 
-[
-  {
-    "num": 1,
-    "category": "🤖 AI & Tech",
-    "extended_headline": "<1 sentence rewritten headline + why it matters>",
-    "title": "<raw article title>",
-    "url": "<canonical url>",
-    "source_label": "<source display, e.g. Reuters>",
-    "topics": ["<topic tags from the ranked file>"]
-  }
-]
+{
+  "items": [
+    {
+      "num": 1,
+      "category": "🤖 AI & Tech",
+      "extended_headline": "<1 sentence rewritten headline + why it matters>",
+      "title": "<raw article title>",
+      "url": "<canonical url>",
+      "source_label": "<source display, e.g. Reuters>",
+      "topics": ["<topic tags from the ranked file>"]
+    }
+  ]
+}
 
 Ranked articles:
 {ranked_json}
@@ -129,9 +132,16 @@ def build_prompt(articles: list[dict]) -> str:
 def parse_items_response(text: str) -> list[dict]:
     """Parse the LLM response into a list of item dicts.
 
-    Defensive markdown-fence unwrap — `json_mode=True` constrains the
-    codex backend to JSON output but models sometimes still wrap in
-    ```json … ``` fences, especially for arrays.
+    Primary shape: {"items": [...]}. The OpenAI Responses API with
+    json_mode=True forces a JSON OBJECT return, so the prompt asks for
+    `{"items": [...]}` and this function unwraps the `items` key.
+
+    Also accepts a bare array for forward compatibility with model
+    variants that honor an explicit array-shape prompt despite
+    json_mode being on.
+
+    Defensive markdown-fence unwrap — models sometimes wrap output
+    in ```json … ``` fences even when asked for bare JSON.
     """
     text = (text or "").strip()
     if text.startswith("```"):
@@ -143,11 +153,26 @@ def parse_items_response(text: str) -> list[dict]:
             body = body[:-3].strip()
         text = body
     data = json.loads(text)
-    if not isinstance(data, list):
-        raise ValueError(
-            f"expected JSON array, got {type(data).__name__}"
-        )
-    return data
+
+    if isinstance(data, list):
+        return data
+
+    if isinstance(data, dict):
+        if "items" not in data:
+            raise ValueError(
+                "expected {\"items\": [...]} shape, "
+                f"got object with keys {sorted(data.keys())}"
+            )
+        items = data["items"]
+        if not isinstance(items, list):
+            raise ValueError(
+                f"expected items to be a list/array, got {type(items).__name__}"
+            )
+        return items
+
+    raise ValueError(
+        f"expected JSON object or array, got {type(data).__name__}"
+    )
 
 
 def write_morning_items(items: list[dict], date_str: str) -> Path:

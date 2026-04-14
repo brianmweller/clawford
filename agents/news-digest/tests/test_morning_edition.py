@@ -112,8 +112,15 @@ SAMPLE_LLM_OUTPUT = [
 
 
 def _fake_infer_ok(items: list[dict]) -> InferResult:
+    """Build a successful InferResult wrapping items in the
+    `{"items": [...]}` envelope the LLM returns under json_mode=True.
+
+    The OpenAI Responses API with text.format.type=json_object forces
+    a JSON OBJECT return (not a bare array), so the prompt asks for
+    `{"items": [...]}` and the parser extracts the array.
+    """
     return InferResult(
-        text=json.dumps(items),
+        text=json.dumps({"items": items}),
         model="gpt-5.4",
         input_tokens=1500,
         output_tokens=400,
@@ -168,45 +175,67 @@ def test_build_prompt_mentions_category_labels(mod):
     assert "📋 Also Noted" in prompt
 
 
-def test_build_prompt_asks_for_json_array(mod):
+def test_build_prompt_asks_for_items_object(mod):
+    """Under json_mode=True the Responses API forces an object return,
+    so the prompt asks for {"items": [...]} shape."""
     prompt = mod.build_prompt(SAMPLE_ARTICLES)
-    # The prompt should instruct the LLM to return an array of objects
-    assert "JSON array" in prompt or "json array" in prompt.lower()
+    assert '"items"' in prompt
+    assert "JSON object" in prompt or "json object" in prompt.lower()
 
 
 # ─── parse_items_response ───────────────────────────────────────────
 
 
-def test_parse_items_response_happy_path(mod):
-    text = json.dumps(SAMPLE_LLM_OUTPUT)
+def test_parse_items_response_extracts_items_from_wrapper_object(mod):
+    """Under json_mode=True the LLM returns {"items": [...]} because
+    the Responses API forces a JSON object. parse_items_response
+    unwraps the `items` key."""
+    text = json.dumps({"items": SAMPLE_LLM_OUTPUT})
     items = mod.parse_items_response(text)
     assert len(items) == 2
     assert items[0]["num"] == 1
     assert items[0]["category"] == "🤖 AI & Tech"
 
 
+def test_parse_items_response_accepts_bare_array_as_fallback(mod):
+    """If the model disregards json_mode and returns a bare array
+    (possible when the prompt is explicit), parse_items_response
+    should still handle it for forward compatibility."""
+    text = json.dumps(SAMPLE_LLM_OUTPUT)
+    items = mod.parse_items_response(text)
+    assert len(items) == 2
+
+
 def test_parse_items_response_unwraps_markdown_fence(mod):
     """Even with json_mode=True, models sometimes wrap in ```json…```."""
-    fenced = "```json\n" + json.dumps(SAMPLE_LLM_OUTPUT) + "\n```"
+    fenced = "```json\n" + json.dumps({"items": SAMPLE_LLM_OUTPUT}) + "\n```"
     items = mod.parse_items_response(fenced)
     assert len(items) == 2
 
 
 def test_parse_items_response_unwraps_bare_fence(mod):
-    fenced = "```\n" + json.dumps(SAMPLE_LLM_OUTPUT) + "\n```"
+    fenced = "```\n" + json.dumps({"items": SAMPLE_LLM_OUTPUT}) + "\n```"
     items = mod.parse_items_response(fenced)
     assert len(items) == 2
 
 
 def test_parse_items_response_strips_leading_whitespace(mod):
-    text = "\n\n  " + json.dumps(SAMPLE_LLM_OUTPUT)
+    text = "\n\n  " + json.dumps({"items": SAMPLE_LLM_OUTPUT})
     items = mod.parse_items_response(text)
     assert len(items) == 2
 
 
-def test_parse_items_response_raises_when_not_array(mod):
-    text = json.dumps({"items": SAMPLE_LLM_OUTPUT})  # dict, not array
-    with pytest.raises(ValueError, match="array"):
+def test_parse_items_response_raises_when_dict_has_no_items_key(mod):
+    """A wrapper object that doesn't have 'items' is a contract
+    violation — the prompt explicitly asks for that shape."""
+    text = json.dumps({"results": SAMPLE_LLM_OUTPUT})
+    with pytest.raises(ValueError, match="items"):
+        mod.parse_items_response(text)
+
+
+def test_parse_items_response_raises_when_items_is_not_list(mod):
+    text = json.dumps({"items": {"not": "a list"}})
+    with pytest.raises(ValueError, match="array|list"):
         mod.parse_items_response(text)
 
 
