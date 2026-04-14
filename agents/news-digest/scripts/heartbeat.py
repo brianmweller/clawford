@@ -18,13 +18,19 @@ import json
 import os
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
-# Allow running as a script (python3 path/to/heartbeat.py) without
-# agents/shared already on sys.path — the VPS cron wrapper bakes the
-# repo root in, but local invocation and tests use this shim.
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
+# --- shared library sys.path shim ---
+# Find the first ancestor containing agents/shared/ and prepend it to
+# sys.path so `from agents.shared import X` resolves in both the local
+# repo layout (where agents/shared/ lives at the repo root) and the
+# deployed <workspace>/agents/shared/ layout that deploy.py's
+# sync_shared_library creates inside the gateway container.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "agents" / "shared").is_dir():
+        if str(_p) not in sys.path:
+            sys.path.insert(0, str(_p))
+        break
 
 from agents.shared.heartbeat_base import HeartbeatProbe
 

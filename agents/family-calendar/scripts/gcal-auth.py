@@ -28,10 +28,18 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
+# --- shared library sys.path shim ---
+# Find the first ancestor containing agents/shared/ and prepend it to
+# sys.path so `from agents.shared import X` resolves in both the local
+# repo layout and the deployed <workspace>/agents/shared/ layout.
+# See agents/shared/deploy.py::sync_shared_library.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "agents" / "shared").is_dir():
+        if str(_p) not in sys.path:
+            sys.path.insert(0, str(_p))
+        break
 
 from agents.shared.google_oauth import build_flow, save_credentials
 
