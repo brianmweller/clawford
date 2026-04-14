@@ -109,6 +109,30 @@ def first_names_match(n1, n2):
     return n2 in NICKNAME_MAP.get(n1, set()) or n1 in NICKNAME_MAP.get(n2, set())
 
 
+_NAME_SUFFIXES = {"jr", "jr.", "sr", "sr.", "ii", "iii", "iv"}
+
+
+def _name_tokens(name):
+    if not name:
+        return []
+    return [t for t in name.lower().split() if t and t not in _NAME_SUFFIXES]
+
+
+def is_name_subset(a, b):
+    """Return True if one full name's tokens are a subset of the other's
+    and at least two tokens overlap. Used as a second-pass dedup after
+    first_names_match to catch cases like 'Yendrick Zieleniak' vs
+    'Jedrzej Yendrick Zieleniak' — same person, no nickname map entry."""
+    if not a or not b:
+        return False
+    ta, tb = set(_name_tokens(a)), set(_name_tokens(b))
+    if len(ta) < 2 or len(tb) < 2:
+        return False
+    if len(ta & tb) < 2:
+        return False
+    return ta <= tb or tb <= ta
+
+
 def fuzzy_str_match(a, b, threshold=0.85):
     if not a or not b:
         return False
@@ -721,21 +745,22 @@ def aggregate():
             continue
         last = parts[-1].lower()
         first = parts[0].lower()
-        by_last_name[last].append((email, first, raw_activity(c)))
+        by_last_name[last].append((email, first, raw_activity(c), name))
 
     fuzzy_count = 0
     for last, entries in by_last_name.items():
         if len(entries) < 2:
             continue
-        # Group entries by matching first-name (with nickname resolution).
-        # Union-find-style: each entry joins the first existing group whose
-        # first name is nickname-compatible.
-        groups = []  # list of lists of (email, first, activity)
+        # Group entries by matching first-name (with nickname resolution)
+        # AND a token-subset check on the full name. The subset pass catches
+        # middle-name duplicates like "Yendrick Zieleniak" vs
+        # "Jedrzej Yendrick Zieleniak" that NICKNAME_MAP doesn't know about.
+        groups = []  # list of lists of (email, first, activity, name)
         for entry in entries:
-            _, first, _ = entry
+            _, first, _, full_name = entry
             placed = False
             for g in groups:
-                if first_names_match(g[0][1], first):
+                if first_names_match(g[0][1], first) or is_name_subset(g[0][3], full_name):
                     g.append(entry)
                     placed = True
                     break
@@ -748,7 +773,7 @@ def aggregate():
                 continue
             g.sort(key=lambda x: (is_synthetic(x[0]), -x[2]))
             canonical_email = g[0][0]
-            for alias_email, _, _ in g[1:]:
+            for alias_email, _, _, _ in g[1:]:
                 if alias_email == canonical_email or alias_email in auto_aliases:
                     continue
                 auto_aliases[alias_email] = canonical_email

@@ -37,7 +37,8 @@
     "scripts/notes-triage.py",
     "scripts/commitment-scan.py",
     "scripts/timed-deliver.py",
-    "scripts/heartbeat.py"
+    "scripts/heartbeat.py",
+    "scripts/daily-refresh.py"
   ],
   "state_files": [
     {
@@ -117,6 +118,13 @@
     ]
   },
   "crons": [
+    {
+      "name": "daily-refresh",
+      "cron": "30 11 * * *",
+      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. Refresh last_interaction across ~/Dropbox/openclaw-backup/people/*.md by re-mining the past 14 days of Gmail, Google Calendar, and Krisp transcripts, and write the next 14 days of upcoming GCal attendees to upcoming-meetings.json so people-scan can demote people you already have on the calendar. Run: python3 ~/.openclaw/connector-workspace/scripts/daily-refresh.py. Parse the JSON from stdout. If status is 'ok' or 'degraded' with people_updated > 0, return EXACTLY the empty string (zero bytes, no narration, no acknowledgement). If status is 'error' or the alert field is set, deliver a short Telegram message describing the failure so the operator knows the refresh is broken. DO NOT touch ~/Dropbox/openclaw-backup/agents/connector.status.md \u2014 fleet-health.json owns health.",
+      "announce": false,
+      "no_deliver": true
+    },
     {
       "name": "morning-relationship-nudge",
       "cron": "50 11 * * *",

@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 
 BRAIN_PEOPLE = os.path.expanduser("~/Dropbox/openclaw-backup/people")
 CONFIG_FILE = os.path.expanduser("~/.openclaw/connector-workspace/connector-config.json")
+UPCOMING_CACHE = os.path.expanduser("~/.openclaw/connector-workspace/upcoming-meetings.json")
 
 APPROACHING_WINDOW_DAYS = 7  # Flag people within 7 days of their cadence
 
@@ -55,6 +56,25 @@ def load_config():
         raise FileNotFoundError(f"Config not found: {CONFIG_FILE}")
     with open(CONFIG_FILE) as f:
         return json.load(f)
+
+
+def _load_upcoming_meeting_emails() -> set:
+    """Read upcoming-meetings.json written by daily-refresh.py.
+
+    Returns a lowercased set of email addresses with a confirmed
+    calendar meeting in the next LOOKAHEAD_DAYS window. Missing or
+    malformed file → empty set (filter is a no-op)."""
+    if not os.path.exists(UPCOMING_CACHE):
+        return set()
+    try:
+        with open(UPCOMING_CACHE) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return set()
+    emails = (data or {}).get("emails") or {}
+    if not isinstance(emails, dict):
+        return set()
+    return {str(e).lower() for e in emails.keys() if e and "@" in str(e)}
 
 
 def parse_person_file(filepath):
@@ -116,6 +136,7 @@ def get_cadence_for_person(person, config):
 def run() -> dict:
     overdue_only, circle_filter, person_filter = parse_args()
     config = load_config()
+    upcoming_emails = _load_upcoming_meeting_emails()
 
     # Find all person files
     pattern = os.path.join(BRAIN_PEOPLE, "*.md")
@@ -124,6 +145,7 @@ def run() -> dict:
     overdue = []
     approaching = []
     healthy = []
+    demoted_upcoming = []
     skipped = 0
     today = datetime.now(timezone.utc).date()
 
@@ -191,10 +213,22 @@ def run() -> dict:
             "days_overdue": days_overdue,
         }
 
+        # Component C: a confirmed upcoming meeting demotes the
+        # person out of overdue/approaching. Healthy people are
+        # unaffected — the filter only prevents false nudges.
+        person_email = (person.get("email") or "").lower()
+        has_upcoming = bool(person_email) and person_email in upcoming_emails
+
         if days_overdue > 0:
-            overdue.append(entry)
+            if has_upcoming:
+                demoted_upcoming.append(entry)
+            else:
+                overdue.append(entry)
         elif days_overdue > -APPROACHING_WINDOW_DAYS:
-            approaching.append(entry)
+            if has_upcoming:
+                demoted_upcoming.append(entry)
+            else:
+                approaching.append(entry)
         else:
             if not overdue_only:
                 healthy.append(entry)
@@ -214,11 +248,13 @@ def run() -> dict:
         "overdue_total": len(overdue),
         "approaching": approaching,
         "healthy": healthy if not overdue_only else [],
+        "demoted_upcoming": demoted_upcoming,
         "summary": {
-            "total": len(overdue) + len(approaching) + len(healthy),
+            "total": len(overdue) + len(approaching) + len(healthy) + len(demoted_upcoming),
             "overdue": len(overdue),
             "approaching": len(approaching),
             "healthy": len(healthy),
+            "demoted_upcoming": len(demoted_upcoming),
             "skipped": skipped,
         },
     }
