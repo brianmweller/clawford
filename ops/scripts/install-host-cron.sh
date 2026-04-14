@@ -7,14 +7,16 @@
 # subsequent runs detect pre-existing installs.
 #
 # Registered entries (direct wrappers):
-#   */5 * * * *  costco-token-refresh-host.sh   (every 5 min — Costco JWT)
-#   0 12 * * *   morning-fleet-deliver-host.sh  (5:00 AM PDT — morning briefs)
+#   */5 * * * *  costco-token-refresh-host.sh            (every 5 min — Costco JWT)
+#   0 12 * * *   morning-fleet-deliver-host.sh           (5:00 AM PDT — morning briefs)
+#   30 10 * * *  news-digest-morning-edition-host.sh     (fetch-and-rank + LLM compose)
 #
 # Registered entries (via generic script-contract-host.sh wrapper):
 #   */15 * * * *  fleet-health                    → TELEGRAM_BOT_TOKEN  (R3 — replaces per-agent heartbeats)
 #   0 */6 * * *   linkedin-keepalive              → NEWSDIGEST_BOT_TOKEN
 #   */5 * * * *   family-calendar-reminder-check  → FAMILYCAL_BOT_TOKEN
 #   */5 * * * *   news-digest-engagement-poll     → NEWSDIGEST_BOT_TOKEN
+#   0 23 * * *    news-digest-preference-update   → NEWSDIGEST_BOT_TOKEN  (Phase 3b — pure-Python, calls llm.infer internally)
 #
 # Removed in R3 (replaced by fleet-health):
 #   */30 * * * *  shopping-heartbeat              → covered by fleet-health
@@ -34,6 +36,7 @@ DIRECT_ENTRIES=(
   "0 12 * * *|morning-fleet-deliver-host.sh|# morning-fleet-deliver-host"
   "*/15 * * * *|fleet-health-host.sh|# fleet-health-host"
   "30 10 * * *|morning-status-host.sh|# morning-status-host"
+  "30 10 * * *|news-digest-morning-edition-host.sh|# news-digest-morning-edition-host"
 )
 
 # Generic contract wrappers — use script-contract-host.sh with args.
@@ -43,6 +46,7 @@ CONTRACT_ENTRIES=(
   "0 */6 * * *|linkedin-keepalive|/home/node/.openclaw/news-digest-workspace/scripts/linkedin-keepalive.py|NEWSDIGEST_BOT_TOKEN|300"
   "*/5 * * * *|family-calendar-reminder-check|/home/node/.openclaw/family-calendar-workspace/scripts/reminder-check.py|FAMILYCAL_BOT_TOKEN|90"
   "*/5 * * * *|news-digest-engagement-poll|/home/node/.openclaw/news-digest-workspace/scripts/engagement-poller.py|NEWSDIGEST_BOT_TOKEN|60"
+  "0 23 * * *|news-digest-preference-update|/home/node/.openclaw/news-digest-workspace/scripts/update-preferences.py|NEWSDIGEST_BOT_TOKEN|300"
 )
 
 # Markers for old entries to REMOVE on next install run. Used by the

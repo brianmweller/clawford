@@ -22,6 +22,7 @@
   ],
   "scripts": [
     "scripts/fetch-and-rank.py",
+    "scripts/morning-edition.py",
     "scripts/deliver-digest.py",
     "scripts/update-preferences.py",
     "scripts/engagement-poller.py",
@@ -216,14 +217,16 @@
       "cron": "30 10 * * *",
       "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Generate the morning news digest. Run: python3 ~/.openclaw/news-digest-workspace/scripts/fetch-and-rank.py. This fetches all RSS feeds and LinkedIn updates, ranks them against the preference model at preferences/model.json, and writes cache/ranked-<date>.json. Read the ranked output. Select the top 15-20 items. For each item, write a one-sentence extended headline explaining why it matters. Group items by topic category (\ud83e\udd16 AI & Tech, \ud83d\udcb0 Economics, \ud83c\udf0d World, \ud83c\udfdb\ufe0f US Policy, \ud83d\udd17 LinkedIn, \ud83d\udccb Also Noted). \n\nYou MUST write TWO files. The fleet-delivery script reads the first; a legacy chunked-text fallback uses the second.\n\nFILE 1 \u2014 cache/morning-items.json (structured, authoritative for Telegram delivery):\nA JSON array of item objects, one per selected item, in the order they should be delivered. Each object has:\n  {\"num\": <1..N>,                         // sequential, matches /like N\n   \"category\": \"\u270d\ufe0f Category name\",       // with leading emoji, e.g. \"\ud83e\udd16 AI & Tech\"\n   \"extended_headline\": \"<1 sentence>\",   // your rewritten headline + why it matters\n   \"title\": \"<raw article title>\",        // for reference\n   \"url\": \"<canonical url>\",\n   \"source_label\": \"<source display>\",    // e.g. \"Reuters\", \"NYT World\", \"LinkedIn Message\"\n   \"topics\": [<topic tags from ranked file>]}\nWrite the file atomically. If you can't open it, stop \u2014 don't continue to FILE 2.\n\nFILE 2 \u2014 cache/morning-brief-ready.txt (plain text fallback, human-readable):\nSame items rendered as plain text with headings and the inline-command form (\ud83d\udc4d /like_N    \ud83d\udc4e /dislike_N    \ud83d\udcd6 /more_N). End with a line: \ud83d\udc1b {total} items \u00b7 {source_count} sources \u00b7 Reply inline or with /ask [topic]. This file exists only as a fallback; when morning-items.json is fresh, fleet-delivery ignores this.\n\nFor LinkedIn message thread items (source=linkedin, source_label contains 'Message'), the title already contains the sender and the summary is an LLM-generated thread summary. Use those as the headline fields.\n\nIMPORTANT: Do NOT send to Telegram. The host-cron morning-fleet-deliver (fires at 12:00 UTC = 5:00 AM PT) reads morning-items.json and sends each item as its own message with \ud83d\udc4d/\ud83d\udc4e/\ud83d\udcd6 inline keyboard buttons via the NEWSDIGEST_BOT_TOKEN. Your job ends when both cache files are written. DO NOT touch ~/Dropbox/openclaw-backup/agents/news-digest.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source.",
       "announce": false,
-      "no_deliver": true
+      "no_deliver": true,
+      "enabled": false
     },
     {
       "name": "preference-update",
       "cron": "0 23 * * *",
       "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Process today's engagement signals and update the preference model. Run: python3 ~/.openclaw/news-digest-workspace/scripts/update-preferences.py. This reads new entries from preferences/engagement.jsonl, applies multiplicative weight updates (thumbs_up: topic \u00d71.1 source \u00d71.05, thumbs_down: topic \u00d70.85 source \u00d70.95, expand: topic \u00d71.05), clamps weights to safe ranges, and writes updated model to preferences/model.json. If there are no new engagement events, skip the update silently. Return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. DO NOT touch ~/Dropbox/openclaw-backup/agents/news-digest.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source.",
       "announce": false,
-      "no_deliver": true
+      "no_deliver": true,
+      "enabled": false
     }
   ]
 }
