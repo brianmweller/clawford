@@ -20,8 +20,12 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
-import urllib.request
-import urllib.error
+
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from agents.shared import telegram_api
 
 WORKSPACE = Path(os.path.expanduser("~/.openclaw/news-digest-workspace"))
 CACHE_DIR = WORKSPACE / "cache"
@@ -59,38 +63,25 @@ def clean_html_entities(text):
 
 
 def send_telegram(text, reply_markup=None, silent=True):
-    """Send a message via Telegram Bot API with previews disabled."""
+    """Send a message via Telegram Bot API with previews disabled.
+
+    Delegates to agents.shared.telegram_api.send_message. When bot
+    credentials are missing, prints a dry-run log line to stderr so
+    tests and manual runs without env still see what would have been
+    sent.
+    """
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print(f"[dry-run] {text[:100]}...", file=sys.stderr)
         return True
 
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-
-    msg = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": text,
-        "disable_web_page_preview": True,
-        "disable_notification": silent,
-    }
-    if reply_markup:
-        msg["reply_markup"] = reply_markup
-
-    payload = json.dumps(msg).encode("utf-8")
-
-    req = urllib.request.Request(url, data=payload, headers={
-        "Content-Type": "application/json",
-    })
-
-    try:
-        resp = urllib.request.urlopen(req, timeout=10)
-        result = json.loads(resp.read())
-        if not result.get("ok"):
-            print(f"Telegram error: {result}", file=sys.stderr)
-            return False
-        return True
-    except Exception as e:
-        print(f"Telegram send failed: {e}", file=sys.stderr)
-        return False
+    return telegram_api.send_message(
+        TELEGRAM_BOT_TOKEN,
+        TELEGRAM_CHAT_ID,
+        text,
+        silent=silent,
+        disable_web_preview=True,
+        reply_markup=reply_markup,
+    )
 
 
 def get_source_name(source):
