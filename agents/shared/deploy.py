@@ -251,6 +251,7 @@ class Cron:
     announce: bool = False
     no_deliver: bool = False
     account: str | None = None
+    enabled: bool = True
 
     def to_cron_def(self, agent_id: str, telegram_account: str, telegram_chat_id: str) -> dict:
         return {
@@ -332,6 +333,7 @@ def load_manifest(path: Path) -> Manifest:
             announce=c.get("announce", False),
             no_deliver=c.get("no_deliver", False),
             account=c.get("account"),
+            enabled=c.get("enabled", True),
         ))
 
     mf = Manifest(
@@ -991,11 +993,19 @@ def fetch_live_crons(agent_id: str) -> dict[str, dict]:
 
 
 def plan_cron_ops(mf: Manifest, live: dict[str, dict], telegram_chat_id: str) -> list[dict]:
-    """Return a list of {op, name, ...} ops to bring live → manifest."""
-    ops = []
-    manifest_names = {c.name for c in mf.crons}
+    """Return a list of {op, name, ...} ops to bring live → manifest.
 
-    for cron in mf.crons:
+    Disabled crons (`enabled: false` in the manifest) stay in mf.crons
+    as rollback reference but are invisible to the add/edit/skip
+    logic here — they're treated as if absent from the manifest. If
+    live still has them, they surface as orphans and `--remove-orphans`
+    cleans them up; otherwise no-op.
+    """
+    ops = []
+    active_crons = [c for c in mf.crons if c.enabled]
+    manifest_names = {c.name for c in active_crons}
+
+    for cron in active_crons:
         spec = cron.to_cron_def(mf.agent_id, mf.telegram_account, telegram_chat_id)
         existing = live.get(cron.name)
         if existing is None:
