@@ -206,6 +206,188 @@ def test_update_last_interaction_writes_when_existing_is_dash(tmp_path, dr):
     assert "- **last_interaction:** 2026-04-14" in fp.read_text(encoding="utf-8")
 
 
+# ── gmessages signals ───────────────────────────────────────────────
+
+
+def test_normalize_phone_strips_everything_non_digit(dr):
+    assert dr._normalize_phone("+1 (650) 537-9785") == "6505379785"
+    assert dr._normalize_phone("267-808-3359") == "2678083359"
+    assert dr._normalize_phone("(415) 555.1234") == "4155551234"
+
+
+def test_normalize_phone_strips_leading_us_country_code(dr):
+    assert dr._normalize_phone("16505379785") == "6505379785"
+    assert dr._normalize_phone("1-650-537-9785") == "6505379785"
+
+
+def test_normalize_phone_preserves_intl(dr):
+    """92xxxxxxxxx is Pakistan, not US — must stay intact."""
+    assert dr._normalize_phone("92267868522") == "92267868522"
+
+
+def test_normalize_phone_empty_and_none(dr):
+    assert dr._normalize_phone("") == ""
+    assert dr._normalize_phone(None) == ""
+    assert dr._normalize_phone("—") == ""
+
+
+def test_build_phone_index_reads_people_files(tmp_path, dr):
+    people = tmp_path / "people"
+    people.mkdir()
+    (people / "mohit.md").write_text(
+        "# Mohit\n- **email:** m@x.com\n- **phone:** +1 (650) 537-9785\n"
+        "- **last_interaction:** 2026-03-20\n",
+        encoding="utf-8",
+    )
+    (people / "noph.md").write_text(
+        "# No Phone\n- **email:** x@y.com\n- **phone:** —\n",
+        encoding="utf-8",
+    )
+
+    idx = dr.build_phone_index(people)
+    assert set(idx.keys()) == {"6505379785"}
+    assert idx["6505379785"][0].name == "mohit.md"
+    assert idx["6505379785"][1] == "2026-03-20"
+
+
+def test_load_gmessages_signals_returns_phone_to_date(tmp_path, dr):
+    cache = tmp_path / "mined-gmessages.json"
+    cache.write_text(json.dumps({
+        "status": "ok",
+        "mined_at": "2026-04-14T10:00:00+00:00",
+        "contacts": [
+            {"name": "Dan Z", "phone": "+1 650 555 1111", "last_message_date": "2026-04-10"},
+            {"name": "Yendrick", "phone": "650-555-2222", "last_message_date": "2026-04-11"},
+            {"name": "Ghost", "phone": "", "last_message_date": "2026-04-12"},
+        ],
+    }))
+    signals = dr._load_gmessages_signals(cache)
+    assert signals == {
+        "6505551111": "2026-04-10",
+        "6505552222": "2026-04-11",
+    }
+
+
+def test_load_gmessages_signals_missing_file_returns_empty(tmp_path, dr):
+    assert dr._load_gmessages_signals(tmp_path / "nope.json") == {}
+
+
+def test_load_gmessages_signals_tolerates_malformed_json(tmp_path, dr):
+    cache = tmp_path / "mined-gmessages.json"
+    cache.write_text("not json at all {")
+    assert dr._load_gmessages_signals(cache) == {}
+
+
+def test_load_gmessages_by_name_returns_lowercased_name_to_date(tmp_path, dr):
+    cache = tmp_path / "mined-gmessages.json"
+    cache.write_text(json.dumps({
+        "contacts": [
+            {"name": "Dan Zylberglejd", "phone": "", "last_message_date": "2026-04-10"},
+            {"name": "YENDRICK Z.", "phone": "", "last_message_date": "2026-04-11"},
+            {"name": "", "phone": "+1 650 555 1111", "last_message_date": "2026-04-12"},
+        ],
+    }))
+    by_name = dr._load_gmessages_by_name(cache)
+    assert by_name == {
+        "dan zylberglejd": "2026-04-10",
+        "yendrick z.": "2026-04-11",
+    }
+
+
+def test_build_name_index_lowercases_h1(tmp_path, dr):
+    people = tmp_path / "people"
+    people.mkdir()
+    (people / "dan.md").write_text(
+        "# Dan Zylberglejd\n- **slug:** dan-zylberglejd\n- **email:** dz@x.com\n"
+        "- **last_interaction:** 2026-02-11\n",
+        encoding="utf-8",
+    )
+    idx = dr.build_name_index(people)
+    assert "dan zylberglejd" in idx
+    assert idx["dan zylberglejd"][0].name == "dan.md"
+
+
+def test_run_falls_back_to_name_match_when_phone_missing(tmp_path, dr, monkeypatch):
+    people = tmp_path / "people"
+    people.mkdir()
+    (people / "dan.md").write_text(
+        "# Dan Zylberglejd\n- **slug:** dan-zylberglejd\n- **email:** dz@x.com\n"
+        "- **phone:** —\n- **last_interaction:** 2026-02-11\n",
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "connector-workspace"
+    (workspace / "cache").mkdir(parents=True)
+    (workspace / "cache" / "mined-gmessages.json").write_text(json.dumps({
+        "contacts": [
+            {"name": "Dan Zylberglejd", "phone": "", "last_message_date": "2026-04-10"},
+        ],
+    }))
+    mc_cache = tmp_path / "mc" / "cache"
+    mc_cache.mkdir(parents=True)
+
+    monkeypatch.setattr(dr, "BRAIN_PEOPLE", people)
+    monkeypatch.setattr(dr, "WORKSPACE", workspace)
+    monkeypatch.setattr(dr, "UPCOMING_CACHE", workspace / "upcoming-meetings.json")
+    monkeypatch.setattr(dr, "GMESSAGES_CACHE", workspace / "cache" / "mined-gmessages.json")
+    monkeypatch.setattr(dr, "MC_CACHE", mc_cache)
+    monkeypatch.setattr(dr, "_build_google_services", lambda: (object(), object()))
+    monkeypatch.setattr(
+        dr, "_collect_gcal_signals", lambda svc, lookback_days, lookahead_days: ({}, {})
+    )
+    monkeypatch.setattr(
+        dr, "_collect_gmail_signals", lambda svc, days, operator_emails: {}
+    )
+    monkeypatch.setattr(dr, "_operator_emails", lambda: set())
+
+    result = dr.run()
+    assert result["people_updated"] == 1
+    text = (people / "dan.md").read_text(encoding="utf-8")
+    assert "- **last_interaction:** 2026-04-10" in text
+
+
+def test_run_applies_gmessages_signals_via_phone_match(tmp_path, dr, monkeypatch):
+    """Integration: a gmessages cache with a phone signal updates the
+    matching person file even when Gmail/GCal have nothing to say."""
+    people = tmp_path / "people"
+    people.mkdir()
+    (people / "dan.md").write_text(
+        "# Dan\n- **email:** dan@x.com\n- **phone:** (650) 555-1111\n"
+        "- **last_interaction:** 2026-02-11\n",
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "connector-workspace"
+    workspace.mkdir()
+    (workspace / "cache").mkdir()
+    (workspace / "cache" / "mined-gmessages.json").write_text(json.dumps({
+        "contacts": [
+            {"name": "Dan Z", "phone": "+1 650-555-1111", "last_message_date": "2026-04-10"},
+        ],
+    }))
+    mc_cache = tmp_path / "mc" / "cache"
+    mc_cache.mkdir(parents=True)
+
+    monkeypatch.setattr(dr, "BRAIN_PEOPLE", people)
+    monkeypatch.setattr(dr, "WORKSPACE", workspace)
+    monkeypatch.setattr(dr, "UPCOMING_CACHE", workspace / "upcoming-meetings.json")
+    monkeypatch.setattr(dr, "GMESSAGES_CACHE", workspace / "cache" / "mined-gmessages.json")
+    monkeypatch.setattr(dr, "MC_CACHE", mc_cache)
+    monkeypatch.setattr(dr, "_build_google_services", lambda: (object(), object()))
+    monkeypatch.setattr(
+        dr, "_collect_gcal_signals", lambda svc, lookback_days, lookahead_days: ({}, {})
+    )
+    monkeypatch.setattr(
+        dr, "_collect_gmail_signals", lambda svc, days, operator_emails: {}
+    )
+    monkeypatch.setattr(dr, "_operator_emails", lambda: set())
+
+    result = dr.run()
+    assert result["status"] == "ok"
+    assert result["people_updated"] == 1
+    assert result["gmessages_signals"] == 1
+    text = (people / "dan.md").read_text(encoding="utf-8")
+    assert "- **last_interaction:** 2026-04-10" in text
+
+
 # ── _load_krisp_debriefs ────────────────────────────────────────────
 
 

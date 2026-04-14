@@ -37,6 +37,7 @@ MINE_DIR = SCRIPT_DIR / "mine"
 BRAIN_PEOPLE = Path(os.path.expanduser("~/Dropbox/openclaw-backup/people"))
 WORKSPACE = Path(os.path.expanduser("~/.openclaw/connector-workspace"))
 UPCOMING_CACHE = WORKSPACE / "upcoming-meetings.json"
+GMESSAGES_CACHE = WORKSPACE / "cache" / "mined-gmessages.json"
 MC_CACHE = Path(os.path.expanduser("~/.openclaw/meetings-coach-workspace/cache"))
 
 LOOKBACK_DAYS = 30
@@ -61,6 +62,112 @@ def _parse_field(text: str, key: str) -> str | None:
                 return None
             return val
     return None
+
+
+def _normalize_phone(phone: str | None) -> str:
+    """Digits-only, strip leading US country code. Matches
+    contact-aggregator.normalize_phone so the two stay in sync."""
+    if not phone:
+        return ""
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    return digits
+
+
+def build_phone_index(people_dir: Path) -> dict[str, tuple[Path, str | None]]:
+    """Return normalized-phone → (file, last_interaction). People without
+    a populated `phone:` field are simply absent from the index."""
+    idx: dict[str, tuple[Path, str | None]] = {}
+    if not people_dir.exists():
+        return idx
+    for fp in sorted(people_dir.glob("*.md")):
+        if fp.name == "_template.md":
+            continue
+        try:
+            text = fp.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        phone = _parse_field(text, "phone")
+        key = _normalize_phone(phone)
+        if not key:
+            continue
+        last = _parse_field(text, "last_interaction")
+        idx[key] = (fp, last)
+    return idx
+
+
+def _read_gmessages_cache(cache_path: Path) -> list[dict]:
+    if not cache_path.exists():
+        return []
+    try:
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return [e for e in (data.get("contacts") or []) if isinstance(e, dict)]
+
+
+def _load_gmessages_signals(cache_path: Path) -> dict[str, str]:
+    """Read mined-gmessages.json → {normalized_phone: last_message_date}.
+    Entries without a usable phone are skipped — name-match flows
+    through _load_gmessages_by_name() instead."""
+    signals: dict[str, str] = {}
+    for entry in _read_gmessages_cache(cache_path):
+        phone = _normalize_phone(entry.get("phone"))
+        date = (entry.get("last_message_date") or "")[:10]
+        if not phone or not date:
+            continue
+        cur = signals.get(phone)
+        if not cur or date > cur:
+            signals[phone] = date
+    return signals
+
+
+def _load_gmessages_by_name(cache_path: Path) -> dict[str, str]:
+    """Read mined-gmessages.json → {lower(name): last_message_date}.
+    Complements _load_gmessages_signals for contacts the user has saved
+    in Google Messages with a display name rather than a raw phone."""
+    signals: dict[str, str] = {}
+    for entry in _read_gmessages_cache(cache_path):
+        raw_name = (entry.get("name") or "").strip()
+        date = (entry.get("last_message_date") or "")[:10]
+        if not raw_name or not date:
+            continue
+        # Skip entries where name is actually a phone (digits + punctuation)
+        if not any(ch.isalpha() for ch in raw_name):
+            continue
+        key = raw_name.lower()
+        cur = signals.get(key)
+        if not cur or date > cur:
+            signals[key] = date
+    return signals
+
+
+_H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
+
+
+def build_name_index(people_dir: Path) -> dict[str, tuple[Path, str | None]]:
+    """Return lowercased display name → (path, last_interaction) for
+    every people/*.md with an H1 heading."""
+    idx: dict[str, tuple[Path, str | None]] = {}
+    if not people_dir.exists():
+        return idx
+    for fp in sorted(people_dir.glob("*.md")):
+        if fp.name == "_template.md":
+            continue
+        try:
+            text = fp.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        m = _H1_RE.search(text)
+        if not m:
+            continue
+        name = m.group(1).strip()
+        if not name or name.startswith("{"):
+            continue
+        last = _parse_field(text, "last_interaction")
+        idx[name.lower()] = (fp, last)
+    return idx
 
 
 def build_email_index(people_dir: Path) -> dict[str, tuple[Path, str | None]]:
@@ -404,6 +511,13 @@ def run() -> dict:
         krisp_signals = {}
         sources_failed.append({"source": "krisp", "error": str(e)})
 
+    # Google Messages Web — also a local cache file, cheap read.
+    try:
+        gmessages_signals = _load_gmessages_signals(GMESSAGES_CACHE)
+    except Exception as e:  # pragma: no cover — defensive
+        gmessages_signals = {}
+        sources_failed.append({"source": "gmessages", "error": str(e)})
+
     # Gmail + GCal share a token. Build once, catch together.
     try:
         gcal_svc, gmail_svc = _build_google_services()
@@ -431,21 +545,60 @@ def run() -> dict:
         gmail_signals = {}
         sources_failed.append({"source": "gmail", "error": str(e)})
 
-    # Merge all past-facing signals
+    # Merge all email-keyed signals
     merged = merge_signals(gmail_signals, gcal_past, krisp_signals)
 
-    # Apply updates
-    idx = build_email_index(BRAIN_PEOPLE)
+    # Apply email-keyed updates
+    email_idx = build_email_index(BRAIN_PEOPLE)
     updated = 0
     unmatched = 0
+    updated_paths: set[Path] = set()
     for addr, date in merged.items():
-        entry = idx.get(addr)
+        entry = email_idx.get(addr)
         if not entry:
             unmatched += 1
             continue
         fp, _existing = entry
         if update_last_interaction(fp, date):
             updated += 1
+            updated_paths.add(fp)
+
+    # Apply phone-keyed gmessages updates — a person can be updated by
+    # both pipelines in one run, so we count file updates once.
+    phone_idx = build_phone_index(BRAIN_PEOPLE)
+    gm_unmatched = 0
+    matched_by_phone: set[Path] = set()
+    for phone, date in gmessages_signals.items():
+        entry = phone_idx.get(phone)
+        if not entry:
+            gm_unmatched += 1
+            continue
+        fp, _existing = entry
+        matched_by_phone.add(fp)
+        if update_last_interaction(fp, date):
+            if fp not in updated_paths:
+                updated += 1
+                updated_paths.add(fp)
+
+    # Name-match fallback: Google Messages displays the contact's saved
+    # name for every chat that has one in the operator's Android contacts. Match
+    # against the person-file H1 when phone mining didn't find them.
+    gmessages_by_name = _load_gmessages_by_name(GMESSAGES_CACHE)
+    name_idx = build_name_index(BRAIN_PEOPLE)
+    for name, date in gmessages_by_name.items():
+        entry = name_idx.get(name)
+        if not entry:
+            gm_unmatched += 1
+            continue
+        fp, _existing = entry
+        if fp in matched_by_phone:
+            # Already stamped via phone — skip the extra work
+            continue
+        if update_last_interaction(fp, date):
+            if fp not in updated_paths:
+                updated += 1
+                updated_paths.add(fp)
+    unmatched += gm_unmatched
 
     # Upcoming cache: even unmatched emails get persisted so the
     # filter catches new contacts on their first meeting.
@@ -469,6 +622,7 @@ def run() -> dict:
         "gcal_past_signals": len(gcal_past),
         "gcal_upcoming_signals": len(gcal_upcoming),
         "krisp_signals": len(krisp_signals),
+        "gmessages_signals": len(gmessages_signals),
         "sources_failed": sources_failed,
         **(
             {"alert": "daily-refresh: one or more sources failed — see sources_failed"}
