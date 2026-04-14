@@ -13,10 +13,15 @@ Usage: python3 update-preferences.py
 
 import json
 import os
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from agents.shared import llm
 
 WORKSPACE = Path(os.path.expanduser("~/.openclaw/news-digest-workspace"))
 ENGAGEMENT_FILE = WORKSPACE / "preferences" / "engagement.jsonl"
@@ -36,8 +41,8 @@ TOPIC_WEIGHT_MAX = 3.0
 SOURCE_WEIGHT_MIN = 0.5
 SOURCE_WEIGHT_MAX = 2.0
 
-# Judge LLM call timeout. Generous because openclaw infer can have
-# variable latency depending on provider routing.
+# Judge LLM call timeout. Generous because the codex backend can
+# have variable latency depending on provider routing.
 JUDGE_TIMEOUT_S = 30
 
 
@@ -82,12 +87,13 @@ def load_new_events(last_updated):
 
 
 def call_judge_llm(title, summary, topics, source, action):
-    """Call the judge LLM via `openclaw infer model run` to analyze WHY
+    """Call the judge LLM via agents.shared.llm.infer to analyze WHY
     the user reacted to an item.
 
-    Uses Sam's openclaw codex subscription, NOT a raw OpenAI API key.
-    See memory/feedback_no_api_keys_ever.md — scripts must never carry
-    raw API keys; always go through the openclaw inference layer.
+    Uses the ChatGPT-subscription codex responses endpoint (no API
+    keys). See memory/feedback_no_api_keys_ever.md — scripts must
+    never carry raw API keys; all LLM calls route through the shared
+    shim which holds the OAuth credentials.
 
     Returns a dict with:
       - reason: one of IRRELEVANT_SUBTOPIC | LOW_QUALITY | STALE |
@@ -116,47 +122,18 @@ def call_judge_llm(title, summary, topics, source, action):
         f'"explanation": "one sentence why"}}'
     )
 
-    try:
-        result = subprocess.run(
-            ["openclaw", "infer", "model", "run", "--prompt", prompt, "--json"],
-            capture_output=True,
-            text=True,
-            timeout=JUDGE_TIMEOUT_S,
-        )
-    except FileNotFoundError:
-        print("  [judge] openclaw CLI not on PATH", file=sys.stderr)
-        return None
-    except subprocess.TimeoutExpired:
-        print(f"  [judge] timeout after {JUDGE_TIMEOUT_S}s", file=sys.stderr)
+    result = llm.infer(prompt, json_mode=True, timeout=JUDGE_TIMEOUT_S)
+    if not result.ok:
+        print(f"  [judge] infer failed: {result.error}", file=sys.stderr)
         return None
 
-    if result.returncode != 0:
-        print(
-            f"  [judge] openclaw infer exited {result.returncode}: "
-            f"{(result.stderr or '')[:200]}",
-            file=sys.stderr,
-        )
-        return None
-
-    # `openclaw infer model run --json` shape:
-    #   {"ok": true, "provider": "...", "model": "...",
-    #    "outputs": [{"text": "<the model's response>", "mediaUrl": null}]}
-    try:
-        envelope = json.loads(result.stdout)
-        outputs = envelope.get("outputs") or []
-        if not (outputs and isinstance(outputs, list)):
-            return None
-        text = (outputs[0].get("text") or "").strip()
-    except (json.JSONDecodeError, AttributeError) as e:
-        print(f"  [judge] could not parse openclaw envelope: {e}", file=sys.stderr)
-        return None
-
+    text = (result.text or "").strip()
     if not text:
         return None
 
-    # Strip markdown fence if present (```json … ``` is common).
+    # Strip markdown fence if present (```json … ``` is common, and
+    # json_mode=True doesn't always prevent the model from wrapping).
     if text.startswith("```"):
-        # Drop leading fence + optional language tag, then trailing fence.
         body = text[3:]
         if body.lower().startswith("json"):
             body = body[4:]

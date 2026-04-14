@@ -23,6 +23,12 @@ import urllib.error
 
 import feedparser
 
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from agents.shared import llm
+
 WORKSPACE = Path(os.path.expanduser("~/.openclaw/news-digest-workspace"))
 CACHE_DIR = WORKSPACE / "cache"
 PREFS_FILE = WORKSPACE / "preferences" / "model.json"
@@ -162,56 +168,27 @@ def fetch_single_feed(feed_config):
 
 
 def _summarize_linkedin_thread(sender: str, full_messages: list[str]) -> str | None:
-    """Summarize a LinkedIn message thread via `openclaw infer model run`.
+    """Summarize a LinkedIn message thread via agents.shared.llm.infer.
 
-    Uses Sam's subscription-backed codex provider (no API keys). Returns
-    None on any failure so the caller falls back to the raw preview.
-
-    Requires openclaw >= 2026.4.2 for the `infer` subcommand.
+    Uses the ChatGPT-subscription codex responses endpoint (no API
+    keys). Returns None on any failure so the caller falls back to the
+    raw message preview.
     """
-    import subprocess
     thread_text = "\n".join(full_messages[-10:])[:1200]
     prompt = (
         f"Summarize this LinkedIn message thread with {sender} in 1-2 sentences. "
         f"Focus on what was discussed, any action items, and the current status. "
         f"Be concise.\n\nThread:\n{thread_text}"
     )
-    try:
-        result = subprocess.run(
-            ["openclaw", "infer", "model", "run", "--prompt", prompt, "--json"],
-            capture_output=True, text=True, timeout=30,
-        )
-    except FileNotFoundError:
-        print(f"  [linkedin-summary] openclaw CLI not on PATH", file=sys.stderr)
-        return None
-    except subprocess.TimeoutExpired:
-        print(f"  [linkedin-summary] timeout for sender={sender}", file=sys.stderr)
-        return None
-
-    if result.returncode != 0:
+    result = llm.infer(prompt, timeout=30)
+    if not result.ok:
         print(
-            f"  [linkedin-summary] openclaw infer exited {result.returncode}: "
-            f"{(result.stderr or '')[:200]}",
+            f"  [linkedin-summary] infer failed for sender={sender}: {result.error}",
             file=sys.stderr,
         )
         return None
-
-    # --json output shape:
-    #   { "provider": "...", "model": "...", "outputs": [{"text": "..."}] }
-    try:
-        data = json.loads(result.stdout)
-        outputs = data.get("outputs") or []
-        if outputs and isinstance(outputs, list):
-            text = outputs[0].get("text", "").strip()
-            if text:
-                return text
-    except (json.JSONDecodeError, AttributeError) as e:
-        # Fallback: try to use stdout as plain text (if --json wasn't honored)
-        plain = result.stdout.strip()
-        if plain and not plain.startswith("{"):
-            return plain
-        print(f"  [linkedin-summary] could not parse openclaw infer output: {e}", file=sys.stderr)
-    return None
+    text = (result.text or "").strip()
+    return text if text else None
 
 
 def fetch_linkedin_browser():
