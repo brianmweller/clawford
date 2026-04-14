@@ -3,5 +3,10 @@
     {"id": "sam.smith@example.com", "label": "Sam", "emoji": "👨", "remind": true},
     {"id": "alex.rivera@example.com", "label": "Alex", "emoji": "👩", "remind": false}
   ],
-  "timezone": "America/Los_Angeles"
+  "timezone": "America/Los_Angeles",
+  "activity_providers": [
+    {"name": "Example Preschool", "query": "from:ExamplePreschool newer_than:2d"},
+    {"name": "Example Swim School", "query": "from:ExampleSwim newer_than:2d"},
+    {"name": "Example Ballet Studio", "query": "from:ExampleBallet newer_than:2d"}
+  ]
 }

@@ -40,12 +40,27 @@ TOKEN_PATH = os.environ.get(
 )
 CACHE_DIR = os.path.join(WORKSPACE, "cache")
 SEEN_PATH = os.path.join(CACHE_DIR, "seen-activity-emails.json")
+CONFIG_PATH = os.path.join(WORKSPACE, "calendar-config.json")
 
-PROVIDERS = [
+# Sanitized fallback. Real provider names are PII and must not live in
+# the tracked script — they load from calendar-config.json at runtime.
+DEFAULT_PROVIDERS = [
     {"name": "Example Preschool", "query": "from:ExamplePreschool newer_than:2d"},
     {"name": "Example Swim School", "query": "from:ExampleSwim newer_than:2d"},
-    {"name": "Example Ballet Studio", "query": "(from:tutu OR from:tutuschool) newer_than:2d"},
+    {"name": "Example Ballet Studio", "query": "from:ExampleBallet newer_than:2d"},
 ]
+
+
+def load_providers(config_path=CONFIG_PATH):
+    try:
+        with open(config_path) as f:
+            config = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return DEFAULT_PROVIDERS
+    providers = config.get("activity_providers")
+    if not isinstance(providers, list) or not providers:
+        return DEFAULT_PROVIDERS
+    return providers
 
 
 def parse_args():
@@ -147,7 +162,7 @@ def main():
     seen = load_seen()
     results = []
 
-    for provider in PROVIDERS:
+    for provider in load_providers():
         try:
             search = gmail.users().messages().list(
                 userId="me", q=provider["query"], maxResults=10
