@@ -34,6 +34,7 @@ services:
       FAMILYCAL_BOT_TOKEN: ${FAMILYCAL_BOT_TOKEN:-}
     volumes:
       - /home/openclaw/.openclaw:/home/node/.openclaw
+      - /home/openclaw/.codex:/home/node/.codex
       - /home/openclaw/.openclaw/workspace:/home/node/.openclaw/workspace
       - /home/openclaw/Dropbox/openclaw-backup:/home/node/Dropbox/openclaw-backup
       - /home/openclaw/repo:/home/node/repo
