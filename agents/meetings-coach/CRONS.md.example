@@ -99,13 +99,17 @@ If no meetings today:
 **Schedule:** `15,45 * * * *`
 **Command:** Check for recently-ended meetings and scan for Krisp transcripts.
 
+**DELIVERY INVARIANT (read this first):** The ONLY items eligible for Telegram delivery in this cron are those in `transcript-scan.py` output's `processed` list for the current run. **Never iterate `cache/pending-debrief-*.json` files to decide what to send** — those files are the `/confirm` staging area, not a delivery queue. `processed-transcripts.json` already dedupes transcripts at the script level, so on re-runs `output.processed` is empty and the cron must send nothing. This rule was added after the 2026-04-14 incident where Sergeant Murphy re-sent the same Alexis Lloyd debrief five times across 2.5 hours by treating pending files as a queue.
+
 1. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/gcal-fetch.py` and identify meetings that ended in the last 60 minutes.
 2. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/transcript-scan.py`
    - Fetches new transcripts from Krisp MCP API
    - Matches transcripts to recently-ended meetings by fuzzy scoring
    - Extracts action items, decisions, follow-ups via your own LLM reasoning
    - Stages results in `cache/pending-debrief-{EVENT_ID}.json`
-3. For each matched transcript with extracted items:
+   - **Returns `processed: []` on re-runs** — the script-level dedup via `processed-transcripts.json` is the single source of truth for delivery.
+3. **Cleanup pass (cleanup only, not delivery):** For each pending debrief file, grep `commitments/active.md` for its `event_id`. If found, delete the stale pending file. This step deletes files; it does NOT send anything.
+4. For each item in `transcript-scan.py`'s `output.processed` for THIS run (and ONLY those):
    Send a Telegram message:
    ```
    🐷🔍 Debrief ready — {Meeting Title}
@@ -128,12 +132,12 @@ If no meetings today:
 **On `/confirm`:** See "Confirm Flow" in SOUL.md. Critical steps: (1) idempotency check — grep `commitments/active.md` for `event_id: {EVENT_ID}`; if found, refuse and report already confirmed; (2) write with `source_detail: {title} debrief (event_id: {EVENT_ID}, meeting_start: {ts})`; (3) delete `cache/pending-debrief-{EVENT_ID}.json`.
 **On `/dismiss N`:** Remove item N from the pending debrief. If all items dismissed, delete the pending file.
 
-**Idempotency in the scan cron:** Before presenting a pending debrief, grep the brain for `event_id: {EVENT_ID}`. If found, delete the stale pending file and skip — do NOT re-present an already-confirmed debrief.
+**Idempotency model:** Delivery is gated by `transcript-scan.py` output.processed (script-level dedup via `processed-transcripts.json`). Un-`/confirm`-ed pending files are NOT a re-delivery signal — they sit in cache until the user acts on them. The scan cron's cleanup pass only removes pending files whose `event_id` already landed in `commitments/active.md`.
 
-**One message per debrief:** Send EXACTLY ONE Telegram debrief message per pending file, then ONE coaching message (if enabled). Never present the same debrief in multiple formats.
+**One message per debrief:** Send EXACTLY ONE Telegram debrief message per item in `output.processed`, then ONE coaching message (if enabled and not yet in `coaching-history.json`). Never present the same debrief twice.
 
 5. **Coaching (after debrief, if coaching.enabled is true):**
-   For each staged debrief with transcript text, run `python3 ~/.openclaw/meetings-coach-workspace/scripts/transcript-metrics.py --event-id EVENT_ID`. Read the metrics JSON. Read `meeting-config.json` for `coaching.growth_areas`. Read the transcript text from the debrief file. For each growth area, analyze Sam's utterances and compose a coaching section. Send a coaching message on Telegram:
+   For each item in `output.processed` with transcript text — **first check `cache/coaching-history.json` and skip if an entry for this `event_id` already exists** (otherwise a re-run will re-append, as happened 5× to the Alexis event on 2026-04-14 and 5× to the the operator/Ashley event on 2026-04-08). If no prior entry: run `python3 ~/.openclaw/meetings-coach-workspace/scripts/transcript-metrics.py --event-id EVENT_ID`. Read the metrics JSON. Read `meeting-config.json` for `coaching.growth_areas`. Read the transcript text from the debrief file. For each growth area, analyze Sam's utterances and compose a coaching section. Send a coaching message on Telegram:
 
    ```
    📊 Meeting Coach — {Meeting Title}
