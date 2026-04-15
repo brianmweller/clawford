@@ -86,6 +86,26 @@ def test_resolve_explicit_mdy_slashes(gm):
     assert gm._resolve_relative_date("12/22/2025", today) == "2025-12-22"
 
 
+def test_resolve_mdy_two_digit_year(gm):
+    """Google Messages renders older conversations as '1/26/25' (2-digit
+    year). 25 → 2025, 99 → 1999 (the standard 1970-pivot heuristic)."""
+    today = date(2026, 4, 14)
+    assert gm._resolve_relative_date("1/26/25", today) == "2025-01-26"
+    assert gm._resolve_relative_date("12/3/24", today) == "2024-12-03"
+
+
+def test_resolve_relative_recent(gm):
+    """'23 min', '5 h', '2 hr', '1 d' all round to today (or today-N for
+    days). gmessages-mine only stamps yyyy-mm-dd anyway."""
+    today = date(2026, 4, 14)
+    assert gm._resolve_relative_date("23 min", today) == today.isoformat()
+    assert gm._resolve_relative_date("5 h", today) == today.isoformat()
+    assert gm._resolve_relative_date("2 hr", today) == today.isoformat()
+    assert gm._resolve_relative_date("11 hrs", today) == today.isoformat()
+    assert gm._resolve_relative_date("1 d", today) == "2026-04-13"
+    assert gm._resolve_relative_date("3 d", today) == "2026-04-11"
+
+
 def test_resolve_unparseable_returns_none(gm):
     today = date(2026, 4, 14)
     assert gm._resolve_relative_date("", today) is None

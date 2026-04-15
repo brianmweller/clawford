@@ -52,7 +52,9 @@ LOCAL_TZ_NAME = "America/Los_Angeles"
 # per feedback_playwright_threading.md.
 PAGE_LOAD_TIMEOUT_MS = 30_000
 POST_LOAD_SETTLE_MS = 4_000
-MAX_ROWS = 100
+MAX_ROWS = 500
+SCROLL_PAUSE_MS = 1_500
+SCROLL_MAX_ITER = 12
 
 
 # ── Date resolution helpers ──────────────────────────────────────────
@@ -75,7 +77,8 @@ _WEEKDAYS = {
 
 _TIME_RE = re.compile(r"^\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?$")
 _MONTH_DAY_RE = re.compile(r"^([A-Za-z]+)\s+(\d{1,2})$")
-_MDY_RE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})$")
+_MDY_RE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{2,4})$")
+_RELATIVE_RECENT_RE = re.compile(r"^(\d+)\s*(min|h|hr|hrs|d)$", re.IGNORECASE)
 
 
 def _resolve_relative_date(label: str, today: date) -> str | None:
@@ -121,16 +124,30 @@ def _resolve_relative_date(label: str, today: date) -> str | None:
             except ValueError:
                 return None
 
-    # "3/28/2026"
+    # "3/28/2026" or "1/26/25" (2-digit year → 2000s if <70, else 1900s)
     m = _MDY_RE.match(s)
     if m:
         try:
             month = int(m.group(1))
             day_num = int(m.group(2))
             year = int(m.group(3))
+            if year < 100:
+                year += 2000 if year < 70 else 1900
             return date(year, month, day_num).isoformat()
         except ValueError:
             return None
+
+    # "23 min", "5 h", "2 hr", "11 hrs" → today; "3 d" → today minus N days
+    m = _RELATIVE_RECENT_RE.match(s)
+    if m:
+        try:
+            n = int(m.group(1))
+        except ValueError:
+            return None
+        unit = m.group(2).lower()
+        if unit == "d":
+            return (today - timedelta(days=n)).isoformat()
+        return today.isoformat()
 
     return None
 
@@ -281,6 +298,35 @@ def _scrape_with_playwright() -> tuple[list[dict], str | None]:
             current = page.url or ""
             if "/web/welcome" in current or "authentication" in current:
                 return [], "profile expired — re-run gmessages-auth.py"
+
+            # Lazy-load pagination: Google Messages shows the top ~26
+            # conversations on first render, then loads the next batch
+            # asynchronously when you scroll the sidebar near the
+            # bottom. We have to scroll, *wait*, then count — doing
+            # both in the same evaluate() captures the row count
+            # before the new batch lands in the DOM.
+            last_count = -1
+            stable_iters = 0
+            for _ in range(SCROLL_MAX_ITER):
+                page.evaluate(
+                    """() => {
+                        const nav = document.querySelector('nav.conversation-list');
+                        if (nav) nav.scrollTop = nav.scrollHeight;
+                    }"""
+                )
+                page.wait_for_timeout(SCROLL_PAUSE_MS)
+                count = page.evaluate(
+                    "() => document.querySelectorAll('mws-conversation-list-item').length"
+                )
+                if not isinstance(count, int):
+                    break
+                if count == last_count:
+                    stable_iters += 1
+                    if stable_iters >= 2:
+                        break  # plateau confirmed across two cycles
+                else:
+                    stable_iters = 0
+                last_count = count
 
             rows: list[dict] = page.evaluate(_ROW_EXTRACTOR_JS)
             if not isinstance(rows, list):
