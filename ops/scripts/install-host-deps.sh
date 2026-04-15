@@ -61,7 +61,7 @@ REQUIRED = [
     "playwright",
     "camoufox",
     "rebrowser_playwright",
-    "amazon_orders",
+    "amazonorders",  # pip name: amazon-orders; PyPI installs as amazonorders
     "openai",
     "curl_cffi",
     "googleapiclient",
