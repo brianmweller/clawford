@@ -7,7 +7,7 @@
 **TL;DR**
 
 - The decisions in this chapter determine whether your first agent is live in 2 days or 2 weeks. Most of them are one-way doors, and they're all cheap to get right if you make them here.
-- Budget **~\$50/month** to run Clawford (VPS + ChatGPT Plus subscription), plus **\$8-30/month** in residential proxy fees later if you deploy the shopping agent, Hilda Hippo. Budget **2-3 days** to your first working agent and **2-4 weeks of evenings** to a full fleet. Don't lowball either number.
+- Budget **~\$50/month** to run Clawford (VPS + ChatGPT Plus subscription), plus **~\$1/month** in residential proxy fees later if you deploy the shopping agent, Hilda Hippo. Budget **2-3 days** to your first working agent and **2-4 weeks of evenings** to a full fleet. Don't lowball either number.
 - Run Clawford on a dedicated VPS, not your daily driver. Use Telegram, not WhatsApp. Deploy Mr Fixit first. Those three are the cheapest "listen to me" decisions in the whole guide.
 - The per-agent config files ship as `*.example` templates in git; on first setup you scaffold the unsuffixed siblings via `python3 agents/shared/deploy.py <agent> --bootstrap-configs`, edit your real values into them, and the siblings stay `.gitignore`d. That pattern is the seam that makes sharing this repo possible.
 - Plan for rebuilds, not stability. Every service that touches the real world breaks eventually. The question isn't *whether*, it's *how fast you notice and recover*.
@@ -38,7 +38,7 @@ A **ChatGPT Plus / Codex subscription** (~\$20/month). Clawford's LLM entry poin
 
 **Optional — deferred until Ch 07-6:**
 
-- A **residential proxy subscription** (IPRoyal, Bright Data, or similar). Only matters once you deploy Hilda Hippo for purchasing — Amazon and Costco detect datacenter IPs and will block you — so you'll need a sticky residential egress to reach them. Don't buy this until you're actually ready to deploy her. Budget \$8-30/month when you do.
+- A **residential proxy subscription** (IPRoyal, Bright Data, or similar). Only matters once you deploy Hilda Hippo for purchasing — Amazon and Costco detect datacenter IPs and will block you — so you'll need a sticky residential egress to reach them. Don't buy this until you're actually ready to deploy her. Budget **~\$1/month** when you do — the actual bandwidth the fleet puts through the proxy is small, because Hilda's hot path is small HTTPS API calls, not heavy page scrapes. Uninformed usage (scraping full pages through the proxy on every query) would cost more; most providers' minimum-volume plans land in the \$8-30/month range if you don't pay attention to what you're routing through.
 
 ## What it'll cost you
 
@@ -49,9 +49,9 @@ Rough monthly numbers from my own setup. Your mileage will vary with region and 
 | Hetzner VPS (cpx31) | ~\$30/month | Ch 04 | 4 vCPU / 8 GB RAM / 160 GB SSD. Availability varies by region — I picked cpx31 partly because the slightly larger cpx32 wasn't available in mine. Smaller SKUs are fine for small fleets. |
 | ChatGPT Plus subscription | ~\$20/month | Ch 04 | Flat rate. What `codex` rides for every LLM call in the fleet. |
 | Dropbox | free or ~\$12/month | Ch 06 | Free tier fits the shared brain; paid only if you archive a lot of brain snapshots. |
-| Residential proxy | \$8-30/month | Ch 07-6 | Only if you deploy the shopping agent, Hilda Hippo. Skippable until then. |
+| Residential proxy | ~\$1/month | Ch 07-6 | Only if you deploy the shopping agent, Hilda Hippo. Cost is this low because the hot path is small HTTPS calls, not page scrapes. Uninformed usage lands in the \$8-30/month range. |
 | **Baseline (no proxy)** | **~\$50/month** | | |
-| **Full fleet with proxy** | **~\$60-80/month** | | |
+| **Full fleet with proxy** | **~\$51/month** | | |
 
 None of this includes your time, which is the expensive part.
 
