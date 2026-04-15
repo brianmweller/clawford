@@ -54,6 +54,43 @@ set -euo pipefail
 REPO_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 WRAPPER_DIR="$REPO_ROOT/ops/scripts"
 
+# Disabled-agents mechanism. Operator writes one agent id per line into
+# $HOME/.openclaw/disabled-agents.txt (or override via DISABLED_AGENTS_FILE
+# env var). Any DIRECT_ENTRIES marker or CONTRACT_ENTRIES logname that
+# equals an entry in that file — or starts with "<entry>-" — is skipped
+# on install AND evicted from the live crontab if present. Short/blank
+# lines and `#` comments in the file are ignored.
+#
+# Matching rule: full agent id with hyphen boundary. "fix-it" disables
+# "fix-it" and anything starting with "fix-it-", but NOT "fix-itchy".
+# "fix" alone does NOT match "fix-it" — the operator must spell out
+# the full agent id.
+DISABLED_AGENTS_FILE="${DISABLED_AGENTS_FILE:-$HOME/.openclaw/disabled-agents.txt}"
+DISABLED_AGENTS=()
+if [[ -f "$DISABLED_AGENTS_FILE" ]]; then
+  while IFS= read -r raw; do
+    # Strip `#` comment to end-of-line, then trim whitespace.
+    stripped="${raw%%#*}"
+    # shellcheck disable=SC2001  # sed is clearer than ${//} for this
+    stripped=$(echo "$stripped" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    [[ -n "$stripped" ]] && DISABLED_AGENTS+=("$stripped")
+  done < "$DISABLED_AGENTS_FILE"
+fi
+
+# Returns 0 (success) if `$1` is owned by a disabled agent, 1 otherwise.
+# Exact match or prefix-with-hyphen match only — see the file-format
+# comment above.
+is_disabled_entry() {
+  local name="$1"
+  local agent
+  for agent in "${DISABLED_AGENTS[@]}"; do
+    if [[ "$name" == "$agent" ]] || [[ "$name" == "$agent-"* ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Direct wrappers — each with its own dedicated script.
 # Format: "<schedule>|<wrapper_basename>|<marker>"
 DIRECT_ENTRIES=(
@@ -155,6 +192,21 @@ existing_line_for_marker() {
 # Process direct entries
 for entry in "${DIRECT_ENTRIES[@]}"; do
   IFS='|' read -r schedule wrapper_name marker <<< "$entry"
+  # marker is literally "# <name>" — strip the "# " prefix for the
+  # disabled-agent check, which compares against bare names.
+  marker_name="${marker#\# }"
+
+  if is_disabled_entry "$marker_name"; then
+    existing=$(existing_line_for_marker "$marker")
+    if [[ -n "$existing" ]]; then
+      echo "[install-host-cron] disabled agent — evicting: $marker_name"
+      DRIFT_MARKERS+=("$marker")
+    else
+      echo "[install-host-cron] disabled agent — skipping: $marker_name"
+    fi
+    continue
+  fi
+
   wrapper="$WRAPPER_DIR/$wrapper_name"
 
   if [[ ! -f "$wrapper" ]]; then
@@ -189,6 +241,17 @@ chmod +x "$CONTRACT_WRAPPER"
 for entry in "${CONTRACT_ENTRIES[@]}"; do
   IFS='|' read -r schedule logname script_path token_env timeout_s <<< "$entry"
   marker="# script-contract-$logname"
+
+  if is_disabled_entry "$logname"; then
+    existing=$(existing_line_for_marker "$marker")
+    if [[ -n "$existing" ]]; then
+      echo "[install-host-cron] disabled agent — evicting: $logname"
+      DRIFT_MARKERS+=("$marker")
+    else
+      echo "[install-host-cron] disabled agent — skipping: $logname"
+    fi
+    continue
+  fi
 
   desired_line="$schedule $CONTRACT_WRAPPER $logname $script_path $token_env $timeout_s $marker"
   existing=$(existing_line_for_marker "$marker")
