@@ -16,21 +16,18 @@
 #
 # Usage — from host:
 #   bash ~/repo/ops/scripts/set-bot-descriptions.sh
-# Usage — inside the gateway container:
-#   bash /home/node/repo/ops/scripts/set-bot-descriptions.sh
 #
 # Environment: requires the per-agent bot token env vars
 # (TELEGRAM_BOT_TOKEN, NEWSDIGEST_BOT_TOKEN, SHOPPING_BOT_TOKEN,
 # FAMILYCAL_BOT_TOKEN, MEETINGS_BOT_TOKEN, CONNECTOR_BOT_TOKEN).
-# Inside the container these come from docker-compose.yml's env_file.
-# From the host we source ~/openclaw/.env if any are missing.
+# Sourced from ~/clawford/.env if not already exported.
 
 set -euo pipefail
 
-if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] && [ -f ~/openclaw/.env ]; then
+if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] && [ -f ~/clawford/.env ]; then
     set -a
     # shellcheck disable=SC1090
-    source ~/openclaw/.env
+    source ~/clawford/.env
     set +a
 fi
 

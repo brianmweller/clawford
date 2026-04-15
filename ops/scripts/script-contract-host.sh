@@ -7,7 +7,7 @@
 # Example crontab:
 #   */30 * * * * /home/openclaw/repo/ops/scripts/script-contract-host.sh \
 #     shopping-heartbeat \
-#     /home/openclaw/.openclaw/shopping-workspace/scripts/heartbeat.py \
+#     /home/openclaw/.clawford/shopping-workspace/scripts/heartbeat.py \
 #     SHOPPING_BOT_TOKEN
 #
 # WHAT IT DOES
@@ -23,7 +23,7 @@
 # bind-mounted directory tree, and the host has the same Python
 # dependencies installed via ops/scripts/install-host-deps.sh.
 #
-# LOG:   ~/.openclaw/logs/<logname>-host.log (rotated @ 1 MB)
+# LOG:   ~/.clawford/logs/<logname>-host.log (rotated @ 1 MB)
 # LOCK:  /tmp/<logname>-host.lock (flock, non-blocking)
 set -u
 
@@ -32,9 +32,9 @@ SCRIPT="${2:?usage: $0 <logname> <host-script-path> <bot-token-env> [timeout-s]}
 TOKEN_ENV="${3:?usage: $0 <logname> <host-script-path> <bot-token-env> [timeout-s]}"
 TIMEOUT_S="${4:-120}"
 
-LOG_FILE="/home/openclaw/.openclaw/logs/${LOGNAME}-host.log"
+LOG_FILE="/home/openclaw/.clawford/logs/${LOGNAME}-host.log"
 LOCK_FILE="/tmp/${LOGNAME}-host.lock"
-ENV_FILE="/home/openclaw/openclaw/.env"
+ENV_FILE="/home/openclaw/clawford/.env"
 
 mkdir -p "$(dirname "$LOG_FILE")"
 

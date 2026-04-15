@@ -1,33 +1,24 @@
 #!/usr/bin/env bash
 # set-bot-commands.sh — Re-apply custom Telegram bot commands for all agents.
 #
-# OpenClaw's channel-sync pushes its ~49 default slash commands whenever
-# its config hash changes. The durable fix is Step 10a in DEPLOY.md —
-# set commands.native:false + customCommands per account in
-# ~/.openclaw/openclaw.json, which makes openclaw respect the custom
-# list across restarts. This script is the belt-and-suspenders Step 10b:
-# direct Bot API set for immediate effect and as emergency-restore after
-# any accidental clobber.
+# Direct Bot API set for the per-agent slash command menus. Single
+# source of truth for the menu Telegram clients show. Re-run after
+# adding a new agent or changing any command label/description.
 #
 # Usage — from host:
 #   bash ~/repo/ops/scripts/set-bot-commands.sh
-# Usage — from inside the gateway container (entrypoint.sh hook):
-#   bash /home/node/repo/ops/scripts/set-bot-commands.sh
 #
 # Environment: requires the per-agent bot token env vars
 # (TELEGRAM_BOT_TOKEN, NEWSDIGEST_BOT_TOKEN, SHOPPING_BOT_TOKEN,
-# FAMILYCAL_BOT_TOKEN, MEETINGS_BOT_TOKEN) to be set. Inside the
-# container these come from docker-compose.yml's env_file. From the
-# host we source ~/openclaw/.env if any are missing.
+# FAMILYCAL_BOT_TOKEN, MEETINGS_BOT_TOKEN). Sourced from
+# ~/clawford/.env if not already exported.
 
 set -euo pipefail
 
-# Source host .env only if the required vars aren't already exported.
-# Inside the container env is already set, so sourcing would fail.
-if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] && [ -f ~/openclaw/.env ]; then
+if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] && [ -f ~/clawford/.env ]; then
     set -a
     # shellcheck disable=SC1090
-    source ~/openclaw/.env
+    source ~/clawford/.env
     set +a
 fi
 

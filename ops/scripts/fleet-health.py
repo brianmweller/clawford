@@ -37,7 +37,7 @@ from datetime import datetime, timezone
 
 # These constants are module-level so tests can monkeypatch them.
 REPO_ROOT = os.environ.get(
-    "OPENCLAW_REPO_ROOT",
+    "CLAWFORD_REPO_ROOT",
     os.path.expanduser("~/repo"),
 )
 FLEET_MANIFEST_PATH = os.path.join(REPO_ROOT, "agents", "shared", "fleet-manifest.json")
@@ -86,7 +86,7 @@ def invoke_agent_probe(spec, run_subprocess) -> dict:
 
     Phase 6.5: was `docker exec openclaw-gateway python3 probe-agent.py`;
     now `/usr/bin/python3 probe-agent.py`. Workspace paths are expanded
-    via os.path.expanduser so `~/.openclaw/...` resolves to the host's
+    via os.path.expanduser so `~/.clawford/...` resolves to the host's
     home directory instead of the container's `/home/node/...`.
     """
     workspace = os.path.expanduser(spec.workspace)

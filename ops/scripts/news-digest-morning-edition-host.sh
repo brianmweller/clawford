@@ -25,15 +25,15 @@
 # fetch/infer latency spikes.
 #
 # INSTALL: ops/scripts/install-host-cron.sh (idempotent).
-# LOG:     ~/.openclaw/logs/news-digest-morning-edition-host.log (1 MB rotation)
+# LOG:     ~/.clawford/logs/news-digest-morning-edition-host.log (1 MB rotation)
 # LOCK:    /tmp/news-digest-morning-edition-host.lock (flock non-blocking)
 set -u
 
-FETCH_AND_RANK="/home/openclaw/.openclaw/news-digest-workspace/scripts/fetch-and-rank.py"
-MORNING_EDITION="/home/openclaw/.openclaw/news-digest-workspace/scripts/morning-edition.py"
-LOG_FILE="/home/openclaw/.openclaw/logs/news-digest-morning-edition-host.log"
+FETCH_AND_RANK="/home/openclaw/.clawford/news-digest-workspace/scripts/fetch-and-rank.py"
+MORNING_EDITION="/home/openclaw/.clawford/news-digest-workspace/scripts/morning-edition.py"
+LOG_FILE="/home/openclaw/.clawford/logs/news-digest-morning-edition-host.log"
 LOCK_FILE="/tmp/news-digest-morning-edition-host.lock"
-ENV_FILE="/home/openclaw/openclaw/.env"
+ENV_FILE="/home/openclaw/clawford/.env"
 
 mkdir -p "$(dirname "$LOG_FILE")"
 

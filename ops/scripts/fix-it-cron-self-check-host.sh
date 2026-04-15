@@ -10,18 +10,18 @@
 #
 # Mirrors the fleet-health-host.sh shape: run script on host, parse
 # the JSON tail of stdout for `status` and `alert`, curl any non-empty
-# alert to Telegram. Bot token sourced from /home/openclaw/openclaw/.env.
+# alert to Telegram. Bot token sourced from /home/openclaw/clawford/.env.
 #
 # INSTALL: ops/scripts/install-host-cron.sh registers this in
 # DIRECT_ENTRIES with marker "# fix-it-cron-self-check-host".
-# LOG:     ~/.openclaw/logs/fix-it-cron-self-check-host.log (rotated @ 1 MB)
+# LOG:     ~/.clawford/logs/fix-it-cron-self-check-host.log (rotated @ 1 MB)
 # LOCK:    /tmp/fix-it-cron-self-check-host.lock (flock, non-blocking)
 set -u
 
 ORCHESTRATOR="/home/openclaw/repo/agents/fix-it/scripts/cron-self-check.py"
-LOG_FILE="/home/openclaw/.openclaw/logs/fix-it-cron-self-check-host.log"
+LOG_FILE="/home/openclaw/.clawford/logs/fix-it-cron-self-check-host.log"
 LOCK_FILE="/tmp/fix-it-cron-self-check-host.lock"
-ENV_FILE="/home/openclaw/openclaw/.env"
+ENV_FILE="/home/openclaw/clawford/.env"
 
 mkdir -p "$(dirname "$LOG_FILE")"
 

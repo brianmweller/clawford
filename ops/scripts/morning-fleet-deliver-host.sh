@@ -18,7 +18,7 @@
 # Running the same script under plain host cron dodges the LLM
 # queue entirely. Phase 6.5 moved the script execution off docker
 # exec — the host now runs the bind-mounted script directly with
-# its own Python and sources /home/openclaw/openclaw/.env for the
+# its own Python and sources /home/openclaw/clawford/.env for the
 # bot tokens + TELEGRAM_CHAT_ID. Because the script has its own
 # hold-until-12:00 barrier, firing the host cron at exactly
 # 0 12 * * * is fine — the barrier becomes a no-op and delivery
@@ -29,13 +29,13 @@
 # ever manually re-triggered the same morning.
 #
 # INSTALL:  ops/scripts/install-host-cron.sh (idempotent)
-# LOG:      ~/.openclaw/logs/morning-fleet-deliver-host.log (rotated @ 1 MB)
+# LOG:      ~/.clawford/logs/morning-fleet-deliver-host.log (rotated @ 1 MB)
 set -u
 
-DELIVER="/home/openclaw/.openclaw/fix-it-workspace/scripts/morning-fleet-deliver.py"
-LOG_FILE="/home/openclaw/.openclaw/logs/morning-fleet-deliver-host.log"
+DELIVER="/home/openclaw/.clawford/fix-it-workspace/scripts/morning-fleet-deliver.py"
+LOG_FILE="/home/openclaw/.clawford/logs/morning-fleet-deliver-host.log"
 LOCK_FILE="/tmp/morning-fleet-deliver-host.lock"
-ENV_FILE="/home/openclaw/openclaw/.env"
+ENV_FILE="/home/openclaw/clawford/.env"
 
 mkdir -p "$(dirname "$LOG_FILE")"
 

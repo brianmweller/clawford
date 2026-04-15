@@ -12,14 +12,14 @@
 #
 # INSTALL: ops/scripts/install-host-cron.sh registers this in
 # DIRECT_ENTRIES with marker "# fleet-health-host".
-# LOG:     ~/.openclaw/logs/fleet-health-host.log (rotated @ 1 MB)
+# LOG:     ~/.clawford/logs/fleet-health-host.log (rotated @ 1 MB)
 # LOCK:    /tmp/fleet-health-host.lock (flock, non-blocking)
 set -u
 
 ORCHESTRATOR="/home/openclaw/repo/ops/scripts/fleet-health.py"
-LOG_FILE="/home/openclaw/.openclaw/logs/fleet-health-host.log"
+LOG_FILE="/home/openclaw/.clawford/logs/fleet-health-host.log"
 LOCK_FILE="/tmp/fleet-health-host.lock"
-ENV_FILE="/home/openclaw/openclaw/.env"
+ENV_FILE="/home/openclaw/clawford/.env"
 
 mkdir -p "$(dirname "$LOG_FILE")"
 

@@ -63,7 +63,7 @@ def fake_repo(tmp_path, monkeypatch):
             {
                 "id": "shopping",
                 "display_name": "Hilda Hippo",
-                "workspace": "~/.openclaw/shopping-workspace",
+                "workspace": "~/.clawford/shopping-workspace",
                 "bot_token_env": "SHOPPING_BOT_TOKEN",
                 "probe_entrypoint": "scripts/heartbeat.py::probe",
                 "expected_probes": ["costco_session", "amazon_session"],
@@ -71,7 +71,7 @@ def fake_repo(tmp_path, monkeypatch):
             {
                 "id": "connector",
                 "display_name": "Huckle Cat",
-                "workspace": "~/.openclaw/connector-workspace",
+                "workspace": "~/.clawford/connector-workspace",
                 "bot_token_env": "CONNECTOR_BOT_TOKEN",
                 "probe_entrypoint": "scripts/heartbeat.py::probe",
                 "expected_probes": ["missing_files"],

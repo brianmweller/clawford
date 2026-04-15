@@ -55,7 +55,7 @@ REPO_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 WRAPPER_DIR="$REPO_ROOT/ops/scripts"
 
 # Disabled-agents mechanism. Operator writes one agent id per line into
-# $HOME/.openclaw/disabled-agents.txt (or override via DISABLED_AGENTS_FILE
+# $HOME/.clawford/disabled-agents.txt (or override via DISABLED_AGENTS_FILE
 # env var). Any DIRECT_ENTRIES marker or CONTRACT_ENTRIES logname that
 # equals an entry in that file — or starts with "<entry>-" — is skipped
 # on install AND evicted from the live crontab if present. Short/blank
@@ -65,7 +65,7 @@ WRAPPER_DIR="$REPO_ROOT/ops/scripts"
 # "fix-it" and anything starting with "fix-it-", but NOT "fix-itchy".
 # "fix" alone does NOT match "fix-it" — the operator must spell out
 # the full agent id.
-DISABLED_AGENTS_FILE="${DISABLED_AGENTS_FILE:-$HOME/.openclaw/disabled-agents.txt}"
+DISABLED_AGENTS_FILE="${DISABLED_AGENTS_FILE:-$HOME/.clawford/disabled-agents.txt}"
 DISABLED_AGENTS=()
 if [[ -f "$DISABLED_AGENTS_FILE" ]]; then
   while IFS= read -r raw; do
@@ -106,32 +106,32 @@ DIRECT_ENTRIES=(
 # Format: "<schedule>|<logname>|<container-script-path>|<bot-token-env>|<timeout-s>"
 # Marker is derived from logname: "# script-contract-<logname>"
 CONTRACT_ENTRIES=(
-  "0 */6 * * *|linkedin-keepalive|/home/openclaw/.openclaw/news-digest-workspace/scripts/linkedin-keepalive.py|NEWSDIGEST_BOT_TOKEN|300"
-  "*/5 * * * *|family-calendar-reminder-check|/home/openclaw/.openclaw/family-calendar-workspace/scripts/reminder-check.py|FAMILYCAL_BOT_TOKEN|90"
-  "*/5 * * * *|news-digest-engagement-poll|/home/openclaw/.openclaw/news-digest-workspace/scripts/engagement-poller.py|NEWSDIGEST_BOT_TOKEN|60"
-  "0 23 * * *|news-digest-preference-update|/home/openclaw/.openclaw/news-digest-workspace/scripts/update-preferences.py|NEWSDIGEST_BOT_TOKEN|300"
-  "30 10 * * *|shopping-delivery-digest|/home/openclaw/.openclaw/shopping-workspace/scripts/delivery-digest.py|SHOPPING_BOT_TOKEN|900"
-  "30 10 * * *|family-calendar-morning-briefing|/home/openclaw/.openclaw/family-calendar-workspace/scripts/morning-briefing.py|FAMILYCAL_BOT_TOKEN|300"
-  "15 */2 * * *|family-calendar-activity-email-alert|/home/openclaw/.openclaw/family-calendar-workspace/scripts/activity-email-alert.py|FAMILYCAL_BOT_TOKEN|300"
-  "30 */3 * * *|family-calendar-gmail-invite-alert|/home/openclaw/.openclaw/family-calendar-workspace/scripts/gmail-invite-alert.py|FAMILYCAL_BOT_TOKEN|120"
-  "45 */2 * * *|family-calendar-whatsapp-chat-alert|/home/openclaw/.openclaw/family-calendar-workspace/scripts/whatsapp-chat-alert.py|FAMILYCAL_BOT_TOKEN|180"
-  "0 12 * * *|family-calendar-whatsapp-schedule-post|/home/openclaw/.openclaw/family-calendar-workspace/scripts/whatsapp-schedule-post.py|FAMILYCAL_BOT_TOKEN|120"
-  "0 */2 * * *|connector-gmessages-mine|/home/openclaw/.openclaw/connector-workspace/scripts/gmessages-mine.py|CONNECTOR_BOT_TOKEN|300"
-  "0 10 * * *|connector-daily-refresh|/home/openclaw/.openclaw/connector-workspace/scripts/daily-refresh.py|CONNECTOR_BOT_TOKEN|600"
-  "30 10 * * *|connector-morning-relationship-nudge|/home/openclaw/.openclaw/connector-workspace/scripts/morning-relationship-nudge.py|CONNECTOR_BOT_TOKEN|300"
-  "0 8,20 * * *|connector-notes-triage-alert|/home/openclaw/.openclaw/connector-workspace/scripts/notes-triage-alert.py|CONNECTOR_BOT_TOKEN|180"
-  "30 10 * * *|meetings-coach-morning-meeting-brief|/home/openclaw/.openclaw/meetings-coach-workspace/scripts/morning-meeting-brief.py|MEETINGS_BOT_TOKEN|300"
-  "*/30 * * * *|meetings-coach-pre-meeting-alert|/home/openclaw/.openclaw/meetings-coach-workspace/scripts/pre-meeting-alert.py|MEETINGS_BOT_TOKEN|180"
-  "15,45 * * * *|meetings-coach-post-meeting-scan|/home/openclaw/.openclaw/meetings-coach-workspace/scripts/post-meeting-scan.py|MEETINGS_BOT_TOKEN|300"
-  "0 16 * * *|meetings-coach-commitment-follow-up|/home/openclaw/.openclaw/meetings-coach-workspace/scripts/commitment-follow-up.py|MEETINGS_BOT_TOKEN|120"
-  "0 */6 * * *|fix-it-brain-validation|/home/openclaw/.openclaw/fix-it-workspace/scripts/brain-validation-check.py|TELEGRAM_BOT_TOKEN|120"
-  "0 */2 * * *|fix-it-conflict-scan|/home/openclaw/.openclaw/fix-it-workspace/scripts/conflict-scan.py|TELEGRAM_BOT_TOKEN|120"
-  "0 12 * * *|fix-it-file-size-monitor|/home/openclaw/.openclaw/fix-it-workspace/scripts/file-size-monitor.py|TELEGRAM_BOT_TOKEN|120"
-  "0 4 * * 0|fix-it-security-audit-alert|/home/openclaw/.openclaw/fix-it-workspace/scripts/security-audit-alert.py|TELEGRAM_BOT_TOKEN|180"
-  "10 12 * * *|fix-it-obsidian-briefing-check|/home/openclaw/.openclaw/fix-it-workspace/scripts/obsidian-briefing-check.py|TELEGRAM_BOT_TOKEN|240"
-  "30 3 * * *|fix-it-workspace-snapshot-check|/home/openclaw/.openclaw/fix-it-workspace/scripts/workspace-snapshot-check.py|TELEGRAM_BOT_TOKEN|600"
-  "0 3 1 * *|fix-it-monthly-archival|/home/openclaw/.openclaw/fix-it-workspace/scripts/monthly-archival.py|TELEGRAM_BOT_TOKEN|600"
-  "0 16 25 4 *|fix-it-probation-end-reminder|/home/openclaw/.openclaw/fix-it-workspace/scripts/probation-end-reminder.py|TELEGRAM_BOT_TOKEN|60"
+  "0 */6 * * *|linkedin-keepalive|/home/openclaw/.clawford/news-digest-workspace/scripts/linkedin-keepalive.py|NEWSDIGEST_BOT_TOKEN|300"
+  "*/5 * * * *|family-calendar-reminder-check|/home/openclaw/.clawford/family-calendar-workspace/scripts/reminder-check.py|FAMILYCAL_BOT_TOKEN|90"
+  "*/5 * * * *|news-digest-engagement-poll|/home/openclaw/.clawford/news-digest-workspace/scripts/engagement-poller.py|NEWSDIGEST_BOT_TOKEN|60"
+  "0 23 * * *|news-digest-preference-update|/home/openclaw/.clawford/news-digest-workspace/scripts/update-preferences.py|NEWSDIGEST_BOT_TOKEN|300"
+  "30 10 * * *|shopping-delivery-digest|/home/openclaw/.clawford/shopping-workspace/scripts/delivery-digest.py|SHOPPING_BOT_TOKEN|900"
+  "30 10 * * *|family-calendar-morning-briefing|/home/openclaw/.clawford/family-calendar-workspace/scripts/morning-briefing.py|FAMILYCAL_BOT_TOKEN|300"
+  "15 */2 * * *|family-calendar-activity-email-alert|/home/openclaw/.clawford/family-calendar-workspace/scripts/activity-email-alert.py|FAMILYCAL_BOT_TOKEN|300"
+  "30 */3 * * *|family-calendar-gmail-invite-alert|/home/openclaw/.clawford/family-calendar-workspace/scripts/gmail-invite-alert.py|FAMILYCAL_BOT_TOKEN|120"
+  "45 */2 * * *|family-calendar-whatsapp-chat-alert|/home/openclaw/.clawford/family-calendar-workspace/scripts/whatsapp-chat-alert.py|FAMILYCAL_BOT_TOKEN|180"
+  "0 12 * * *|family-calendar-whatsapp-schedule-post|/home/openclaw/.clawford/family-calendar-workspace/scripts/whatsapp-schedule-post.py|FAMILYCAL_BOT_TOKEN|120"
+  "0 */2 * * *|connector-gmessages-mine|/home/openclaw/.clawford/connector-workspace/scripts/gmessages-mine.py|CONNECTOR_BOT_TOKEN|300"
+  "0 10 * * *|connector-daily-refresh|/home/openclaw/.clawford/connector-workspace/scripts/daily-refresh.py|CONNECTOR_BOT_TOKEN|600"
+  "30 10 * * *|connector-morning-relationship-nudge|/home/openclaw/.clawford/connector-workspace/scripts/morning-relationship-nudge.py|CONNECTOR_BOT_TOKEN|300"
+  "0 8,20 * * *|connector-notes-triage-alert|/home/openclaw/.clawford/connector-workspace/scripts/notes-triage-alert.py|CONNECTOR_BOT_TOKEN|180"
+  "30 10 * * *|meetings-coach-morning-meeting-brief|/home/openclaw/.clawford/meetings-coach-workspace/scripts/morning-meeting-brief.py|MEETINGS_BOT_TOKEN|300"
+  "*/30 * * * *|meetings-coach-pre-meeting-alert|/home/openclaw/.clawford/meetings-coach-workspace/scripts/pre-meeting-alert.py|MEETINGS_BOT_TOKEN|180"
+  "15,45 * * * *|meetings-coach-post-meeting-scan|/home/openclaw/.clawford/meetings-coach-workspace/scripts/post-meeting-scan.py|MEETINGS_BOT_TOKEN|300"
+  "0 16 * * *|meetings-coach-commitment-follow-up|/home/openclaw/.clawford/meetings-coach-workspace/scripts/commitment-follow-up.py|MEETINGS_BOT_TOKEN|120"
+  "0 */6 * * *|fix-it-brain-validation|/home/openclaw/.clawford/fix-it-workspace/scripts/brain-validation-check.py|TELEGRAM_BOT_TOKEN|120"
+  "0 */2 * * *|fix-it-conflict-scan|/home/openclaw/.clawford/fix-it-workspace/scripts/conflict-scan.py|TELEGRAM_BOT_TOKEN|120"
+  "0 12 * * *|fix-it-file-size-monitor|/home/openclaw/.clawford/fix-it-workspace/scripts/file-size-monitor.py|TELEGRAM_BOT_TOKEN|120"
+  "0 4 * * 0|fix-it-security-audit-alert|/home/openclaw/.clawford/fix-it-workspace/scripts/security-audit-alert.py|TELEGRAM_BOT_TOKEN|180"
+  "10 12 * * *|fix-it-obsidian-briefing-check|/home/openclaw/.clawford/fix-it-workspace/scripts/obsidian-briefing-check.py|TELEGRAM_BOT_TOKEN|240"
+  "30 3 * * *|fix-it-workspace-snapshot-check|/home/openclaw/.clawford/fix-it-workspace/scripts/workspace-snapshot-check.py|TELEGRAM_BOT_TOKEN|600"
+  "0 3 1 * *|fix-it-monthly-archival|/home/openclaw/.clawford/fix-it-workspace/scripts/monthly-archival.py|TELEGRAM_BOT_TOKEN|600"
+  "0 16 25 4 *|fix-it-probation-end-reminder|/home/openclaw/.clawford/fix-it-workspace/scripts/probation-end-reminder.py|TELEGRAM_BOT_TOKEN|60"
 )
 
 # Markers for old entries to REMOVE on next install run. Used by the

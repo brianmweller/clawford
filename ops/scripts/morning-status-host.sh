@@ -4,7 +4,7 @@
 # via docker exec) because the script reads/writes Dropbox-mounted
 # files directly: ~/Dropbox/openclaw-backup/fleet-health.json,
 # ~/Dropbox/openclaw-backup/fix-it/KNOWN_ISSUES.md, validate.py,
-# and writes ~/.openclaw/fix-it-workspace/cache/morning-brief-ready.txt.
+# and writes ~/.clawford/fix-it-workspace/cache/morning-brief-ready.txt.
 #
 # All paths are bind-mounted into the container too, so morning-fleet-
 # deliver.py at 12:00 UTC sees the same cache file the script wrote
@@ -12,14 +12,14 @@
 #
 # INSTALL: ops/scripts/install-host-cron.sh registers this in
 # DIRECT_ENTRIES with marker "# morning-status-host".
-# LOG:     ~/.openclaw/logs/morning-status-host.log (rotated @ 1 MB)
+# LOG:     ~/.clawford/logs/morning-status-host.log (rotated @ 1 MB)
 # LOCK:    /tmp/morning-status-host.lock (flock, non-blocking)
 set -u
 
 SCRIPT="/home/openclaw/repo/agents/fix-it/scripts/morning-status.py"
-LOG_FILE="/home/openclaw/.openclaw/logs/morning-status-host.log"
+LOG_FILE="/home/openclaw/.clawford/logs/morning-status-host.log"
 LOCK_FILE="/tmp/morning-status-host.lock"
-ENV_FILE="/home/openclaw/openclaw/.env"
+ENV_FILE="/home/openclaw/clawford/.env"
 
 mkdir -p "$(dirname "$LOG_FILE")"
 
