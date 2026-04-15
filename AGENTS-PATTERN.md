@@ -11,12 +11,14 @@ Standard patterns all Busytown agents must follow. Read this before building a n
 
 ## Memory
 
-Every agent MUST have a `MEMORY.md` in its workspace. OpenClaw auto-loads it at the start of every session.
+Every agent has a `MEMORY.md` in its workspace. Cron messages and the
+LLM cron runner load it explicitly when they need persistent context
+— there is no auto-loading runtime layer post-Phase-6. The file is
+durable across runs because it lives in the workspace, not in
+session memory.
 
-- **MEMORY.md** — persistent rules, hard constraints, architectural decisions. Things the agent must remember across sessions.
-- **memory/YYYY-MM-DD.md** — daily notes (auto-created by OpenClaw). Today + yesterday loaded automatically.
-- **Memory flush** — before compaction, OpenClaw reminds the agent to save context. On by default.
-- **Dreaming** — optional consolidation that promotes daily notes to MEMORY.md.
+- **MEMORY.md** — persistent rules, hard constraints, architectural decisions. Things the agent must remember across cron invocations.
+- **memory/YYYY-MM-DD.md** — daily notes when an agent wants to write them. Loaded explicitly by the consumer.
 
 What goes in MEMORY.md:
 - Config rules: "NEVER re-enable X" / "ALWAYS use Y"
@@ -24,9 +26,13 @@ What goes in MEMORY.md:
 - Learned patterns: what works, what breaks
 - Do NOT put ephemeral task state — that goes in daily files
 
-## Workspace Files (All 8 Required)
+## Workspace Files
 
-OpenClaw auto-loads exactly 8 files at every session start. ALL must exist in the agent's workspace:
+The eight workspace files below describe an agent's identity, role,
+and operating model. They are loaded on demand by cron message
+prompts (and by `llm-cron-runner.py` when applicable), not auto-
+injected by a runtime layer. ALL must exist in the agent's workspace
+for the agent's prompts to resolve correctly:
 
 | File | Purpose | Create at deploy? |
 |------|---------|-------------------|
@@ -52,13 +58,18 @@ OpenClaw auto-loads exactly 8 files at every session start. ALL must exist in th
 - Append-only convention — never overwrite another agent's entries
 - Mr Fixit monitors all status files and validates brain health
 
-## Claude Code
+## LLM access
 
-- Only Mr Fixit uses Claude Code (via `claude -p` shell command, NOT ACP)
-- Other agents use OpenClaw's native LLM capability
-- `--add-dir ~/Dropbox/openclaw-backup/` required for brain access
-- Multi-turn: `--session-id $(uuidgen)` on turn 1, `--resume` on subsequent turns
-- New request = new session ID. Never reuse across requests.
+- Every agent that needs LLM reasoning calls
+  `from agents.shared.llm import infer` — a thin wrapper over
+  `codex infer` riding the operator's ChatGPT Plus subscription. Zero
+  marginal cost per call.
+- `infer(prompt, *, json_mode=False, timeout=30, model=None)` returns
+  an `InferResult` with normalized `.text` and `.outputs` fields.
+- Mr Fixit also uses Claude Code (`claude -p`) for richer fleet-wide
+  diagnostics. Pass `--add-dir ~/Dropbox/openclaw-backup/` for brain
+  access. Multi-turn: `--session-id $(uuidgen)` on turn 1, `--resume`
+  on subsequent turns.
 
 ## Telegram
 
@@ -78,31 +89,30 @@ OpenClaw auto-loads exactly 8 files at every session start. ALL must exist in th
 ## Security
 
 - `chattr +i` on SOUL.md and IDENTITY.md after deployment
-- Exec allowlist for cron commands
-- Telegram exec approvals for interactive commands (Mr Fixit only)
-- Secrets in `.env` only, never in code or brain
-- ACP disabled (`acp.enabled: false`) — ACP hijacks Telegram channels
+- Per-agent Telegram bots prevent cross-agent impersonation
+- Secrets in `.env` only (`~/clawford/.env` on the VPS), never in
+  code or brain
+- Three-tier defense: OS-level immutability on identity files, the
+  script contract for cron messages (no shell operators in any
+  message string), and `deploy.py`'s ten safeguards. See
+  `guide-v3/06-infra-setup.md`.
 
 ## Deployment
 
 See [DEPLOY.md](DEPLOY.md) for the full step-by-step. The pattern
-(post 2026-04-12 refactor):
+(post-Phase-7 liberation):
 
 1. Create Telegram bot via @BotFather
 2. Write workspace files (SOUL.md, IDENTITY.md, TOOLS.md, AGENTS.md,
    USER.md, HEARTBEAT.md, MEMORY.md, CRONS.md) locally in the Clawford
    repo
-3. Write a `manifest.json` next to the workspace files (or generate
-   one from a legacy `deploy.sh` via
-   `agents/shared/import_from_deploy_sh.py`)
+3. Write a `manifest.json` next to the workspace files
 4. **Commit everything locally and push to GitHub.** No SCP-bypass.
-5. On the VPS: `cd ~/repo && git pull`
-6. Interactive onboarding (first time only):
-   `oci agents add <agent-id>`, then `/start` the bot and approve
-   pairing
-7. Deploy: `python3 agents/shared/deploy.py <agent-id>`
-   (the tool handles file install, cron registration, channel
-   binding, approvals, chattr locking, and backup)
+5. SSH to the VPS: `cd ~/repo && git pull --ff-only origin master`
+6. Deploy: `python3 agents/shared/deploy.py <agent-id> --yes-updates`
+   (file install + chattr handling + backup tarball + Dropbox mirror).
+7. Register host crons: `~/repo/ops/scripts/install-host-cron.sh`
+   (idempotent — drift-detects and rewrites stale lines).
 
 ## Deployment Invariants
 
@@ -120,9 +130,11 @@ warning (or an audit record in the case of drift violations).
    refuses to run if the agent's source directory has uncommitted
    modifications or untracked files. Override: `--allow-dirty`.
 3. **Every deploy produces a backup tarball** at
-   `~/.openclaw/deploy-backups/<agent>-<ts>.tar.gz` AND mirrors it
+   `~/.clawford/deploy-backups/<agent>-<ts>.tar.gz` AND mirrors it
    to `~/Dropbox/openclaw-backup/deploy-backups/` for off-VPS
-   retention. Recovery from a bad deploy is `tar -xzf`.
+   retention. Recovery from a bad deploy is `tar -xzf`. (The
+   Dropbox mirror path keeps the legacy `openclaw-backup` name to
+   avoid resetting Dropbox sync history fleet-wide.)
 4. **Every UPDATE is reviewed via diff before landing.** The tool
    prints a unified diff for each changed file and waits for y/N.
    Override: `--yes-updates`.
@@ -138,9 +150,11 @@ warning (or an audit record in the case of drift violations).
 - NO ON-VPS DEV. Edits happen in local git, full stop.
 - Never `scp` files directly into `~/repo/` on the VPS. Use `git pull`.
 - Never hand-write cron messages with `chr()`, compound shell pipes,
-  or heredocs — OpenClaw's exec layer can trip approval flows even
-  under `policy=full, ask=off`. Use Python scripts invoked via
-  `python3 /home/node/.openclaw/<agent>-workspace/scripts/<name>.py`.
+  or heredocs. Use Python scripts invoked via
+  `python3 /home/openclaw/.clawford/<agent>-workspace/scripts/<name>.py`
+  through `script-contract-host.sh` or a dedicated `*-host.sh`
+  wrapper. The script contract guarantees one JSON line on stdout;
+  the wrapper parses it and decides whether to alert.
 - Never commit secrets. API keys, bot tokens, passwords live in
-  `.env` (gitignored) and are sourced into deploy environment at
-  runtime.
+  `.env` (gitignored) and are sourced into the wrapper environment
+  at runtime from `~/clawford/.env`.

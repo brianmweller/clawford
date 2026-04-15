@@ -1,11 +1,19 @@
 # DEPLOY.md — Deploying a Clawford Agent
 
-Canonical workflow for deploying or updating an agent on the VPS. This
-file supersedes the pre-2026-04-12 shell-script flow; all six
-agents (shopping, family-calendar, meetings-coach, news-digest,
-connector, fix-it) are now deployed via `agents/shared/deploy.py`
-driven by a per-agent `manifest.json`, guarded by ten test-covered
-safeguards.
+Canonical workflow for deploying or updating an agent on the VPS.
+After the Phase 7 liberation (April 2026), every agent runs as plain
+host crons invoking Python directly, with `agents/shared/deploy.py`
+as the file-sync + validation tool, driven by a per-agent
+`manifest.json` and guarded by nine test-covered safeguards.
+
+> **Historical note.** The "OpenClaw Gotchas" appendix later in this
+> document is preserved as an archaeological record of the
+> pre-Phase-7 era. Sections numbered 1 through ~14 describe failures
+> in the OpenClaw runtime, the gateway container, and the LLM cron
+> scheduler — all of which were retired during the liberation. They
+> stay here because the scar tissue is useful when something
+> resembles an old failure mode, but they are not load-bearing
+> documentation.
 
 ---
 
@@ -24,12 +32,18 @@ git commit -m "shopping: costco-orders timeout bump"
 git push origin master
 
 # 4. Pull on the VPS
-ssh openclaw@198.51.100.42 "cd ~/repo && git pull"
+ssh openclaw@198.51.100.42 "cd ~/repo && git pull --ff-only origin master"
 
-# 5. Run the hardened deploy tool
+# 5. Run the deploy tool ON THE VPS
 ssh openclaw@198.51.100.42 \
-  "cd ~/repo && python3 agents/shared/deploy.py shopping"
+  "cd ~/repo && python3 agents/shared/deploy.py shopping --yes-updates"
 ```
+
+**Do not invoke `deploy.py` on your laptop** — it writes to
+`$HOME/.clawford/<agent>-workspace/` on whatever box runs it. On the
+VPS that's the production workspace; on a laptop it's a dead local
+mirror that nothing reads. A laptop dry-run is useful for validating
+a manifest change without touching the VPS, and not much else.
 
 **Do not** `scp` local files directly into `~/repo/` on the VPS. The
 2026-04-12 deploy regression happened because a Claude session SCP'd
@@ -45,16 +59,16 @@ push → pull`.
 
 **Does:**
 - Copies manifest-listed config files and scripts from
-  `~/repo/agents/<agent>/` → `~/.openclaw/<agent>-workspace/`, honoring
-  the chattr-immutable flag on SOUL.md / IDENTITY.md.
+  `~/repo/agents/<agent>/` → `~/.clawford/<agent>-workspace/`,
+  honoring the chattr-immutable flag on SOUL.md / IDENTITY.md.
 - Seeds manifest-listed state files (`grocery-list.json`, etc.) only
   if absent — preserves live accumulated data across reruns.
-- Syncs cron definitions via `openclaw cron edit --message` for
-  UPDATEs and `cron add` for new. Never creates duplicates.
-- Ensures the Telegram channel account + agent binding are registered
-  (idempotent).
-- Adds each manifest-listed exec allowlist pattern.
-- Writes pre-deploy backup tarballs.
+- Mirrors `agents/shared/*.py` runtime modules into the workspace's
+  `agents/shared/` so per-agent scripts can import them via the
+  standard sys.path shim.
+- Writes pre-deploy backup tarballs to
+  `~/.clawford/deploy-backups/` and mirrors them to
+  `~/Dropbox/openclaw-backup/deploy-backups/` for off-VPS retention.
 
 **Does not:**
 - Read VPS workspace state back into the source repo. Flow is
@@ -65,8 +79,9 @@ push → pull`.
   recorded state (Safeguard 4 refuses unless `--accept-drift`).
 - Apply UPDATEs silently — every UPDATE shows a unified diff and
   requires y/N confirmation unless `--yes-updates` is passed.
-- Delete orphan crons (live but not in manifest) unless
-  `--remove-orphans`. Warns by default.
+- Touch the host crontab. Cron registration is owned by
+  `ops/scripts/install-host-cron.sh` — re-run it any time the
+  contract entry list in that script changes.
 - Touch the shared brain at `~/Dropbox/openclaw-backup/`. The brain
   has two layers: **declarative config/code** at `ops/brain/*` in
   git (flow: git → VPS, pushed manually via
@@ -77,27 +92,28 @@ push → pull`.
 
 ---
 
-## Ten safeguards
+## Nine safeguards
 
 | # | Name | Flag to override | What it prevents |
 |---|---|---|---|
-| 1 | Pre-deploy backup | (none — mandatory) | Unrecoverable rollbacks — tar written to `~/.openclaw/deploy-backups/` + mirrored to `~/Dropbox/openclaw-backup/deploy-backups/` |
+| 1 | Pre-deploy backup | (none — mandatory) | Unrecoverable rollbacks — tar written to `~/.clawford/deploy-backups/` + mirrored to `~/Dropbox/openclaw-backup/deploy-backups/` |
 | 2 | Source-clean gate | `--allow-dirty` | SCP'ing uncommitted local files into `~/repo/` and deploying them |
 | 3 | UPDATE diff + confirm | `--yes-updates` | Silent overwrite of a file that shouldn't change |
 | 4 | Drift detection (blocking) | `--accept-drift` | Deploys wiping VPS-side edits without audit |
 | 5 | Deploy banner | (none — cosmetic) | Ambiguity about source, target, git HEAD, flow direction |
 | 6 | Smoke-test hook | `--smoke-test` activates it | Silent regressions — runs `manifest.smoke_test.script` (defaults to `scripts/heartbeat.py`) as a host subprocess, asserts exit 0 + non-empty stdout, auto-restores backup on failure |
-| 7 | Manifest validation | (none — mandatory) | Deploying a manifest with duplicate cron names, missing SOUL.md / IDENTITY.md, dangling `smoke_test.script` refs, absolute state-file paths, or `agent_id` / directory mismatch. Pure-Python cross-check; was previously `openclaw config validate`, rewritten in Phase 5 liberation. |
-| 8 | *(retired 2026-04-15)* | — | Was `exec-approvals` baseline drift — removed in Phase 5 liberation because the OpenClaw approvals concept no longer exists. Tombstone comment in `deploy.py`; `ops/exec-approvals-baseline.json` scheduled for deletion in Phase 7. |
-| 9 | Cron message hygiene | (none — mandatory) | Manifest cron messages containing shell-operator bug-attractors (`; echo $?`, `sh -lc python`, `> /tmp/`, `2>&1`, `$(python`) that an LLM would copy verbatim into its exec tool call and hit an upstream exec preflight — see Gotcha §10 below |
+| 7 | Manifest validation | (none — mandatory) | Deploying a manifest with duplicate cron names, missing SOUL.md / IDENTITY.md, dangling `smoke_test.script` refs, absolute state-file paths, or `agent_id` / directory mismatch. Pure-Python cross-check; was `openclaw config validate` until Phase 5 liberation. |
+| 8 | *(retired 2026-04-15)* | — | Was `exec-approvals` baseline drift. Removed in Phase 5 because the OpenClaw approvals concept no longer exists. Tombstone comment in `deploy.py`; baseline file deleted in Phase 7a. |
+| 9 | Cron message hygiene | (none — mandatory) | Manifest cron messages containing shell-operator bug-attractors (`; echo $?`, `sh -lc python`, `> /tmp/`, `2>&1`, `$(python`) that an LLM would copy verbatim into its exec tool call. |
 | 10 | Config source resolution | `--skip-files` | Deploying with missing/placeholder-laden real config files — walks `config_files[]`, refuses if any real file is missing or still carries the `CLAWFORD_BOOTSTRAP_UNEDITED` sentinel. `--bootstrap-configs` scaffolds from `.example` siblings. |
-| 11 | docker-compose.yml drift | (none — mandatory) | Runtime `~/openclaw/docker-compose.yml` diverging from git-tracked `ops/docker-compose.yml`. Allowed states: missing runtime, symlink into git checkout, byte-identical regular file. |
+| 11 | *(retired 2026-04-15)* | — | Was `docker-compose.yml` drift detection. Removed in Phase 7a because the gateway container is gone and `ops/docker-compose.yml` was deleted from git. |
 
-All ten are test-covered under `agents/shared/tests/` (420+ passing
-offline, no VPS required). Safeguard 7 refuses with exit code 6 and a
-per-field list. Safeguard 9 refuses with exit code 8 and the
-offending cron name + matched pattern. Safeguard 11 refuses with exit
-code 11.
+All nine live safeguards (1–7, 9, 10) are test-covered under
+`agents/shared/tests/` (425+ passing offline, no VPS required).
+Safeguard 7 refuses with exit code 6 and a per-field list. Safeguard
+9 refuses with exit code 8 and the offending cron name + matched
+pattern. Structural test `test_phase7_openclaw_helpers_deleted`
+enforces the OpenClaw helper deletion at the module level.
 
 ---
 
@@ -105,15 +121,15 @@ code 11.
 
 ```bash
 # Find the most recent backup
-ls -t ~/.openclaw/deploy-backups/<agent>-*.tar.gz | head -5
+ls -t ~/.clawford/deploy-backups/<agent>-*.tar.gz | head -5
 
 # Or from local (if VPS is gone)
 ls -t ~/Dropbox/openclaw-backup/deploy-backups/<agent>-*.tar.gz | head -5
 
 # Restore
-BACKUP=$(ls -t ~/.openclaw/deploy-backups/<agent>-*.tar.gz | head -1)
-rm -rf ~/.openclaw/<agent>-workspace/*
-tar -xzf $BACKUP -C ~/.openclaw/ --strip-components=0
+BACKUP=$(ls -t ~/.clawford/deploy-backups/<agent>-*.tar.gz | head -1)
+rm -rf ~/.clawford/<agent>-workspace/*
+tar -xzf $BACKUP -C ~/.clawford/ --strip-components=0
 ```
 
 If Safeguard 6 (`--smoke-test`) was active, the restore is automatic
@@ -129,7 +145,7 @@ Each agent has `agents/<agent_id>/manifest.json`. Minimal example:
 {
   "agent_id": "shopping",
   "display_name": "Hilda Hippo",
-  "workspace": "~/.openclaw/shopping-workspace",
+  "workspace": "~/.clawford/shopping-workspace",
   "status_file": "~/Dropbox/openclaw-backup/agents/shopping.status.md",
   "telegram": {
     "account": "shopping",
@@ -152,9 +168,6 @@ Each agent has `agents/<agent_id>/manifest.json`. Minimal example:
       "seed_if_absent": {"updated_at": null, "items": []}
     }
   ],
-  "approvals": {
-    "allowlist": ["/usr/bin/*", "/bin/*", "/usr/local/bin/*"]
-  },
   "crons": [
     {
       "name": "delivery-digest",
@@ -171,159 +184,69 @@ Each agent has `agents/<agent_id>/manifest.json`. Minimal example:
 }
 ```
 
-Bootstrap an existing agent's manifest from its legacy `deploy.sh`:
-
-```bash
-python3 agents/shared/import_from_deploy_sh.py shopping
-```
+> Manifest files may carry a vestigial top-level `"approvals"` block
+> (allowlist / policy / security). It's parsed and ignored by
+> `deploy.py` post-Phase-7a — the OpenClaw exec-approvals layer that
+> consumed it no longer exists. Keeping the block in old manifests is
+> harmless; new agents should omit it.
 
 ---
 
 ## First-deploy checklist for a new agent
 
-For a brand-new agent that has never been onboarded. **Read the "Gotchas"
-section below first** — several of these steps are traps that bit us
-during the Huckle Cat (2026-04-12) build.
+For a brand-new agent that has never been onboarded:
 
-1. Create the Telegram bot via @BotFather. Save the token as
-   `<AGENTNAME>_BOT_TOKEN=<token>` in `/home/openclaw/openclaw/.env` on
-   the VPS (not any `/root/openclaw/.env` — that path doesn't exist).
-2. Write SOUL.md, IDENTITY.md, TOOLS.md, AGENTS.md, USER.md, HEARTBEAT.md,
-   MEMORY.md, CRONS.md in `agents/<new-agent>/`.
-3. Write the agent's scripts under `agents/<new-agent>/scripts/`.
-4. Write a `manifest.json`. **Include `"approvals": {"policy": "full",
-   "security": "full", "allowlist": [...]}`** — without these, new agents
-   default to `policy=null` which falls back to strict allowlist checks
-   that don't honor wildcards, triggering approval prompts on every
-   shell command the agent tries to run.
-5. Commit everything to local git and push.
-6. On the VPS: register the agent. The interactive wizard
-   (`oci agents add <new-agent>`) is **broken as of 2026-04-12** — it
-   tries to OAuth the codex provider with scope `model.request` that
-   current OAuth clients can't grant (`invalid_scope` error). Workaround
-   is the "bootstrap by direct config" path in Gotchas §1 below.
-7. `/start` the bot on Telegram. In openclaw 2026.4.10 the first message
-   auto-pairs if the Telegram account + binding are already in
-   `openclaw.json` — no explicit `oc pairing approve` needed.
-8. `cd ~/repo && git pull && bash agents/<new-agent>/deploy.sh`
-   (or `python3 agents/shared/deploy.py <new-agent>`).
-9. **Verify SOUL.md is actually loaded.** If the agent still responds
-   with a "fresh workspace, who am I?" onboarding dialog, BOOTSTRAP.md
-   was auto-created by openclaw's `agents add` wizard and is shadowing
-   your IDENTITY.md. `deploy.py` removes BOOTSTRAP.md automatically as
-   of 2026-04-12 — but if you see the symptom, verify the file is gone
-   at `~/.openclaw/<agent>-workspace/BOOTSTRAP.md`.
-10. **Set the bot's slash-command menu. Two steps — both required.**
-
-    **Step 10a — openclaw config.** Edit
-    `~/.openclaw/openclaw.json` in the gateway container. For the
-    Telegram account belonging to the new agent, set:
-
-    ```json
-    "channels": {
-      "telegram": {
-        "accounts": {
-          "<account>": {
-            "botToken": "...",
-            "enabled": true,
-            "name": "<Display Name>",
-            "commands": {"native": false},
-            "customCommands": [
-              {"command": "radar", "description": "Today's nudges"},
-              {"command": "find",  "description": "Look up: /find Drew"}
-            ]
-          }
-        }
-      }
-    }
+1. **Create the Telegram bot** via @BotFather. Save the token as
+   `<AGENTNAME>_BOT_TOKEN=<token>` in `~/clawford/.env` on the VPS.
+2. **Write workspace files** in `agents/<new-agent>/`: SOUL.md,
+   IDENTITY.md, TOOLS.md, AGENTS.md, USER.md, HEARTBEAT.md, MEMORY.md,
+   CRONS.md. Commit `.example` templates to git; the real PII-hydrated
+   files are gitignored and live on your dev box + the VPS only.
+3. **Write the agent's scripts** under `agents/<new-agent>/scripts/`,
+   each conforming to `agents/shared/SCRIPT_CONTRACT.md` (one JSON
+   line on stdout with a `status` field).
+4. **Write a `manifest.json`** with `agent_id`, `display_name`,
+   `workspace` (`~/.clawford/<agent>-workspace`), `status_file`
+   (`~/Dropbox/openclaw-backup/agents/<agent>.status.md`),
+   `telegram.account` + `bot_token_env`, `config_files[]`,
+   `scripts[]`, `state_files[]`, `crons[]`, and optionally
+   `smoke_test`.
+5. **Commit everything to local git and push.**
+6. **Add the agent to `agents/shared/fleet-manifest.json`** so
+   `fleet-health.py` probes its heartbeat.
+7. **Add the agent's host crons to `ops/scripts/install-host-cron.sh`**
+   (CONTRACT_ENTRIES for script-contract-host.sh-wrapped scripts,
+   DIRECT_ENTRIES for dedicated wrappers).
+8. **SSH to the VPS and pull:**
+   ```bash
+   ssh openclaw@198.51.100.42 "cd ~/repo && git pull --ff-only origin master"
+   ```
+9. **Deploy:**
+   ```bash
+   ssh openclaw@198.51.100.42 \
+     "cd ~/repo && python3 agents/shared/deploy.py <new-agent> --yes-updates"
+   ```
+   The tool installs config files (handling chattr immutability),
+   syncs scripts + the shared library, seeds state files, and writes
+   a backup tarball.
+10. **Register host crons:**
+    ```bash
+    ssh openclaw@198.51.100.42 "~/repo/ops/scripts/install-host-cron.sh"
     ```
-
-    Then restart the gateway so openclaw re-runs its command sync. If
-    you skip this step, on the next gateway restart openclaw will
-    clobber any commands you set directly via the Bot API — it
-    maintains its own hash-cached state in
-    `~/.openclaw/telegram/command-hash-<account>-*.txt` and resyncs on
-    startup whenever the hash differs. **Why `commands.native: false`:
-    without it, openclaw injects all ~49 built-in commands
-    (`/help`, `/status`, `/context`, `/tools`, `/exec`, …) into the
-    bot's menu alongside your 7 custom ones, producing a 56-item menu
-    that makes the agent look generic.**
-
-    **Step 10b — the Telegram Bot API set.** Even with openclaw
-    managing its own command sync, you may want to set commands
-    directly via the Bot API for immediate effect (openclaw's sync
-    runs on startup and may be skipped if the hash matches). Both
-    `default` and `all_private_chats` scopes should be set — the
-    Telegram client picks the most specific scope when showing the
-    menu, so `all_private_chats` wins in DMs:
-
-    ```python
-    import json, urllib.request
-    TOKEN = "<YOUR_BOT_TOKEN>"
-    def call(method, body=None):
-        data = json.dumps(body or {}).encode("utf-8")
-        req = urllib.request.Request(
-            f"https://api.telegram.org/bot{TOKEN}/{method}",
-            data=data,
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req) as r:
-            return json.loads(r.read().decode())
-
-    cmds = [
-        {"command": "radar",     "description": "Today's nudges"},
-        {"command": "find",      "description": "Look up: /find Drew"},
-        ...
-    ]
-    call("setMyCommands", {"commands": cmds})
-    call("setMyCommands", {"commands": cmds, "scope": {"type": "all_private_chats"}})
-    call("setMyDescription", {"description": "..."})
-    call("setMyShortDescription", {"short_description": "..."})
-    ```
-
-    **In practice, do not write the `python -c` by hand.** Two
-    canonical scripts live in `ops/scripts/` and run automatically
-    on every container start via `entrypoint.sh` hooks:
-
-    - `ops/scripts/set-bot-commands.sh` — sets `setMyCommands` for
-      all 6 agent bots. Runs ~25s after gateway start.
-    - `ops/scripts/set-bot-descriptions.sh` — sets `setMyDescription`
-      + `setMyShortDescription` for all 6 agent bots. Runs ~30s
-      after gateway start. Without this the empty-chat window is
-      blank — no hint of what the agent does. Voice matches Huckle
-      Cat's "Part of the Busytown OpenClaw network" tagline.
-
-    Both scripts are idempotent. Edit the script in git, push, pull,
-    and either `docker compose restart` (auto-runs both via the
-    entrypoint hooks) OR run them once by hand:
-
-    ```
+    Idempotent. Drift-detects and rewrites stale lines.
+11. **Set the bot's slash-command menu and descriptions:**
+    ```bash
     ssh openclaw@198.51.100.42 "bash ~/repo/ops/scripts/set-bot-commands.sh"
     ssh openclaw@198.51.100.42 "bash ~/repo/ops/scripts/set-bot-descriptions.sh"
     ```
+    Add the new agent's command + description blocks to those scripts
+    in step 2.
+12. **Smoke-test:** send a `/ping` or `/status` to the bot. Confirm
+    the next `*/15` fleet-health tick reports the new agent as `ok`.
 
-    **Gotchas:**
-    - git-bash `curl` on Windows mangles UTF-8 quotes in JSON bodies.
-      Use Python's `urllib.request` with explicit UTF-8 encoding —
-      both canonical scripts already do this.
-    - After setting via Bot API, force-refresh the Telegram client to
-      clear its cache: pull-down on the chat, or close/reopen the app.
-      Telegram caches command menus AND descriptions aggressively on
-      the client side; you may need to close+reopen the chat entirely
-      to see new descriptions in the empty-chat window.
-    - If commands were previously wrong, wipe the openclaw hash cache
-      before restarting:
-      `rm /home/node/.openclaw/telegram/command-hash-<account>-*.txt`
-    - openclaw NEVER touches the description fields (only commands),
-      so set-bot-descriptions.sh has no clobber risk — it's in the
-      entrypoint hook only to survive `docker compose up --build`.
-
-11. Smoke-test via Telegram: send a message, confirm the agent reads
-    SOUL.md and runs its scripts without approval prompts.
-
-For a RE-deploy (updating an existing agent): skip steps 1-3, 6-7, 10.
-Just commit, push, pull, deploy. Step 10 only needs to be re-run when
-the command list changes.
+For a **re-deploy** (updating an existing agent): skip steps 1-2, 6-7,
+11. Just commit, push, pull, run `deploy.py`. Re-run
+`install-host-cron.sh` only if cron schedules / script paths changed.
 
 ---
 
