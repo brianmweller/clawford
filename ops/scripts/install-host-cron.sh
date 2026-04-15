@@ -37,7 +37,7 @@
 #   0 4 * * 0     fix-it-security-audit-alert           → TELEGRAM_BOT_TOKEN   (Phase 4 — wraps security-audit.py, forwards report; degrades after Phase 6)
 #   10 12 * * *   fix-it-obsidian-briefing-check        → TELEGRAM_BOT_TOKEN   (Phase 4 — wraps obsidian-briefing/generate.py)
 #   30 3 * * *    fix-it-workspace-snapshot-check       → TELEGRAM_BOT_TOKEN   (Phase 4 — wraps workspace-snapshot.py)
-#   0 0 * * *     fix-it-cron-self-check                → TELEGRAM_BOT_TOKEN   (Phase 4 — diffs install-host-cron.sh against crontab -l)
+#   0 0 * * *     fix-it-cron-self-check-host.sh        → TELEGRAM_BOT_TOKEN   (Phase 4 — DIRECT_ENTRIES; runs on host because it needs `crontab -l` and host-side install-host-cron.sh)
 #   0 3 1 * *     fix-it-monthly-archival               → TELEGRAM_BOT_TOKEN   (Phase 4 — pure-Python confidence decay archival)
 #   0 16 25 4 *   fix-it-probation-end-reminder         → TELEGRAM_BOT_TOKEN   (Phase 4 — annual one-shot, fires April 25)
 # Retired in Phase 4 (no host cron):
@@ -62,6 +62,7 @@ DIRECT_ENTRIES=(
   "*/15 * * * *|fleet-health-host.sh|# fleet-health-host"
   "30 10 * * *|morning-status-host.sh|# morning-status-host"
   "30 10 * * *|news-digest-morning-edition-host.sh|# news-digest-morning-edition-host"
+  "0 0 * * *|fix-it-cron-self-check-host.sh|# fix-it-cron-self-check-host"
 )
 
 # Generic contract wrappers — use script-contract-host.sh with args.
@@ -92,7 +93,6 @@ CONTRACT_ENTRIES=(
   "0 4 * * 0|fix-it-security-audit-alert|/home/node/.openclaw/fix-it-workspace/scripts/security-audit-alert.py|TELEGRAM_BOT_TOKEN|180"
   "10 12 * * *|fix-it-obsidian-briefing-check|/home/node/.openclaw/fix-it-workspace/scripts/obsidian-briefing-check.py|TELEGRAM_BOT_TOKEN|240"
   "30 3 * * *|fix-it-workspace-snapshot-check|/home/node/.openclaw/fix-it-workspace/scripts/workspace-snapshot-check.py|TELEGRAM_BOT_TOKEN|600"
-  "0 0 * * *|fix-it-cron-self-check|/home/node/.openclaw/fix-it-workspace/scripts/cron-self-check.py|TELEGRAM_BOT_TOKEN|60"
   "0 3 1 * *|fix-it-monthly-archival|/home/node/.openclaw/fix-it-workspace/scripts/monthly-archival.py|TELEGRAM_BOT_TOKEN|600"
   "0 16 25 4 *|fix-it-probation-end-reminder|/home/node/.openclaw/fix-it-workspace/scripts/probation-end-reminder.py|TELEGRAM_BOT_TOKEN|60"
 )

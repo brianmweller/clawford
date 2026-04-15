@@ -121,6 +121,8 @@ def test_format_alert_lists_missing_markers(mod):
 def test_run_silent_when_all_installed(
     mod, install_script, crontab_present, tmp_path, monkeypatch
 ):
+    """Happy path: no `alert` field in the result. The host wrapper
+    gates Telegram delivery on the alert field's presence."""
     workspace = tmp_path / "fix-it-workspace"
     (workspace / "cache").mkdir(parents=True)
     monkeypatch.setattr(mod, "WORKSPACE", workspace)
@@ -131,23 +133,17 @@ def test_run_silent_when_all_installed(
     monkeypatch.setattr(mod, "INSTALL_SCRIPT", install_script)
     monkeypatch.setattr(mod, "_read_crontab", lambda: crontab_present)
 
-    sent: list[str] = []
-    monkeypatch.setattr(mod, "resolve_credentials", lambda env: ("tok", "chat"))
-    monkeypatch.setattr(
-        mod, "send_message", lambda tok, chat, text, **kw: sent.append(text) or True
-    )
-
     result = mod.run()
     assert result["status"] == "ok"
     assert result["expected"] == 5
     assert result["missing"] == 0
-    assert result["sent"] == 0
-    assert sent == []
+    assert "alert" not in result
 
 
 def test_run_alerts_when_marker_missing(
     mod, install_script, crontab_missing, tmp_path, monkeypatch
 ):
+    """Missing marker → result has `alert` populated. Wrapper sends it."""
     workspace = tmp_path / "fix-it-workspace"
     (workspace / "cache").mkdir(parents=True)
     monkeypatch.setattr(mod, "WORKSPACE", workspace)
@@ -158,17 +154,11 @@ def test_run_alerts_when_marker_missing(
     monkeypatch.setattr(mod, "INSTALL_SCRIPT", install_script)
     monkeypatch.setattr(mod, "_read_crontab", lambda: crontab_missing)
 
-    sent: list[str] = []
-    monkeypatch.setattr(mod, "resolve_credentials", lambda env: ("tok", "chat"))
-    monkeypatch.setattr(
-        mod, "send_message", lambda tok, chat, text, **kw: sent.append(text) or True
-    )
-
     result = mod.run()
     assert result["status"] == "ok"
     assert result["missing"] == 1
-    assert result["sent"] == 1
-    assert any("shopping-delivery-digest" in m for m in sent)
+    assert "alert" in result
+    assert "shopping-delivery-digest" in result["alert"]
 
 
 def test_run_handles_missing_install_script(mod, tmp_path, monkeypatch):
@@ -182,15 +172,9 @@ def test_run_handles_missing_install_script(mod, tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "INSTALL_SCRIPT", tmp_path / "missing.sh")
     monkeypatch.setattr(mod, "_read_crontab", lambda: "")
 
-    sent: list[str] = []
-    monkeypatch.setattr(mod, "resolve_credentials", lambda env: ("tok", "chat"))
-    monkeypatch.setattr(
-        mod, "send_message", lambda tok, chat, text, **kw: sent.append(text) or True
-    )
-
     result = mod.run()
     assert result["status"] == "degraded"
-    assert sent == []  # don't spam the operator if the check itself can't run
+    assert "alert" in result  # wrapper will surface this so the operator knows the check failed
 
 
 def test_main_always_exits_zero_on_error(mod, monkeypatch, capsys):

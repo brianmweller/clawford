@@ -8,12 +8,17 @@ registry is empty and that check has nothing to compare against.
 
 The replacement parses install-host-cron.sh's CONTRACT_ENTRIES +
 DIRECT_ENTRIES bash arrays and diffs the marker comments against the
-live `crontab -l` output. If any expected marker is missing, send a
-Telegram alert. The fix is for the operator to re-run install-host-cron.sh —
-this cron diagnoses, it does NOT auto-install (manual gate is the
-whole point of the rewrite).
+live `crontab -l` output. If any expected marker is missing, return
+status=ok with `alert` populated — the wrapper script
+(fix-it-cron-self-check-host.sh) reads the alert and sends Telegram.
 
-SCRIPT_CONTRACT-compliant: always exits 0, prints one JSON line.
+This script runs DIRECTLY on the host (via DIRECT_ENTRIES, not
+script-contract-host.sh) because it needs `crontab -l` from the host
+crontab and reads install-host-cron.sh from the host repo. Both are
+unavailable inside the openclaw gateway container.
+
+SCRIPT_CONTRACT-compliant: always exits 0, prints one JSON line with
+{status, expected, missing, alert?}.
 """
 from __future__ import annotations
 
@@ -26,22 +31,11 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
-# --- shared library sys.path shim ---
-for _p in Path(__file__).resolve().parents:
-    if (_p / "agents" / "shared").is_dir():
-        if str(_p) not in sys.path:
-            sys.path.insert(0, str(_p))
-        break
-
-from agents.shared.telegram_api import resolve_credentials, send_message  # noqa: E402
-
 
 WORKSPACE = Path(os.path.expanduser("~/.openclaw/fix-it-workspace"))
 CACHE_DIR = WORKSPACE / "cache"
 LAST_RUN_FILE = CACHE_DIR / "last-cron-self-check.json"
 INSTALL_SCRIPT = Path("/home/openclaw/repo/ops/scripts/install-host-cron.sh")
-
-BOT_TOKEN_ENV = "TELEGRAM_BOT_TOKEN"
 
 
 # Match a bash array start: `NAME_ENTRIES=(`
@@ -143,21 +137,20 @@ def find_missing_markers(expected: list, crontab: str) -> list:
 
 
 def format_alert(missing: list) -> str:
-    """Render a Telegram message listing missing host-cron markers."""
+    """Render a Telegram-ready single-line message listing missing
+    host-cron markers. The host wrapper forwards this to Telegram."""
     lines: list[str] = [
         f"\U0001f9ea\U0001f527 Host-cron drift: {len(missing)} missing",
-        "",
     ]
     for entry in missing:
         logname = entry.get("logname", "?")
         schedule = entry.get("schedule", "?")
         lines.append(f"  \u2022 {logname}  ({schedule})")
-    lines.append("")
     lines.append(
         "Fix: ssh to the VPS and run "
-        "`~/repo/ops/scripts/install-host-cron.sh` to re-install."
+        "~/repo/ops/scripts/install-host-cron.sh to re-install."
     )
-    return "\n".join(lines).rstrip() + "\n"
+    return "\n".join(lines)
 
 
 def _write_atomic(path: Path, content: str) -> None:
@@ -174,10 +167,9 @@ def run() -> dict:
     if not INSTALL_SCRIPT.exists():
         result = {
             "status": "degraded",
-            "alert": f"install-host-cron.sh not found at {INSTALL_SCRIPT}",
+            "alert": f"\U0001f9ea\U0001f527 cron-self-check: install-host-cron.sh not found at {INSTALL_SCRIPT}",
             "expected": 0,
             "missing": 0,
-            "sent": 0,
         }
         _write_atomic(
             LAST_RUN_FILE,
@@ -189,19 +181,15 @@ def run() -> dict:
     crontab = _read_crontab()
     missing = find_missing_markers(expected, crontab)
 
-    sent_count = 0
-    if missing:
-        token, chat_id = resolve_credentials(BOT_TOKEN_ENV)
-        msg = format_alert(missing)
-        if send_message(token, chat_id, msg, silent=False):
-            sent_count = 1
-
-    result = {
+    result: dict = {
         "status": "ok",
         "expected": len(expected),
         "missing": len(missing),
-        "sent": sent_count,
     }
+    if missing:
+        result["alert"] = format_alert(missing)
+        result["missing_markers"] = [e.get("marker") for e in missing]
+
     _write_atomic(
         LAST_RUN_FILE,
         json.dumps({"timestamp": now_utc.isoformat(), **result}, indent=2),
