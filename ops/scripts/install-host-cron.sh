@@ -112,6 +112,10 @@ STALE_MARKERS=(
   # appends a monthly S&S section on the 1st.
   "# script-contract-shopping-morning-delivery-brief"
   "# script-contract-shopping-subscribe-save-review"
+  # Phase 4d: fix-it cron-self-check moved from CONTRACT (in-container)
+  # to DIRECT (host wrapper) because it needs `crontab -l` and the host
+  # repo, both unreachable from inside the openclaw gateway container.
+  "# script-contract-fix-it-cron-self-check"
 )
 
 NEW_LINES=()
