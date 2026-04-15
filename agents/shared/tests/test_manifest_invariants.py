@@ -12,10 +12,6 @@ These tests walk every agents/*/manifest.json in the repo and assert:
      message has `scripts/<name>` in that manifest's `scripts[]`. This
      catches the situation where heartbeat.py is called by a cron but
      deploy.py doesn't manage it.
-  6. Every manifest's `telegram.bot_token_env` env var is declared in
-     ops/docker-compose.yml `environment:` block. Catches R5-class
-     silent failures where an agent's bot token never reaches the
-     running container.
 """
 from __future__ import annotations
 
@@ -28,7 +24,6 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 AGENTS_DIR = REPO_ROOT / "agents"
-COMPOSE_PATH = REPO_ROOT / "ops" / "docker-compose.yml"
 
 
 def _import_deploy():
@@ -200,34 +195,7 @@ class TestManifestInvariants:
             f"Use 'return EXACTLY the empty string (zero bytes, no narration)' instead."
         )
 
-    def test_bot_token_env_is_in_docker_compose(self, manifest_path):
-        """Every agent's `telegram.bot_token_env` must appear as a key
-        in ops/docker-compose.yml's `environment:` block. Catches
-        R5-class silent failures: env var is in host `.env` but never
-        gets passed through to the running container, so the agent's
-        Telegram channel binding silently fails at delivery time."""
-        deploy = _import_deploy()
-        mf = deploy.load_manifest(manifest_path)
-        token_env = mf.telegram_bot_token_env
-        if not token_env:
-            pytest.skip(f"{mf.agent_id} has no telegram.bot_token_env declared")
-
-        assert COMPOSE_PATH.exists(), (
-            f"ops/docker-compose.yml not found at {COMPOSE_PATH}"
-        )
-        compose_text = COMPOSE_PATH.read_text(encoding="utf-8")
-
-        # Look for a line like "      TOKEN_NAME: ${TOKEN_NAME..." inside
-        # the environment block. Cheap regex rather than full YAML parse
-        # to avoid a dependency.
-        pattern = re.compile(
-            rf"^\s{{6}}{re.escape(token_env)}\s*:\s*\$\{{",
-            re.MULTILINE,
-        )
-        assert pattern.search(compose_text), (
-            f"{mf.agent_id}: manifest declares telegram.bot_token_env="
-            f"{token_env!r} but that key is not in ops/docker-compose.yml "
-            f"environment: block. Either (a) add it to the compose file "
-            f"environment: block alongside the others, or (b) update the "
-            f"manifest to reference an env var that IS in the compose file."
-        )
+    # test_bot_token_env_is_in_docker_compose retired 2026-04-15 Phase 7.
+    # The OpenClaw gateway container is gone, so there's no compose env
+    # block to cross-check. Agents read bot tokens from the host `.env`
+    # directly via Python.

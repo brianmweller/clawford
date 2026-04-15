@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """
-deploy.py — Unified, idempotent OpenClaw agent deployment.
+deploy.py — Unified, idempotent Clawford agent deployment.
 
 Replaces the per-agent shell scripts (agents/*/deploy.sh) with a single
 Python entrypoint that reads a per-agent manifest.json and brings the live
 state on the VPS into alignment with it. Safe to re-run — makes no
-destructive changes to state files, tolerates chattr-immutable config
-files, and patches crons in-place via `openclaw cron edit` rather than
-creating duplicates.
+destructive changes to state files and tolerates chattr-immutable config
+files.
 
-Usage (run on the VPS, inside or outside the gateway container):
+Post-liberation (Phases 5–7), deploy.py is a file-sync + validation tool.
+Cron registration is owned by `ops/scripts/install-host-cron.sh`;
+Telegram channel setup is manual per `guide-v3/04-vps-setup.md`.
+
+Usage (run on the VPS):
     python3 agents/shared/deploy.py <agent_id> [--dry-run] [options]
     python3 agents/shared/deploy.py --all [--exclude fix-it] [--dry-run]
 
@@ -17,9 +20,6 @@ Options:
     --dry-run           Plan only; do not make any changes.
     --skip-files        Skip config-file install (SOUL.md, IDENTITY.md, …).
     --skip-scripts      Skip Python script install.
-    --skip-crons        Skip cron sync.
-    --skip-channel      Skip Telegram channel/binding + exec approvals.
-    --remove-orphans    Delete live crons not in the manifest (default: warn).
 
 Exit codes:
     0  Plan applied successfully (or dry-run clean).
@@ -50,16 +50,8 @@ except Exception:
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # .../Clawford
-GATEWAY_CONTAINER = "openclaw-openclaw-gateway-1"
 BACKUPS_ROOT = Path(os.path.expanduser("~/.openclaw/deploy-backups"))
 
-# docker-compose.yml runtime location on the VPS. The canonical source
-# is ops/docker-compose.yml in the git checkout; check_compose_yml_drift
-# (Safeguard) refuses to deploy when the runtime path drifts from git.
-# The preferred post-Phase-3b-followup shape is a symlink from the
-# runtime path to the tracked path so edits physically can't diverge.
-COMPOSE_RUNTIME_PATH = Path(os.path.expanduser("~/openclaw/docker-compose.yml"))
-COMPOSE_TRACKED_PATH = REPO_ROOT / "ops" / "docker-compose.yml"
 # Off-VPS mirror: Dropbox syncs this path to the user's workstation with
 # 180-day version history. Critical safety net for regression recovery —
 # without it, a bad deploy destroys local-to-VPS data with no escape path.
@@ -169,81 +161,6 @@ def print_banner(mf: "Manifest", agent_subpath: str) -> None:
     ]
     for line in lines:
         print(line)
-
-
-# ────────────────────────────────────────────────────────────────────────
-# OpenClaw CLI wrapper
-# ────────────────────────────────────────────────────────────────────────
-
-
-def oc(*args: str, input_data: str | None = None, check: bool = True) -> subprocess.CompletedProcess:
-    """Run `openclaw <args>` inside the gateway container."""
-    cmd = ["docker", "exec"]
-    if input_data is not None:
-        cmd.append("-i")
-    cmd += [GATEWAY_CONTAINER, "openclaw", *args]
-    result = subprocess.run(
-        cmd,
-        input=input_data,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if check and result.returncode != 0:
-        raise RuntimeError(
-            f"oc {' '.join(args[:3])}... exited {result.returncode}: "
-            f"{result.stderr.strip()[:300]}"
-        )
-    return result
-
-
-def oc_json(*args: str) -> Any:
-    """Run `openclaw <args>` and parse JSON stdout."""
-    result = oc(*args)
-    try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"oc {' '.join(args[:3])}... did not return JSON: {e}")
-
-
-def oc_cron_edit_message(cron_id: str, message: str) -> None:
-    """Safely patch a cron's --message via base64 stdin wrapper.
-
-    `subprocess.run` passes args as argv so we can hand the message in as a
-    regular Python string — no shell quoting required.
-    """
-    if _DRY:
-        return
-    oc("cron", "edit", cron_id, "--message", message)
-
-
-def oc_cron_add(cron_def: dict) -> str:
-    """Register a new cron. Returns the new cron id."""
-    args = [
-        "cron", "add",
-        "--agent", cron_def["agent"],
-        "--name", cron_def["name"],
-        "--cron", cron_def["cron"],
-        "--message", cron_def["message"],
-    ]
-    if cron_def.get("to"):
-        args += ["--to", cron_def["to"]]
-    if cron_def.get("account"):
-        args += ["--account", cron_def["account"]]
-    if cron_def.get("announce"):
-        args.append("--announce")
-    if cron_def.get("no_deliver"):
-        args.append("--no-deliver")
-    if _DRY:
-        return "<dry-run>"
-    result = oc_json(*args)
-    return result.get("id", "<unknown>")
-
-
-def oc_cron_rm(cron_id: str) -> None:
-    if _DRY:
-        return
-    oc("cron", "rm", cron_id)
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -665,71 +582,6 @@ def check_cron_message_hygiene(manifest: "Manifest") -> list[str]:
     return errors
 
 
-def check_compose_yml_drift() -> list[str]:
-    """Return a list of drift errors between the runtime docker-compose.yml
-    and the git-tracked copy.
-
-    The runtime path (~/openclaw/docker-compose.yml) is what `docker compose`
-    actually reads. The tracked path (ops/docker-compose.yml) is the single
-    source of truth in git. These can silently drift when someone edits the
-    VPS copy without touching git — e.g. the Phase 3b .codex bind-mount that
-    lived in the VPS for hours before landing in the repo.
-
-    Allowed states (empty list):
-      - runtime path doesn't exist (fresh install; the operator will
-        bootstrap it via a symlink or direct run from ~/repo/ops/)
-      - runtime path is a symlink resolving to the tracked path
-        (preferred — physical guarantee against divergence)
-      - runtime path is a regular file byte-identical to the tracked
-        copy (grace period for installs that haven't symlinked yet)
-
-    Refused (non-empty list):
-      - runtime path is a regular file whose content differs from
-        the tracked copy
-      - runtime path is a symlink targeting something other than the
-        tracked copy
-      - the tracked copy is missing entirely (broken checkout)
-    """
-    if not COMPOSE_TRACKED_PATH.exists():
-        return [
-            f"tracked docker-compose.yml missing at {COMPOSE_TRACKED_PATH} — "
-            "the repo checkout looks broken"
-        ]
-
-    if not COMPOSE_RUNTIME_PATH.exists():
-        return []
-
-    if COMPOSE_RUNTIME_PATH.is_symlink():
-        try:
-            resolved = COMPOSE_RUNTIME_PATH.resolve()
-            tracked_resolved = COMPOSE_TRACKED_PATH.resolve()
-        except OSError as e:
-            return [f"could not resolve compose symlink: {e}"]
-        if resolved != tracked_resolved:
-            return [
-                f"{COMPOSE_RUNTIME_PATH} is a symlink pointing at {resolved}, "
-                f"expected {tracked_resolved}. Either re-link it to the "
-                f"tracked copy or remove the file entirely."
-            ]
-        return []
-
-    # Regular file — must match tracked copy byte-for-byte
-    try:
-        runtime_bytes = COMPOSE_RUNTIME_PATH.read_bytes()
-        tracked_bytes = COMPOSE_TRACKED_PATH.read_bytes()
-    except OSError as e:
-        return [f"could not read compose files: {e}"]
-
-    if runtime_bytes != tracked_bytes:
-        return [
-            f"{COMPOSE_RUNTIME_PATH} differs from tracked {COMPOSE_TRACKED_PATH}. "
-            f"Sync the VPS copy from git, or replace it with a symlink: "
-            f"`ln -sf {COMPOSE_TRACKED_PATH} {COMPOSE_RUNTIME_PATH}`"
-        ]
-
-    return []
-
-
 def check_source_clean(source_dir: Path, agent_subpath: str) -> list[str]:
     """Return a list of problem strings if the source git state is not clean.
 
@@ -1000,183 +852,6 @@ def log_drift_violation(mf: "Manifest", drifted: list[tuple[str, str, str]]) -> 
     user = os.environ.get("USER") or os.environ.get("USERNAME", "unknown")
     with open(log_path, "a", encoding="utf-8") as f:
         f.write(f"{ts} agent={mf.agent_id} user={user} files={paths}\n")
-
-
-# ────────────────────────────────────────────────────────────────────────
-# Cron sync
-# ────────────────────────────────────────────────────────────────────────
-
-
-def fetch_live_crons(agent_id: str) -> dict[str, dict]:
-    """Return {name: job_dict} for all live crons owned by this agent."""
-    data = oc_json("cron", "list", "--json")
-    return {
-        j["name"]: j
-        for j in data.get("jobs", [])
-        if j.get("agentId") == agent_id
-    }
-
-
-def plan_cron_ops(mf: Manifest, live: dict[str, dict], telegram_chat_id: str) -> list[dict]:
-    """Return a list of {op, name, ...} ops to bring live → manifest.
-
-    Disabled crons (`enabled: false` in the manifest) stay in mf.crons
-    as rollback reference but are invisible to the add/edit/skip
-    logic here — they're treated as if absent from the manifest. If
-    live still has them, they surface as orphans and `--remove-orphans`
-    cleans them up; otherwise no-op.
-    """
-    ops = []
-    active_crons = [c for c in mf.crons if c.enabled]
-    manifest_names = {c.name for c in active_crons}
-
-    for cron in active_crons:
-        spec = cron.to_cron_def(mf.agent_id, mf.telegram_account, telegram_chat_id)
-        existing = live.get(cron.name)
-        if existing is None:
-            ops.append({"op": "add", "spec": spec})
-            continue
-
-        current_message = existing.get("payload", {}).get("message", "")
-        current_cron = existing.get("schedule", {}).get("expr", "")
-        if current_message == cron.message and current_cron == cron.cron:
-            ops.append({"op": "skip", "name": cron.name})
-            continue
-
-        patch: dict[str, Any] = {"op": "edit", "id": existing["id"], "name": cron.name}
-        if current_message != cron.message:
-            patch["message"] = cron.message
-        if current_cron != cron.cron:
-            patch["cron"] = cron.cron
-        ops.append(patch)
-
-    for name, job in live.items():
-        if name not in manifest_names:
-            ops.append({"op": "orphan", "name": name, "id": job["id"]})
-
-    return ops
-
-
-def apply_cron_ops(ops: list[dict], remove_orphans: bool) -> tuple[int, int]:
-    """Returns (applied, failed) counts."""
-    applied = failed = 0
-    for op in ops:
-        try:
-            if op["op"] == "skip":
-                log(f"cron  SKIP   {op['name']}", "ok")
-            elif op["op"] == "edit":
-                pieces = []
-                if "message" in op:
-                    pieces.append(f"message({len(op['message'])}ch)")
-                if "cron" in op:
-                    pieces.append(f"cron={op['cron']}")
-                log(f"cron  EDIT   {op['name']} ({', '.join(pieces)})", "plan")
-                if not _DRY:
-                    edit_args = ["cron", "edit", op["id"]]
-                    if "message" in op:
-                        edit_args += ["--message", op["message"]]
-                    if "cron" in op:
-                        edit_args += ["--cron", op["cron"]]
-                    oc(*edit_args)
-                applied += 1
-            elif op["op"] == "add":
-                log(f"cron  ADD    {op['spec']['name']} ({op['spec']['cron']})", "plan")
-                new_id = oc_cron_add(op["spec"])
-                log(f"       → {new_id}", "ok")
-                applied += 1
-            elif op["op"] == "orphan":
-                if remove_orphans:
-                    log(f"cron  REMOVE {op['name']} (orphan, --remove-orphans)", "plan")
-                    oc_cron_rm(op["id"])
-                    applied += 1
-                else:
-                    log(f"cron  ORPHAN {op['name']} (live but not in manifest — left alone)", "warn")
-        except Exception as e:
-            log(f"       failed: {e}", "err")
-            failed += 1
-    return applied, failed
-
-
-# ────────────────────────────────────────────────────────────────────────
-# Channel / binding / approvals (idempotent)
-# ────────────────────────────────────────────────────────────────────────
-
-
-def ensure_channel(mf: Manifest) -> None:
-    bot_token = os.environ.get(mf.telegram_bot_token_env, "")
-    if not bot_token:
-        log(f"channel SKIP  (${mf.telegram_bot_token_env} not in env)", "warn")
-        return
-
-    # Check if the channel is already configured — `openclaw channels list`
-    # output includes the account id. Avoid adding if already present.
-    try:
-        existing = oc("channels", "list", check=False)
-        if mf.telegram_account in existing.stdout:
-            log(f"channel SKIP  telegram:{mf.telegram_account} (already configured)", "ok")
-            return
-    except Exception:
-        pass
-
-    log(f"channel ADD   telegram:{mf.telegram_account}", "plan")
-    if not _DRY:
-        oc(
-            "channels", "add",
-            "--channel", "telegram",
-            "--token", bot_token,
-            "--account", mf.telegram_account,
-            "--name", mf.display_name,
-            check=False,
-        )
-
-
-def ensure_binding(mf: Manifest) -> None:
-    log(f"bind    ENSURE {mf.agent_id} → telegram:{mf.telegram_account}", "plan")
-    if not _DRY:
-        oc(
-            "agents", "bind",
-            "--agent", mf.agent_id,
-            "--bind", f"telegram:{mf.telegram_account}",
-            check=False,
-        )
-
-
-def ensure_approvals(mf: Manifest) -> None:
-    # Set per-agent policy/security (e.g. "full") so new agents don't fall
-    # back to host defaults that don't understand wildcards. Edit
-    # exec-approvals.json directly — there's no CLI for policy yet.
-    approvals_path = Path(os.path.expanduser("~/.openclaw/exec-approvals.json"))
-    if approvals_path.exists():
-        try:
-            with open(approvals_path, encoding="utf-8") as f:
-                data = json.load(f)
-            agent_entry = data.setdefault("agents", {}).setdefault(mf.agent_id, {})
-            changed = False
-            if agent_entry.get("policy") != mf.approvals_policy:
-                agent_entry["policy"] = mf.approvals_policy
-                changed = True
-            if agent_entry.get("security") != mf.approvals_security:
-                agent_entry["security"] = mf.approvals_security
-                changed = True
-            if changed:
-                log(f"approv  POLICY {mf.agent_id} policy={mf.approvals_policy} security={mf.approvals_security}", "plan")
-                if not _DRY:
-                    with open(approvals_path, "w", encoding="utf-8") as f:
-                        json.dump(data, f, indent=2)
-            else:
-                log(f"approv  OK     {mf.agent_id} policy={mf.approvals_policy}", "ok")
-        except (OSError, json.JSONDecodeError) as e:
-            log(f"approv  FAIL   cannot update policy: {e}", "error")
-
-    for pattern in mf.approvals_allowlist:
-        log(f"allow   ENSURE {mf.agent_id} {pattern}", "plan")
-        if not _DRY:
-            oc(
-                "approvals", "allowlist", "add",
-                "--agent", mf.agent_id,
-                pattern,
-                check=False,
-            )
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -1538,22 +1213,9 @@ def deploy_one(agent_id: str, args: argparse.Namespace) -> int:
     agent_subpath_for_banner = f"agents/{agent_id}"
     print_banner(mf, agent_subpath_for_banner)
 
-    # Safeguard 11: refuse if ~/openclaw/docker-compose.yml has drifted
-    # from the git-tracked ops/docker-compose.yml. Phase 3b surfaced this
-    # class of bug — the VPS copy got a .codex bind-mount edit that
-    # wasn't in git for hours, and there was no structural guarantee it
-    # would ever get committed. After the followup-2 symlink migration,
-    # the runtime path is a symlink into the git checkout, so any drift
-    # here means someone replaced the symlink with a real file.
-    note("docker-compose.yml drift")
-    compose_errors = check_compose_yml_drift()
-    if compose_errors:
-        log(f"compose drift detected ({len(compose_errors)} issue(s)):", "err")
-        for e in compose_errors:
-            log(f"  {e}", "err")
-        log("Refuse to deploy — sync the VPS compose file to git first.", "err")
-        return 11
-    log("compose runtime matches git", "ok")
+    # Safeguard 11 (docker-compose.yml drift) retired 2026-04-15 Phase 7 —
+    # the OpenClaw gateway container is gone, so there's no compose file
+    # to diff. `ops/docker-compose.yml` was deleted alongside this check.
 
     # Safeguard 7: refuse if the per-agent manifest has semantic violations.
     # Post-Phase-5 rewrite: was "ask openclaw gateway to validate its own
@@ -1654,15 +1316,6 @@ def deploy_one(agent_id: str, args: argparse.Namespace) -> int:
         note("State files")
         sync_state_files(mf)
 
-    # Phase 6 (2026-04-15): channel/binding/approvals and cron reconciliation
-    # no longer run through the OpenClaw gateway. Telegram delivery is wired
-    # directly via agents.shared.telegram; crons are installed via
-    # ops/scripts/install-host-cron.sh. The ensure_channel / ensure_binding /
-    # ensure_approvals / fetch_live_crons / plan_cron_ops / apply_cron_ops
-    # helpers survive as dead code for Phase 7 to sweep alongside oc()/oc_json().
-    # --skip-channel, --skip-crons, --remove-orphans CLI flags also become
-    # orphans; Phase 7 deletes them.
-
     # Safeguard 6: smoke test. Post-Phase-5: runs the manifest's smoke_test
     # script as a host subprocess and asserts exit 0 + non-empty stdout.
     # On failure, restore the pre-deploy backup automatically.
@@ -1689,16 +1342,13 @@ def deploy_one(agent_id: str, args: argparse.Namespace) -> int:
 
 def main() -> int:
     global _DRY
-    ap = argparse.ArgumentParser(description="Unified OpenClaw agent deploy.")
+    ap = argparse.ArgumentParser(description="Clawford agent deploy.")
     ap.add_argument("agent_id", nargs="?", help="Agent id (e.g. shopping); use --all instead to fan out.")
     ap.add_argument("--all", action="store_true", help="Deploy every agent with a manifest.")
     ap.add_argument("--exclude", action="append", default=[], help="Skip this agent (with --all).")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--skip-files", action="store_true")
     ap.add_argument("--skip-scripts", action="store_true")
-    ap.add_argument("--skip-crons", action="store_true")
-    ap.add_argument("--skip-channel", action="store_true")
-    ap.add_argument("--remove-orphans", action="store_true")
     ap.add_argument(
         "--remove-orphan-scripts", action="store_true",
         help=(

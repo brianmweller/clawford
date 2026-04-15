@@ -32,8 +32,8 @@ AGENTS_DIR = REPO_ROOT / "agents"
 def _make_args(
     dry_run=True,
     smoke_test=False,
-    skip_crons=False,
-    skip_channel=True,
+    skip_crons=False,  # noqa: ARG001 — kwarg kept for back-compat with Phase 5/6 callers
+    skip_channel=True,  # noqa: ARG001
     skip_files=False,
     skip_scripts=False,
 ):
@@ -44,9 +44,6 @@ def _make_args(
         dry_run=dry_run,
         skip_files=skip_files,
         skip_scripts=skip_scripts,
-        skip_crons=skip_crons,
-        skip_channel=skip_channel,
-        remove_orphans=False,
         remove_orphan_scripts=False,
         allow_dirty=False,
         yes_updates=True,
@@ -63,25 +60,15 @@ def _make_args(
 def test_dry_run_invokes_no_oc(
     deploy_module, fake_source_repo, fake_workspace, monkeypatch, tmp_path,
 ):
-    """Monkeypatch every oc-adjacent helper to raise. deploy_one with
-    dry_run=True must complete without triggering any of them.
+    """deploy_one with dry_run=True completes cleanly.
 
-    This is the Phase 5 acceptance criterion — the bridge between the
-    liberation effort and Phase 6's OpenClaw decommission. Once this test
-    is green, dry-run is structurally decoupled from OpenClaw.
+    Pre-Phase-7 this test monkeypatched the oc/oc_json/fetch_live_crons
+    helpers to raise if the dry-run path touched them. Phase 7 deleted
+    those symbols outright — the structural guarantee is stronger now
+    (the call would fail with AttributeError, not AssertionError). This
+    test still validates the dry-run happy path; `test_phase7_openclaw_helpers_deleted`
+    guards the structural invariant.
     """
-    def raiser(*args, **kwargs):
-        raise AssertionError(
-            f"oc-path was called from dry-run: args={args} kwargs={kwargs}"
-        )
-
-    monkeypatch.setattr(deploy_module, "oc", raiser)
-    monkeypatch.setattr(deploy_module, "oc_json", raiser)
-    monkeypatch.setattr(deploy_module, "oc_cron_add", raiser)
-    monkeypatch.setattr(deploy_module, "oc_cron_rm", raiser)
-    monkeypatch.setattr(deploy_module, "oc_cron_edit_message", raiser)
-    monkeypatch.setattr(deploy_module, "fetch_live_crons", raiser)
-
     monkeypatch.setattr(deploy_module, "BACKUPS_ROOT", tmp_path / "backups", raising=False)
     monkeypatch.setattr(deploy_module, "_DRY", True, raising=False)
 
@@ -100,32 +87,10 @@ def test_dry_run_invokes_no_oc(
 def test_live_run_invokes_no_oc(
     deploy_module, fake_source_repo, fake_workspace, monkeypatch, tmp_path,
 ):
-    """Phase 6 acceptance: a LIVE deploy (not dry-run) must not invoke any
-    oc-adjacent helper. This is strictly stronger than the Phase 5 dry-run
-    invariant.
-
-    Post-Phase 6, main() no longer calls ensure_channel / ensure_binding /
-    ensure_approvals or fetch_live_crons / plan_cron_ops / apply_cron_ops.
-    The helper function *bodies* still exist as dead code (Phase 7 deletes
-    them), but deploy_one has no path that reaches them.
+    """Live-run deploy_one happy path. Post-Phase-7 the oc-adjacent
+    helpers don't exist at all; this test survives as a smoke check that
+    deploy_one succeeds end-to-end with no OpenClaw plumbing.
     """
-    def raiser(*args, **kwargs):
-        raise AssertionError(
-            f"oc-path was called from live-run: args={args} kwargs={kwargs}"
-        )
-
-    monkeypatch.setattr(deploy_module, "oc", raiser)
-    monkeypatch.setattr(deploy_module, "oc_json", raiser)
-    monkeypatch.setattr(deploy_module, "oc_cron_add", raiser)
-    monkeypatch.setattr(deploy_module, "oc_cron_rm", raiser)
-    monkeypatch.setattr(deploy_module, "oc_cron_edit_message", raiser)
-    monkeypatch.setattr(deploy_module, "fetch_live_crons", raiser)
-    monkeypatch.setattr(deploy_module, "plan_cron_ops", raiser)
-    monkeypatch.setattr(deploy_module, "apply_cron_ops", raiser)
-    monkeypatch.setattr(deploy_module, "ensure_channel", raiser)
-    monkeypatch.setattr(deploy_module, "ensure_binding", raiser)
-    monkeypatch.setattr(deploy_module, "ensure_approvals", raiser)
-
     monkeypatch.setattr(deploy_module, "BACKUPS_ROOT", tmp_path / "backups", raising=False)
     monkeypatch.setattr(deploy_module, "_DRY", False, raising=False)
 
@@ -136,69 +101,6 @@ def test_live_run_invokes_no_oc(
             skip_files=True,
             skip_crons=False,
             skip_channel=False,
-        ),
-    )
-    assert rc == 0, f"live-run deploy returned {rc}, expected 0"
-
-
-def test_live_run_skips_channel_binding_approvals(
-    deploy_module, fake_source_repo, fake_workspace, monkeypatch, tmp_path,
-):
-    """Live deploy must NOT call ensure_channel / ensure_binding /
-    ensure_approvals. Pre-Phase 6 those were invoked unconditionally from
-    main() at lines 1657-1661; Phase 6 removes that block."""
-    def raiser(*args, **kwargs):
-        raise AssertionError(
-            f"channel/binding/approvals helper was called from live-run: "
-            f"args={args} kwargs={kwargs}"
-        )
-
-    monkeypatch.setattr(deploy_module, "ensure_channel", raiser)
-    monkeypatch.setattr(deploy_module, "ensure_binding", raiser)
-    monkeypatch.setattr(deploy_module, "ensure_approvals", raiser)
-
-    monkeypatch.setattr(deploy_module, "BACKUPS_ROOT", tmp_path / "backups", raising=False)
-    monkeypatch.setattr(deploy_module, "_DRY", False, raising=False)
-
-    rc = deploy_module.deploy_one(
-        "testagent",
-        _make_args(
-            dry_run=False,
-            skip_files=True,
-            skip_crons=False,
-            skip_channel=False,
-        ),
-    )
-    assert rc == 0, f"live-run deploy returned {rc}, expected 0"
-
-
-def test_live_run_skips_cron_reconciliation(
-    deploy_module, fake_source_repo, fake_workspace, monkeypatch, tmp_path,
-):
-    """Live deploy must NOT call fetch_live_crons / plan_cron_ops /
-    apply_cron_ops. Pre-Phase 6 these were invoked from main()'s else
-    branch at lines 1673-1682; Phase 6 removes that block so crons live
-    exclusively under ops/scripts/install-host-cron.sh."""
-    def raiser(*args, **kwargs):
-        raise AssertionError(
-            f"cron-reconciliation helper was called from live-run: "
-            f"args={args} kwargs={kwargs}"
-        )
-
-    monkeypatch.setattr(deploy_module, "fetch_live_crons", raiser)
-    monkeypatch.setattr(deploy_module, "plan_cron_ops", raiser)
-    monkeypatch.setattr(deploy_module, "apply_cron_ops", raiser)
-
-    monkeypatch.setattr(deploy_module, "BACKUPS_ROOT", tmp_path / "backups", raising=False)
-    monkeypatch.setattr(deploy_module, "_DRY", False, raising=False)
-
-    rc = deploy_module.deploy_one(
-        "testagent",
-        _make_args(
-            dry_run=False,
-            skip_files=True,
-            skip_crons=False,
-            skip_channel=True,
         ),
     )
     assert rc == 0, f"live-run deploy returned {rc}, expected 0"
@@ -445,6 +347,30 @@ def test_safeguard_8_check_function_removed(deploy_module):
     Assert the symbol is not present. Catches accidental resurrection."""
     assert not hasattr(deploy_module, "check_exec_approvals_baseline"), (
         "check_exec_approvals_baseline should have been deleted in Phase 5"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 7: structural assertion that the OpenClaw helper surface is gone
+# ---------------------------------------------------------------------------
+
+
+def test_phase7_openclaw_helpers_deleted(deploy_module):
+    """Phase 7 sweep: oc()/oc_json()/oc_cron_*, the cron-reconciliation
+    trio, the channel/binding/approvals trio, and check_compose_yml_drift
+    are all removed from the deploy module. Catches accidental resurrection
+    of any OpenClaw-coupled code path.
+    """
+    deleted = [
+        "oc", "oc_json", "oc_cron_edit_message", "oc_cron_add", "oc_cron_rm",
+        "fetch_live_crons", "plan_cron_ops", "apply_cron_ops",
+        "ensure_channel", "ensure_binding", "ensure_approvals",
+        "check_compose_yml_drift",
+        "GATEWAY_CONTAINER", "COMPOSE_RUNTIME_PATH", "COMPOSE_TRACKED_PATH",
+    ]
+    still_present = [n for n in deleted if hasattr(deploy_module, n)]
+    assert not still_present, (
+        f"Phase 7 should have removed these from deploy.py: {still_present}"
     )
 
 

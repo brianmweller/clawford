@@ -1,7 +1,8 @@
 """Shared fixtures for deploy.py safeguard tests.
 
-Each test gets its own fake workspace, fake source git repo, and can stub
-out the `oc` wrapper so we never actually talk to a Docker daemon.
+Each test gets its own fake workspace and fake source git repo. Post-Phase-7,
+deploy.py no longer defines any OpenClaw helpers so there's nothing to stub —
+the fixture just imports the module and redirects REPO_ROOT.
 """
 from __future__ import annotations
 
@@ -83,22 +84,6 @@ def fake_source_repo(tmp_path: Path) -> Path:
         json.dumps(manifest, indent=2), encoding="utf-8"
     )
 
-    # Seed ops/exec-approvals-baseline.json so Safeguard 8 finds a file
-    # when deploy_one() runs. The live (mocked) oc_json returns a matching
-    # healthy payload by default — see `fake_oc_json` below.
-    ops_dir = repo / "ops"
-    ops_dir.mkdir(exist_ok=True)
-    baseline = {
-        "defaults": {"security": "full", "ask": "off"},
-        "agents": {
-            "main":            {"security": "full", "policy": "full", "ask": "off"},
-            "testagent":       {"security": "full", "policy": "full", "ask": "off"},
-        },
-    }
-    (ops_dir / "exec-approvals-baseline.json").write_text(
-        json.dumps(baseline, indent=2), encoding="utf-8"
-    )
-
     _run(["git", "init", "-q"], cwd=repo)
     _run(["git", "config", "user.email", "test@example.com"], cwd=repo)
     _run(["git", "config", "user.name", "test"], cwd=repo)
@@ -134,32 +119,15 @@ def prepopulated_workspace(fake_workspace: Path) -> Path:
 
 @pytest.fixture
 def deploy_module(fake_source_repo: Path, monkeypatch):
-    """Import deploy.py fresh and point REPO_ROOT at the fake repo."""
+    """Import deploy.py fresh and point REPO_ROOT at the fake repo.
+
+    Post-Phase-7 deploy.py has no OpenClaw helpers to stub out; the fixture
+    just imports the module clean.
+    """
     # Force reimport to pick up any code changes in this session.
     for mod in list(sys.modules):
         if mod == "deploy" or mod.startswith("deploy."):
             del sys.modules[mod]
     import deploy  # type: ignore
     monkeypatch.setattr(deploy, "REPO_ROOT", fake_source_repo)
-    # Stub out the oc() wrapper so we never call docker.
-    def fake_oc(*args, **kwargs):
-        result = subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
-        return result
-    monkeypatch.setattr(deploy, "oc", fake_oc)
-    def fake_oc_json(*args, **kwargs):
-        # Route by subcommand so the Safeguard 7/8 safety gates pass
-        # in fixture setup without each test having to re-mock them.
-        if args[:2] == ("config", "validate"):
-            return {"valid": True, "path": "/fake/openclaw.json"}
-        if args[:2] == ("approvals", "get"):
-            # Healthy default — matches the baseline seeded above.
-            return {
-                "defaults": {"security": "full", "ask": "off"},
-                "agents": {
-                    "main":      {"security": "full", "policy": "full", "ask": "off", "allowlist": []},
-                    "testagent": {"security": "full", "policy": "full", "ask": "off", "allowlist": []},
-                },
-            }
-        return {"jobs": []}
-    monkeypatch.setattr(deploy, "oc_json", fake_oc_json)
     return deploy

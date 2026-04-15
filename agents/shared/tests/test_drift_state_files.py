@@ -117,24 +117,7 @@ def deploy_module_stateagent(source_repo_with_state_file, monkeypatch):
         sys.path.insert(0, str(SHARED_DIR))
     import deploy  # type: ignore
     monkeypatch.setattr(deploy, "REPO_ROOT", source_repo_with_state_file)
-
-    def fake_oc(*args, **kwargs):
-        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
-    monkeypatch.setattr(deploy, "oc", fake_oc)
-
-    def fake_oc_json(*args, **kwargs):
-        if args[:2] == ("config", "validate"):
-            return {"valid": True, "path": "/fake/openclaw.json"}
-        if args[:2] == ("approvals", "get"):
-            return {
-                "defaults": {"security": "full", "ask": "off"},
-                "agents": {
-                    "main":       {"security": "full", "policy": "full", "ask": "off", "allowlist": []},
-                    "stateagent": {"security": "full", "policy": "full", "ask": "off", "allowlist": []},
-                },
-            }
-        return {"jobs": []}
-    monkeypatch.setattr(deploy, "oc_json", fake_oc_json)
+    # Post-Phase-7: no oc helpers to monkeypatch.
     return deploy
 
 
