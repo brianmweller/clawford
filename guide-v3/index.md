@@ -12,7 +12,7 @@
 |---|---------|--------|
 | 01 | What Is Clawford? *(to migrate from v2, architecture diagram updated)* | pending |
 | 02 | [What Clawford Isn't](02-what-clawford-isnt.md) | **drafted** (Phase 0) |
-| 03 | Before you start *(to migrate from v2)* | pending |
+| 03 | [Before you start](03-before-you-start.md) | **drafted** (Phase 7d) |
 | 04 | [VPS setup](04-vps-setup.md) | **drafted** (Phase 6) |
 | 05 | [Dev setup](05-dev-setup.md) | **drafted** (Phase 7d) |
 | 06 | [Infra setup](06-infra-setup.md) | **drafted** (Phase 5) |
