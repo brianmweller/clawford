@@ -82,13 +82,24 @@ CURRENT_CRONTAB=$(crontab -l 2>/dev/null || true)
 
 # Helper: return the first existing crontab line whose literal content
 # contains the given marker, or empty string if no match.
+#
+# Uses pure-bash substring matching instead of `grep -F | head -1`
+# because under `set -euo pipefail`, grep's exit-1-on-no-match
+# propagates through the pipeline and aborts the whole script on every
+# "not yet installed" entry. The while-read-here-string form avoids
+# pipes entirely.
 existing_line_for_marker() {
   local marker="$1"
-  if [[ -z "$CURRENT_CRONTAB" ]]; then
-    echo ""
-    return
+  local line=""
+  if [[ -n "$CURRENT_CRONTAB" ]]; then
+    while IFS= read -r candidate; do
+      if [[ "$candidate" == *"$marker"* ]]; then
+        line="$candidate"
+        break
+      fi
+    done <<< "$CURRENT_CRONTAB"
   fi
-  echo "$CURRENT_CRONTAB" | grep -F -- "$marker" | head -1
+  echo "$line"
 }
 
 # Process direct entries
