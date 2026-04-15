@@ -16,12 +16,13 @@
 # 12:05:05 → user received "5 AM PDT" delivery at 5:05 AM.
 #
 # Running the same script under plain host cron dodges the LLM
-# queue entirely. The wrapper just `docker exec`s into the gateway
-# container (where the agent bot tokens + TELEGRAM_CHAT_ID live in
-# the process env) and lets the script do its thing. Because the
-# script has its own hold-until-12:00 barrier, firing the host cron
-# at exactly 0 12 * * * is fine — the barrier becomes a no-op and
-# delivery happens at the wall-clock target.
+# queue entirely. Phase 6.5 moved the script execution off docker
+# exec — the host now runs the bind-mounted script directly with
+# its own Python and sources /home/openclaw/openclaw/.env for the
+# bot tokens + TELEGRAM_CHAT_ID. Because the script has its own
+# hold-until-12:00 barrier, firing the host cron at exactly
+# 0 12 * * * is fine — the barrier becomes a no-op and delivery
+# happens at the wall-clock target.
 #
 # The script's per-day idempotency marker (morning-fleet-delivered-
 # YYYY-MM-DD.json) protects against double-fire if the wrapper is
@@ -31,10 +32,10 @@
 # LOG:      ~/.openclaw/logs/morning-fleet-deliver-host.log (rotated @ 1 MB)
 set -u
 
-CONTAINER="openclaw-openclaw-gateway-1"
-DELIVER="/home/node/.openclaw/fix-it-workspace/scripts/morning-fleet-deliver.py"
+DELIVER="/home/openclaw/.openclaw/fix-it-workspace/scripts/morning-fleet-deliver.py"
 LOG_FILE="/home/openclaw/.openclaw/logs/morning-fleet-deliver-host.log"
 LOCK_FILE="/tmp/morning-fleet-deliver-host.lock"
+ENV_FILE="/home/openclaw/openclaw/.env"
 
 mkdir -p "$(dirname "$LOG_FILE")"
 
@@ -48,11 +49,20 @@ flock -n 200 || {
 
 TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
+# Source the host .env so bot tokens + TELEGRAM_CHAT_ID are in
+# the subprocess environment.
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+fi
+
 # 25-minute ceiling. The script's internal MAX_HOLD_SECONDS is 20 min,
 # the Telegram sends themselves take <10 seconds total, so 25 min is
 # a generous upper bound. If we somehow exceed it, abort and let
 # the next morning's cron retry.
-OUTPUT=$(timeout 1500 docker exec "$CONTAINER" python3 "$DELIVER" 2>&1)
+OUTPUT=$(timeout 1500 /usr/bin/python3 "$DELIVER" 2>&1)
 EXIT_CODE=$?
 
 {

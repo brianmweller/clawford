@@ -29,9 +29,8 @@
 # LOCK:    /tmp/news-digest-morning-edition-host.lock (flock non-blocking)
 set -u
 
-CONTAINER="openclaw-openclaw-gateway-1"
-FETCH_AND_RANK="/home/node/.openclaw/news-digest-workspace/scripts/fetch-and-rank.py"
-MORNING_EDITION="/home/node/.openclaw/news-digest-workspace/scripts/morning-edition.py"
+FETCH_AND_RANK="/home/openclaw/.openclaw/news-digest-workspace/scripts/fetch-and-rank.py"
+MORNING_EDITION="/home/openclaw/.openclaw/news-digest-workspace/scripts/morning-edition.py"
 LOG_FILE="/home/openclaw/.openclaw/logs/news-digest-morning-edition-host.log"
 LOCK_FILE="/tmp/news-digest-morning-edition-host.lock"
 ENV_FILE="/home/openclaw/openclaw/.env"
@@ -51,10 +50,21 @@ TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   echo "[$TS] === morning-edition start ==="
 } >> "$LOG_FILE"
 
+# Source the host .env once up front so NEWSDIGEST_BOT_TOKEN,
+# LINKEDIN_*, TELEGRAM_CHAT_ID, and the codex auth path are in the
+# subprocess environment. Pre-6.5 docker exec inherited them from
+# the container — now the host wrapper is responsible.
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+fi
+
 # Step 1: fetch-and-rank. 10 min ceiling — RSS is usually <2 min but
 # LinkedIn scraper can block, and the LinkedIn thread summary loop
 # calls llm.infer() per unread thread.
-FETCH_OUT=$(timeout 600 docker exec "$CONTAINER" python3 "$FETCH_AND_RANK" 2>&1)
+FETCH_OUT=$(timeout 600 /usr/bin/python3 "$FETCH_AND_RANK" 2>&1)
 FETCH_RC=$?
 {
   echo "[$TS] fetch-and-rank exit=$FETCH_RC"
@@ -63,26 +73,20 @@ FETCH_RC=$?
 
 if [[ "$FETCH_RC" -ne 0 ]]; then
   echo "[$TS] fetch-and-rank failed — skipping morning-edition compose" >> "$LOG_FILE"
-  # Alert via NEWSDIGEST_BOT_TOKEN so the operator sees it at 5 AM
-  if [[ -f "$ENV_FILE" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$ENV_FILE"
-    set +a
-    if [[ -n "${NEWSDIGEST_BOT_TOKEN:-}" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
-      curl -s -o /dev/null -w '%{http_code}' \
-        -X POST "https://api.telegram.org/bot${NEWSDIGEST_BOT_TOKEN}/sendMessage" \
-        --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-        --data-urlencode "text=🐛 morning-edition: fetch-and-rank failed (exit $FETCH_RC)" >> "$LOG_FILE" 2>&1 || true
-      echo "" >> "$LOG_FILE"
-    fi
+  # Alert via NEWSDIGEST_BOT_TOKEN — .env already sourced above.
+  if [[ -n "${NEWSDIGEST_BOT_TOKEN:-}" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
+    curl -s -o /dev/null -w '%{http_code}' \
+      -X POST "https://api.telegram.org/bot${NEWSDIGEST_BOT_TOKEN}/sendMessage" \
+      --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+      --data-urlencode "text=🐛 morning-edition: fetch-and-rank failed (exit $FETCH_RC)" >> "$LOG_FILE" 2>&1 || true
+    echo "" >> "$LOG_FILE"
   fi
   exit 0
 fi
 
 # Step 2: morning-edition LLM compose. 3 min ceiling — one llm.infer()
 # call with a ~5k-token prompt, usually returns in 30-60s.
-COMPOSE_OUT=$(timeout 180 docker exec "$CONTAINER" python3 "$MORNING_EDITION" 2>&1)
+COMPOSE_OUT=$(timeout 180 /usr/bin/python3 "$MORNING_EDITION" 2>&1)
 COMPOSE_RC=$?
 {
   echo "[$TS] morning-edition exit=$COMPOSE_RC"
@@ -92,7 +96,7 @@ COMPOSE_RC=$?
 # Parse the JSON status line. SCRIPT_CONTRACT: final non-blank stdout
 # line is a single JSON object with a `status` field.
 LAST_LINE=$(echo "$COMPOSE_OUT" | tail -1)
-STATUS=$(python3 -c "
+STATUS=$(/usr/bin/python3 -c "
 import json, sys
 try:
     d = json.loads(sys.argv[1])
@@ -102,7 +106,7 @@ except Exception:
 " "$LAST_LINE" 2>/dev/null || echo "")
 
 if [[ "$STATUS" != "ok" ]] && [[ -n "$STATUS" ]]; then
-  ALERT=$(python3 -c "
+  ALERT=$(/usr/bin/python3 -c "
 import json, sys
 try:
     d = json.loads(sys.argv[1])
@@ -111,11 +115,8 @@ except Exception:
     print('')
 " "$LAST_LINE" 2>/dev/null || echo "")
 
-  if [[ -n "$ALERT" ]] && [[ -f "$ENV_FILE" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$ENV_FILE"
-    set +a
+  # .env already sourced at the top of the script.
+  if [[ -n "$ALERT" ]]; then
     if [[ -n "${NEWSDIGEST_BOT_TOKEN:-}" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
       HTTP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
         -X POST "https://api.telegram.org/bot${NEWSDIGEST_BOT_TOKEN}/sendMessage" \

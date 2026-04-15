@@ -33,7 +33,7 @@ flock -n 200 || {
 
 TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-OUTPUT=$(timeout 60 python3 "$ORCHESTRATOR" 2>&1)
+OUTPUT=$(timeout 60 /usr/bin/python3 "$ORCHESTRATOR" 2>&1)
 EXIT_CODE=$?
 
 {
@@ -42,7 +42,7 @@ EXIT_CODE=$?
 } >> "$LOG_FILE"
 
 LAST_LINE=$(echo "$OUTPUT" | tail -1)
-ALERT=$(python3 -c "
+ALERT=$(/usr/bin/python3 -c "
 import json, sys
 try:
     d = json.loads(sys.argv[1])

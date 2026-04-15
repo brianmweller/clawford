@@ -33,7 +33,7 @@ TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # 120s ceiling: validate.py takes ~5s, find conflicts ~2s, classification
 # is instant, file write is instant. 120s is generous.
-OUTPUT=$(timeout 120 python3 "$SCRIPT" 2>&1)
+OUTPUT=$(timeout 120 /usr/bin/python3 "$SCRIPT" 2>&1)
 EXIT_CODE=$?
 
 {
@@ -43,7 +43,7 @@ EXIT_CODE=$?
 
 # Parse last line as JSON. morning-status.py emits SCRIPT_CONTRACT JSON.
 LAST_LINE=$(echo "$OUTPUT" | tail -1)
-STATUS=$(python3 -c "
+STATUS=$(/usr/bin/python3 -c "
 import json, sys
 try:
     d = json.loads(sys.argv[1])
@@ -58,7 +58,7 @@ except Exception:
 # itself crashed (status=error), not on degraded fleet state (which
 # is what the report communicates).
 if [[ "$STATUS" == "error" ]] && [[ -f "$ENV_FILE" ]]; then
-  ALERT=$(python3 -c "
+  ALERT=$(/usr/bin/python3 -c "
 import json, sys
 try:
     d = json.loads(sys.argv[1])

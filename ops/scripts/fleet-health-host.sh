@@ -33,7 +33,7 @@ flock -n 200 || {
 
 TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-OUTPUT=$(timeout 600 python3 "$ORCHESTRATOR" 2>&1)
+OUTPUT=$(timeout 600 /usr/bin/python3 "$ORCHESTRATOR" 2>&1)
 EXIT_CODE=$?
 
 {
@@ -43,7 +43,7 @@ EXIT_CODE=$?
 
 # Parse the LAST line of stdout as JSON per SCRIPT_CONTRACT.
 LAST_LINE=$(echo "$OUTPUT" | tail -1)
-STATUS=$(python3 -c "
+STATUS=$(/usr/bin/python3 -c "
 import json, sys
 try:
     d = json.loads(sys.argv[1])
@@ -53,7 +53,7 @@ except Exception:
 " "$LAST_LINE" 2>/dev/null || echo "")
 
 if [[ "$STATUS" != "ok" ]] && [[ -n "$STATUS" ]]; then
-  ALERT=$(python3 -c "
+  ALERT=$(/usr/bin/python3 -c "
 import json, sys
 try:
     d = json.loads(sys.argv[1])

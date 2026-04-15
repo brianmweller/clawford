@@ -2,41 +2,36 @@
 # script-contract-host.sh — generic host wrapper for SCRIPT_CONTRACT scripts.
 #
 # Usage:
-#   script-contract-host.sh <logname> <container-script-path> <bot-token-env> [<timeout-s>]
+#   script-contract-host.sh <logname> <host-script-path> <bot-token-env> [<timeout-s>]
 #
 # Example crontab:
 #   */30 * * * * /home/openclaw/repo/ops/scripts/script-contract-host.sh \
 #     shopping-heartbeat \
-#     /home/node/.openclaw/shopping-workspace/scripts/heartbeat.py \
+#     /home/openclaw/.openclaw/shopping-workspace/scripts/heartbeat.py \
 #     SHOPPING_BOT_TOKEN
 #
 # WHAT IT DOES
 # ------------
-# Runs any SCRIPT_CONTRACT-compliant Python script inside the openclaw
-# gateway container via `docker exec`, parses the final JSON line of
-# stdout, and on `status != "ok"` relays the `alert` field to Telegram
-# using the specified agent bot token. Silent on success (per contract).
+# Runs any SCRIPT_CONTRACT-compliant Python script as a bare host
+# subprocess, parses the final JSON line of stdout, and on
+# `status != "ok"` relays the `alert` field to Telegram using the
+# specified agent bot token. Silent on success (per contract).
 #
-# This is the generic equivalent of what the openclaw LLM cron was
-# doing for every heartbeat / keepalive / validator cron: run the
-# script, read the JSON, forward the alert. Moving these off the LLM
-# dispatch path removes 12+ slots/hour of queue contention during the
-# morning burst window.
-#
-# The script lives on the host but invokes the target script INSIDE
-# the container — that's where all the workspace paths, env vars,
-# and Python dependencies are. Host cron is just the dispatcher.
+# Phase 6.5: the script used to run inside the openclaw gateway
+# container via `docker exec`. Post-migration, agent Python runs
+# on the host directly — the workspace filesystem is the same
+# bind-mounted directory tree, and the host has the same Python
+# dependencies installed via ops/scripts/install-host-deps.sh.
 #
 # LOG:   ~/.openclaw/logs/<logname>-host.log (rotated @ 1 MB)
 # LOCK:  /tmp/<logname>-host.lock (flock, non-blocking)
 set -u
 
-LOGNAME="${1:?usage: $0 <logname> <container-script-path> <bot-token-env> [timeout-s]}"
-SCRIPT="${2:?usage: $0 <logname> <container-script-path> <bot-token-env> [timeout-s]}"
-TOKEN_ENV="${3:?usage: $0 <logname> <container-script-path> <bot-token-env> [timeout-s]}"
+LOGNAME="${1:?usage: $0 <logname> <host-script-path> <bot-token-env> [timeout-s]}"
+SCRIPT="${2:?usage: $0 <logname> <host-script-path> <bot-token-env> [timeout-s]}"
+TOKEN_ENV="${3:?usage: $0 <logname> <host-script-path> <bot-token-env> [timeout-s]}"
 TIMEOUT_S="${4:-120}"
 
-CONTAINER="openclaw-openclaw-gateway-1"
 LOG_FILE="/home/openclaw/.openclaw/logs/${LOGNAME}-host.log"
 LOCK_FILE="/tmp/${LOGNAME}-host.lock"
 ENV_FILE="/home/openclaw/openclaw/.env"
@@ -53,7 +48,18 @@ flock -n 200 || {
 
 TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-OUTPUT=$(timeout "$TIMEOUT_S" docker exec "$CONTAINER" python3 "$SCRIPT" 2>&1)
+# Source the host .env FIRST so the subprocess inherits every bot
+# token and PROXY_URL agents rely on. In the pre-6.5 docker-exec path
+# the container's environment carried these; the host must explicitly
+# export them before the python3 invocation.
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+fi
+
+OUTPUT=$(timeout "$TIMEOUT_S" /usr/bin/python3 "$SCRIPT" 2>&1)
 EXIT_CODE=$?
 
 {
@@ -65,7 +71,7 @@ EXIT_CODE=$?
 # line is a single JSON object. Use Python to parse it safely rather
 # than jq (which isn't guaranteed installed on the host).
 LAST_LINE=$(echo "$OUTPUT" | tail -1)
-STATUS=$(python3 -c "
+STATUS=$(/usr/bin/python3 -c "
 import json, sys
 try:
     d = json.loads(sys.argv[1])
@@ -79,7 +85,7 @@ if [[ "$STATUS" != "ok" ]] && [[ -n "$STATUS" ]]; then
   # heartbeat.py). Fall back to 'message' (v1 shape, used by
   # linkedin-keepalive.py etc.) so older scripts that predate the
   # contract still relay a useful Telegram body.
-  ALERT=$(python3 -c "
+  ALERT=$(/usr/bin/python3 -c "
 import json, sys
 try:
     d = json.loads(sys.argv[1])
