@@ -52,6 +52,14 @@ except Exception:
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # .../Clawford
 GATEWAY_CONTAINER = "openclaw-openclaw-gateway-1"
 BACKUPS_ROOT = Path(os.path.expanduser("~/.openclaw/deploy-backups"))
+
+# docker-compose.yml runtime location on the VPS. The canonical source
+# is ops/docker-compose.yml in the git checkout; check_compose_yml_drift
+# (Safeguard) refuses to deploy when the runtime path drifts from git.
+# The preferred post-Phase-3b-followup shape is a symlink from the
+# runtime path to the tracked path so edits physically can't diverge.
+COMPOSE_RUNTIME_PATH = Path(os.path.expanduser("~/openclaw/docker-compose.yml"))
+COMPOSE_TRACKED_PATH = REPO_ROOT / "ops" / "docker-compose.yml"
 # Off-VPS mirror: Dropbox syncs this path to the user's workstation with
 # 180-day version history. Critical safety net for regression recovery —
 # without it, a bad deploy destroys local-to-VPS data with no escape path.
@@ -660,6 +668,71 @@ def check_exec_approvals_baseline() -> list[str]:
                 )
 
     return errors
+
+
+def check_compose_yml_drift() -> list[str]:
+    """Return a list of drift errors between the runtime docker-compose.yml
+    and the git-tracked copy.
+
+    The runtime path (~/openclaw/docker-compose.yml) is what `docker compose`
+    actually reads. The tracked path (ops/docker-compose.yml) is the single
+    source of truth in git. These can silently drift when someone edits the
+    VPS copy without touching git — e.g. the Phase 3b .codex bind-mount that
+    lived in the VPS for hours before landing in the repo.
+
+    Allowed states (empty list):
+      - runtime path doesn't exist (fresh install; the operator will
+        bootstrap it via a symlink or direct run from ~/repo/ops/)
+      - runtime path is a symlink resolving to the tracked path
+        (preferred — physical guarantee against divergence)
+      - runtime path is a regular file byte-identical to the tracked
+        copy (grace period for installs that haven't symlinked yet)
+
+    Refused (non-empty list):
+      - runtime path is a regular file whose content differs from
+        the tracked copy
+      - runtime path is a symlink targeting something other than the
+        tracked copy
+      - the tracked copy is missing entirely (broken checkout)
+    """
+    if not COMPOSE_TRACKED_PATH.exists():
+        return [
+            f"tracked docker-compose.yml missing at {COMPOSE_TRACKED_PATH} — "
+            "the repo checkout looks broken"
+        ]
+
+    if not COMPOSE_RUNTIME_PATH.exists():
+        return []
+
+    if COMPOSE_RUNTIME_PATH.is_symlink():
+        try:
+            resolved = COMPOSE_RUNTIME_PATH.resolve()
+            tracked_resolved = COMPOSE_TRACKED_PATH.resolve()
+        except OSError as e:
+            return [f"could not resolve compose symlink: {e}"]
+        if resolved != tracked_resolved:
+            return [
+                f"{COMPOSE_RUNTIME_PATH} is a symlink pointing at {resolved}, "
+                f"expected {tracked_resolved}. Either re-link it to the "
+                f"tracked copy or remove the file entirely."
+            ]
+        return []
+
+    # Regular file — must match tracked copy byte-for-byte
+    try:
+        runtime_bytes = COMPOSE_RUNTIME_PATH.read_bytes()
+        tracked_bytes = COMPOSE_TRACKED_PATH.read_bytes()
+    except OSError as e:
+        return [f"could not read compose files: {e}"]
+
+    if runtime_bytes != tracked_bytes:
+        return [
+            f"{COMPOSE_RUNTIME_PATH} differs from tracked {COMPOSE_TRACKED_PATH}. "
+            f"Sync the VPS copy from git, or replace it with a symlink: "
+            f"`ln -sf {COMPOSE_TRACKED_PATH} {COMPOSE_RUNTIME_PATH}`"
+        ]
+
+    return []
 
 
 def check_openclaw_config_valid() -> list[str]:
@@ -1286,7 +1359,21 @@ def sync_files(mf: Manifest, yes_updates: bool = False) -> tuple[int, int]:
     return updated, skipped
 
 
-def sync_scripts(mf: Manifest, yes_updates: bool = False) -> tuple[int, int]:
+def sync_scripts(
+    mf: Manifest,
+    yes_updates: bool = False,
+    *,
+    remove_orphan_scripts: bool = False,
+) -> tuple[int, int]:
+    """Mirror the manifest's scripts[] into <workspace>/scripts/.
+
+    When remove_orphan_scripts is True, also sweep any *.py file under
+    <workspace>/scripts/ that the manifest no longer lists. Non-Python
+    files (.js, .json, .sh) are always preserved so the sweep's blast
+    radius stays predictable — the Phase 3b followup that motivated
+    this flag only needed to clean up deliver-digest.py, and the
+    surrounding LinkedIn extractors / etc. are distributed as .js.
+    """
     updated = skipped = 0
     workspace = mf.expanded_workspace
     scripts_dir = workspace / "scripts"
@@ -1304,6 +1391,28 @@ def sync_scripts(mf: Manifest, yes_updates: bool = False) -> tuple[int, int]:
             updated += 1
         else:
             skipped += 1
+
+    if remove_orphan_scripts and scripts_dir.is_dir():
+        # Build the set of script basenames the manifest currently lists,
+        # scoped to files under scripts/ (not top-level workspace files).
+        manifest_script_basenames = {
+            Path(s).name
+            for s in mf.scripts
+            if s.startswith("scripts/") or s.startswith("scripts\\")
+        }
+        for child in scripts_dir.iterdir():
+            if not child.is_file():
+                continue
+            if child.suffix != ".py":
+                continue
+            if child.name in manifest_script_basenames:
+                continue
+            log(f"script REMOVE {child.name} (orphan, --remove-orphan-scripts)", "plan")
+            if not _DRY:
+                try:
+                    child.unlink()
+                except OSError as e:
+                    log(f"script FAIL   remove {child.name}: {e}", "err")
 
     return updated, skipped
 
@@ -1477,6 +1586,23 @@ def deploy_one(agent_id: str, args: argparse.Namespace) -> int:
     agent_subpath_for_banner = f"agents/{agent_id}"
     print_banner(mf, agent_subpath_for_banner)
 
+    # Safeguard 11: refuse if ~/openclaw/docker-compose.yml has drifted
+    # from the git-tracked ops/docker-compose.yml. Phase 3b surfaced this
+    # class of bug — the VPS copy got a .codex bind-mount edit that
+    # wasn't in git for hours, and there was no structural guarantee it
+    # would ever get committed. After the followup-2 symlink migration,
+    # the runtime path is a symlink into the git checkout, so any drift
+    # here means someone replaced the symlink with a real file.
+    note("docker-compose.yml drift")
+    compose_errors = check_compose_yml_drift()
+    if compose_errors:
+        log(f"compose drift detected ({len(compose_errors)} issue(s)):", "err")
+        for e in compose_errors:
+            log(f"  {e}", "err")
+        log("Refuse to deploy — sync the VPS compose file to git first.", "err")
+        return 11
+    log("compose runtime matches git", "ok")
+
     # Safeguard 7: refuse if openclaw's own config is schema-invalid.
     # Catches the class of bug where a CLI version change rejects the
     # existing config shape and the gateway is in a restart loop —
@@ -1576,7 +1702,11 @@ def deploy_one(agent_id: str, args: argparse.Namespace) -> int:
         note("Config files")
         sync_files(mf, yes_updates=getattr(args, "yes_updates", False))
         note("Scripts")
-        sync_scripts(mf, yes_updates=getattr(args, "yes_updates", False))
+        sync_scripts(
+            mf,
+            yes_updates=getattr(args, "yes_updates", False),
+            remove_orphan_scripts=getattr(args, "remove_orphan_scripts", False),
+        )
         note("Shared library")
         sync_shared_library(mf)
         note("State files")
@@ -1636,6 +1766,14 @@ def main() -> int:
     ap.add_argument("--skip-crons", action="store_true")
     ap.add_argument("--skip-channel", action="store_true")
     ap.add_argument("--remove-orphans", action="store_true")
+    ap.add_argument(
+        "--remove-orphan-scripts", action="store_true",
+        help=(
+            "Delete any *.py file under <workspace>/scripts/ that is "
+            "not in the manifest's scripts list. Off by default so "
+            "operator-placed files survive a routine deploy."
+        ),
+    )
     ap.add_argument(
         "--allow-dirty", action="store_true",
         help="Permit deploy from a dirty git state (emergency override)",
