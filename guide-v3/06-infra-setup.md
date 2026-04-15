@@ -107,6 +107,8 @@ There's a script, [`ops/scripts/install-host-cron.sh`](../ops/scripts/install-ho
 
 Each agent declares its own crons as `CONTRACT_ENTRY` lines in the install script. The script writes them under a stable marker comment, so other tools (the heartbeat check, the fix-it agent's cron-self-check) can parse them back out and verify nothing has disappeared.
 
+> **Wrapper exec bits live in git, not at install time.** The wrappers under `ops/scripts/*-host.sh` must be committed as mode `100755`, not `100644`. If one lands at `100644`, `install-host-cron.sh` will `chmod +x` it on every run, which produces a recurring dirty working tree on the VPS (`old mode 100644 / new mode 100755` forever, refusing every subsequent `git pull`). Flip existing files with `git update-index --chmod=+x <path>` — the change touches zero bytes of content, has no line-ending implications, and fixes the recurrence permanently. More generally: anything an installer does repeatedly at runtime that a single commit could encode, bake into the commit. That's the difference between idempotent-in-principle and idempotent-in-practice.
+
 ### The 5 AM PT fleet path
 
 Every agent that contributes to the morning briefing follows the same shape:
@@ -117,6 +119,14 @@ Every agent that contributes to the morning briefing follows the same shape:
 4. The fleet aggregator at `0 12 * * *` UTC (5:00 AM PT) reads every agent's cache file and sends a single consolidated brief.
 
 The fleet-path discipline matters because without it, five agents each send their own early-morning message at five slightly different times and the human wakes up to a notification storm instead of one actionable digest. The 3:30 AM populate / 5:00 AM deliver split gives every agent an hour and a half to be late without breaking the brief, and the atomic-write-to-cache pattern means a partially-failed agent cleanly drops out of the brief instead of corrupting it.
+
+### Retiring an agent — the file-based opt-out pattern
+
+`install-host-cron.sh` reads `\$HOME/.clawford/disabled-agents.txt` on every run. If an agent id appears in that file, the installer skips its `CONTRACT_ENTRY` lines on fresh installs *and* evicts any matching lines already in the live crontab. The file format is one entry per line, with `#` comments and blank lines ignored; missing file means no agents are disabled. Retiring an agent is two operator-facing steps — append the id to the file, re-run the installer — and reversal is one step: remove the line, re-run.
+
+This is the canonical file-based opt-out pattern, and the rule generalises. When you need a persistent, reversible operator opt-out — "disable this check", "skip this cron", "turn this agent off" — use a single text file under `\$HOME/.clawford/` that the installer reads on every run. Avoid in-code flags (they need a redeploy to toggle), environment variables (they don't survive cron invocations), and manifest fields (they need a deploy cycle). A text file the operator can `cat`, `echo >>`, or `\$EDITOR` is auditable in seconds, scriptable from emergency flows, and survives git pulls and reboots. The path should be overridable via an env var (the `DISABLED_AGENTS_FILE` pattern) and the installer should wire any operator-facing helper — `retire.sh`, say — to *append* to the file, never overwrite, so multiple disabled things can coexist.
+
+**Operator discipline caveat: spell out full agent ids.** The matcher inside `install-host-cron.sh` is prefix-with-hyphen-boundary, not exact. Writing `fix-it` into `disabled-agents.txt` disables `fix-it`, `fix-it-brain-validation`, `fix-it-conflict-scan`, and every other `fix-it-*` cron — which is exactly what retirement wants. But writing `fix` would silently nuke every `fix-it-*` cron too, because `fix-it-*` starts with `fix-`. The installer cannot tell `fix` from `fix-it`; it has no canonical agent list to disambiguate against. Always type the full canonical id: `fix-it`, not `fix`. The rule generalises — anywhere in the system an agent id gets matched against a string (cron markers, filter rules, deny-lists, grep patterns), type the whole thing. A typo at one character of prefix is a disable-the-whole-family outage waiting to happen.
 
 ### Logic-gate the LLM
 
@@ -130,7 +140,7 @@ This isn't a philosophical stance. It's a cost-and-failure discipline: the LLM c
 
 `deploy.py` reads an agent's `manifest.json` and installs the agent onto the VPS idempotently: copies the workspace files into `~/.clawford/<agent>-workspace/`, seeds any declared state files, syncs `agents/shared/` into the workspace, and captures a pre-deploy backup tarball. It is one Python script, ~1800 lines, and it is the single structural choke-point between the git repo and the running fleet.
 
-It runs ten active safeguards. They are documented in full at [`DEPLOY.md`](../DEPLOY.md); the three worth naming explicitly are the ones that exist because of specific past outages.
+It runs nine active safeguards (two earlier safeguards, 8 and 11, were retired during the liberation — more on both below). They're documented in full at [`DEPLOY.md`](../DEPLOY.md); the two worth naming explicitly are the ones that exist because of specific past outages.
 
 ### Safeguard 9: forbidden cron-message patterns
 
@@ -155,19 +165,13 @@ On a fresh clone, there are templates but no real files. Deploying in that state
 
 `deploy.py <agent> --bootstrap-configs` scaffolds each missing real file by copying its `.example` sibling and prepending the sentinel comment. The operator then hand-edits the dummy values to real ones, deletes the sentinel line, and redeploys. The sentinel is the rail that stops someone from accidentally shipping the `Sam / Alex` cast into a live agent's workspace after a fresh clone.
 
-### Safeguard 11: docker-compose drift
+### The two retired safeguards
 
-Clawford ran on top of a docker-compose stack during its OpenClaw era, and the compose file lives at `ops/docker-compose.yml` in git. The runtime copy on the VPS can silently drift from the git-tracked copy — the original story was a bind-mount edit that lived on the VPS for hours before landing in the repo, with no structural guarantee it would ever get committed.
+Earlier versions of the deploy tool shipped two safeguards that are now gone. Both existed for good reasons, both stopped classes of regressions from happening twice, and both were retired because the thing they guarded against ceased to exist during the liberation.
 
-Safeguard 11 compares the runtime path to the tracked path and refuses to deploy if the two diverge. Allowed states: the runtime path is missing (fresh install), the runtime path is a symlink into the git checkout (preferred), or the runtime path is a regular file byte-identical to the tracked copy. Anything else, deploy exits 11.
+**Safeguard 8 — exec-approvals baseline drift.** Checked the live `exec-approvals.json` against a committed baseline file (`ops/exec-approvals-baseline.json`) and refused to deploy if the two diverged. It existed because a platform upgrade had silently rewritten the live approvals file in a way that blocked every cron across the fleet overnight. The liberation retired both the platform and the approvals concept; Safeguard 8 and its baseline file are gone. Its call site in `deploy.py` is a one-line tombstone comment with the removal date. The historical story is in [Ch 02](02-what-clawford-isnt.md).
 
-The long-term fix is the symlink: `ln -sf ~/repo/ops/docker-compose.yml ~/openclaw/docker-compose.yml`. Once it's a symlink, drift is structurally impossible.
-
-### The retired safeguard
-
-Earlier versions of the deploy tool shipped a Safeguard 8 that checked the live `exec-approvals.json` against a committed baseline. That check existed because a platform upgrade had silently rewritten the live approvals file in a way that blocked every cron across the fleet overnight, and the committed baseline + drift check stopped that class of regression from happening twice.
-
-The liberation work retired both the platform and the approvals concept. Safeguard 8 is gone. Its call site in `deploy.py` is a one-line tombstone comment with the removal date, and its baseline JSON file will be deleted in a later phase. The historical story — the morning the fleet went dark because of a silent approvals rewrite — is documented in [Ch 02](02-what-clawford-isnt.md).
+**Safeguard 11 — docker-compose drift.** Compared the runtime `~/openclaw/docker-compose.yml` to the git-tracked `ops/docker-compose.yml` and refused to deploy if the two diverged, because a bind-mount edit had once lived on the VPS for hours before landing in the repo. The Phase 7 cleanup deleted the compose file from git (the gateway container was already stopped in Phase 6) and Safeguard 11 had nothing left to check. Retired with a tombstone comment on the same day as Safeguard 8.
 
 ### The other safeguards
 
