@@ -45,12 +45,14 @@ BACKOFF_S = 5
 KILL_SWITCH_PATH = os.path.expanduser("~/.clawford/inbox-disabled")
 
 AGENT_TOKEN_ENV = {
-    "fix-it": "FIXIT_BOT_TOKEN",
-    "news-digest": "NEWSDIGEST_BOT_TOKEN",
-    "shopping": "SHOPPING_BOT_TOKEN",
-    "family-calendar": "FAMILYCAL_BOT_TOKEN",
-    "meetings-coach": "MEETINGS_BOT_TOKEN",
-    "connector": "CONNECTOR_BOT_TOKEN",
+    # Order matters: first env var that's set wins. Mirrors the same
+    # list in dispatcher.py.
+    "fix-it": ["FIXIT_BOT_TOKEN", "TELEGRAM_BOT_TOKEN"],
+    "news-digest": ["NEWSDIGEST_BOT_TOKEN"],
+    "shopping": ["SHOPPING_BOT_TOKEN"],
+    "family-calendar": ["FAMILYCAL_BOT_TOKEN"],
+    "meetings-coach": ["MEETINGS_BOT_TOKEN"],
+    "connector": ["CONNECTOR_BOT_TOKEN"],
 }
 
 
@@ -98,12 +100,16 @@ def is_disabled() -> bool:
 
 def load_bot_configs() -> list[tuple[str, str]]:
     """Return [(agent_id, token), ...] for every agent with a bot token
-    set in env. Agents without a token are silently skipped."""
+    set in env. Agents without a token are silently skipped. For
+    agents with multiple candidate env vars, the first one that's set
+    wins."""
     configs = []
-    for agent_id, env_var in AGENT_TOKEN_ENV.items():
-        token = os.environ.get(env_var, "").strip()
-        if token:
-            configs.append((agent_id, token))
+    for agent_id, env_candidates in AGENT_TOKEN_ENV.items():
+        for name in env_candidates:
+            token = os.environ.get(name, "").strip()
+            if token:
+                configs.append((agent_id, token))
+                break
     return configs
 
 

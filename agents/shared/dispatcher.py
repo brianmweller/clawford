@@ -50,13 +50,24 @@ class AgentConfig:
 
 
 AGENT_TOKEN_ENV = {
-    "fix-it": "FIXIT_BOT_TOKEN",
-    "news-digest": "NEWSDIGEST_BOT_TOKEN",
-    "shopping": "SHOPPING_BOT_TOKEN",
-    "family-calendar": "FAMILYCAL_BOT_TOKEN",
-    "meetings-coach": "MEETINGS_BOT_TOKEN",
-    "connector": "CONNECTOR_BOT_TOKEN",
+    # Order matters: first env var that's set wins. Supports both the
+    # liberation-era per-agent names (FIXIT_BOT_TOKEN) and the
+    # historical production name (TELEGRAM_BOT_TOKEN for fix-it).
+    "fix-it": ["FIXIT_BOT_TOKEN", "TELEGRAM_BOT_TOKEN"],
+    "news-digest": ["NEWSDIGEST_BOT_TOKEN"],
+    "shopping": ["SHOPPING_BOT_TOKEN"],
+    "family-calendar": ["FAMILYCAL_BOT_TOKEN"],
+    "meetings-coach": ["MEETINGS_BOT_TOKEN"],
+    "connector": ["CONNECTOR_BOT_TOKEN"],
 }
+
+
+def _resolve_token(agent_id: str) -> str:
+    for name in AGENT_TOKEN_ENV.get(agent_id, []):
+        val = os.environ.get(name, "").strip()
+        if val:
+            return val
+    return ""
 
 
 def _read_agent_doc(agent_dir: Path, name: str) -> str:
@@ -109,9 +120,10 @@ def load_agent_config(agent_id: str) -> AgentConfig:
     unknown, OSError/ImportError if its files are missing."""
     if agent_id not in AGENT_TOKEN_ENV:
         raise KeyError(f"unknown agent: {agent_id}")
-    token = os.environ.get(AGENT_TOKEN_ENV[agent_id], "")
+    token = _resolve_token(agent_id)
     if not token:
-        raise KeyError(f"missing env {AGENT_TOKEN_ENV[agent_id]} for {agent_id}")
+        candidates = "/".join(AGENT_TOKEN_ENV[agent_id])
+        raise KeyError(f"missing env {candidates} for {agent_id}")
 
     agent_dir = REPO_ROOT / "agents" / agent_id
 
