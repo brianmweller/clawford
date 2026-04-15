@@ -388,6 +388,189 @@ def test_merge_annotations_ignores_extra_llm_fields(mod):
     assert first["url"] == selected[0]["link"]
 
 
+# ─── group_by_section ───────────────────────────────────────────────
+
+
+def _merged_item(num: int, id_: str, category: str, source: str = "nyt") -> dict:
+    return {
+        "num": num,
+        "id": id_,
+        "category": category,
+        "extended_headline": f"why {id_}",
+        "title": id_,
+        "url": f"https://x/{id_}",
+        "source_label": source.upper(),
+        "source": source,
+        "topics": [],
+    }
+
+
+def test_group_by_section_orders_sections_by_category_labels(mod):
+    """Sections appear in CATEGORY_LABELS order, not rank-mixed order."""
+    merged = [
+        _merged_item(1, "a", "💰 Economics"),
+        _merged_item(2, "b", "🤖 AI & Tech"),
+        _merged_item(3, "c", "🏛️ US Policy"),
+        _merged_item(4, "d", "🤖 AI & Tech"),
+        _merged_item(5, "e", "🔗 LinkedIn", source="linkedin"),
+    ]
+    grouped = mod.group_by_section(merged)
+
+    categories = [g["category"] for g in grouped]
+    assert categories == [
+        "🤖 AI & Tech",
+        "🤖 AI & Tech",
+        "💰 Economics",
+        "🏛️ US Policy",
+        "🔗 LinkedIn",
+    ]
+
+
+def test_group_by_section_preserves_rank_within_section(mod):
+    """Stable sort — within each section, items retain the rank order
+    they arrived in (merged is already rank-sorted)."""
+    merged = [
+        _merged_item(1, "ai_hi", "🤖 AI & Tech"),
+        _merged_item(2, "econ_hi", "💰 Economics"),
+        _merged_item(3, "ai_lo", "🤖 AI & Tech"),
+        _merged_item(4, "econ_lo", "💰 Economics"),
+    ]
+    grouped = mod.group_by_section(merged)
+    assert [g["id"] for g in grouped] == ["ai_hi", "ai_lo", "econ_hi", "econ_lo"]
+
+
+def test_group_by_section_reassigns_sequential_num_in_new_order(mod):
+    merged = [
+        _merged_item(1, "a", "💰 Economics"),
+        _merged_item(2, "b", "🤖 AI & Tech"),
+        _merged_item(3, "c", "🤖 AI & Tech"),
+    ]
+    grouped = mod.group_by_section(merged)
+    assert [g["num"] for g in grouped] == [1, 2, 3]
+    assert grouped[0]["category"] == "🤖 AI & Tech"
+    assert grouped[0]["id"] == "b"
+
+
+def test_group_by_section_unknown_category_sorts_last(mod):
+    merged = [
+        _merged_item(1, "u", "🤯 Unknown"),
+        _merged_item(2, "ai", "🤖 AI & Tech"),
+        _merged_item(3, "also", "📋 Also Noted"),
+    ]
+    grouped = mod.group_by_section(merged)
+    cats = [g["category"] for g in grouped]
+    assert cats[0] == "🤖 AI & Tech"
+    assert cats[1] == "📋 Also Noted"
+    assert cats[2] == "🤯 Unknown"
+
+
+def test_group_by_section_does_not_mutate_input(mod):
+    merged = [
+        _merged_item(1, "a", "💰 Economics"),
+        _merged_item(2, "b", "🤖 AI & Tech"),
+    ]
+    _ = mod.group_by_section(merged)
+    assert merged[0]["num"] == 1
+    assert merged[0]["id"] == "a"
+    assert merged[1]["num"] == 2
+    assert merged[1]["id"] == "b"
+
+
+def test_run_output_is_sectioned(fake_workspace):
+    """End-to-end: morning-items.json is written grouped by section
+    with contiguous category runs — no category appears, disappears,
+    and reappears."""
+    me, ws, cache = fake_workspace
+    articles = _mixed_feed(non_li=20, linkedin=4)
+    _write_ranked(cache, articles)
+    selected = me.select_items(articles)
+
+    categories_cycle = [
+        "🤖 AI & Tech",
+        "💰 Economics",
+        "🏛️ US Policy",
+        "🌍 World",
+    ]
+
+    def _annotate(items: list[dict]) -> list[dict]:
+        return [
+            {
+                "id": it["id"],
+                "category": (
+                    "🔗 LinkedIn"
+                    if it.get("source") == "linkedin"
+                    else categories_cycle[i % 4]
+                ),
+                "extended_headline": f"why {it['id']}",
+            }
+            for i, it in enumerate(items)
+        ]
+
+    fake_result = InferResult(
+        text=json.dumps({"items": _annotate(selected)}),
+        model="gpt-5.4",
+        input_tokens=800,
+        output_tokens=300,
+        total_tokens=1100,
+    )
+    with patch("agents.shared.llm.infer", return_value=fake_result):
+        me.run()
+
+    items = json.loads((cache / "morning-items.json").read_text(encoding="utf-8"))
+    seen: list[str] = []
+    prev = None
+    for it in items:
+        cat = it["category"]
+        if cat != prev:
+            assert cat not in seen, (
+                f"category {cat!r} reappears after {prev!r} — items not grouped"
+            )
+            seen.append(cat)
+            prev = cat
+
+
+def test_run_item_map_keys_match_sectioned_num(fake_workspace):
+    """item-map-<date>.json must key on the sectioned num, not the
+    original select_items num, so engagement callbacks resolve."""
+    me, ws, cache = fake_workspace
+    articles = _mixed_feed(non_li=20, linkedin=4)
+    _write_ranked(cache, articles)
+    selected = me.select_items(articles)
+
+    def _annotate(items: list[dict]) -> list[dict]:
+        return [
+            {
+                "id": it["id"],
+                "category": (
+                    "🔗 LinkedIn"
+                    if it.get("source") == "linkedin"
+                    else ["🤖 AI & Tech", "💰 Economics"][i % 2]
+                ),
+                "extended_headline": f"why {it['id']}",
+            }
+            for i, it in enumerate(items)
+        ]
+
+    fake_result = InferResult(
+        text=json.dumps({"items": _annotate(selected)}),
+        model="gpt-5.4",
+        input_tokens=800,
+        output_tokens=300,
+        total_tokens=1100,
+    )
+    with patch("agents.shared.llm.infer", return_value=fake_result):
+        me.run()
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    items = json.loads((cache / "morning-items.json").read_text(encoding="utf-8"))
+    item_map = json.loads((cache / f"item-map-{today}.json").read_text(encoding="utf-8"))
+
+    for it in items:
+        key = str(it["num"])
+        assert key in item_map, f"num {key} missing from item-map"
+        assert item_map[key]["id"] == it["id"]
+
+
 # ─── write_morning_items ────────────────────────────────────────────
 
 

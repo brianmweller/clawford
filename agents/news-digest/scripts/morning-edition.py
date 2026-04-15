@@ -86,6 +86,8 @@ CATEGORY_LABELS = (
     "📋 Also Noted",
 )
 
+_CATEGORY_ORDER = {label: i for i, label in enumerate(CATEGORY_LABELS)}
+
 
 PROMPT_TEMPLATE = """\
 Annotate each of the following articles for the morning news digest.
@@ -337,6 +339,37 @@ def merge_annotations(
     return merged
 
 
+# ─── group_by_section ───────────────────────────────────────────────
+
+
+def group_by_section(items: list[dict]) -> list[dict]:
+    """Reorder merged items by section and reassign num 1..N.
+
+    Section order follows CATEGORY_LABELS. Within each section the
+    input order is preserved — since `merged` arrives rank-descending
+    from select_items → merge_annotations, a stable sort on category
+    gives rank-descending order inside each section. Unknown labels
+    sort after Also Noted so the final list never drops an item.
+
+    num is reassigned against the new display order so Telegram
+    numbering, callback_data, and item-map-<date>.json all agree.
+    Returns a new list; the input is not mutated.
+    """
+    def _section_key(item: dict) -> int:
+        return _CATEGORY_ORDER.get(
+            item.get("category", ""),
+            len(CATEGORY_LABELS),
+        )
+
+    grouped = sorted(items, key=_section_key)
+    out: list[dict] = []
+    for i, item in enumerate(grouped, 1):
+        new = dict(item)
+        new["num"] = i
+        out.append(new)
+    return out
+
+
 # ─── write_morning_items ────────────────────────────────────────────
 
 
@@ -396,8 +429,9 @@ def run() -> dict:
     merged = merge_annotations(selected, annotations)
     if not merged:
         raise RuntimeError("merged items list is empty")
-    items_path = write_morning_items(merged, date_str)
-    map_path = write_item_map(merged, date_str)
+    sectioned = group_by_section(merged)
+    items_path = write_morning_items(sectioned, date_str)
+    map_path = write_item_map(sectioned, date_str)
 
     linkedin_count = sum(1 for m in merged if m.get("source") == "linkedin")
     return {
