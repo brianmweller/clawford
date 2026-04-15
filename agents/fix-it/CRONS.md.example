@@ -9,7 +9,8 @@ Workspace: .clawford/fix-it-workspace/
 ## Heartbeat Check — RETIRED (R3+R6, 2026-04-13)
 
 The per-agent LLM `heartbeat-check` cron is retired. Fleet health is now
-orchestrated by `ops/scripts/fleet-health.py` (host cron, `*/15 * * * *`),
+orchestrated by `ops/scripts/fleet-health.py` (host cron, `2,17,32,47 * * * *` —
+staggered off `*/5` so it never collides with the Costco token refresh),
 which invokes each agent's `probe()` directly via `probe-agent.py` and
 writes `~/Dropbox/openclaw-backup/fleet-health.json`. Cross-agent alerting
 is handled by `fleet-health.py`'s `summarize()` and pushed to Telegram

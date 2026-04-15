@@ -96,7 +96,7 @@ is_disabled_entry() {
 DIRECT_ENTRIES=(
   "*/5 * * * *|costco-token-refresh-host.sh|# costco-token-refresh-host"
   "0 12 * * *|morning-fleet-deliver-host.sh|# morning-fleet-deliver-host"
-  "*/15 * * * *|fleet-health-host.sh|# fleet-health-host"
+  "2,17,32,47 * * * *|fleet-health-host.sh|# fleet-health-host"
   "30 10 * * *|morning-status-host.sh|# morning-status-host"
   "30 10 * * *|news-digest-morning-edition-host.sh|# news-digest-morning-edition-host"
   "0 0 * * *|fix-it-cron-self-check-host.sh|# fix-it-cron-self-check-host"
