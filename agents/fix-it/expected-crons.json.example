@@ -6,7 +6,7 @@
       "announce": false,
       "account": "murphy",
       "to": "111111111",
-      "message": "Check for upcoming meetings needing alerts. Run gcal-fetch.py for events in the next 2 hours. Filter to real meetings starting in 15-45 minutes. Read sent-alerts.json to skip already-alerted meetings. For any un-alerted meeting: check cache for existing prep, generate if missing via meeting-prep.py. Send Telegram: '\u00f0\u0178\udc90\u00b7\u00f0\u0178\u201d\udc8d Heads up \u00e2\u20ac\u201d meeting in {N} min\\n\u00f0\u0178\u201c\u2039 {Title}\\n\u00f0\u0178\u2018\u00a5 {Attendees}\\n\u00f0\u0178\u017d\u00af {Top bullets}\\n\u00f0\u0178\u201c\u0152 {Open items}'. Record in sent-alerts.json. If no meetings approaching: produce NO output. Write result to ~/.openclaw/meetings-coach-workspace/cache/last-pre-meeting.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"meetings_alerted\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md \u00e2\u20ac\u201d fleet-health.json (R6 orchestrator) is the authoritative health source."
+      "message": "Check for upcoming meetings needing alerts. Run gcal-fetch.py for events in the next 2 hours. Filter to real meetings starting in 15-45 minutes. Read sent-alerts.json to skip already-alerted meetings. For any un-alerted meeting: check cache for existing prep, generate if missing via meeting-prep.py. Send Telegram: 'ðŸ���·ðŸ”��� Heads up â€” meeting in {N} min\\nðŸ“‹ {Title}\\nðŸ‘¥ {Attendees}\\nðŸŽ¯ {Top bullets}\\nðŸ“Œ {Open items}'. Record in sent-alerts.json. If no meetings approaching: produce NO output. Write result to ~/.openclaw/meetings-coach-workspace/cache/last-pre-meeting.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"meetings_alerted\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md â€” fleet-health.json (R6 orchestrator) is the authoritative health source."
     },
     "post-meeting-scan": {
       "cron": "15,45 * * * *",
@@ -14,7 +14,7 @@
       "announce": false,
       "account": "murphy",
       "to": "111111111",
-      "message": "Scan for recently-ended meetings and new transcripts. 1) Run gcal-fetch.py and identify meetings ended in the last 60 minutes. 2) Run transcript-scan.py to fetch Krisp transcripts and match to meetings. 3) Read the output. If items were extracted and staged: send a debrief summary on Telegram with action items, decisions, follow-ups. Include '/confirm to save to brain \u00c2\u00b7 /dismiss N to skip item N'. 4) If no transcripts found: produce NO output. 5) Write result to ~/.openclaw/meetings-coach-workspace/cache/last-post-scan.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"transcripts_processed\": <N>, \"debriefs_staged\": <N>, \"unmatched\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md \u00e2\u20ac\u201d fleet-health.json (R6 orchestrator) is the authoritative health source."
+      "message": "Scan for recently-ended meetings and new transcripts. 1) Run gcal-fetch.py and identify meetings ended in the last 60 minutes. 2) Run transcript-scan.py to fetch Krisp transcripts and match to meetings. 3) Read the output. If items were extracted and staged: send a debrief summary on Telegram with action items, decisions, follow-ups. Include '/confirm to save to brain Â· /dismiss N to skip item N'. 4) If no transcripts found: produce NO output. 5) Write result to ~/.openclaw/meetings-coach-workspace/cache/last-post-scan.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"transcripts_processed\": <N>, \"debriefs_staged\": <N>, \"unmatched\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md â€” fleet-health.json (R6 orchestrator) is the authoritative health source."
     },
     "morning-meeting-brief": {
       "cron": "50 11 * * *",
@@ -22,7 +22,7 @@
       "announce": false,
       "account": "murphy",
       "to": "111111111",
-      "message": "Generate and deliver the morning meeting brief. 1) Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/gcal-fetch.py --days 2. Read the JSON output \u00e2\u20ac\u201d these are today's and tomorrow's professional meetings. 2) Filter to real meetings only (is_real_meeting=true). 3) For each real meeting: a) Run person-bootstrap.py to create person files for new attendees. b) Run workflowy-sync.py --create-nodes to create Workflowy meeting nodes. c) Run meeting-prep.py --meeting-id EVENT_ID to generate talking points. d) Run workflowy-sync.py --push-bullets EVENT_ID to push AI bullets to Workflowy. 4) Format the brief using the template in CRONS.md. Include talking points, open items with attendees, and a tomorrow preview. 5) Write to cache/morning-meeting-brief.txt. 6) Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/timed-deliver.py cache/morning-meeting-brief.txt --token-env MEETINGS_BOT_TOKEN. 7) Write result summary to ~/.openclaw/meetings-coach-workspace/cache/last-morning-brief.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"meetings_briefed\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md \u00e2\u20ac\u201d fleet-health.json (R6 orchestrator) is the authoritative health source."
+      "message": "Generate and deliver the morning meeting brief. 1) Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/gcal-fetch.py --days 2. Read the JSON output â€” these are today's and tomorrow's professional meetings. 2) Filter to real meetings only (is_real_meeting=true). 3) For each real meeting: a) Run person-bootstrap.py to create person files for new attendees. b) Run workflowy-sync.py --create-nodes to create Workflowy meeting nodes. c) Run meeting-prep.py --meeting-id EVENT_ID to generate talking points. d) Run workflowy-sync.py --push-bullets EVENT_ID to push AI bullets to Workflowy. 4) Format the brief using the template in CRONS.md. Include talking points, open items with attendees, and a tomorrow preview. 5) Write to cache/morning-meeting-brief.txt. 6) Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/timed-deliver.py cache/morning-meeting-brief.txt --token-env MEETINGS_BOT_TOKEN. 7) Write result summary to ~/.openclaw/meetings-coach-workspace/cache/last-morning-brief.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"meetings_briefed\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md â€” fleet-health.json (R6 orchestrator) is the authoritative health source."
     },
     "commitment-follow-up": {
       "cron": "0 16 * * *",
@@ -30,7 +30,7 @@
       "announce": false,
       "account": "murphy",
       "to": "111111111",
-      "message": "Check open commitments from meetings. Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/commitment-tracker.py. Read the JSON output. If there are overdue or approaching items: send a follow-up summary on Telegram using the format in CRONS.md. If no actionable items: produce NO output. Write result to ~/.openclaw/meetings-coach-workspace/cache/last-commitment.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"overdue\": <N>, \"approaching\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md \u00e2\u20ac\u201d fleet-health.json (R6 orchestrator) is the authoritative health source."
+      "message": "Check open commitments from meetings. Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/commitment-tracker.py. Read the JSON output. If there are overdue or approaching items: send a follow-up summary on Telegram using the format in CRONS.md. If no actionable items: produce NO output. Write result to ~/.openclaw/meetings-coach-workspace/cache/last-commitment.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"overdue\": <N>, \"approaching\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md â€” fleet-health.json (R6 orchestrator) is the authoritative health source."
     },
     "weekly-review": {
       "cron": "0 0 * * 5",
@@ -41,10 +41,8 @@
       "message": "Generate the weekly meeting review. Run gcal-fetch.py --days 7 to look back at this weeks meetings. Run commitment-tracker.py to get open commitments. Compile: meetings held, prep generated, transcripts processed, commitments created/resolved/overdue. List all unresolved commitments. Format using the template in CRONS.md. Deliver to Telegram."
     }
   },
-  "news-digest": {
-  },
-  "shopping": {
-  },
+  "news-digest": {},
+  "shopping": {},
   "fix-it": {
     "cron-self-check": {
       "cron": "0 0 * * *",
@@ -52,7 +50,7 @@
       "announce": false,
       "account": "default",
       "to": "111111111",
-      "message": "Run: openclaw cron list. Verify all 9 fix-it LLM crons are registered (cron-self-check, brain-validation, conflict-scan, file-size-monitor, obsidian-briefing, monthly-archival, security-audit, update-check, probation-end-reminder). Host crons (fleet-health, morning-status, reminder-check, engagement-poll, costco-token-refresh, morning-fleet-deliver, linkedin-keepalive) live in the system crontab via install-host-cron.sh and are NOT in scope \u2014 do not re-register them even if they look missing from openclaw cron list. Filter the output visually for fix-it entries. If all 9 are present: produce NO output and DO NOT touch fix-it.status.md (fleet-health is the only writer). If any are missing: attempt to re-register them and send me a Telegram message."
+      "message": "Run: openclaw cron list. Verify all 9 fix-it LLM crons are registered (cron-self-check, brain-validation, conflict-scan, file-size-monitor, obsidian-briefing, monthly-archival, security-audit, update-check, probation-end-reminder). Host crons (fleet-health, morning-status, reminder-check, engagement-poll, costco-token-refresh, morning-fleet-deliver, linkedin-keepalive) live in the system crontab via install-host-cron.sh and are NOT in scope — do not re-register them even if they look missing from openclaw cron list. Filter the output visually for fix-it entries. If all 9 are present: produce NO output and DO NOT touch fix-it.status.md (fleet-health is the only writer). If any are missing: attempt to re-register them and send me a Telegram message."
     },
     "conflict-scan": {
       "cron": "0 */2 * * *",
@@ -60,7 +58,7 @@
       "announce": false,
       "account": "default",
       "to": "111111111",
-      "message": "Run: find ~/Dropbox/openclaw-backup/ -name *conflicted copy* -type f. If NO conflicts found: produce NO output and DO NOT touch ~/Dropbox/openclaw-backup/agents/fix-it.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source. If conflicts ARE found: send me a Telegram message with the filenames. Do NOT attempt to merge."
+      "message": "Run: find ~/Dropbox/openclaw-backup/ -name *conflicted copy* -type f. If NO conflicts found: produce NO output and DO NOT touch ~/Dropbox/openclaw-backup/agents/fix-it.status.md — fleet-health.json (R6 orchestrator) is the authoritative health source. If conflicts ARE found: send me a Telegram message with the filenames. Do NOT attempt to merge."
     },
     "brain-validation": {
       "cron": "0 */6 * * *",
@@ -68,7 +66,7 @@
       "announce": false,
       "account": "default",
       "to": "111111111",
-      "message": "Run: python3 ~/Dropbox/openclaw-backup/scripts/validate.py. If validation PASSES: produce NO output and DO NOT touch ~/Dropbox/openclaw-backup/agents/fix-it.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source. If validation FAILS: send me a Telegram message with the specific failures immediately."
+      "message": "Run: python3 ~/Dropbox/openclaw-backup/scripts/validate.py. If validation PASSES: produce NO output and DO NOT touch ~/Dropbox/openclaw-backup/agents/fix-it.status.md — fleet-health.json (R6 orchestrator) is the authoritative health source. If validation FAILS: send me a Telegram message with the specific failures immediately."
     },
     "security-audit": {
       "cron": "0 4 * * 0",
@@ -76,7 +74,7 @@
       "announce": true,
       "account": "default",
       "to": "111111111",
-      "message": "Run: python3 /home/node/.openclaw/fix-it-workspace/scripts/security-audit.py\n\nThe script reads /home/node/.openclaw/exec-approvals.json directly, runs openclaw security audit --deep, applies enrichment rules (suppresses tools.exec.security_full_configured and plugins.tools_reachable_permissive_policy), and prints the formatted emoji-headed severity report. Send the entire stdout to Telegram as ONE message. Do NOT use python3 -c. Do NOT use heredocs. Do NOT regenerate the report yourself \u2014 just run the script and forward its output verbatim."
+      "message": "Run: python3 /home/node/.openclaw/fix-it-workspace/scripts/security-audit.py\n\nThe script reads /home/node/.openclaw/exec-approvals.json directly, runs openclaw security audit --deep, applies enrichment rules (suppresses tools.exec.security_full_configured and plugins.tools_reachable_permissive_policy), and prints the formatted emoji-headed severity report. Send the entire stdout to Telegram as ONE message. Do NOT use python3 -c. Do NOT use heredocs. Do NOT regenerate the report yourself — just run the script and forward its output verbatim."
     },
     "probation-end-reminder": {
       "cron": "0 16 25 4 *",
@@ -84,7 +82,7 @@
       "announce": true,
       "account": "default",
       "to": "111111111",
-      "message": "\ud83e\udd8a\ud83d\udd27 Probation review reminder. Today is 2026-04-25 \u2014 your 14-day probation window ends today. Read ~/Dropbox/openclaw-backup/fix-it/probation.md for the failure ledger Sam has been keeping. Send Sam one Telegram message: 'Probation ends today. Failures logged: {N}. Verdict requested: keep / extend / retire.' Then stop. Do not propose a verdict yourself \u2014 that is Sam's decision. Retirement command if needed: bash ~/repo/agents/fix-it/retire.sh"
+      "message": "🦊🔧 Probation review reminder. Today is 2026-04-25 — your 14-day probation window ends today. Read ~/Dropbox/openclaw-backup/fix-it/probation.md for the failure ledger Sam has been keeping. Send Sam one Telegram message: 'Probation ends today. Failures logged: {N}. Verdict requested: keep / extend / retire.' Then stop. Do not propose a verdict yourself — that is Sam's decision. Retirement command if needed: bash ~/repo/agents/fix-it/retire.sh"
     },
     "file-size-monitor": {
       "cron": "0 12 * * *",
@@ -92,7 +90,7 @@
       "announce": false,
       "account": "default",
       "to": "111111111",
-      "message": "Run: find ~/Dropbox/openclaw-backup/ -type f -size +500k. If NO large files found: produce NO output and DO NOT touch ~/Dropbox/openclaw-backup/agents/fix-it.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source. If large files ARE found: send me a Telegram message with the filenames and sizes."
+      "message": "Run: find ~/Dropbox/openclaw-backup/ -type f -size +500k. If NO large files found: produce NO output and DO NOT touch ~/Dropbox/openclaw-backup/agents/fix-it.status.md — fleet-health.json (R6 orchestrator) is the authoritative health source. If large files ARE found: send me a Telegram message with the filenames and sizes."
     },
     "obsidian-briefing": {
       "cron": "10 12 * * *",
@@ -100,7 +98,7 @@
       "announce": false,
       "account": "default",
       "to": "111111111",
-      "message": "Generate daily Obsidian briefing. Run: python3\n~/Dropbox/openclaw-backup/scripts/obsidian-briefing/generate.py. If successful: produce NO output. DO NOT touch ~/Dropbox/openclaw-backup/agents/fix-it.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source. If it fails: report the error."
+      "message": "Generate daily Obsidian briefing. Run: python3\n~/Dropbox/openclaw-backup/scripts/obsidian-briefing/generate.py. If successful: produce NO output. DO NOT touch ~/Dropbox/openclaw-backup/agents/fix-it.status.md — fleet-health.json (R6 orchestrator) is the authoritative health source. If it fails: report the error."
     },
     "update-check": {
       "cron": "0 4 * * 3",
@@ -119,54 +117,5 @@
       "message": "Run monthly archival. Create /home/node/Dropbox/openclaw-backup/archive/YYYY-MM/ for current month. Scan ALL files matching /home/node/Dropbox/openclaw-backup/facts/*.md (every monthly file, not just the current month). For each fact entry, calculate effective_confidence = original_confidence * 0.5^(days_since_recorded / half_life) using category half-lives: identity=never, established=365, situation=90, preference=180, plan=30, logistics=7, rumor=14. Move facts with effective_confidence < 0.2 AND recorded > 90 days ago to the archive. Also scan /home/node/Dropbox/openclaw-backup/tasks/queue.md and move tasks with status done and completed > 90 days ago. Write an archive manifest listing everything moved. Report results on Telegram."
     }
   },
-  "family-calendar": {
-    "whatsapp-chat-scan": {
-      "cron": "0 */2 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "familycal",
-      "to": "111111111",
-      "message": "Scan recent WhatsApp messages for schedule changes. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/chat-parse-schedule.py --hours 4. Read the JSON output. For each schedule-relevant item: alert Sam on Telegram with the details and suggested action. If the output is empty: produce NO output. DO NOT touch ~/Dropbox/openclaw-backup/agents/family-calendar.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source."
-    },
-    "activity-email-check": {
-      "cron": "15 */2 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "familycal",
-      "to": "111111111",
-      "message": "Check Gmail for emails from Example Preschool, Example Swim School, and Example Ballet Studio. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/activity-email-check.py. Read the JSON output. For each item that is not type none: if closure or cancellation send \"\u00f0\u0178\udc90\u00ad \u00e2\u0161\u00a0\u00ef\u00b8\udc8f {source}: {summary}\". If action_item send \"\u00f0\u0178\udc90\u00ad \u00f0\u0178\u201c\u2039 {source}: {summary} (by {action_by})\". If event or fyi send \"\u00f0\u0178\udc90\u00ad \u00f0\u0178\u201c\u0152 {source}: {summary}\". If the output is empty or all none: produce NO output. DO NOT touch ~/Dropbox/openclaw-backup/agents/family-calendar.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source."
-    },
-    "gmail-invite-check": {
-      "cron": "30 */3 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "familycal",
-      "to": "111111111",
-      "message": "Check Gmail for calendar invites. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/gmail-invite-check.py. Read the JSON output. For each invite send: \"\u00f0\u0178\udc90\u00ad New invite: {subject} on {start} from {organizer}. Accept?\" If no invites: produce NO output. DO NOT touch ~/Dropbox/openclaw-backup/agents/family-calendar.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source."
-    },
-    "morning-briefing": {
-      "cron": "50 11 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "familycal",
-      "to": "111111111",
-      "message": "Generate and deliver the morning family briefing. 1) Run: python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 2. Read the JSON output. 2) Format the briefing using the template in CRONS.md. Group events by time blocks (Morning, Afternoon, Evening). Use family member emoji. Flag conflicts. Include tomorrow preview. Note pickup arrangement. 3) Write output to cache/morning-briefing.txt. 4) Run: python3 ~/.openclaw/family-calendar-workspace/scripts/timed-deliver.py cache/morning-briefing.txt --token-env FAMILYCAL_BOT_TOKEN. 5) DO NOT touch ~/Dropbox/openclaw-backup/agents/family-calendar.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source."
-    },
-    "whatsapp-schedule-post": {
-      "cron": "0 12 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "familycal",
-      "to": "111111111",
-      "message": "Compose a brief WhatsApp-style schedule summary for today. Fetch events with: python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 1. Include only non-routine events, pickup arrangement changes, and conflicts. Keep it short and scannable. Send it to Sam on Telegram \u00e2\u20ac\u201d he will decide what to forward to the FamilyGroup WhatsApp group (Alex + Jamie) as needed. Do NOT send directly to WhatsApp."
-    },
-    "weekly-overview": {
-      "cron": "0 1 * * 1",
-      "no_deliver": false,
-      "announce": true,
-      "account": "familycal",
-      "to": "111111111",
-      "message": "Generate the weekly overview for the coming week. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 7. Read the JSON output. Format a day-by-day overview: for each day, list key events with family member emoji, note pickup arrangements, flag conflicts. Include Monday exceptions (Sam swimming), Friday exceptions (Jamie early, Alex takes Jordan). Deliver to Telegram. DO NOT touch ~/Dropbox/openclaw-backup/agents/family-calendar.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source."
-    }
-  }
+  "family-calendar": {}
 }

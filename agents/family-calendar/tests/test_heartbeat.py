@@ -217,3 +217,52 @@ def test_main_emits_error_json_when_probe_crashes(stub_workspace, capsys, monkey
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["status"] == "error"
     assert "alert" in payload
+
+
+# ─── Phase 4: HeartbeatProbe subclass ────────────────────────────────
+
+
+def test_family_calendar_probe_subclasses_heartbeat_probe(stub_workspace):
+    """Phase 4: family-calendar/heartbeat.py exposes a
+    FamilyCalendarProbe class that subclasses
+    agents.shared.heartbeat_base.HeartbeatProbe, matching the fleet
+    convention. The class carries AGENT_ID, TITLE, EMOJI identifiers
+    and delegates probe()/render_status_md() to per-agent logic."""
+    from agents.shared.heartbeat_base import HeartbeatProbe
+
+    hb = stub_workspace.hb
+    assert hasattr(hb, "FamilyCalendarProbe"), (
+        "expected FamilyCalendarProbe class to exist after Phase 4 refactor"
+    )
+    cls = hb.FamilyCalendarProbe
+    assert issubclass(cls, HeartbeatProbe)
+    assert cls.AGENT_ID == "family-calendar"
+    assert cls.TITLE == "Family Calendar"
+    assert cls.EMOJI  # any non-empty emoji is acceptable
+
+
+def test_family_calendar_probe_render_status_md_shape(stub_workspace):
+    """render_status_md() returns the markdown body that was previously
+    inlined in _write_status_md. Must include the same fields."""
+    probe_result = {
+        "status": "ok",
+        "google_auth": "ok",
+        "calendars_configured": 2,
+        "pruned_reminders": 1,
+        "missing_files": [],
+        "last_cron_run": "2026-04-14T10:00:00Z",
+        "last_cron_name": "morning-briefing",
+        "last_cron_result": "14 events",
+    }
+    hb = stub_workspace.hb
+    instance = hb.FamilyCalendarProbe()
+    md = instance.render_status_md(probe_result)
+
+    assert "# Family Calendar — Status" in md
+    assert "**status:** ok" in md
+    assert "**google_auth:** ok" in md
+    assert "**calendars_configured:** 2" in md
+    assert "**pruned_reminders:** 1" in md
+    assert "**last_cron_run:** 2026-04-14T10:00:00Z — morning-briefing" in md
+    assert "**last_cron_result:** 14 events" in md
+    assert "**error_log:** none" in md

@@ -1,0 +1,64 @@
+{
+  "status": "ok",
+  "date": "2026-04-14",
+  "days": 2,
+  "events": [
+    {
+      "id": "today-morning-1",
+      "summary": "Dentist — share Cigna info",
+      "start": "2026-04-14T09:00:00-07:00",
+      "end": "2026-04-14T10:00:00-07:00",
+      "all_day": false,
+      "location": "Palo Alto Dental",
+      "description": "",
+      "status": "confirmed",
+      "calendar_label": "Sam",
+      "calendar_emoji": "👨",
+      "has_workflowy_item": false
+    },
+    {
+      "id": "today-afternoon-1",
+      "summary": "Avery ballet",
+      "start": "2026-04-14T15:30:00-07:00",
+      "end": "2026-04-14T16:30:00-07:00",
+      "all_day": false,
+      "location": "Example Ballet Studio",
+      "description": "",
+      "status": "confirmed",
+      "calendar_label": "Avery",
+      "calendar_emoji": "🧒",
+      "has_workflowy_item": false
+    },
+    {
+      "id": "today-evening-1",
+      "summary": "Family dinner with grandparents",
+      "start": "2026-04-14T18:30:00-07:00",
+      "end": "2026-04-14T20:00:00-07:00",
+      "all_day": false,
+      "location": "",
+      "description": "",
+      "status": "confirmed",
+      "calendar_label": "Sam",
+      "calendar_emoji": "👨",
+      "has_workflowy_item": false
+    },
+    {
+      "id": "tomorrow-morning-1",
+      "summary": "Avery preschool field trip",
+      "start": "2026-04-15T08:30:00-07:00",
+      "end": "2026-04-15T14:00:00-07:00",
+      "all_day": false,
+      "location": "Children's Discovery Museum",
+      "description": "",
+      "status": "confirmed",
+      "calendar_label": "Avery",
+      "calendar_emoji": "🧒",
+      "has_workflowy_item": false
+    }
+  ],
+  "conflicts": [],
+  "errors": [],
+  "fetched_at": "2026-04-14T10:30:00+00:00",
+  "skip_meetings": true,
+  "skipped_meetings_count": 2
+}

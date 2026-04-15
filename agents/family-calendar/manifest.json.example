@@ -41,7 +41,12 @@
     "scripts/activity-email-check.py",
     "scripts/gmail-invite-check.py",
     "scripts/chat-parse-schedule.py",
-    "scripts/heartbeat.py"
+    "scripts/heartbeat.py",
+    "scripts/morning-briefing.py",
+    "scripts/activity-email-alert.py",
+    "scripts/gmail-invite-alert.py",
+    "scripts/whatsapp-chat-alert.py",
+    "scripts/whatsapp-schedule-post.py"
   ],
   "state_files": [
     {
@@ -58,19 +63,28 @@
           {
             "id": "sam.smith@example.com",
             "label": "Sam",
-            "emoji": "\ud83d\udc68"
+            "emoji": "👨"
           },
           {
             "id": "alex.rivera@example.com",
             "label": "Alex",
-            "emoji": "\ud83d\udc69"
+            "emoji": "👩"
           }
         ],
         "timezone": "America/Los_Angeles",
         "activity_providers": [
-          {"name": "Example Preschool", "query": "from:ExamplePreschool newer_than:2d"},
-          {"name": "Example Swim School", "query": "from:ExampleSwim newer_than:2d"},
-          {"name": "Example Ballet Studio", "query": "from:ExampleBallet newer_than:2d"}
+          {
+            "name": "Example Preschool",
+            "query": "from:ExamplePreschool newer_than:2d"
+          },
+          {
+            "name": "Example Swim School",
+            "query": "from:ExampleSwim newer_than:2d"
+          },
+          {
+            "name": "Example Ballet Studio",
+            "query": "from:ExampleBallet newer_than:2d"
+          }
         ]
       }
     }
@@ -86,44 +100,50 @@
     {
       "name": "morning-briefing",
       "cron": "30 10 * * *",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Generate and deliver the morning family briefing. 1) Run: python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 2 --skip-meetings. Read the JSON output \u2014 these are today's and tomorrow's events across all family calendars. 2) Format the briefing using the template in CRONS.md. Group events by time blocks (Morning, Afternoon, Evening). Use family member emoji (\ud83d\udc68 Sam, \ud83d\udc69 Alex, \ud83e\uddd2 Avery, \ud83d\udc76 Jordan, \ud83c\udfe0 Jamie). Flag any conflicts with \u26a0\ufe0f. Include a tomorrow preview. Check if today is a standard routine day (see MEMORY.md) \u2014 if no extra events, say 'Standard {weekday} \u2014 no exceptions.' Note the pickup arrangement for today (Mon=Sam+swimming, Fri=Sam, other=Jamie). 3) Write the formatted output to cache/morning-brief-ready.txt \u2014 this is the fleet-delivery cache file read by fix-it/morning-fleet-deliver at 12:00 UTC. Do NOT call timed-deliver.py; the fleet deliver cron handles the send. 5) DO NOT touch ~/Dropbox/openclaw-backup/agents/family-calendar.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source.",
+      "message": "DISABLED — replaced by ops/scripts/install-host-cron.sh entry family-calendar-morning-briefing, which runs agents/family-calendar/scripts/morning-briefing.py on host cron at 30 10 * * * (writes cache/morning-brief-ready.txt for the 5 AM PT fleet delivery; appends a weekly-overview section on Mondays). Kept here for Phase 4 rollback reference.",
       "announce": false,
-      "no_deliver": true
+      "no_deliver": true,
+      "enabled": false
     },
     {
       "name": "activity-email-check",
       "cron": "15 */2 * * *",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Check Gmail for emails from activity providers. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/activity-email-check.py. Read the JSON output \u2014 these are emails from Example Preschool, Example Swim School, and Example Ballet Studio in the last 48 hours. For each email with schedule-relevant content (closures, cancellations, action items, event changes): classify the urgency and send a Telegram message. Closures/cancellations: '\ud83d\udc2d \u26a0\ufe0f {source}: {summary}'. Action items: '\ud83d\udc2d \ud83d\udccb {source}: {summary}'. Events/FYI: '\ud83d\udc2d \ud83d\udccc {source}: {summary}'. If no actionable items found, return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. DO NOT touch ~/Dropbox/openclaw-backup/agents/family-calendar.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source.",
+      "message": "DISABLED — replaced by ops/scripts/install-host-cron.sh entry family-calendar-activity-email-alert, which runs agents/family-calendar/scripts/activity-email-alert.py on host cron at 15 */2 * * * (LLM classifies provider emails, sends per-item Telegram alerts). Kept here for Phase 4 rollback reference.",
       "announce": false,
-      "no_deliver": true
+      "no_deliver": true,
+      "enabled": false
     },
     {
       "name": "gmail-invite-check",
       "cron": "30 */3 * * *",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Check Gmail for calendar invites. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/gmail-invite-check.py. Read the JSON output \u2014 these are new calendar invites (ICS attachments with METHOD:REQUEST). For each invite: send a Telegram message '\ud83d\udc2d New invite: {subject} on {date} from {organizer}. Accept?'. If no new invites, return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent.",
+      "message": "DISABLED — replaced by ops/scripts/install-host-cron.sh entry family-calendar-gmail-invite-alert, which runs agents/family-calendar/scripts/gmail-invite-alert.py on host cron at 30 */3 * * * (formats + sends per-invite Telegram alerts). Kept here for Phase 4 rollback reference.",
       "announce": false,
-      "no_deliver": true
+      "no_deliver": true,
+      "enabled": false
     },
     {
       "name": "weekly-overview",
       "cron": "0 1 * * 0",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Generate and deliver the weekly schedule overview. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 7 --skip-meetings. Format as a day-by-day overview for the upcoming week. For each day: list key events with times, attendees, and locations. Flag any conflicts with \u26a0\ufe0f. Note pickup arrangements per day (Mon=Sam+swimming, Fri=Sam, other=Jamie). Include a summary line: '\ud83d\udc2d {N} events this week \u00b7 {conflicts} conflicts'. Deliver to Telegram.",
+      "message": "DISABLED — Option C, folded into morning-briefing.py on Mondays. The 5 AM PT Monday brief now includes a WEEK AHEAD section populated from gcal-fetch --days 7. No separate cron needed. Kept here for Phase 4 rollback reference.",
       "announce": true,
-      "no_deliver": false
+      "no_deliver": false,
+      "enabled": false
     },
     {
       "name": "whatsapp-chat-scan",
       "cron": "45 */2 * * *",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Scan WhatsApp messages for schedule-relevant content. Run: python3 ~/.openclaw/family-calendar-workspace/scripts/chat-parse-schedule.py. Read the JSON output \u2014 these are recent WhatsApp messages from the familycal-wa channel. For each message with schedule-relevant content (cancellations, time changes, pickup changes, new events): send a Telegram alert to Sam: '\ud83d\udc2d \ud83d\udcf1 WhatsApp: {person} \u2014 {summary}. Suggested action: {action}.' If no schedule-relevant messages, return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. NEVER post to WhatsApp groups automatically \u2014 all output goes to Sam on Telegram.",
+      "message": "DISABLED — replaced by ops/scripts/install-host-cron.sh entry family-calendar-whatsapp-chat-alert, which runs agents/family-calendar/scripts/whatsapp-chat-alert.py on host cron at 45 */2 * * * (LLM classifies WhatsApp messages via the existing Baileys-backed chat-parse-schedule.py script). Kept here for Phase 4 rollback reference.",
       "announce": false,
-      "no_deliver": true
+      "no_deliver": true,
+      "enabled": false
     },
     {
       "name": "whatsapp-schedule-post",
       "cron": "0 12 * * *",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Compose a brief WhatsApp-style schedule summary for today. Fetch events with: python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 1. Include only non-routine events, pickup arrangement changes, and conflicts. Keep it short and scannable. Send it to Sam on Telegram \u2014 he will decide what to forward to the FamilyGroup WhatsApp group (Alex + Jamie) as needed. Do NOT send directly to WhatsApp.",
+      "message": "DISABLED — replaced by ops/scripts/install-host-cron.sh entry family-calendar-whatsapp-schedule-post, which runs agents/family-calendar/scripts/whatsapp-schedule-post.py on host cron at 0 12 * * * (composes a WhatsApp-style summary for the operator to manually forward — never auto-posts to family groups). Kept here for Phase 4 rollback reference.",
       "announce": false,
-      "no_deliver": true
+      "no_deliver": true,
+      "enabled": false
     }
   ]
 }

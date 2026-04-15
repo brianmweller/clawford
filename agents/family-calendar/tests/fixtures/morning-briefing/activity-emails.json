@@ -1,0 +1,26 @@
+[
+  {
+    "source": "Example Preschool",
+    "subject": "Early Dismissal Thursday",
+    "from": "newsletter@examplepreschool.com",
+    "date": "2026-04-14",
+    "body": "Dear families, this Thursday Apr 17 school will dismiss at 12:00 due to a staff training day. Please arrange pickup accordingly.",
+    "message_id": "wf-1"
+  },
+  {
+    "source": "Example Ballet Studio",
+    "subject": "Recital costume order form",
+    "from": "info@exampleballet.com",
+    "date": "2026-04-13",
+    "body": "Spring recital costumes must be ordered by April 22. Please fill out the form at the front desk or email us your child's size.",
+    "message_id": "wf-2"
+  },
+  {
+    "source": "Example Swim School",
+    "subject": "Newsletter — May schedule",
+    "from": "hello@exampleswim.com",
+    "date": "2026-04-12",
+    "body": "Happy spring! Here is a general newsletter about pool hours and upcoming summer camps. No action required.",
+    "message_id": "wf-3"
+  }
+]

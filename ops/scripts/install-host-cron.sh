@@ -18,6 +18,11 @@
 #   */5 * * * *   news-digest-engagement-poll     → NEWSDIGEST_BOT_TOKEN
 #   0 23 * * *    news-digest-preference-update   → NEWSDIGEST_BOT_TOKEN  (Phase 3b — pure-Python, calls llm.infer internally)
 #   30 10 * * *   shopping-delivery-digest        → SHOPPING_BOT_TOKEN   (Phase 4 — full daily digest, writes cache/morning-brief-ready.txt for 5 AM PT fleet delivery; appends monthly S&S section on the 1st)
+#   30 10 * * *   family-calendar-morning-briefing → FAMILYCAL_BOT_TOKEN (Phase 4 — daily brief for 5 AM PT fleet; appends WEEK AHEAD section on Mondays)
+#   15 */2 * * *  family-calendar-activity-email-alert → FAMILYCAL_BOT_TOKEN (Phase 4 — LLM classifies preschool/swim/ballet emails)
+#   30 */3 * * *  family-calendar-gmail-invite-alert   → FAMILYCAL_BOT_TOKEN (Phase 4 — format + send per-invite Telegram alerts)
+#   45 */2 * * *  family-calendar-whatsapp-chat-alert  → FAMILYCAL_BOT_TOKEN (Phase 4 — LLM classifies WhatsApp messages via Baileys session store)
+#   0 12 * * *    family-calendar-whatsapp-schedule-post → FAMILYCAL_BOT_TOKEN (Phase 4 — compose daily summary for the operator to manually forward)
 #
 # Removed in R3 (replaced by fleet-health):
 #   */30 * * * *  shopping-heartbeat              → covered by fleet-health
@@ -49,6 +54,11 @@ CONTRACT_ENTRIES=(
   "*/5 * * * *|news-digest-engagement-poll|/home/node/.openclaw/news-digest-workspace/scripts/engagement-poller.py|NEWSDIGEST_BOT_TOKEN|60"
   "0 23 * * *|news-digest-preference-update|/home/node/.openclaw/news-digest-workspace/scripts/update-preferences.py|NEWSDIGEST_BOT_TOKEN|300"
   "30 10 * * *|shopping-delivery-digest|/home/node/.openclaw/shopping-workspace/scripts/delivery-digest.py|SHOPPING_BOT_TOKEN|900"
+  "30 10 * * *|family-calendar-morning-briefing|/home/node/.openclaw/family-calendar-workspace/scripts/morning-briefing.py|FAMILYCAL_BOT_TOKEN|300"
+  "15 */2 * * *|family-calendar-activity-email-alert|/home/node/.openclaw/family-calendar-workspace/scripts/activity-email-alert.py|FAMILYCAL_BOT_TOKEN|300"
+  "30 */3 * * *|family-calendar-gmail-invite-alert|/home/node/.openclaw/family-calendar-workspace/scripts/gmail-invite-alert.py|FAMILYCAL_BOT_TOKEN|120"
+  "45 */2 * * *|family-calendar-whatsapp-chat-alert|/home/node/.openclaw/family-calendar-workspace/scripts/whatsapp-chat-alert.py|FAMILYCAL_BOT_TOKEN|180"
+  "0 12 * * *|family-calendar-whatsapp-schedule-post|/home/node/.openclaw/family-calendar-workspace/scripts/whatsapp-schedule-post.py|FAMILYCAL_BOT_TOKEN|120"
 )
 
 # Markers for old entries to REMOVE on next install run. Used by the

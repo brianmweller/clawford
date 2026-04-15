@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
 """heartbeat.py — Family Calendar (Mistress Mouse) heartbeat probe.
 
-Replaces the former LLM-native heartbeat cron with a deterministic
-Python script. Verifies required workspace files, probes Google
-Calendar OAuth token freshness, prunes stale sent-reminders entries
-(>48h), writes family-calendar.status.md, emits SCRIPT_CONTRACT JSON.
+Phase 4: a thin FamilyCalendarProbe subclass of
+agents.shared.heartbeat_base.HeartbeatProbe. Module-level probe()/
+run()/main() wrappers stay so existing callers (tests, fleet-health,
+monkeypatch flows) don't need to know about the class.
 
-Two-layer design matching connector/heartbeat.py:
-
-  probe() -> dict    — pure: reads state, returns result dict.
-                       Fleet-health.py orchestrator (R3) calls this
-                       directly via docker exec.
-  run()   -> dict    — calls probe() + writes status.md (transition).
-  main()  -> int     — SCRIPT_CONTRACT wrapper (always exit 0).
+Verifies required workspace files, probes Google Calendar OAuth token
+freshness, prunes stale sent-reminders entries (>48h), writes
+family-calendar.status.md, emits SCRIPT_CONTRACT JSON.
 
 Reuses the 48h prune threshold from reminder-check.py::prune_old_reminders
 for consistency — the two scripts must agree on what "stale" means or
@@ -26,6 +22,20 @@ import sys
 import time
 import traceback
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+# --- shared library sys.path shim ---
+# Find the first ancestor containing agents/shared/ and prepend it to
+# sys.path so `from agents.shared import X` resolves in both the local
+# repo layout and the deployed <workspace>/agents/shared/ layout.
+# See agents/shared/deploy.py::sync_shared_library.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "agents" / "shared").is_dir():
+        if str(_p) not in sys.path:
+            sys.path.insert(0, str(_p))
+        break
+
+from agents.shared.heartbeat_base import HeartbeatProbe  # noqa: E402
 
 
 WORKSPACE = os.path.expanduser("~/.openclaw/family-calendar-workspace")
@@ -185,64 +195,66 @@ def probe() -> dict:
     return result
 
 
+class FamilyCalendarProbe(HeartbeatProbe):
+    """Family Calendar (Mistress Mouse) heartbeat probe.
+
+    Subclass of agents.shared.heartbeat_base.HeartbeatProbe. Delegates
+    probe() to the module-level function so the existing monkeypatched
+    globals (WORKSPACE, BRAIN, TOKEN_FILE, etc.) remain the single
+    source of truth for tests.
+    """
+
+    AGENT_ID = "family-calendar"
+    TITLE = "Family Calendar"
+    EMOJI = "🐭"
+
+    @property
+    def output_file(self) -> str:
+        return OUTPUT_FILE
+
+    def probe(self) -> dict:
+        return probe()
+
+    def render_status_md(self, result: dict) -> str:
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+        status = result.get("status", "ok")
+        last_cron_run = result.get("last_cron_run") or now_str
+        last_cron_name = result.get("last_cron_name") or "heartbeat"
+        last_cron_result = result.get("last_cron_result") or "heartbeat ran"
+        google_auth = result.get("google_auth", "ok")
+        calendars = result.get("calendars_configured", 0)
+
+        errors: list[str] = []
+        if result.get("missing_files"):
+            errors.append(f"missing: {', '.join(result['missing_files'])}")
+        if google_auth != "ok":
+            errors.append(f"google_auth: {google_auth}")
+        error_log = "; ".join(errors) if errors else "none"
+
+        return (
+            "# Family Calendar — Status\n\n"
+            f"- **last_heartbeat:** {now_str}\n"
+            f"- **status:** {status}\n"
+            f"- **last_cron_run:** {last_cron_run} — {last_cron_name}\n"
+            f"- **last_cron_result:** {last_cron_result}\n"
+            f"- **calendars_configured:** {calendars}\n"
+            f"- **google_auth:** {google_auth}\n"
+            f"- **pruned_reminders:** {result.get('pruned_reminders', 0)}\n"
+            f"- **error_log:** {error_log}\n"
+        )
+
+
+_default_instance = FamilyCalendarProbe()
+
+
 def run() -> dict:
     """Call probe() + write family-calendar.status.md as side effect."""
-    result = probe()
-    _write_status_md(result)
-    return result
-
-
-def _write_status_md(probe_result: dict) -> None:
-    now = datetime.now(timezone.utc)
-    now_str = now.strftime("%Y-%m-%d %H:%M UTC")
-
-    status = probe_result.get("status", "ok")
-    last_cron_run = probe_result.get("last_cron_run") or now_str
-    last_cron_name = probe_result.get("last_cron_name") or "heartbeat"
-    last_cron_result = probe_result.get("last_cron_result") or "heartbeat ran"
-    google_auth = probe_result.get("google_auth", "ok")
-    calendars = probe_result.get("calendars_configured", 0)
-
-    errors: list[str] = []
-    if probe_result.get("missing_files"):
-        errors.append(f"missing: {', '.join(probe_result['missing_files'])}")
-    if google_auth != "ok":
-        errors.append(f"google_auth: {google_auth}")
-    error_log = "; ".join(errors) if errors else "none"
-
-    content = f"""# Family Calendar — Status
-
-- **last_heartbeat:** {now_str}
-- **status:** {status}
-- **last_cron_run:** {last_cron_run} — {last_cron_name}
-- **last_cron_result:** {last_cron_result}
-- **calendars_configured:** {calendars}
-- **google_auth:** {google_auth}
-- **pruned_reminders:** {probe_result.get("pruned_reminders", 0)}
-- **error_log:** {error_log}
-"""
-    try:
-        os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
-        tmp = OUTPUT_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.replace(tmp, OUTPUT_FILE)
-    except Exception as e:
-        raise RuntimeError(f"status file write failed: {e}") from e
+    return _default_instance.run()
 
 
 def main() -> int:
-    try:
-        result = run()
-    except Exception as e:
-        result = {
-            "status": "error",
-            "error": str(e),
-            "alert": f"🐭 family-calendar heartbeat crashed: {e}",
-            "traceback": traceback.format_exc().splitlines()[-3:],
-        }
-    print(json.dumps(result))
-    return 0
+    return FamilyCalendarProbe().main()
 
 
 if __name__ == "__main__":
