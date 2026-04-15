@@ -1,10 +1,10 @@
-# DEPLOY.md — Deploying an OpenClaw Agent
+# DEPLOY.md — Deploying a Clawford Agent
 
 Canonical workflow for deploying or updating an agent on the VPS. This
 file supersedes the pre-2026-04-12 shell-script flow; all six
 agents (shopping, family-calendar, meetings-coach, news-digest,
 connector, fix-it) are now deployed via `agents/shared/deploy.py`
-driven by a per-agent `manifest.json`, guarded by eight test-covered
+driven by a per-agent `manifest.json`, guarded by ten test-covered
 safeguards.
 
 ---
@@ -77,7 +77,7 @@ push → pull`.
 
 ---
 
-## Nine safeguards
+## Ten safeguards
 
 | # | Name | Flag to override | What it prevents |
 |---|---|---|---|
@@ -86,18 +86,18 @@ push → pull`.
 | 3 | UPDATE diff + confirm | `--yes-updates` | Silent overwrite of a file that shouldn't change |
 | 4 | Drift detection (blocking) | `--accept-drift` | Deploys wiping VPS-side edits without audit |
 | 5 | Deploy banner | (none — cosmetic) | Ambiguity about source, target, git HEAD, flow direction |
-| 6 | Smoke-test hook | `--smoke-test` activates it | Silent regressions — restores backup on cron failure |
-| 7 | `openclaw.json` schema validate | (none — mandatory) | Deploying against a gateway whose config is invalid — e.g. a version downgrade that rejects the `streaming: {mode: ...}` object shape, putting the gateway in a restart loop |
-| 8 | `exec-approvals` baseline drift guard | (none — mandatory) | `defaults.security=allowlist` or per-agent `policy=allowlist` quietly blocking every cron session after an openclaw upgrade starts enforcing the stricter side — see Gotcha §7 below |
-| 9 | Cron message hygiene | (none — mandatory) | Manifest cron messages containing shell-operator bug-attractors (`; echo $?`, `sh -lc python`, `> /tmp/`, `2>&1`, `$(python`) that an LLM would copy verbatim into its exec tool call and hit the openclaw preflight — see Gotcha §10 below |
+| 6 | Smoke-test hook | `--smoke-test` activates it | Silent regressions — runs `manifest.smoke_test.script` (defaults to `scripts/heartbeat.py`) as a host subprocess, asserts exit 0 + non-empty stdout, auto-restores backup on failure |
+| 7 | Manifest validation | (none — mandatory) | Deploying a manifest with duplicate cron names, missing SOUL.md / IDENTITY.md, dangling `smoke_test.script` refs, absolute state-file paths, or `agent_id` / directory mismatch. Pure-Python cross-check; was previously `openclaw config validate`, rewritten in Phase 5 liberation. |
+| 8 | *(retired 2026-04-15)* | — | Was `exec-approvals` baseline drift — removed in Phase 5 liberation because the OpenClaw approvals concept no longer exists. Tombstone comment in `deploy.py`; `ops/exec-approvals-baseline.json` scheduled for deletion in Phase 7. |
+| 9 | Cron message hygiene | (none — mandatory) | Manifest cron messages containing shell-operator bug-attractors (`; echo $?`, `sh -lc python`, `> /tmp/`, `2>&1`, `$(python`) that an LLM would copy verbatim into its exec tool call and hit an upstream exec preflight — see Gotcha §10 below |
+| 10 | Config source resolution | `--skip-files` | Deploying with missing/placeholder-laden real config files — walks `config_files[]`, refuses if any real file is missing or still carries the `CLAWFORD_BOOTSTRAP_UNEDITED` sentinel. `--bootstrap-configs` scaffolds from `.example` siblings. |
+| 11 | docker-compose.yml drift | (none — mandatory) | Runtime `~/openclaw/docker-compose.yml` diverging from git-tracked `ops/docker-compose.yml`. Allowed states: missing runtime, symlink into git checkout, byte-identical regular file. |
 
-All nine are test-covered under `agents/shared/tests/` (200+ passing
-offline, no VPS required). On drift Safeguard 8 refuses with exit
-code 7 and a per-key error list pointing at the drift — fix
-`~/.openclaw/exec-approvals.json` first, or update the baseline at
-`ops/exec-approvals-baseline.json` if the invariant itself is changing
-(e.g., new agent). Safeguard 9 refuses with exit code 8 and the
-offending cron name + matched pattern.
+All ten are test-covered under `agents/shared/tests/` (420+ passing
+offline, no VPS required). Safeguard 7 refuses with exit code 6 and a
+per-field list. Safeguard 9 refuses with exit code 8 and the
+offending cron name + matched pattern. Safeguard 11 refuses with exit
+code 11.
 
 ---
 
@@ -165,7 +165,7 @@ Each agent has `agents/<agent_id>/manifest.json`. Minimal example:
     }
   ],
   "smoke_test": {
-    "cron_name": "heartbeat",
+    "script": "scripts/heartbeat.py",
     "max_wait_s": 120
   }
 }

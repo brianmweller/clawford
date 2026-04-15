@@ -55,7 +55,11 @@ def source_repo_with_state_file(tmp_path: Path) -> Path:
     agent_dir = repo / "agents" / "stateagent"
     (agent_dir / "scripts").mkdir(parents=True)
     (agent_dir / "SOUL.md").write_text("# stateagent soul\n", encoding="utf-8")
+    (agent_dir / "IDENTITY.md").write_text("# stateagent identity\n", encoding="utf-8")
     (agent_dir / "scripts" / "hello.py").write_text("print('hi')\n", encoding="utf-8")
+    (agent_dir / "scripts" / "heartbeat.py").write_text(
+        "print('{\"status\": \"ok\"}')\n", encoding="utf-8"
+    )
 
     manifest = {
         "agent_id": "stateagent",
@@ -63,8 +67,11 @@ def source_repo_with_state_file(tmp_path: Path) -> Path:
         "workspace": str(tmp_path / "state-workspace"),
         "status_file": str(tmp_path / "fake-brain" / "stateagent.status.md"),
         "telegram": {"account": "stateagent", "bot_token_env": "TEST_BOT_TOKEN"},
-        "config_files": [{"src": "SOUL.md", "immutable": False}],
-        "scripts": ["scripts/hello.py"],
+        "config_files": [
+            {"src": "SOUL.md", "immutable": True},
+            {"src": "IDENTITY.md", "immutable": True},
+        ],
+        "scripts": ["scripts/hello.py", "scripts/heartbeat.py"],
         "state_files": [
             {
                 "path": "pending-actions.json",

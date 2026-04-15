@@ -302,7 +302,7 @@ class Manifest:
     approvals_security: str
     crons: list[Cron]
     source_dir: Path = field(default_factory=Path)
-    smoke_test: dict | None = None  # {"cron_name": ..., "max_wait_s": int}
+    smoke_test: dict | None = None  # {"script": "scripts/heartbeat.py", "max_wait_s": int}
 
     @property
     def expanded_workspace(self) -> Path:
@@ -319,20 +319,24 @@ class Manifest:
         return expanded
 
 
-def load_manifest(path: Path) -> Manifest:
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
+def load_manifest_from_dict(data: dict, source_dir: Path | None = None, source_label: str = "<dict>") -> Manifest:
+    """Parse an already-loaded manifest dict into a Manifest dataclass.
 
+    Exposed so tests can exercise the parser without going through the
+    filesystem. `source_dir` is stored on the Manifest for callers that
+    need it (sync_files etc.); `source_label` is only used in error
+    messages and defaults to a placeholder when loading from a dict.
+    """
     required = {"agent_id", "display_name", "workspace", "telegram", "crons"}
     missing = required - set(data)
     if missing:
-        raise ValueError(f"{path}: missing required keys: {sorted(missing)}")
+        raise ValueError(f"{source_label}: missing required keys: {sorted(missing)}")
 
     crons = []
     for c in data["crons"]:
         if c.get("announce") and c.get("no_deliver"):
             raise ValueError(
-                f"{path}: cron '{c['name']}' cannot have both announce and no_deliver"
+                f"{source_label}: cron '{c['name']}' cannot have both announce and no_deliver"
             )
         crons.append(Cron(
             name=c["name"],
@@ -344,7 +348,7 @@ def load_manifest(path: Path) -> Manifest:
             enabled=c.get("enabled", True),
         ))
 
-    mf = Manifest(
+    return Manifest(
         agent_id=data["agent_id"],
         display_name=data["display_name"],
         workspace=data["workspace"],
@@ -367,10 +371,79 @@ def load_manifest(path: Path) -> Manifest:
         approvals_policy=data.get("approvals", {}).get("policy", "full"),
         approvals_security=data.get("approvals", {}).get("security", "full"),
         crons=crons,
-        source_dir=path.parent,
+        source_dir=source_dir or Path(),
         smoke_test=data.get("smoke_test"),
     )
-    return mf
+
+
+def load_manifest(path: Path) -> Manifest:
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    return load_manifest_from_dict(data, source_dir=path.parent, source_label=str(path))
+
+
+def validate_manifest(mf: Manifest, expected_agent_id: str = "") -> list[str]:
+    """Return a list of semantic violations in a parsed Manifest.
+
+    Phase 5 of Clawford liberation replaces the old `check_openclaw_config_valid`
+    (which asked the OpenClaw gateway to validate its own composed config)
+    with a pure-Python cross-field check on the per-agent manifest about to
+    be deployed. Catches real developer errors: duplicate cron names,
+    missing identity anchors, smoke_test.script dangling references, etc.
+
+    Checks are deliberately narrow — every rule must pass against all 6
+    real agents' manifest.json.example files. Any regression here blocks
+    deploy with exit code 6 (same code the old check used).
+    """
+    errors: list[str] = []
+
+    if expected_agent_id and mf.agent_id != expected_agent_id:
+        errors.append(
+            f"agent_id mismatch: manifest says {mf.agent_id!r}, deploy target is {expected_agent_id!r}"
+        )
+
+    cf_srcs = {cf.src for cf in mf.config_files}
+    for required_cf in ("SOUL.md", "IDENTITY.md"):
+        if required_cf not in cf_srcs:
+            errors.append(
+                f"config_files missing required entry: {required_cf}"
+            )
+
+    if not mf.scripts:
+        errors.append("scripts list is empty")
+    elif "scripts/heartbeat.py" not in mf.scripts:
+        errors.append("scripts list missing scripts/heartbeat.py (fleet-health probe)")
+
+    seen_cron_names: set[str] = set()
+    for c in mf.crons:
+        if c.name in seen_cron_names:
+            errors.append(f"duplicate cron name: {c.name!r}")
+        seen_cron_names.add(c.name)
+
+    if not mf.telegram_account:
+        errors.append("telegram.account is empty")
+    if not mf.telegram_bot_token_env:
+        errors.append("telegram.bot_token_env is empty")
+
+    if mf.smoke_test:
+        script_rel = mf.smoke_test.get("script")
+        if script_rel and script_rel not in mf.scripts:
+            errors.append(
+                f"smoke_test.script {script_rel!r} is not in the scripts list"
+            )
+
+    for sf in mf.state_files:
+        p = sf.path
+        if p.startswith("/") or p.startswith("~") or (len(p) > 1 and p[1] == ":"):
+            errors.append(
+                f"state_files[].path must be relative, got absolute/home path: {p!r}"
+            )
+        if "\\" in p:
+            errors.append(
+                f"state_files[].path must use forward slashes, got backslash: {p!r}"
+            )
+
+    return errors
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -592,84 +665,6 @@ def check_cron_message_hygiene(manifest: "Manifest") -> list[str]:
     return errors
 
 
-def check_exec_approvals_baseline() -> list[str]:
-    """Return a list of drift errors from the ops/exec-approvals-baseline.json invariant.
-
-    Reads the baseline from ops/exec-approvals-baseline.json (a small
-    invariant schema that encodes "every agent must have
-    security=full, policy=full, ask=off; defaults must match"). Fetches
-    the live exec-approvals state via
-    `openclaw approvals get --json` and flat-compares each declared key.
-
-    Extra live allowlist entries are fine — they're volatile and not
-    part of the baseline. We only check the specific keys declared in
-    the baseline file.
-
-    Returns an empty list on clean. Non-empty → deploy.py refuses to
-    proceed with exit code 7.
-
-    Context: the 2026-04-13 "every agent shows approval required"
-    incident was caused by `defaults.security: "allowlist"` + `agents.main`
-    with only 2 allowlist patterns. Everything worked for weeks until an
-    openclaw upgrade started enforcing the stricter side, at which
-    point every cron session was blocked. This guard catches that
-    class of regression at deploy time.
-    """
-    baseline_path = REPO_ROOT / "ops" / "exec-approvals-baseline.json"
-    if not baseline_path.exists():
-        return [f"baseline file not found: {baseline_path}"]
-    try:
-        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
-    except Exception as e:
-        return [f"baseline file unreadable: {e}"]
-
-    try:
-        live = oc_json("approvals", "get", "--json")
-    except Exception as e:
-        return [f"openclaw approvals get failed: {e}"]
-
-    if not isinstance(live, dict):
-        return [f"openclaw approvals get returned unexpected shape: {type(live).__name__}"]
-
-    # openclaw 2026.4.11 wraps the actual exec-approvals.json contents under
-    # a top-level `.file` key alongside path/exists/hash/effectivePolicy.
-    # Older versions (and tests) may return defaults/agents at the top level.
-    # Accept both shapes.
-    if "file" in live and isinstance(live["file"], dict) and (
-        "defaults" in live["file"] or "agents" in live["file"]
-    ):
-        live = live["file"]
-
-    errors: list[str] = []
-
-    # defaults.* check
-    baseline_defaults = baseline.get("defaults", {}) or {}
-    live_defaults = live.get("defaults", {}) or {}
-    for k, expected in baseline_defaults.items():
-        actual = live_defaults.get(k)
-        if actual != expected:
-            errors.append(
-                f"defaults.{k}: expected {expected!r}, got {actual!r}"
-            )
-
-    # agents.* check
-    baseline_agents = baseline.get("agents", {}) or {}
-    live_agents = live.get("agents", {}) or {}
-    for agent_id, expected_fields in baseline_agents.items():
-        if agent_id not in live_agents:
-            errors.append(f"agents.{agent_id}: missing from live exec-approvals")
-            continue
-        live_agent = live_agents[agent_id] or {}
-        for k, expected in (expected_fields or {}).items():
-            actual = live_agent.get(k)
-            if actual != expected:
-                errors.append(
-                    f"agents.{agent_id}.{k}: expected {expected!r}, got {actual!r}"
-                )
-
-    return errors
-
-
 def check_compose_yml_drift() -> list[str]:
     """Return a list of drift errors between the runtime docker-compose.yml
     and the git-tracked copy.
@@ -733,56 +728,6 @@ def check_compose_yml_drift() -> list[str]:
         ]
 
     return []
-
-
-def check_openclaw_config_valid() -> list[str]:
-    """Return a list of validation errors from `openclaw config validate`.
-
-    Empty list means the config is schema-valid and the gateway will
-    accept it on boot. A non-empty list means deploy should refuse to
-    proceed — applying cron edits or file writes to a gateway whose
-    own config is broken will just add to the pile of problems
-    (observed during the P1 force-recreate, where a silent schema
-    downgrade put the container in a restart loop).
-
-    Exceptions from the oc_json subprocess (e.g. the gateway container
-    is restarting, docker exec failed) are themselves treated as a
-    validation failure — that's the right behavior: don't deploy
-    against a gateway we can't talk to.
-
-    Supports both string-list and dict-list error shapes because
-    `openclaw config validate --json` has returned both in different
-    versions.
-    """
-    try:
-        result = oc_json("config", "validate", "--json")
-    except Exception as e:
-        return [f"config validate failed to run: {e}"]
-
-    if not isinstance(result, dict):
-        return [f"config validate returned unexpected shape: {type(result).__name__}"]
-
-    if result.get("valid") is True:
-        return []
-
-    raw_errors = result.get("errors") or []
-    if not isinstance(raw_errors, list):
-        return [f"config validate reported invalid but no errors list: {result}"]
-
-    flattened: list[str] = []
-    for err in raw_errors:
-        if isinstance(err, str):
-            flattened.append(err)
-        elif isinstance(err, dict):
-            path = err.get("path") or err.get("field") or ""
-            msg = err.get("message") or err.get("error") or str(err)
-            flattened.append(f"{path}: {msg}" if path else msg)
-        else:
-            flattened.append(str(err))
-
-    if not flattened:
-        flattened = ["config validate reported invalid (no structured errors)"]
-    return flattened
 
 
 def check_source_clean(source_dir: Path, agent_subpath: str) -> list[str]:
@@ -993,47 +938,54 @@ def restore_backup(mf: "Manifest", tarball: Path) -> None:
     log(f"restore OK    {tarball.name}", "ok")
 
 
-def run_smoke_test(mf: "Manifest", cron_name: str, max_wait_s: int) -> bool:
-    """Fire the agent's smoke-test cron and return True on exit 0.
+def run_smoke_test(mf: "Manifest", smoke_cfg: dict) -> bool:
+    """Run the agent's smoke-test script as a host subprocess.
 
-    Real implementation uses `oc cron list` to find the cron id, `oc cron
-    run <id>` to enqueue, and polls `oc cron runs --id <id> --limit 1` for
-    status. In tests this function is monkey-patched.
+    Phase 5 rewrite: was `oc cron list` + `oc cron run` + poll
+    `oc cron runs`. Now runs the script on the host directly, matching
+    how every cron actually fires post-Phase-4 (host crontab → python3).
+
+    smoke_cfg shape: `{"script": "scripts/heartbeat.py", "max_wait_s": 120}`.
+    Backward-compatible with the old `{"cron_name": ..., "max_wait_s": ...}`
+    shape — falls through to `scripts/heartbeat.py` as the universal default.
+    Every agent is required to ship `scripts/heartbeat.py`, so this path
+    always resolves.
+
+    Returns True iff the subprocess exits 0 AND stdout is non-empty (the
+    script contract requires at least one JSON status line). False on
+    non-zero exit, empty stdout, or TimeoutExpired.
     """
+    script_rel = (smoke_cfg or {}).get("script") or "scripts/heartbeat.py"
+    max_wait_s = int((smoke_cfg or {}).get("max_wait_s", 120))
+
+    script_abs = mf.expanded_workspace / script_rel
+    if not script_abs.exists():
+        log(f"smoke test script not found: {script_abs}", "err")
+        return False
+
     try:
-        data = oc_json("cron", "list", "--json")
+        result = subprocess.run(
+            ["python3", str(script_abs)],
+            timeout=max_wait_s,
+            capture_output=True,
+            text=True,
+            env=os.environ.copy(),
+            cwd=str(mf.expanded_workspace),
+        )
+    except subprocess.TimeoutExpired:
+        log(f"smoke test timed out after {max_wait_s}s: {script_rel}", "err")
+        return False
     except Exception as e:
-        log(f"smoke test failed to list crons: {e}", "err")
+        log(f"smoke test failed to launch: {e}", "err")
         return False
-    cron_id = None
-    for j in data.get("jobs", []):
-        if j.get("agentId") == mf.agent_id and j.get("name") == cron_name:
-            cron_id = j.get("id")
-            break
-    if not cron_id:
-        log(f"smoke test cron '{cron_name}' not found for {mf.agent_id}", "err")
+
+    if result.returncode != 0:
+        log(f"smoke test exited {result.returncode}: {result.stderr[:200]!r}", "err")
         return False
-    try:
-        oc("cron", "run", cron_id)
-    except Exception as e:
-        log(f"smoke test failed to trigger cron: {e}", "err")
+    if not (result.stdout or "").strip():
+        log(f"smoke test stdout empty (script contract requires JSON line)", "err")
         return False
-    # Poll for the latest run status
-    deadline = time.time() + max_wait_s
-    while time.time() < deadline:
-        time.sleep(5)
-        try:
-            runs = oc_json("cron", "runs", "--id", cron_id, "--limit", "1")
-        except Exception:
-            continue
-        entries = runs.get("entries", [])
-        if entries:
-            status = entries[0].get("status")
-            if status == "ok":
-                return True
-            if status in ("error", "failed"):
-                return False
-    return False
+    return True
 
 
 def log_drift_violation(mf: "Manifest", drifted: list[tuple[str, str, str]]) -> None:
@@ -1603,36 +1555,26 @@ def deploy_one(agent_id: str, args: argparse.Namespace) -> int:
         return 11
     log("compose runtime matches git", "ok")
 
-    # Safeguard 7: refuse if openclaw's own config is schema-invalid.
-    # Catches the class of bug where a CLI version change rejects the
-    # existing config shape and the gateway is in a restart loop —
-    # deploying against that state will only add more broken state.
-    note("Config validation")
-    config_errors = check_openclaw_config_valid()
-    if config_errors:
-        log(f"openclaw config validation failed ({len(config_errors)} issue(s)):", "err")
-        for e in config_errors:
+    # Safeguard 7: refuse if the per-agent manifest has semantic violations.
+    # Post-Phase-5 rewrite: was "ask openclaw gateway to validate its own
+    # composed config" via `oc config validate --json`; now "cross-check the
+    # parsed Manifest against Clawford's structural rules" via pure Python.
+    # Catches duplicate cron names, missing SOUL/IDENTITY anchors,
+    # smoke_test.script dangling refs, etc. — the class of bug the old check
+    # couldn't see because it was looking at the gateway, not the manifest.
+    note("Manifest validation")
+    manifest_errors = validate_manifest(mf, expected_agent_id=agent_id)
+    if manifest_errors:
+        log(f"manifest validation failed ({len(manifest_errors)} issue(s)):", "err")
+        for e in manifest_errors:
             log(f"  {e}", "err")
-        log("Refuse to deploy — fix openclaw.json first.", "err")
-        log("Hint: openclaw doctor --fix", "err")
+        log("Refuse to deploy — fix agents/<id>/manifest.json first.", "err")
         return 6
-    log("openclaw.json schema valid", "ok")
+    log("manifest structurally valid", "ok")
 
-    # Safeguard 8: refuse if exec-approvals drifts from the committed baseline.
-    # Catches the 2026-04-13 "every agent shows approval required" class: the
-    # live exec-approvals.json quietly regressed to defaults.security=allowlist
-    # and main.policy=allowlist, blocking every cron session. The baseline
-    # lives at ops/exec-approvals-baseline.json and encodes "defaults=full/off,
-    # every agent=full/full/off".
-    approval_errors = check_exec_approvals_baseline()
-    if approval_errors:
-        log(f"exec-approvals drift from baseline ({len(approval_errors)} issue(s)):", "err")
-        for e in approval_errors:
-            log(f"  {e}", "err")
-        log("Refuse to deploy — fix ~/.openclaw/exec-approvals.json first.", "err")
-        log("Baseline: ops/exec-approvals-baseline.json", "err")
-        return 7
-    log("exec-approvals matches baseline", "ok")
+    # Safeguard 8 (exec-approvals baseline) removed 2026-04-15 Phase 5 —
+    # OpenClaw approvals concept no longer exists. Phase 7 deletes
+    # ops/exec-approvals-baseline.json.
 
     # Safeguard 9: refuse if any cron message contains a forbidden
     # shell-operator pattern (`; echo $?`, `sh -lc python`, `> /tmp/`, …).
@@ -1720,25 +1662,34 @@ def deploy_one(agent_id: str, args: argparse.Namespace) -> int:
 
     if not args.skip_crons:
         note("Crons")
-        vps_env = load_vps_env()
-        telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID") or vps_env.get("TELEGRAM_CHAT_ID", "")
-        if not telegram_chat_id:
-            log("TELEGRAM_CHAT_ID not in env — crons may fail delivery", "warn")
-        live = fetch_live_crons(mf.agent_id)
-        ops = plan_cron_ops(mf, live, telegram_chat_id)
-        applied, failed = apply_cron_ops(ops, args.remove_orphans)
-        if failed:
-            return 1
+        if _DRY:
+            # Post-Phase-4, every agent's cron run via host cron
+            # (install-host-cron.sh), not the OpenClaw gateway. Dry-run
+            # doesn't need to reach into the gateway to reconcile state.
+            # Phase 6 removes this block entirely once live deploys also
+            # stop touching the gateway.
+            log("DRY RUN: skipping cron reconciliation "
+                "(post-Phase 4 crons run via host cron; Phase 6 removes this block)", "info")
+        else:
+            vps_env = load_vps_env()
+            telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID") or vps_env.get("TELEGRAM_CHAT_ID", "")
+            if not telegram_chat_id:
+                log("TELEGRAM_CHAT_ID not in env — crons may fail delivery", "warn")
+            live = fetch_live_crons(mf.agent_id)
+            ops = plan_cron_ops(mf, live, telegram_chat_id)
+            applied, failed = apply_cron_ops(ops, args.remove_orphans)
+            if failed:
+                return 1
 
-    # Safeguard 6: smoke test. If the manifest declares a smoke-test cron
-    # and --smoke-test is set, fire it. On failure, restore the pre-deploy
-    # backup automatically.
+    # Safeguard 6: smoke test. Post-Phase-5: runs the manifest's smoke_test
+    # script as a host subprocess and asserts exit 0 + non-empty stdout.
+    # On failure, restore the pre-deploy backup automatically.
     if getattr(args, "smoke_test", False) and mf.smoke_test:
         note("Smoke test")
-        cron_name = mf.smoke_test.get("cron_name", "heartbeat")
-        max_wait_s = mf.smoke_test.get("max_wait_s", 120)
-        log(f"firing {mf.agent_id}/{cron_name}, waiting up to {max_wait_s}s", "info")
-        ok = run_smoke_test(mf, cron_name, max_wait_s)
+        script_rel = (mf.smoke_test or {}).get("script") or "scripts/heartbeat.py"
+        max_wait_s = int((mf.smoke_test or {}).get("max_wait_s", 120))
+        log(f"running {mf.agent_id}/{script_rel}, waiting up to {max_wait_s}s", "info")
+        ok = run_smoke_test(mf, mf.smoke_test)
         if not ok:
             log(f"smoke test FAILED — restoring pre-deploy backup", "err")
             if pre_deploy_backup and pre_deploy_backup.exists():

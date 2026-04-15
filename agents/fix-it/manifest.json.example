@@ -8,7 +8,7 @@
     "bot_token_env": "TELEGRAM_BOT_TOKEN"
   },
   "smoke_test": {
-    "cron_name": "heartbeat-check",
+    "script": "scripts/heartbeat.py",
     "max_wait_s": 120
   },
   "config_files": [

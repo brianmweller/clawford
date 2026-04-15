@@ -54,9 +54,13 @@ def fake_source_repo(tmp_path: Path) -> Path:
     (agent_dir / "scripts").mkdir(parents=True)
 
     (agent_dir / "SOUL.md").write_text("# testagent soul\n", encoding="utf-8")
+    (agent_dir / "IDENTITY.md").write_text("# testagent identity\n", encoding="utf-8")
     (agent_dir / "TOOLS.md").write_text("# testagent tools\n", encoding="utf-8")
     (agent_dir / "scripts" / "hello.py").write_text(
         "print('hello v1')\n", encoding="utf-8"
+    )
+    (agent_dir / "scripts" / "heartbeat.py").write_text(
+        "print('{\"status\": \"ok\"}')\n", encoding="utf-8"
     )
 
     manifest = {
@@ -66,10 +70,11 @@ def fake_source_repo(tmp_path: Path) -> Path:
         "status_file": str(tmp_path / "fake-brain" / "testagent.status.md"),
         "telegram": {"account": "testagent", "bot_token_env": "TEST_BOT_TOKEN"},
         "config_files": [
-            {"src": "SOUL.md", "immutable": False},
+            {"src": "SOUL.md", "immutable": True},
+            {"src": "IDENTITY.md", "immutable": True},
             {"src": "TOOLS.md"},
         ],
-        "scripts": ["scripts/hello.py"],
+        "scripts": ["scripts/hello.py", "scripts/heartbeat.py"],
         "state_files": [],
         "approvals": {"allowlist": []},
         "crons": [],
