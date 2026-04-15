@@ -50,7 +50,7 @@ Overall: ✅ all clear
 
 Agents:
   ✅ family-calendar — heartbeat 12m ago
-  ℹ️ meetings-coach — WORKFLOWY_API_KEY missing (Murphy onboarding gap)
+  ✅ meetings-coach — heartbeat 8m ago
   ✅ shopping — heartbeat 22m ago
   ✅ news-digest — heartbeat 5m ago
   ✅ connector — heartbeat 15m ago
@@ -64,7 +64,7 @@ Dropbox: no conflicts
     Next: {restart | human needed | specific command}
 
 ℹ️ Known (pending human action): (omit if none)
-  - meetings-coach: WORKFLOWY_API_KEY missing (Sergeant Murphy deployed without WF key) — expires 2026-05-01
+  - {agent}: {issue} — expires {YYYY-MM-DD}
 
 ⚠️ Stale (not re-verified): (omit if none)
   - {agent}: status file last updated 8h ago; content may be resolved

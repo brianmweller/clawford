@@ -47,8 +47,12 @@ def check_auth():
     else:
         auth["google_auth"] = "missing"
 
-    # Workflowy
-    auth["workflowy_auth"] = "ok" if os.environ.get("WORKFLOWY_API_KEY") else "missing"
+    # Workflowy — mirror workflowy-sync.get_api_key()'s fallback chain.
+    # Under host-native cron the env var isn't exported, so we also
+    # probe the .env files that workflowy-sync actually reads. Drift
+    # between these two resolvers produced the 2026-04-15 false-positive
+    # where heartbeat said "missing" while workflowy-sync ran fine.
+    auth["workflowy_auth"] = "ok" if _resolve_workflowy_api_key() else "missing"
 
     # Krisp — staleness-aware check.
     #
@@ -76,6 +80,37 @@ def check_auth():
 
 
 KRISP_AUTH_FAIL_STALE_S = 60 * 60  # 60 min — older than this, don't trust the 401 marker
+
+
+def _resolve_workflowy_api_key() -> str:
+    """Return WORKFLOWY_API_KEY from env or the .env fallback chain used
+    by workflowy-sync.get_api_key(). Empty string if not found anywhere.
+    Kept structurally identical to workflowy-sync's resolver so the two
+    can't drift.
+    """
+    key = os.environ.get("WORKFLOWY_API_KEY", "")
+    if key:
+        return key
+    for env_file in [
+        os.path.join(WORKSPACE, ".env"),
+        os.path.expanduser("~/openclaw/.env"),
+        "/home/openclaw/openclaw/.env",
+        os.path.expanduser("~/.env"),
+        "/tmp/.env",
+    ]:
+        if not os.path.exists(env_file):
+            continue
+        try:
+            with open(env_file, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("WORKFLOWY_API_KEY=") and not line.startswith("#"):
+                        candidate = line.split("=", 1)[1].strip().strip("'\"")
+                        if candidate:
+                            return candidate
+        except OSError:
+            continue
+    return ""
 
 
 def _krisp_recently_failed(fail_path: str) -> bool:
