@@ -191,4 +191,3 @@ That passes the contract.
 
 - Plan: `C:/Users/Sam/.claude/plans/melodic-fluttering-blanket.md`
 - Deploy tool: `agents/shared/deploy.py` Safeguard 9
-- Entrypoint safety net: `ops/docker/entrypoint.sh`

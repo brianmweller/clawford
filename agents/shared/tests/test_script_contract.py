@@ -71,8 +71,8 @@ def _all_cron_messages() -> list[tuple[str, str, str]]:
 def _all_scripts() -> list[tuple[str, Path]]:
     """Yield (agent_id, absolute_script_path) for every Python script in every manifest.
 
-    Non-.py files (e.g. on-startup.sh, retire.sh) are excluded — the
-    contract only applies to Python scripts invoked by cron LLM sessions.
+    Non-.py files (e.g. retire.sh) are excluded — the contract only
+    applies to Python scripts invoked by cron LLM sessions.
     """
     out: list[tuple[str, Path]] = []
     for agent_id, mf in _load_manifests():

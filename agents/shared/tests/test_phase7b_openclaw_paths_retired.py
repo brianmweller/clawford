@@ -14,10 +14,6 @@ Two test files (this one and test_host_cron_wrappers.py) legitimately
 contain the forbidden patterns as string literals — they are listed in
 SKIP_FILES so they don't trip themselves.
 
-A handful of container-era dead-code shells under agents/shopping/scripts/
-still reference /home/node/.openclaw/... — those files are not actually
-called by any host cron after Phase 6.5 and are also in SKIP_FILES,
-flagged as dead code awaiting a separate cleanup sweep.
 """
 from __future__ import annotations
 
@@ -33,9 +29,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SKIP_FILES = {
     "agents/shared/tests/test_phase7b_openclaw_paths_retired.py",
     "agents/shared/tests/test_host_cron_wrappers.py",
-    "agents/shopping/scripts/entrypoint.sh",
-    "agents/shopping/scripts/on-startup.sh",
-    "agents/shopping/scripts/cache-subscriptions.sh",
 }
 
 
