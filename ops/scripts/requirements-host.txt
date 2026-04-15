@@ -1,0 +1,52 @@
+# Phase 6.5 host Python dependencies for Clawford.
+#
+# Mirrors the pip install line in ops/Dockerfile so the host matches
+# the container. Keep them in sync until Phase 7 removes the compose
+# block entirely — at which point this file becomes the single source.
+#
+# Install via ops/scripts/install-host-deps.sh. The install uses
+# `pip install --user --break-system-packages` so packages land under
+# ~/.local/lib/python3.12/site-packages/ without touching system
+# packages.
+#
+# Agents that need these at runtime:
+#   feedparser, linkedin-api, googlenewsdecoder — news-digest
+#   pyotp — costco 2FA (via costco-token-daemon)
+#   playwright, rebrowser-playwright — connector, news-digest (Tier 2)
+#   camoufox[geoip] — shopping (Tier 3, Costco)
+#   amazon-orders — shopping
+#   openai — not actually used by any script today (llm.py uses direct
+#            HTTP to codex endpoint), but kept for parity with the
+#            Dockerfile and for future migration flexibility
+#   curl_cffi — anti-bot TLS fingerprint spoofing, used by Tier 3 helpers
+#   google-api-python-client + google-auth-* — family-calendar,
+#            meetings-coach, connector Google OAuth flows
+#   mcp, httpx, httpx-sse — not used by the Clawford fleet scripts but
+#            kept for parity with the container in case Phase 7 migrates
+#            any MCP-bound code off the gateway
+
+feedparser==6.0.11
+linkedin-api
+googlenewsdecoder
+pyotp
+playwright
+amazon-orders
+openai
+curl_cffi
+camoufox[geoip]
+rebrowser-playwright
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+mcp>=1.27
+httpx-sse
+httpx
+
+# Extras the fleet's Python uses but the Dockerfile didn't name
+# explicitly because they came in as transitive deps. Host install
+# pulls them transitively too, but pinning them here documents intent
+# and surfaces import failures in install-host-deps.sh's verify step.
+beautifulsoup4
+lxml
+python-dateutil
+pytz
