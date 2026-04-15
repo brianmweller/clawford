@@ -5,9 +5,13 @@ security-audit.py — Fix-It weekly security audit.
 Replaces the inline chr()-obfuscated python -c that previously lived in the
 security-audit cron prompt. Pure Python, no shell, no obfuscation.
 
-What it does:
-  1. Read /home/node/.openclaw/exec-approvals.json and emit per-agent policy
-  2. Run `openclaw security audit --deep` and capture output
+What it does (post-Phase-6.5 native audit):
+  1. Read ~/.openclaw/exec-approvals.json and emit per-agent policy
+  2. Run native Python checks:
+      - chattr +i on each agent's SOUL.md / IDENTITY.md
+      - file-mode 0600 on ~/.codex/auth.json and ~/openclaw/.env
+      - brain directory exists with expected subdirs
+      - world-writable files under ~/.openclaw/*-workspace/
   3. Apply enrichment rules (suppress known-acceptable findings)
   4. Format an emoji-headed severity report
 
@@ -18,25 +22,42 @@ Override the approvals path with EXEC_APPROVALS_PATH env var (for tests).
 
 import json
 import os
-import re
 import subprocess
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Callable
 
 APPROVALS_PATH = os.environ.get(
     "EXEC_APPROVALS_PATH",
     os.path.expanduser("~/.openclaw/exec-approvals.json"),
 )
-AUDIT_TIMEOUT_SEC = 90
+
+# Default host paths for the native audit. Overridable via run_native_audit()
+# kwargs for tests.
+DEFAULT_WORKSPACE_ROOT = Path(os.path.expanduser("~/.openclaw"))
+DEFAULT_CODEX_AUTH_PATH = Path(os.path.expanduser("~/.codex/auth.json"))
+DEFAULT_ENV_PATH = Path(os.path.expanduser("~/openclaw/.env"))
+DEFAULT_BRAIN_PATH = Path(os.path.expanduser("~/Dropbox/openclaw-backup"))
+EXPECTED_BRAIN_SUBDIRS = frozenset({
+    "agents", "people", "facts", "queues", "commitments",
+})
+
+LSATTR_TIMEOUT_SEC = 10
 
 
-def get_agent_policies():
-    """Return list of (agent, policy) tuples from exec-approvals.json."""
+def get_agent_policies(approvals_path: str | os.PathLike | None = None):
+    """Return list of (agent, policy) tuples from exec-approvals.json.
+
+    `approvals_path` defaults to APPROVALS_PATH, which honors the
+    EXEC_APPROVALS_PATH env var. Tests override it directly.
+    """
+    path = str(approvals_path) if approvals_path is not None else APPROVALS_PATH
     try:
-        with open(APPROVALS_PATH) as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except FileNotFoundError:
-        return [("(error)", f"approvals file not found at {APPROVALS_PATH}")]
+        return [("(error)", f"approvals file not found at {path}")]
     except Exception as e:
         return [("(error)", f"approvals file unreadable: {e}")]
 
@@ -54,86 +75,138 @@ def get_agent_policies():
     return result
 
 
-def run_security_audit():
-    """Run `openclaw security audit --deep`. Return raw stdout text."""
+SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
+
+
+def _default_lsattr_runner(path: Path) -> str | None:
+    """Run `lsattr <path>` and return the attribute string, or None if
+    lsattr is unavailable or the call failed.
+
+    lsattr output for a single file looks like:
+        `----i---------e-- /path/to/file`
+    We return the leading attribute column.
+    """
     try:
         r = subprocess.run(
-            ["openclaw", "security", "audit", "--deep"],
+            ["lsattr", str(path)],
             capture_output=True,
             text=True,
-            timeout=AUDIT_TIMEOUT_SEC,
+            timeout=LSATTR_TIMEOUT_SEC,
+            check=False,
         )
-        return (r.stdout or "") + (r.stderr or "")
-    except FileNotFoundError:
-        return "(openclaw CLI not found on PATH)"
-    except subprocess.TimeoutExpired:
-        return f"(security audit timed out after {AUDIT_TIMEOUT_SEC}s)"
-    except Exception as e:
-        return f"(security audit failed: {e})"
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    except OSError:
+        return None
+    if r.returncode != 0:
+        return None
+    parts = r.stdout.split(None, 1)
+    if not parts:
+        return None
+    return parts[0]
 
 
-SEVERITY_PATTERNS = {
-    "CRITICAL": re.compile(r"\bcritical\b", re.IGNORECASE),
-    "HIGH": re.compile(r"\bhigh\b", re.IGNORECASE),
-    "MEDIUM": re.compile(r"\bmedium\b|\bmoderate\b", re.IGNORECASE),
-    "LOW": re.compile(r"\blow\b|\binfo\b", re.IGNORECASE),
-}
+def run_native_audit(
+    *,
+    workspace_root: Path | None = None,
+    codex_auth_path: Path | None = None,
+    env_path: Path | None = None,
+    brain_path: Path | None = None,
+    lsattr_runner: Callable[[Path], str | None] | None = None,
+) -> dict[str, list[str]]:
+    """Native Python security audit for the Clawford fleet.
 
-SUPPRESSED_FINDINGS = {
-    "tools.exec.security_full_configured",
-    "plugins.tools_reachable_permissive_policy",
-}
+    Replaces the pre-Phase-6.5 `openclaw security audit --deep` subprocess.
+    Returns findings in the same {severity: [description]} shape
+    render_report() expects.
 
+    Checks performed:
+      1. SOUL.md / IDENTITY.md in each ~/.openclaw/*-workspace/ have
+         the immutable (chattr +i) attribute.
+      2. ~/.codex/auth.json and ~/openclaw/.env exist with mode 0600.
+      3. ~/Dropbox/openclaw-backup/ exists with expected subdirs.
+      4. No world-writable files under ~/.openclaw/*-workspace/.
 
-def parse_findings(audit_text):
-    """Parse audit output into {severity: [finding_lines]}.
-
-    Best-effort. Handles JSON or plain-text. Suppresses known-acceptable IDs.
+    All path arguments are overridable for tests. `lsattr_runner` takes
+    a Path and returns the mode string (containing 'i' if immutable),
+    or None if lsattr cannot be run at all.
     """
-    findings = {sev: [] for sev in SEVERITY_PATTERNS}
+    workspace_root = workspace_root or DEFAULT_WORKSPACE_ROOT
+    codex_auth_path = codex_auth_path or DEFAULT_CODEX_AUTH_PATH
+    env_path = env_path or DEFAULT_ENV_PATH
+    brain_path = brain_path or DEFAULT_BRAIN_PATH
+    lsattr_runner = lsattr_runner or _default_lsattr_runner
 
-    if not audit_text or audit_text.startswith("("):
-        return findings
+    findings: dict[str, list[str]] = {sev: [] for sev in SEVERITIES}
 
-    # Try JSON first
-    try:
-        data = json.loads(audit_text)
-        items = data.get("findings") or data.get("issues") or []
-        for item in items:
-            ident = item.get("id") or item.get("name") or ""
-            if ident in SUPPRESSED_FINDINGS:
-                continue
-            sev_raw = (item.get("severity") or item.get("level") or "").upper()
-            sev = next((s for s in SEVERITY_PATTERNS if s in sev_raw), "LOW")
-            desc = item.get("message") or item.get("description") or ident or "(no description)"
-            findings[sev].append(desc.strip())
-        return findings
-    except (ValueError, AttributeError):
-        pass
+    # 1. Immutable identity files
+    lsattr_warned = False
+    if workspace_root.is_dir():
+        for ws in sorted(workspace_root.glob("*-workspace")):
+            agent_label = ws.name.removesuffix("-workspace")
+            for immutable_name in ("SOUL.md", "IDENTITY.md"):
+                target = ws / immutable_name
+                if not target.exists():
+                    continue
+                attrs = lsattr_runner(target)
+                if attrs is None:
+                    if not lsattr_warned:
+                        findings["LOW"].append(
+                            "cannot verify immutability — lsattr missing "
+                            "(install e2fsprogs)"
+                        )
+                        lsattr_warned = True
+                    continue
+                if "i" not in attrs:
+                    findings["CRITICAL"].append(
+                        f"{immutable_name} not immutable in "
+                        f"{agent_label}-workspace — agent values can be "
+                        f"rewritten"
+                    )
 
-    # Fall back to plain-text parsing
-    current_sev = None
-    for line in audit_text.splitlines():
-        stripped = line.strip()
-        if not stripped:
+    # 2. Secret file modes
+    for label, path in (
+        ("~/.codex/auth.json", codex_auth_path),
+        ("~/openclaw/.env", env_path),
+    ):
+        if not path.exists():
+            findings["HIGH"].append(f"credential missing: {label}")
             continue
-
-        if any(ident in stripped for ident in SUPPRESSED_FINDINGS):
+        try:
+            mode = path.stat().st_mode & 0o777
+        except OSError as e:
+            findings["HIGH"].append(f"cannot stat {label}: {e}")
             continue
+        if mode > 0o600:
+            findings["HIGH"].append(
+                f"{label} is mode {oct(mode)[2:]}, expected 600"
+            )
 
-        upper = stripped.upper()
-        if upper.startswith(("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")):
-            for sev, pat in SEVERITY_PATTERNS.items():
-                if pat.search(stripped):
-                    current_sev = sev
-                    rest = stripped.split(":", 1)[1].strip() if ":" in stripped else ""
-                    if rest:
-                        findings[sev].append(rest)
-                    break
-            continue
+    # 3. Brain directory sanity
+    if not brain_path.is_dir():
+        findings["MEDIUM"].append(f"brain directory missing at {brain_path}")
+    else:
+        existing = {p.name for p in brain_path.iterdir() if p.is_dir()}
+        missing = sorted(EXPECTED_BRAIN_SUBDIRS - existing)
+        if missing:
+            findings["MEDIUM"].append(
+                f"brain directory missing subdirs: {missing}"
+            )
 
-        if current_sev and (stripped.startswith(("•", "-", "*"))):
-            findings[current_sev].append(stripped.lstrip("•-* ").strip())
+    # 4. World-writable files under workspaces
+    if workspace_root.is_dir():
+        for ws in sorted(workspace_root.glob("*-workspace")):
+            for dirpath, _dirs, files in os.walk(ws):
+                for fname in files:
+                    fp = Path(dirpath) / fname
+                    try:
+                        mode = fp.stat().st_mode
+                    except OSError:
+                        continue
+                    if mode & 0o002:
+                        findings["MEDIUM"].append(
+                            f"world-writable: {fp}"
+                        )
 
     return findings
 
@@ -146,8 +219,13 @@ SEVERITY_EMOJI = {
 }
 
 
-def render_report(policies, findings, audit_raw):
-    """Format the final emoji-headed report."""
+def render_report(policies, findings):
+    """Format the final emoji-headed report.
+
+    Post-Phase-6.5: `findings` is the dict returned by run_native_audit().
+    No raw audit text to render — the native audit produces structured
+    findings directly.
+    """
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     lines = [f"🦊🔧 Security Audit — {today}", ""]
 
@@ -158,15 +236,11 @@ def render_report(policies, findings, audit_raw):
     lines.append("")
 
     total_findings = sum(len(v) for v in findings.values())
-    if total_findings == 0 and not audit_raw.startswith("("):
+    if total_findings == 0:
         lines.append("✅ Security audit clean.")
-        return "\n".join(lines)
+        return "\n".join(lines).rstrip() + "\n"
 
-    if audit_raw.startswith("("):
-        lines.append(f"⚠️ Audit run note: {audit_raw}")
-        lines.append("")
-
-    for sev in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
+    for sev in SEVERITIES:
         items = findings.get(sev, [])
         emoji = SEVERITY_EMOJI[sev]
         if not items:
@@ -187,9 +261,8 @@ def render_report(policies, findings, audit_raw):
 
 def main():
     policies = get_agent_policies()
-    audit_raw = run_security_audit()
-    findings = parse_findings(audit_raw)
-    report = render_report(policies, findings, audit_raw)
+    findings = run_native_audit()
+    report = render_report(policies, findings)
     sys.stdout.write(report)
     sys.exit(0)
 
