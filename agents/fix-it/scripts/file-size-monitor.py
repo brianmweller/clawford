@@ -35,15 +35,48 @@ SIZE_THRESHOLD_BYTES = 500 * 1024  # 500 KB
 
 BOT_TOKEN_ENV = "TELEGRAM_BOT_TOKEN"
 
+# Directories whose contents Mr Fixit deliberately ignores. Mostly
+# legitimately-large infrastructure (snapshots, backups, archives) that
+# would otherwise spam the alert every day.
+IGNORE_DIR_NAMES = {
+    "deploy-backups",
+    "workspace-snapshots",
+    "archive",
+    ".dropbox.cache",
+    ".git",
+    "openclaw-installer",
+}
+# File suffixes that are expected to be large by design (tarballs,
+# zip archives) — same rationale.
+IGNORE_SUFFIXES = (".tar.gz", ".tgz", ".tar", ".zip")
+
+
+def _is_ignored(path: Path, root: Path) -> bool:
+    name = path.name.lower()
+    for suffix in IGNORE_SUFFIXES:
+        if name.endswith(suffix):
+            return True
+    try:
+        rel_parts = path.relative_to(root).parts
+    except ValueError:
+        rel_parts = path.parts
+    for part in rel_parts:
+        if part in IGNORE_DIR_NAMES:
+            return True
+    return False
+
 
 def find_large_files(root: Path, threshold: int = SIZE_THRESHOLD_BYTES) -> list[tuple[str, int]]:
     """Return list of (relative_path, size_bytes) for files larger than
-    threshold. Sorted by size descending."""
+    threshold. Skips deploy-backups, workspace-snapshots, archive, and
+    archive-format suffixes — see IGNORE_DIR_NAMES / IGNORE_SUFFIXES."""
     if not root.exists():
         return []
     found: list[tuple[str, int]] = []
     for path in root.rglob("*"):
         if not path.is_file():
+            continue
+        if _is_ignored(path, root):
             continue
         try:
             size = path.stat().st_size

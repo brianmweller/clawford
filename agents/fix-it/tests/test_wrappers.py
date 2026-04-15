@@ -82,6 +82,37 @@ def test_conflict_scan_alerts_on_conflict_files(tmp_path, monkeypatch):
     assert "conflicted copy" in sent[0]
 
 
+def test_conflict_scan_ignores_backup_and_archive_trees(tmp_path, monkeypatch):
+    """Conflicted copies inside deploy-backups, workspace-snapshots,
+    or archive folders are not actionable — skip them."""
+    mod = _load("conflict-scan")
+    scan_root = tmp_path / "brain"
+    (scan_root / "deploy-backups").mkdir(parents=True)
+    (scan_root / "deploy-backups" / "shopping (conflicted copy 2026-04-12).tar.gz").write_text(
+        "x", encoding="utf-8"
+    )
+    (scan_root / "workspace-snapshots").mkdir()
+    (scan_root / "workspace-snapshots" / "fix-it (conflicted copy 2026-04-12).tar.gz").write_text(
+        "x", encoding="utf-8"
+    )
+    (scan_root / "archive" / "2026-04").mkdir(parents=True)
+    (scan_root / "archive" / "2026-04" / "facts (conflicted copy).md").write_text(
+        "x", encoding="utf-8"
+    )
+    monkeypatch.setattr(mod, "SCAN_ROOT", scan_root)
+    _patch_basics(mod, tmp_path, monkeypatch, "last-conflict-scan.json")
+
+    sent: list[str] = []
+    monkeypatch.setattr(mod, "resolve_credentials", lambda env: ("tok", "chat"))
+    monkeypatch.setattr(
+        mod, "send_message", lambda tok, chat, text, **kw: sent.append(text) or True
+    )
+
+    result = mod.run()
+    assert result["conflicts"] == 0
+    assert sent == []
+
+
 def test_conflict_scan_main_exits_zero(monkeypatch, capsys):
     mod = _load("conflict-scan")
     monkeypatch.setattr(mod, "run", lambda: (_ for _ in ()).throw(RuntimeError("x")))
@@ -131,6 +162,71 @@ def test_file_size_alerts_when_oversized(tmp_path, monkeypatch):
     assert result["large_files"] == 1
     assert result["sent"] == 1
     assert "big.md" in sent[0]
+
+
+def test_file_size_ignores_backups_snapshots_archives(tmp_path, monkeypatch):
+    """Mr Fixit must not alert on files inside deploy-backups,
+    workspace-snapshots, or archive trees — those are legitimately
+    large by design. Same for *.tar.gz / *.zip suffixes anywhere."""
+    mod = _load("file-size-monitor")
+    scan_root = tmp_path / "brain"
+    scan_root.mkdir()
+    big_payload = "x" * (600 * 1024)
+
+    (scan_root / "deploy-backups").mkdir()
+    (scan_root / "deploy-backups" / "shopping-2026.tar.gz").write_text(
+        big_payload, encoding="utf-8"
+    )
+    (scan_root / "workspace-snapshots").mkdir()
+    (scan_root / "workspace-snapshots" / "fix-it-2026.tar.gz").write_text(
+        big_payload, encoding="utf-8"
+    )
+    (scan_root / "archive" / "2026-04").mkdir(parents=True)
+    (scan_root / "archive" / "2026-04" / "old-facts.md").write_text(
+        big_payload, encoding="utf-8"
+    )
+    # A bare tar.gz at the root should also be ignored by suffix
+    (scan_root / "loose.tar.gz").write_text(big_payload, encoding="utf-8")
+
+    monkeypatch.setattr(mod, "SCAN_ROOT", scan_root)
+    _patch_basics(mod, tmp_path, monkeypatch, "last-file-size-monitor.json")
+
+    sent: list[str] = []
+    monkeypatch.setattr(mod, "resolve_credentials", lambda env: ("tok", "chat"))
+    monkeypatch.setattr(
+        mod, "send_message", lambda tok, chat, text, **kw: sent.append(text) or True
+    )
+
+    result = mod.run()
+    assert result["large_files"] == 0
+    assert sent == []
+
+
+def test_file_size_still_alerts_on_unexpected_large_brain_file(tmp_path, monkeypatch):
+    """An oversized file outside the ignored trees still triggers —
+    e.g. a runaway facts/2026-04.md or a stray cache."""
+    mod = _load("file-size-monitor")
+    scan_root = tmp_path / "brain"
+    (scan_root / "facts").mkdir(parents=True)
+    (scan_root / "facts" / "2026-04.md").write_text("x" * (700 * 1024), encoding="utf-8")
+    # And a normal tarball that should be ignored
+    (scan_root / "deploy-backups").mkdir()
+    (scan_root / "deploy-backups" / "shopping.tar.gz").write_text(
+        "x" * (600 * 1024), encoding="utf-8"
+    )
+    monkeypatch.setattr(mod, "SCAN_ROOT", scan_root)
+    _patch_basics(mod, tmp_path, monkeypatch, "last-file-size-monitor.json")
+
+    sent: list[str] = []
+    monkeypatch.setattr(mod, "resolve_credentials", lambda env: ("tok", "chat"))
+    monkeypatch.setattr(
+        mod, "send_message", lambda tok, chat, text, **kw: sent.append(text) or True
+    )
+
+    result = mod.run()
+    assert result["large_files"] == 1
+    assert result["sent"] == 1
+    assert "facts/2026-04.md" in sent[0] or "facts\\2026-04.md" in sent[0]
 
 
 # ─── brain-validation-check ─────────────────────────────────────────

@@ -35,15 +35,37 @@ SCAN_ROOT = Path(os.path.expanduser("~/Dropbox/openclaw-backup"))
 
 BOT_TOKEN_ENV = "TELEGRAM_BOT_TOKEN"
 
+# Directories Mr Fixit ignores when scanning for sync conflicts.
+# Conflicted copies inside backup/snapshot/archive trees are not
+# actionable and would only spam the operator.
+IGNORE_DIR_NAMES = {
+    "deploy-backups",
+    "workspace-snapshots",
+    "archive",
+    ".dropbox.cache",
+    ".git",
+    "openclaw-installer",
+}
+
+
+def _is_ignored(path: Path, root: Path) -> bool:
+    try:
+        rel_parts = path.relative_to(root).parts
+    except ValueError:
+        rel_parts = path.parts
+    return any(part in IGNORE_DIR_NAMES for part in rel_parts)
+
 
 def find_conflicts(root: Path) -> list[str]:
     """Return paths (relative to root) of files whose name contains
-    'conflicted copy' anywhere. Skips dotdirs to avoid Dropbox metadata."""
+    'conflicted copy' anywhere. Skips IGNORE_DIR_NAMES subtrees."""
     if not root.exists():
         return []
     found: list[str] = []
     for path in root.rglob("*"):
         if not path.is_file():
+            continue
+        if _is_ignored(path, root):
             continue
         if "conflicted copy" in path.name.lower():
             try:
