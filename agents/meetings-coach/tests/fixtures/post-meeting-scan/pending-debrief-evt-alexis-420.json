@@ -1,0 +1,22 @@
+{
+  "event_id": "evt-alexis-420",
+  "meeting_title": "Alexis 1:1",
+  "meeting_start": "2026-04-15T16:25:00-07:00",
+  "attendees": [
+    {"name": "Alexis Lloyd", "email": "alexis@example.com"}
+  ],
+  "transcript_id": "kr-12345",
+  "transcript_source": "krisp-mcp",
+  "krisp_key_points": [
+    "Q2 roadmap is slipping by about 2 weeks",
+    "Team bandwidth is the bottleneck, not scope"
+  ],
+  "krisp_action_items": [
+    {"who": "the operator", "what": "Send updated Q2 roadmap draft", "by_when": "2026-04-18"},
+    {"who": "Alexis", "what": "Share hiring pipeline data", "by_when": "2026-04-17"}
+  ],
+  "transcript_text": "the operator: So walking through where Q2 landed... Alexis: Yeah, so the main slippage is... [truncated for test]",
+  "participants": ["the operator", "Alexis"],
+  "staged_at": "2026-04-15T17:02:00Z",
+  "status": "pending_review"
+}

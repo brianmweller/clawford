@@ -43,7 +43,11 @@
     "scripts/person-bootstrap.py",
     "scripts/timed-deliver.py",
     "scripts/krisp-auth-manual.py",
-    "scripts/heartbeat.py"
+    "scripts/heartbeat.py",
+    "scripts/morning-meeting-brief.py",
+    "scripts/pre-meeting-alert.py",
+    "scripts/post-meeting-scan.py",
+    "scripts/commitment-follow-up.py"
   ],
   "state_files": [
     {
@@ -110,6 +114,7 @@
   "crons": [
     {
       "name": "morning-meeting-brief",
+      "enabled": false,
       "cron": "30 10 * * *",
       "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Generate and deliver the morning meeting brief. 1) Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/gcal-fetch.py --days 2. Read the JSON output \u2014 these are today's and tomorrow's professional meetings. 2) Filter to real meetings only (is_real_meeting=true). 3) For each real meeting: a) Run person-bootstrap.py to create person files for new attendees. b) Run workflowy-sync.py --create-nodes to create Workflowy meeting nodes. c) Run meeting-prep.py --meeting-id EVENT_ID to assemble context (attendees, facts, open commitments). 4) Format the brief using the template in CRONS.md \u2014 factual schedule only: meeting times, attendees, locations, open commitments with attendees. Do NOT include talking points. Include a tomorrow preview. 5) Write the formatted brief to cache/morning-brief-ready.txt \u2014 this is the fleet-delivery cache file read by fix-it/morning-fleet-deliver at 12:00 UTC. Do NOT call timed-deliver.py; the fleet deliver cron handles the send. 7) Write result summary to ~/.openclaw/meetings-coach-workspace/cache/last-morning-brief.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"meetings_briefed\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source.",
       "announce": false,
@@ -117,6 +122,7 @@
     },
     {
       "name": "pre-meeting-alert",
+      "enabled": false,
       "cron": "*/30 * * * *",
       "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Check for upcoming meetings needing alerts. Run gcal-fetch.py for events in the next 2 hours. Filter to real meetings starting in 15-45 minutes. Read sent-alerts.json to skip already-alerted meetings. For any un-alerted meeting: check cache for existing prep, generate if missing via meeting-prep.py. Send Telegram: '\ud83d\udc37\ud83d\udd0d Heads up \u2014 meeting in {N} min\\n\ud83d\udccb {Title}\\n\ud83d\udc65 {Attendees}\\n\ud83c\udfaf {Top bullets}\\n\ud83d\udccc {Open items}'. Record in sent-alerts.json. If no meetings approaching, return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. Write result to ~/.openclaw/meetings-coach-workspace/cache/last-pre-meeting.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"meetings_alerted\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source.",
       "announce": false,
@@ -124,6 +130,7 @@
     },
     {
       "name": "post-meeting-scan",
+      "enabled": false,
       "cron": "15,45 * * * *",
       "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Scan for recently-ended meetings and new transcripts. 1) Run gcal-fetch.py and identify meetings ended in the last 60 minutes. 2) Run transcript-scan.py to fetch Krisp transcripts and match to meetings. 3) IDEMPOTENCY CHECK: For each pending debrief file in cache/pending-debrief-*.json, extract the event_id and grep ~/Dropbox/openclaw-backup/commitments/active.md for that event_id. If found: the debrief was already confirmed \u2014 delete the stale pending file and skip it. Do NOT re-present an already-confirmed debrief. \n\n4) KRISP 401 HANDLING. If transcript-scan.py reports \"401 Unauthorized\" or \"Token verification failed\" (or ANY Krisp auth error):\n(a) Write cache/krisp-last-401.json with {\"ts\": \"<current ISO UTC>\"}. This marker is read by heartbeat.py to set krisp_auth: expired in the status file.\n(b) Read cache/krisp-last-alert.json if it exists. It contains {\"ts\": \"<ISO UTC>\"}. Compute the age in minutes. If age < 90 minutes, DO NOT send another Telegram alert \u2014 return EXACTLY the empty string (zero bytes, no narration). The previous alert is still fresh.\n(c) If age >= 90 minutes OR cache/krisp-last-alert.json does not exist: send Telegram '\ud83d\udc37\ud83d\udd0d Krisp transcript access returned 401 Unauthorized. The refresh_token is revoked. Run krisp-auth-manual.py locally and scp fresh tokens.json to ~/.openclaw/meetings-coach-workspace/cache/krisp-tokens/tokens.json.' Then write cache/krisp-last-alert.json with {\"ts\": \"<current ISO UTC>\"}.\n(d) Do NOT continue to steps 5-6 \u2014 no transcripts are accessible. Write cache/last-post-scan.json with status: error, summary: krisp 401. Stop here.\n\n5) If transcript-scan.py succeeded: read the output. If NEW items were extracted and staged (not already confirmed): send a debrief summary on Telegram with action items, decisions, follow-ups. Include '/confirm to save to brain \u00b7 /dismiss N to skip item N'. Delete cache/krisp-last-401.json if it existed (recovered).\n\n6) If no transcripts found and no pending debriefs: return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary).\n\n7) COACHING (after debrief, if coaching.enabled is true in meeting-config.json): For each staged debrief that has transcript text, run: python3 ~/.openclaw/meetings-coach-workspace/scripts/transcript-metrics.py --event-id EVENT_ID. Read the metrics JSON. Read coaching.growth_areas from meeting-config.json. For each growth area, find Sam's utterances in the transcript that relate to that area. Compose a coaching message using the format in CRONS.md (metric header, 1-2 sentence assessment, quoted excerpt with timestamp, suggested alternative). Send ONE coaching message per debrief on Telegram. After sending, append to cache/coaching-history.json: {\"event_id\": \"...\", \"meeting_title\": \"...\", \"date\": \"YYYY-MM-DD\", \"metrics\": {...}, \"area_assessments\": {\"concision\": \"strong|good|needs_work\", ...}}.\n\n8) Write result to ~/.openclaw/meetings-coach-workspace/cache/last-post-scan.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"transcripts_processed\": <N>, \"debriefs_staged\": <N>, \"unmatched\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source.",
       "announce": false,
@@ -131,17 +138,12 @@
     },
     {
       "name": "commitment-follow-up",
+      "enabled": false,
       "cron": "0 16 * * *",
       "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Check open commitments from meetings. Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/commitment-tracker.py. Read the JSON output. If there are overdue or approaching items: send a follow-up summary on Telegram using the format in CRONS.md. If no actionable items, return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. Write result to ~/.openclaw/meetings-coach-workspace/cache/last-commitment.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"overdue\": <N>, \"approaching\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source.",
       "announce": false,
       "no_deliver": true
     },
-    {
-      "name": "weekly-review",
-      "cron": "0 0 * * 5",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Generate the weekly meeting review. 1) Run gcal-fetch.py --days 7 to look back at this week's meetings. 2) Run commitment-tracker.py to get open commitments. 3) Compile: meetings held, prep generated, transcripts processed, commitments created/resolved/overdue. 4) List all unresolved commitments. 5) Format using the template in CRONS.md. 6) Deliver to Telegram.",
-      "announce": true,
-      "no_deliver": false
     }
   ]
 }

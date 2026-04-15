@@ -1,0 +1,7 @@
+{
+  "status": "ok",
+  "processed": [],
+  "unmatched": [],
+  "errors": [],
+  "mcp_error": "Krisp MCP: HTTP 401 Unauthorized (token expired)"
+}

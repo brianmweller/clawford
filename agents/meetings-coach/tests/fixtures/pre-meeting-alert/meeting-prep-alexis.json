@@ -1,0 +1,30 @@
+{
+  "status": "ok",
+  "meetings": [
+    {
+      "meeting_id": "evt-in-window-1",
+      "meeting_title": "Alexis 1:1",
+      "meeting_start": "2026-04-15T16:25:00-07:00",
+      "attendees": [
+        {
+          "name": "Alexis Lloyd",
+          "email": "alexis@example.com"
+        }
+      ],
+      "context": {
+        "facts": [],
+        "commitments": [
+          {
+            "who": "the operator",
+            "to_whom": "Alexis",
+            "what": "Send over the Q2 roadmap draft",
+            "by_when": "2026-04-10",
+            "status": "overdue"
+          }
+        ]
+      },
+      "context_sources": ["commitments:1"]
+    }
+  ],
+  "total": 1
+}

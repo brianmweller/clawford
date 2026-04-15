@@ -1,0 +1,50 @@
+{
+  "status": "ok",
+  "date": "2026-04-14",
+  "days": 2,
+  "events": [
+    {
+      "id": "evt-today-1",
+      "summary": "Alexis 1:1",
+      "start": "2026-04-14T09:00:00-07:00",
+      "end": "2026-04-14T09:30:00-07:00",
+      "attendees": [
+        {"name": "Alexis Lloyd", "email": "alexis@example.com"}
+      ],
+      "conference_link": "https://meet.google.com/abc-defg-hij",
+      "location": "",
+      "is_real_meeting": true
+    },
+    {
+      "id": "evt-today-2",
+      "summary": "Board prep review",
+      "start": "2026-04-14T14:00:00-07:00",
+      "end": "2026-04-14T15:00:00-07:00",
+      "attendees": [
+        {"name": "Pat", "email": "pat@example.com"},
+        {"name": "Dana", "email": "dana@example.com"}
+      ],
+      "conference_link": "https://zoom.us/j/98765",
+      "location": "",
+      "is_real_meeting": true
+    },
+    {
+      "id": "evt-today-task",
+      "summary": "Deep work block",
+      "start": "2026-04-14T10:00:00-07:00",
+      "end": "2026-04-14T12:00:00-07:00",
+      "attendees": [],
+      "is_real_meeting": false
+    },
+    {
+      "id": "evt-tomorrow-1",
+      "summary": "Weekly staff sync",
+      "start": "2026-04-15T09:30:00-07:00",
+      "end": "2026-04-15T10:00:00-07:00",
+      "attendees": [
+        {"name": "Staff", "email": "staff@example.com"}
+      ],
+      "is_real_meeting": true
+    }
+  ]
+}

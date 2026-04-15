@@ -1,0 +1,68 @@
+{
+  "status": "ok",
+  "date": "2026-04-15",
+  "days": 1,
+  "events": [
+    {
+      "id": "evt-too-soon",
+      "summary": "Standup",
+      "start": "2026-04-15T16:10:00-07:00",
+      "end": "2026-04-15T16:25:00-07:00",
+      "attendees": [{"email": "sam@example.com", "name": "Sam"}],
+      "conference_link": "https://meet.google.com/abc-defg-hij",
+      "is_real_meeting": true
+    },
+    {
+      "id": "evt-in-window-1",
+      "summary": "Alexis 1:1",
+      "start": "2026-04-15T16:25:00-07:00",
+      "end": "2026-04-15T16:55:00-07:00",
+      "attendees": [
+        {"email": "alexis@example.com", "name": "Alexis Lloyd", "response_status": "accepted"}
+      ],
+      "conference_link": "https://meet.google.com/xxx-yyyy-zzz",
+      "is_real_meeting": true,
+      "location": ""
+    },
+    {
+      "id": "evt-in-window-2",
+      "summary": "Board prep review",
+      "start": "2026-04-15T16:40:00-07:00",
+      "end": "2026-04-15T17:30:00-07:00",
+      "attendees": [
+        {"email": "pat@example.com", "name": "Pat"},
+        {"email": "dana@example.com", "name": "Dana"}
+      ],
+      "conference_link": "https://zoom.us/j/12345",
+      "is_real_meeting": true,
+      "location": ""
+    },
+    {
+      "id": "evt-already-alerted",
+      "summary": "Portfolio review",
+      "start": "2026-04-15T16:35:00-07:00",
+      "end": "2026-04-15T17:05:00-07:00",
+      "attendees": [{"email": "jay@example.com", "name": "Jay"}],
+      "conference_link": "https://meet.google.com/aaa-bbbb-ccc",
+      "is_real_meeting": true
+    },
+    {
+      "id": "evt-too-far",
+      "summary": "Town hall",
+      "start": "2026-04-15T17:30:00-07:00",
+      "end": "2026-04-15T18:30:00-07:00",
+      "attendees": [{"email": "all@example.com", "name": "All Hands"}],
+      "conference_link": "",
+      "is_real_meeting": true
+    },
+    {
+      "id": "evt-task-block",
+      "summary": "Focus block",
+      "start": "2026-04-15T16:25:00-07:00",
+      "end": "2026-04-15T17:25:00-07:00",
+      "attendees": [],
+      "conference_link": "",
+      "is_real_meeting": false
+    }
+  ]
+}

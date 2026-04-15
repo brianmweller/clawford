@@ -1,0 +1,24 @@
+{
+  "coaching": {
+    "enabled": true,
+    "growth_areas": [
+      {
+        "id": "concision",
+        "label": "Concision",
+        "description": "Was the operator succinct?"
+      },
+      {
+        "id": "structured_thinking",
+        "label": "Structured Thinking",
+        "description": "Were ideas presented logically?"
+      },
+      {
+        "id": "empathy",
+        "label": "Empathy & Listening",
+        "description": "Did the operator listen well?"
+      }
+    ],
+    "brian_speaker_names": ["the operator"],
+    "min_transcript_length": 500
+  }
+}

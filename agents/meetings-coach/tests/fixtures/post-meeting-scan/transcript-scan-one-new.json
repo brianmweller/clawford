@@ -1,0 +1,17 @@
+{
+  "status": "ok",
+  "processed": [
+    {
+      "transcript_id": "kr-12345",
+      "matched_event_id": "evt-alexis-420",
+      "matched_event_title": "Alexis 1:1",
+      "match_score": 0.92,
+      "has_krisp_extractions": true,
+      "has_raw_text": true,
+      "status": "staged_for_review"
+    }
+  ],
+  "unmatched": [],
+  "errors": [],
+  "mcp_error": null
+}

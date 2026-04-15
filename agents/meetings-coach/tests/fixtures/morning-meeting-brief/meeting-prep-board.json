@@ -1,0 +1,17 @@
+{
+  "status": "ok",
+  "meetings": [
+    {
+      "meeting_id": "evt-today-2",
+      "meeting_title": "Board prep review",
+      "meeting_start": "2026-04-14T14:00:00-07:00",
+      "attendees": [
+        {"name": "Pat", "email": "pat@example.com"},
+        {"name": "Dana", "email": "dana@example.com"}
+      ],
+      "context": {"facts": [], "commitments": []},
+      "context_sources": []
+    }
+  ],
+  "total": 1
+}

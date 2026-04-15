@@ -1,0 +1,59 @@
+{
+  "status": "ok",
+  "commitments": [
+    {
+      "id": "c-001",
+      "who": "the operator",
+      "to_whom": "Alexis",
+      "what": "Send over the Q2 roadmap draft",
+      "by_when": "2026-04-10",
+      "status": "overdue",
+      "source_agent": "meetings-coach",
+      "days_info": "5 days overdue",
+      "is_overdue": true,
+      "is_approaching": false
+    },
+    {
+      "id": "c-002",
+      "who": "the operator",
+      "to_whom": "Jay",
+      "what": "Review the portfolio rebalance proposal",
+      "by_when": "2026-04-12",
+      "status": "overdue",
+      "source_agent": "meetings-coach",
+      "days_info": "3 days overdue",
+      "is_overdue": true,
+      "is_approaching": false
+    },
+    {
+      "id": "c-003",
+      "who": "the operator",
+      "to_whom": "Pat",
+      "what": "Share the vendor comparison spreadsheet",
+      "by_when": "2026-04-16",
+      "status": "open",
+      "source_agent": "meetings-coach",
+      "days_info": "1 days left",
+      "is_overdue": false,
+      "is_approaching": true
+    },
+    {
+      "id": "c-004",
+      "who": "the operator",
+      "to_whom": "Dana",
+      "what": "Review hiring pipeline notes",
+      "by_when": "2026-04-22",
+      "status": "open",
+      "source_agent": "meetings-coach",
+      "days_info": "7 days left",
+      "is_overdue": false,
+      "is_approaching": false
+    }
+  ],
+  "summary": {
+    "total": 4,
+    "open": 2,
+    "overdue": 2,
+    "approaching": 1
+  }
+}

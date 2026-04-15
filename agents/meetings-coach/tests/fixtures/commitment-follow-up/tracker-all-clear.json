@@ -1,0 +1,23 @@
+{
+  "status": "ok",
+  "commitments": [
+    {
+      "id": "c-010",
+      "who": "the operator",
+      "to_whom": "Sam",
+      "what": "Circulate the retro notes",
+      "by_when": "2026-04-30",
+      "status": "open",
+      "source_agent": "meetings-coach",
+      "days_info": "15 days left",
+      "is_overdue": false,
+      "is_approaching": false
+    }
+  ],
+  "summary": {
+    "total": 1,
+    "open": 1,
+    "overdue": 0,
+    "approaching": 0
+  }
+}

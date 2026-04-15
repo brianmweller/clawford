@@ -1,0 +1,21 @@
+{
+  "status": "ok",
+  "event_id": "evt-alexis-420",
+  "meeting_title": "Alexis 1:1",
+  "metrics": {
+    "talk_ratio": 0.55,
+    "brian_words": 2200,
+    "other_words": 1800,
+    "brian_turns": 28,
+    "other_turns": 24,
+    "avg_brian_turn_words": 78.6,
+    "avg_other_turn_words": 75.0,
+    "longest_brian_turn": {
+      "words": 340,
+      "timestamp": "0:12:35",
+      "preview": "So walking through where Q2 landed, I think the main..."
+    },
+    "brian_questions": 3,
+    "brian_filler_count": 8
+  }
+}

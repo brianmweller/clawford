@@ -1,0 +1,500 @@
+"""Tests for agents/meetings-coach/scripts/post-meeting-scan.py.
+
+Phase 4 orchestrator that replaces the OpenClaw LLM cron
+`meetings-coach:post-meeting-scan`. THIS CRON IS DELICATE — the
+2026-04-14 Alexis Lloyd incident re-sent the same debrief 5x across
+2.5 hours. Preserve the fix invariants:
+
+1. Delivery is gated ONLY on `transcript-scan.py` output's `processed`
+   list — NEVER iterate `cache/pending-debrief-*.json` as a queue.
+2. Coaching appends only once per event — check `coaching-history.json`
+   before running metrics and sending.
+3. Cleanup pass is separate from delivery: walks pending files, greps
+   `commitments/active.md` for their event_id, deletes matched ones.
+   That step never sends anything.
+4. Krisp 401 4-step rate-limited alert: stamp `cache/krisp-last-401.json`,
+   check `cache/krisp-last-alert.json` mtime, send Telegram only when
+   >= 90 min since last alert, stamp `cache/krisp-last-alert.json`.
+
+See agents/shared/tests/test_post_meeting_scan_idempotency.py — that
+file asserted the invariants on the LLM cron prompt. This file asserts
+them on the Python orchestrator.
+"""
+from __future__ import annotations
+
+import importlib.util
+import json
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SCRIPT = REPO_ROOT / "agents" / "meetings-coach" / "scripts" / "post-meeting-scan.py"
+FIXTURES = Path(__file__).parent / "fixtures" / "post-meeting-scan"
+
+
+def _load():
+    spec = importlib.util.spec_from_file_location("post_meeting_scan", SCRIPT)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+@pytest.fixture
+def mod():
+    return _load()
+
+
+@pytest.fixture
+def scan_one_new():
+    with open(FIXTURES / "transcript-scan-one-new.json", encoding="utf-8") as f:
+        return json.load(f)
+
+
+@pytest.fixture
+def scan_empty():
+    with open(FIXTURES / "transcript-scan-empty.json", encoding="utf-8") as f:
+        return json.load(f)
+
+
+@pytest.fixture
+def scan_401():
+    with open(FIXTURES / "transcript-scan-401.json", encoding="utf-8") as f:
+        return json.load(f)
+
+
+@pytest.fixture
+def pending_alexis():
+    with open(FIXTURES / "pending-debrief-evt-alexis-420.json", encoding="utf-8") as f:
+        return json.load(f)
+
+
+@pytest.fixture
+def metrics_alexis():
+    with open(FIXTURES / "transcript-metrics-alexis.json", encoding="utf-8") as f:
+        return json.load(f)
+
+
+@pytest.fixture
+def meeting_config():
+    with open(FIXTURES / "meeting-config.json", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _fake_infer(json_payload: dict) -> SimpleNamespace:
+    return SimpleNamespace(
+        ok=True,
+        text=json.dumps(json_payload),
+        error=None,
+        input_tokens=0,
+        output_tokens=0,
+        model="fake",
+    )
+
+
+def _coaching_llm_reply() -> dict:
+    """Shape the orchestrator's LLM prompt should return."""
+    return {
+        "concision": {
+            "assessment": "Long stretches, could tighten.",
+            "quote": "So walking through where Q2 landed...",
+            "timestamp": "0:12:35",
+            "try": "Q2 slipped two weeks; bandwidth is the bottleneck.",
+        },
+        "structured_thinking": {
+            "assessment": "Jumped between scope and timeline.",
+            "quote": "And then on the bandwidth side...",
+            "timestamp": "0:14:02",
+            "try": "Lead with timeline, then causes, then mitigations.",
+        },
+        "empathy": {
+            "assessment": "Asked 3 questions — decent.",
+            "quote": "What do you need from me to unblock the hiring side?",
+            "timestamp": "0:22:10",
+            "try": None,
+        },
+    }
+
+
+# ─── format_debrief ──────────────────────────────────────────────────
+
+
+def test_format_debrief_includes_title_and_sections(mod, pending_alexis):
+    msg = mod.format_debrief(pending_alexis)
+    assert "Alexis 1:1" in msg
+    assert "ACTION ITEMS" in msg
+    assert "DECISIONS" in msg or "KEY POINTS" in msg
+    assert "Q2 roadmap draft" in msg
+    assert "hiring pipeline" in msg
+    assert "/confirm" in msg
+    assert "/dismiss" in msg
+
+
+# ─── coaching history ───────────────────────────────────────────────
+
+
+def test_already_coached_true_when_event_id_present(mod, tmp_path, monkeypatch):
+    history = tmp_path / "coaching-history.json"
+    history.write_text(
+        json.dumps([{"event_id": "evt-alexis-420", "meeting_title": "x"}]),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mod, "COACHING_HISTORY_FILE", history)
+    assert mod._already_coached("evt-alexis-420") is True
+    assert mod._already_coached("evt-other") is False
+
+
+def test_already_coached_false_when_missing_file(mod, tmp_path, monkeypatch):
+    monkeypatch.setattr(mod, "COACHING_HISTORY_FILE", tmp_path / "missing.json")
+    assert mod._already_coached("evt-alexis-420") is False
+
+
+def test_append_coaching_history_idempotent(mod, tmp_path, monkeypatch):
+    history = tmp_path / "coaching-history.json"
+    monkeypatch.setattr(mod, "COACHING_HISTORY_FILE", history)
+
+    entry = {"event_id": "evt-1", "meeting_title": "Alexis 1:1"}
+    mod._append_coaching_history(entry)
+    mod._append_coaching_history(entry)  # second call, same event_id
+    data = json.loads(history.read_text(encoding="utf-8"))
+    assert len([e for e in data if e["event_id"] == "evt-1"]) == 1
+
+
+# ─── cleanup_confirmed_pending ───────────────────────────────────────
+
+
+def test_cleanup_deletes_pending_whose_event_id_is_in_active(
+    mod, tmp_path, monkeypatch
+):
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / "pending-debrief-evt-a.json").write_text(
+        json.dumps({"event_id": "evt-a"}), encoding="utf-8"
+    )
+    (cache / "pending-debrief-evt-b.json").write_text(
+        json.dumps({"event_id": "evt-b"}), encoding="utf-8"
+    )
+    active = tmp_path / "active.md"
+    active.write_text(
+        "- **id:** commit-1\n- **event_id:** evt-a\n- **what:** do the thing\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mod, "CACHE_DIR", cache)
+    monkeypatch.setattr(mod, "ACTIVE_COMMITMENTS_FILE", active)
+
+    deleted = mod._cleanup_confirmed_pending()
+    assert deleted == 1
+    assert not (cache / "pending-debrief-evt-a.json").exists()
+    assert (cache / "pending-debrief-evt-b.json").exists()
+
+
+def test_cleanup_tolerates_missing_active_file(mod, tmp_path, monkeypatch):
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / "pending-debrief-evt-a.json").write_text(
+        json.dumps({"event_id": "evt-a"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(mod, "CACHE_DIR", cache)
+    monkeypatch.setattr(mod, "ACTIVE_COMMITMENTS_FILE", tmp_path / "missing.md")
+    deleted = mod._cleanup_confirmed_pending()
+    assert deleted == 0
+    assert (cache / "pending-debrief-evt-a.json").exists()
+
+
+# ─── run() happy path + invariants ───────────────────────────────────
+
+
+def _patch_common(mod, tmp_path, monkeypatch, *, scan, pending_fixture=None,
+                  metrics=None, meeting_cfg=None, active_text=""):
+    workspace = tmp_path / "meetings-coach-workspace"
+    (workspace / "cache").mkdir(parents=True)
+    (workspace / "scripts").mkdir()
+    history = workspace / "cache" / "coaching-history.json"
+    active_file = tmp_path / "active.md"
+    active_file.write_text(active_text, encoding="utf-8")
+
+    monkeypatch.setattr(mod, "WORKSPACE", workspace)
+    monkeypatch.setattr(mod, "CACHE_DIR", workspace / "cache")
+    monkeypatch.setattr(mod, "SCRIPTS_DIR", workspace / "scripts")
+    monkeypatch.setattr(mod, "COACHING_HISTORY_FILE", history)
+    monkeypatch.setattr(mod, "ACTIVE_COMMITMENTS_FILE", active_file)
+    monkeypatch.setattr(
+        mod, "KRISP_LAST_401_FILE", workspace / "cache" / "krisp-last-401.json"
+    )
+    monkeypatch.setattr(
+        mod, "KRISP_LAST_ALERT_FILE", workspace / "cache" / "krisp-last-alert.json"
+    )
+    monkeypatch.setattr(
+        mod, "LAST_RUN_FILE", workspace / "cache" / "last-post-meeting.json"
+    )
+    monkeypatch.setattr(
+        mod, "MEETING_CONFIG_FILE", workspace / "meeting-config.json"
+    )
+
+    if meeting_cfg is not None:
+        (workspace / "meeting-config.json").write_text(
+            json.dumps(meeting_cfg), encoding="utf-8"
+        )
+
+    if pending_fixture is not None:
+        event_id = pending_fixture["event_id"]
+        (workspace / "cache" / f"pending-debrief-{event_id}.json").write_text(
+            json.dumps(pending_fixture), encoding="utf-8"
+        )
+
+    def fake_run(script, *args, **kw):
+        if script == "gcal-fetch.py":
+            return {"status": "ok", "events": []}
+        if script == "transcript-scan.py":
+            return scan
+        if script == "transcript-metrics.py":
+            return metrics
+        return None
+
+    monkeypatch.setattr(mod, "_run_script", fake_run)
+    return workspace, history
+
+
+def test_run_happy_path_sends_debrief_and_coaching(
+    mod, scan_one_new, pending_alexis, metrics_alexis, meeting_config,
+    tmp_path, monkeypatch
+):
+    workspace, history = _patch_common(
+        mod, tmp_path, monkeypatch,
+        scan=scan_one_new,
+        pending_fixture=pending_alexis,
+        metrics=metrics_alexis,
+        meeting_cfg=meeting_config,
+    )
+
+    sent: list[str] = []
+    monkeypatch.setattr(mod, "resolve_credentials", lambda env: ("tok", "chat"))
+    monkeypatch.setattr(
+        mod, "send_message", lambda tok, chat, text, **kw: sent.append(text) or True
+    )
+    monkeypatch.setattr(mod, "llm_infer", lambda p, **kw: _fake_infer(_coaching_llm_reply()))
+
+    class _Dt(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 4, 15, 17, 15, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(mod, "datetime", _Dt)
+
+    result = mod.run()
+    assert result["status"] == "ok"
+    assert result["processed"] == 1
+    assert result["debriefs_sent"] == 1
+    assert result["coaching_sent"] == 1
+
+    # Exactly two messages: debrief + coaching
+    assert len(sent) == 2
+    assert "Debrief ready" in sent[0] or "Alexis" in sent[0]
+    assert "Meeting Coach" in sent[1] or "CONCISION" in sent[1].upper()
+
+    # Coaching history entry appended
+    data = json.loads(history.read_text(encoding="utf-8"))
+    ids = [e["event_id"] for e in data]
+    assert ids == ["evt-alexis-420"]
+
+
+def test_run_empty_processed_is_silent(
+    mod, scan_empty, pending_alexis, tmp_path, monkeypatch
+):
+    """INVARIANT: even if a pending-debrief-*.json file exists on disk,
+    if it's NOT in scan.processed the orchestrator must NOT send it.
+    This is the 2026-04-14 Alexis incident regression test."""
+    workspace, history = _patch_common(
+        mod, tmp_path, monkeypatch,
+        scan=scan_empty,
+        pending_fixture=pending_alexis,  # file exists on disk but processed=[]
+        meeting_cfg={"coaching": {"enabled": True, "growth_areas": []}},
+    )
+
+    sent: list[str] = []
+    monkeypatch.setattr(mod, "resolve_credentials", lambda env: ("tok", "chat"))
+    monkeypatch.setattr(
+        mod, "send_message", lambda tok, chat, text, **kw: sent.append(text) or True
+    )
+    monkeypatch.setattr(mod, "llm_infer", lambda p, **kw: _fake_infer({}))
+
+    class _Dt(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 4, 15, 17, 45, tzinfo=timezone.utc)
+    monkeypatch.setattr(mod, "datetime", _Dt)
+
+    result = mod.run()
+    assert result["status"] == "ok"
+    assert result["processed"] == 0
+    assert result["debriefs_sent"] == 0
+    assert result["coaching_sent"] == 0
+    assert sent == []
+
+    # History must remain empty — no coaching entry appended
+    assert not history.exists() or json.loads(history.read_text(encoding="utf-8")) == []
+
+
+def test_run_coaching_dedup_skips_when_already_in_history(
+    mod, scan_one_new, pending_alexis, metrics_alexis, meeting_config,
+    tmp_path, monkeypatch
+):
+    """INVARIANT: if coaching-history.json already has an entry for
+    event_id, a re-run must NOT re-send coaching (2026-04-14 bug)."""
+    workspace, history = _patch_common(
+        mod, tmp_path, monkeypatch,
+        scan=scan_one_new,
+        pending_fixture=pending_alexis,
+        metrics=metrics_alexis,
+        meeting_cfg=meeting_config,
+    )
+    # Pre-seed the history with this event_id
+    history.write_text(
+        json.dumps([{"event_id": "evt-alexis-420", "meeting_title": "Alexis 1:1"}]),
+        encoding="utf-8",
+    )
+
+    sent: list[str] = []
+    monkeypatch.setattr(mod, "resolve_credentials", lambda env: ("tok", "chat"))
+    monkeypatch.setattr(
+        mod, "send_message", lambda tok, chat, text, **kw: sent.append(text) or True
+    )
+    monkeypatch.setattr(mod, "llm_infer", lambda p, **kw: _fake_infer(_coaching_llm_reply()))
+
+    class _Dt(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 4, 15, 17, 15, tzinfo=timezone.utc)
+    monkeypatch.setattr(mod, "datetime", _Dt)
+
+    result = mod.run()
+    assert result["status"] == "ok"
+    # Debrief still sends (processed has the item)
+    assert result["debriefs_sent"] == 1
+    # Coaching skipped (already in history)
+    assert result["coaching_sent"] == 0
+    assert len(sent) == 1
+
+    # History unchanged (still 1 entry)
+    data = json.loads(history.read_text(encoding="utf-8"))
+    assert len(data) == 1
+
+
+def test_run_cleanup_pass_runs_and_does_not_send(
+    mod, scan_empty, pending_alexis, tmp_path, monkeypatch
+):
+    """Cleanup pass deletes pending files whose event_id landed in
+    active.md. It does NOT send anything — delivery is separate."""
+    workspace, _ = _patch_common(
+        mod, tmp_path, monkeypatch,
+        scan=scan_empty,
+        pending_fixture=pending_alexis,
+        meeting_cfg={"coaching": {"enabled": True, "growth_areas": []}},
+        active_text="- **id:** c-1\n- **event_id:** evt-alexis-420\n- **what:** x\n",
+    )
+
+    sent: list[str] = []
+    monkeypatch.setattr(mod, "resolve_credentials", lambda env: ("tok", "chat"))
+    monkeypatch.setattr(
+        mod, "send_message", lambda tok, chat, text, **kw: sent.append(text) or True
+    )
+    monkeypatch.setattr(mod, "llm_infer", lambda p, **kw: _fake_infer({}))
+
+    class _Dt(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 4, 15, 17, 45, tzinfo=timezone.utc)
+    monkeypatch.setattr(mod, "datetime", _Dt)
+
+    result = mod.run()
+    assert result["cleanup_count"] == 1
+    assert result["debriefs_sent"] == 0
+    assert sent == []
+    assert not (workspace / "cache" / "pending-debrief-evt-alexis-420.json").exists()
+
+
+# ─── Krisp 401 state machine ─────────────────────────────────────────
+
+
+def test_run_krisp_401_fresh_sends_alert_and_stamps_markers(
+    mod, scan_401, tmp_path, monkeypatch
+):
+    workspace, _ = _patch_common(
+        mod, tmp_path, monkeypatch,
+        scan=scan_401,
+        meeting_cfg={"coaching": {"enabled": True, "growth_areas": []}},
+    )
+
+    sent: list[str] = []
+    monkeypatch.setattr(mod, "resolve_credentials", lambda env: ("tok", "chat"))
+    monkeypatch.setattr(
+        mod, "send_message", lambda tok, chat, text, **kw: sent.append(text) or True
+    )
+
+    class _Dt(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 4, 15, 17, 45, tzinfo=timezone.utc)
+    monkeypatch.setattr(mod, "datetime", _Dt)
+
+    result = mod.run()
+    assert result["krisp_401"] is True
+    # Exactly one alert — no rate-limit suppression on first run
+    assert len(sent) == 1
+    assert "Krisp" in sent[0] and ("expired" in sent[0].lower() or "re-login" in sent[0].lower())
+
+    # Both marker files stamped
+    assert (workspace / "cache" / "krisp-last-401.json").exists()
+    assert (workspace / "cache" / "krisp-last-alert.json").exists()
+
+
+def test_run_krisp_401_rate_limited_within_90min_does_not_spam(
+    mod, scan_401, tmp_path, monkeypatch
+):
+    """If a Krisp 401 alert was sent in the last 90 min, don't send
+    another one on this run. Still stamps the 401 marker (heartbeat
+    needs it for awareness)."""
+    workspace, _ = _patch_common(
+        mod, tmp_path, monkeypatch,
+        scan=scan_401,
+        meeting_cfg={"coaching": {"enabled": True, "growth_areas": []}},
+    )
+    # Pre-seed the alert marker with mtime 30 min ago
+    alert_marker = workspace / "cache" / "krisp-last-alert.json"
+    alert_marker.write_text('{"stamped": true}', encoding="utf-8")
+    old_time = time.time() - (30 * 60)  # 30 min ago
+    import os as _os
+    _os.utime(str(alert_marker), (old_time, old_time))
+
+    sent: list[str] = []
+    monkeypatch.setattr(mod, "resolve_credentials", lambda env: ("tok", "chat"))
+    monkeypatch.setattr(
+        mod, "send_message", lambda tok, chat, text, **kw: sent.append(text) or True
+    )
+
+    class _Dt(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 4, 15, 17, 45, tzinfo=timezone.utc)
+    monkeypatch.setattr(mod, "datetime", _Dt)
+
+    result = mod.run()
+    assert result["krisp_401"] is True
+    # Suppressed by rate limit
+    assert sent == []
+    # 401 marker still stamped (fresh)
+    assert (workspace / "cache" / "krisp-last-401.json").exists()
+
+
+def test_main_always_exits_zero_on_error(mod, monkeypatch, capsys):
+    def boom():
+        raise RuntimeError("simulated")
+    monkeypatch.setattr(mod, "run", boom)
+    rc = mod.main()
+    payload = json.loads(capsys.readouterr().out.strip().split("\n")[-1])
+    assert rc == 0
+    assert payload["status"] == "error"

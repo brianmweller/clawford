@@ -27,6 +27,10 @@
 #   0 10 * * *    connector-daily-refresh               → CONNECTOR_BOT_TOKEN  (Phase 4 — runs 30 min before morning-relationship-nudge at 30 10 UTC so people-scan sees fresh last_interaction)
 #   30 10 * * *   connector-morning-relationship-nudge  → CONNECTOR_BOT_TOKEN  (Phase 4 — daily nudge for 5 AM PT fleet; Monday recap folds weekly-review)
 #   0 8,20 * * *  connector-notes-triage-alert          → CONNECTOR_BOT_TOKEN  (Phase 4 — LLM classifies inbox notes twice daily)
+#   30 10 * * *   meetings-coach-morning-meeting-brief  → MEETINGS_BOT_TOKEN   (Phase 4 — daily brief for 5 AM PT fleet; Monday fold replaces weekly-review)
+#   */30 * * * *  meetings-coach-pre-meeting-alert      → MEETINGS_BOT_TOKEN   (Phase 4 — 15-45 min lookahead, sent-alerts.json dedup)
+#   15,45 * * * * meetings-coach-post-meeting-scan      → MEETINGS_BOT_TOKEN   (Phase 4 — Krisp transcript scan + LLM coaching; preserves 74c726c idempotency)
+#   0 16 * * *    meetings-coach-commitment-follow-up   → MEETINGS_BOT_TOKEN   (Phase 4 — overdue/approaching alert at 9 AM PT)
 #
 # Removed in R3 (replaced by fleet-health):
 #   */30 * * * *  shopping-heartbeat              → covered by fleet-health
@@ -67,6 +71,10 @@ CONTRACT_ENTRIES=(
   "0 10 * * *|connector-daily-refresh|/home/node/.openclaw/connector-workspace/scripts/daily-refresh.py|CONNECTOR_BOT_TOKEN|600"
   "30 10 * * *|connector-morning-relationship-nudge|/home/node/.openclaw/connector-workspace/scripts/morning-relationship-nudge.py|CONNECTOR_BOT_TOKEN|300"
   "0 8,20 * * *|connector-notes-triage-alert|/home/node/.openclaw/connector-workspace/scripts/notes-triage-alert.py|CONNECTOR_BOT_TOKEN|180"
+  "30 10 * * *|meetings-coach-morning-meeting-brief|/home/node/.openclaw/meetings-coach-workspace/scripts/morning-meeting-brief.py|MEETINGS_BOT_TOKEN|300"
+  "*/30 * * * *|meetings-coach-pre-meeting-alert|/home/node/.openclaw/meetings-coach-workspace/scripts/pre-meeting-alert.py|MEETINGS_BOT_TOKEN|180"
+  "15,45 * * * *|meetings-coach-post-meeting-scan|/home/node/.openclaw/meetings-coach-workspace/scripts/post-meeting-scan.py|MEETINGS_BOT_TOKEN|300"
+  "0 16 * * *|meetings-coach-commitment-follow-up|/home/node/.openclaw/meetings-coach-workspace/scripts/commitment-follow-up.py|MEETINGS_BOT_TOKEN|120"
 )
 
 # Markers for old entries to REMOVE on next install run. Used by the
