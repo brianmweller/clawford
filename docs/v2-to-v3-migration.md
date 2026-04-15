@@ -1,6 +1,6 @@
 # Guide v2 → v3 migration checklist
 
-*Last updated: 2026-04-15 (Phase 5)*
+*Last updated: 2026-04-15 (Phase 6)*
 
 Per-chapter disposition for the migration from `guide-v2/` (OpenClaw-era) to `guide-v3/` (Clawford-native). Dispositions:
 
@@ -18,10 +18,10 @@ Status values: **pending**, **in_progress**, **done**.
 | 01 | `index.md` | migrate | 01 | `index.md` | pending | Phase 7 | Update "stitched together with OpenClaw" paragraph; refresh architecture diagram |
 | — | — | net-new | 02 | `02-what-clawford-isnt.md` | **drafted** | Phase 0 → Phase 7 (receipts) | The manifesto chapter. Section 9 "What the migration looked like" is a placeholder until Phase 7. |
 | 02 | `02-before-you-start.md` | migrate | 03 | `03-before-you-start.md` | pending | Phase 7 | Add one-line "this is the Clawford-native guide" note at top |
-| 03 | `03-vps-setup.md` | migrate | 04 | `04-vps-setup.md` | pending | Phase 6 | Replace OpenClaw install step with `codex` install + auth bootstrap |
+| 03 | `03-vps-setup.md` | migrate | 04 | `04-vps-setup.md` | **done** | Phase 6 | OpenClaw gateway install section replaced with `codex login` + SCP `~/.codex/auth.json` pattern. GHCR PAT step removed. Smoke test items replaced with `codex --version` / `codex infer 'say hi'`. Pre-liberation note flags the vestigial Docker install. |
 | 04 | `04-dev-setup.md` | migrate | 05 | `05-dev-setup.md` | pending | Phase 7 | Minor updates; pattern of "Claude Code + test harness" stays |
 | 05 | `05-infra-setup.md` | **rewrite** | 06 | `06-infra-setup.md` | **done** | Phase 5 | v3 describes the shared library (`agents/shared/*`), shared brain (git + Dropbox split), Clawford-native deploy.py with 10 safeguards (Safeguard 8 retired with tombstone), and the host-cron runtime. OpenClaw gateway framing dropped. |
-| 06 | `06-intro-to-agents.md` | **rewrite** | 07 | `07-intro-to-agents.md` | pending | Phase 6 | v2 has "two kinds of crons" (OpenClaw vs host), the permissive-exec-approvals rationale, the 8-workspace-files pattern loaded by OpenClaw. All of these are OpenClaw-era framings that disappear in v3. Keep the script-contract and LLM-vs-deterministic seam (those survive), drop the rest. |
+| 06 | `06-intro-to-agents.md` | **rewrite** | 07 | `07-intro-to-agents.md` | **done** | Phase 6 | "Two kinds of crons" collapsed into "host crons only + 5 AM PT fleet path." "Exec-approvals, and why mine are permissive" replaced with a three-layer defense-in-depth paragraph pointing at OS-level immutability, the script contract, and the `deploy.py` safeguards. Eight workspace files reframed as durable identity loaded on demand, not auto-loaded per cron tick. Script contract and LLM-vs-deterministic sections preserved. 600s-LLM-cron-budget and BOOTSTRAP.md-split-brain pitfalls dropped (both OpenClaw-specific). |
 | 07-0 | `07-0-your-first-agent.md` | migrate | 07-0 | `07-0-your-first-agent.md` | pending | Phase 4 | Update deploy steps for Clawford-native flow |
 | 07-1 | `07-1-mr-fixit.md` | migrate | 07-1 | `07-1-mr-fixit.md` | pending | Phase 4 (fix-it sub-phase) | Update references to deploy.py + host crons; the `cron-self-check` story changes to "diff expected-crons.json against crontab -l" |
 | 07-2a | `07-2a-lowly-worm-newsfeed.md` | migrate | 07-2a | `07-2a-lowly-worm-newsfeed.md` | pending | Phase 3 | Reference `agents.shared.llm.infer` instead of `openclaw infer`; describe the new host-cron + llm-cron-runner.py pattern |
