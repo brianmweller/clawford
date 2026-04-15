@@ -12,9 +12,12 @@ This removes the LLM from the write path — no shell escaping, no python -c,
 no approval issues.
 """
 
+import os
 import sys
 
-STATUS_FILE = "/home/node/Dropbox/openclaw-backup/agents/fix-it.status.md"
+STATUS_FILE = os.path.expanduser(
+    "~/Dropbox/openclaw-backup/agents/fix-it.status.md"
+)
 
 content = sys.stdin.read()
 if not content.strip():

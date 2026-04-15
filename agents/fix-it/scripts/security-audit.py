@@ -24,7 +24,8 @@ import sys
 from datetime import datetime, timezone
 
 APPROVALS_PATH = os.environ.get(
-    "EXEC_APPROVALS_PATH", "/home/node/.openclaw/exec-approvals.json"
+    "EXEC_APPROVALS_PATH",
+    os.path.expanduser("~/.openclaw/exec-approvals.json"),
 )
 AUDIT_TIMEOUT_SEC = 90
 
