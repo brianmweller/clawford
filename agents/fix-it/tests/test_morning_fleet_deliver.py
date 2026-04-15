@@ -40,6 +40,7 @@ def fake_fleet(tmp_path, monkeypatch):
         "TELEGRAM_BOT_TOKEN",
         "SHOPPING_BOT_TOKEN",
         "NEWSDIGEST_BOT_TOKEN",
+        "CONNECTOR_BOT_TOKEN",
     ):
         monkeypatch.setenv(t, "FAKE_" + t)
     mod = _load_deliver()
@@ -85,19 +86,39 @@ def test_read_brief_empty_file(fake_fleet):
     assert status == "empty"
 
 
-def test_main_delivers_all_5_when_all_present(fake_fleet):
+def test_fleet_roster_includes_connector(fake_fleet):
+    """Regression guard (2026-04-15): Huckle Cat's gather cron writes
+    connector-workspace/cache/morning-brief-ready.txt daily, but for
+    several days it was missing from FLEET, so fleet-deliver silently
+    skipped it and no morning relationship nudge went out."""
+    fleet = fake_fleet["mod"].FLEET
+    ids = [row[0] for row in fleet]
+    assert "connector" in ids, f"connector missing from FLEET: {ids}"
+    connector_row = next(row for row in fleet if row[0] == "connector")
+    assert connector_row[1] == "CONNECTOR_BOT_TOKEN"
+    assert connector_row[2] == "Huckle Cat"
+
+
+def test_main_delivers_all_6_when_all_present(fake_fleet):
     base = fake_fleet["base"]
-    for agent in ("family-calendar", "meetings-coach", "fix-it", "shopping", "news-digest"):
+    for agent in (
+        "family-calendar",
+        "meetings-coach",
+        "fix-it",
+        "shopping",
+        "news-digest",
+        "connector",
+    ):
         _write_brief(base, agent, f"brief from {agent}")
 
     with patch.object(fake_fleet["mod"], "send_telegram", return_value=True) as send:
         rc = fake_fleet["mod"].main()
 
     assert rc == 0
-    assert send.call_count == 5
+    assert send.call_count == 6
     # Verify each call used a DIFFERENT bot token (not all the same)
     tokens_used = [call.args[0] for call in send.call_args_list]
-    assert len(set(tokens_used)) == 5, f"expected 5 distinct bot tokens, got {tokens_used}"
+    assert len(set(tokens_used)) == 6, f"expected 6 distinct bot tokens, got {tokens_used}"
     # Every token should start with FAKE_ (from the fixture)
     assert all(t.startswith("FAKE_") for t in tokens_used)
 
@@ -110,7 +131,7 @@ def test_main_returns_zero_when_no_cache_files(fake_fleet, capsys):
     out = capsys.readouterr().out
     report = json.loads(out)
     assert report["delivered"] == []
-    assert len(report["skipped"]) == 5
+    assert len(report["skipped"]) == 6
     assert all(reason == "missing" for _, reason in report["skipped"])
 
 

@@ -42,6 +42,7 @@ FLEET = [
     ("fix-it", "TELEGRAM_BOT_TOKEN", "Mr Fixit"),
     ("shopping", "SHOPPING_BOT_TOKEN", "Hilda Hippo"),
     ("news-digest", "NEWSDIGEST_BOT_TOKEN", "Lowly Worm"),
+    ("connector", "CONNECTOR_BOT_TOKEN", "Huckle Cat"),
 ]
 
 CACHE_FILENAME = "cache/morning-brief-ready.txt"
