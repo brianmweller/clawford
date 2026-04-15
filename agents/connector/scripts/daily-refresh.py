@@ -464,7 +464,6 @@ def _find_google_token() -> Path | None:
     candidates = [
         Path(os.path.expanduser("~/.openclaw/family-calendar-workspace/token.json")),
         Path(os.path.expanduser("~/.openclaw/meetings-coach-workspace/token.json")),
-        SCRIPT_DIR.parent.parent / "family-calendar" / "token.json",
     ]
     for p in candidates:
         if p.exists():

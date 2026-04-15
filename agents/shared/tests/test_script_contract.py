@@ -256,12 +256,18 @@ def _assert_compliant_output(stdout: str, returncode: int, stderr: str) -> Contr
 
 
 def _run_bare(script_path: Path, tmp_home: Path) -> ContractResult:
+    # input="" (not stdin=DEVNULL) — on Windows, DEVNULL maps to NUL which
+    # is reported as a TTY by sys.stdin.isatty(), so scripts that branch
+    # on isatty (e.g. interactive getpass helpers) would still try to
+    # prompt and hang. An empty-PIPE stdin guarantees isatty()==False
+    # everywhere.
     try:
         proc = subprocess.run(
             [sys.executable, str(script_path)],
             capture_output=True, text=True,
             env=_isolated_env(tmp_home),
             cwd=str(script_path.parent),
+            input="",
             timeout=20,
         )
     except subprocess.TimeoutExpired as e:
@@ -284,6 +290,7 @@ def _run_wrapped(script_path: Path, tmp_home: Path) -> ContractResult:
             capture_output=True, text=True,
             env=_isolated_env(tmp_home),
             cwd=str(script_path.parent),
+            input="",
             timeout=30,
         )
     except subprocess.TimeoutExpired as e:
