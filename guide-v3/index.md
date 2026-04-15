@@ -30,6 +30,7 @@
 | 09 | Scripts and configs reference | pending |
 | 10 | CLI reference | pending |
 | 11 | Glossary | pending |
+| 99 | [Unsorted operator lessons](99-unsorted-lessons.md) | **holding pen** — raw lessons awaiting triage into their natural chapters |
 
 See [`docs/v2-to-v3-migration.md`](../docs/v2-to-v3-migration.md) for the per-chapter migration checklist and status.
 
