@@ -133,9 +133,11 @@ def launch_camoufox(
     *,
     width: int = 1280,
     height: int = 800,
-    headless: bool = False,
+    headless: "bool | str" = False,
     os_name: str = "windows",
     extra_config: dict | None = None,
+    persistent_context: bool = False,
+    user_data_dir: str | os.PathLike | None = None,
 ) -> Iterator[Any]:
     """Context manager yielding a Camoufox browser instance.
 
@@ -146,12 +148,18 @@ def launch_camoufox(
     `extra_config` is merged into the default viewport config so
     individual callers can override specific Camoufox properties
     (e.g. the Costco daemon's AudioContext overrides).
+
+    Pass `persistent_context=True` and `user_data_dir=...` for flows
+    that need cookies/localStorage to survive across launches —
+    Google Messages Web auth + periodic mine is the canonical case.
+    Without those, each launch is a fresh browser, which is what the
+    Amazon/Costco auto-login flows want.
     """
     config = _viewport_config(width, height)
     if extra_config:
         config.update(extra_config)
 
-    instance = _Camoufox(
+    launch_kwargs: dict[str, Any] = dict(
         headless=headless,
         proxy=proxy_cfg,
         geoip=bool(proxy_cfg),
@@ -160,5 +168,11 @@ def launch_camoufox(
         config=config,
         i_know_what_im_doing=True,
     )
+    if persistent_context:
+        launch_kwargs["persistent_context"] = True
+    if user_data_dir is not None:
+        launch_kwargs["user_data_dir"] = str(user_data_dir)
+
+    instance = _Camoufox(**launch_kwargs)
     with instance as browser:
         yield browser

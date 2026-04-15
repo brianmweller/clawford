@@ -278,6 +278,30 @@ def test_load_gmessages_signals_tolerates_malformed_json(tmp_path, dr):
     assert dr._load_gmessages_signals(cache) == {}
 
 
+def test_load_gmessages_by_name_strips_parenthetical_suffix(tmp_path, dr):
+    """Google Messages displays contacts as 'Dan Zylberglejd (Netflix)'
+    — the parenthetical employer hint is helpful in the UI but breaks
+    name-match against the person file's plain 'Dan Zylberglejd' H1.
+    The loader must normalize both so they match."""
+    cache = tmp_path / "mined-gmessages.json"
+    cache.write_text(json.dumps({
+        "contacts": [
+            {"name": "Dan Zylberglejd (Netflix)", "phone": "", "last_message_date": "2026-04-11"},
+            {"name": "Mayra (Cleaning)", "phone": "", "last_message_date": "2026-04-07"},
+            {"name": "Louise (Violet's Mom)", "phone": "", "last_message_date": "2026-04-12"},
+        ],
+    }))
+    by_name = dr._load_gmessages_by_name(cache)
+    # Both the bare name AND the (...)-stripped version are exposed
+    # so the index can match either spelling.
+    assert by_name["dan zylberglejd"] == "2026-04-11"
+    assert by_name["mayra"] == "2026-04-07"
+    assert by_name["louise"] == "2026-04-12"
+    # The original full name is still present in case the person file
+    # actually uses the full string.
+    assert by_name["dan zylberglejd (netflix)"] == "2026-04-11"
+
+
 def test_load_gmessages_by_name_returns_lowercased_name_to_date(tmp_path, dr):
     cache = tmp_path / "mined-gmessages.json"
     cache.write_text(json.dumps({

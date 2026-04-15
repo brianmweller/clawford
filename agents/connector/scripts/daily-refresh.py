@@ -123,23 +123,34 @@ def _load_gmessages_signals(cache_path: Path) -> dict[str, str]:
     return signals
 
 
+_PARENS_RE = re.compile(r"\s*\([^)]*\)\s*$")
+
+
 def _load_gmessages_by_name(cache_path: Path) -> dict[str, str]:
     """Read mined-gmessages.json → {lower(name): last_message_date}.
-    Complements _load_gmessages_signals for contacts the user has saved
-    in Google Messages with a display name rather than a raw phone."""
+
+    Google Messages displays contacts as 'Dan Zylberglejd (Netflix)' or
+    'Mayra (Cleaning)' — the parenthetical is a UI hint that breaks
+    name-match against the person file's plain H1. We expose BOTH the
+    full name and the (...)-stripped variant so the index can match
+    either spelling.
+    """
     signals: dict[str, str] = {}
     for entry in _read_gmessages_cache(cache_path):
         raw_name = (entry.get("name") or "").strip()
         date = (entry.get("last_message_date") or "")[:10]
         if not raw_name or not date:
             continue
-        # Skip entries where name is actually a phone (digits + punctuation)
         if not any(ch.isalpha() for ch in raw_name):
             continue
-        key = raw_name.lower()
-        cur = signals.get(key)
-        if not cur or date > cur:
-            signals[key] = date
+        keys = {raw_name.lower()}
+        stripped = _PARENS_RE.sub("", raw_name).strip()
+        if stripped and stripped.lower() != raw_name.lower():
+            keys.add(stripped.lower())
+        for key in keys:
+            cur = signals.get(key)
+            if not cur or date > cur:
+                signals[key] = date
     return signals
 
 

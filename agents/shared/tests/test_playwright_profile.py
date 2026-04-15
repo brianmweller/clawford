@@ -212,6 +212,66 @@ def test_launch_persistent_profile_cleans_locks_before_launch(
         pass
 
 
+def test_launch_persistent_profile_forwards_ignore_default_args(
+    monkeypatch, tmp_path
+):
+    """Some sites (Google Messages Web) detect Playwright's default
+    --enable-automation flag and refuse to complete handshakes. Callers
+    must be able to suppress it via ignore_default_args."""
+    profile = tmp_path / "profile"
+    profile.mkdir()
+
+    captured = {}
+
+    class FakePW:
+        class chromium:
+            @staticmethod
+            def launch_persistent_context(**kwargs):
+                captured["kwargs"] = kwargs
+                return MagicMock()
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            pass
+
+    monkeypatch.setattr(playwright_profile, "_sync_playwright", lambda: FakePW())
+
+    with playwright_profile.launch_persistent_profile(
+        profile, ignore_default_args=["--enable-automation"]
+    ) as _:
+        pass
+
+    assert captured["kwargs"]["ignore_default_args"] == ["--enable-automation"]
+
+
+def test_launch_persistent_profile_omits_ignore_default_args_by_default(
+    monkeypatch, tmp_path
+):
+    profile = tmp_path / "profile"
+    profile.mkdir()
+
+    captured = {}
+
+    class FakePW:
+        class chromium:
+            @staticmethod
+            def launch_persistent_context(**kwargs):
+                captured["kwargs"] = kwargs
+                return MagicMock()
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            pass
+
+    monkeypatch.setattr(playwright_profile, "_sync_playwright", lambda: FakePW())
+
+    with playwright_profile.launch_persistent_profile(profile) as _:
+        pass
+
+    # Don't pass the kwarg unless caller asked — preserves Playwright defaults
+    assert "ignore_default_args" not in captured["kwargs"]
+
+
 def test_launch_persistent_profile_uses_xvfb_display_when_requested(
     monkeypatch, tmp_path
 ):

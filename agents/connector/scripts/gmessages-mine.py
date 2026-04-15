@@ -186,38 +186,57 @@ _ROW_EXTRACTOR_JS = r"""
     }
   }
 
+  // Recognize common Google Messages timestamp formats: "Yesterday",
+  // "Today", weekday names, "12:35 PM" / "14:05", "Mar 28", "3/28/25",
+  // "Apr 5". Avoid matching emoji-only spans or message snippets.
+  const TIME_RE = /^(Today|Yesterday|Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|\d{1,2}:\d{2}\s*(AM|PM|am|pm)?|[A-Z][a-z]{2}\s\d{1,2}|\d{1,2}\/\d{1,2}\/\d{2,4}|\d+\s*(min|h|hr|hrs|d))$/;
+
+  // Walk every element in the row and collect its DIRECT text (the
+  // text node children only — not concatenated descendant text). This
+  // gives us the discrete rendered strings: name, snippet, time tag.
+  function directText(el) {
+    let out = '';
+    for (const child of el.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        out += child.textContent;
+      }
+    }
+    return out.trim();
+  }
+
   const out = [];
   for (const row of rows) {
-    // Strategies for name extraction, in preference order:
-    //   1. an explicit .name / .display-name / [data-name] attribute
-    //   2. the first <h3> / <h4> / .title
-    //   3. the largest text span inside the row
-    let name = "";
-    const nameEl =
-      row.querySelector('[class*="name"] [dir], [class*="name"] span, .name, .display-name, h3, h4, [data-name]');
-    if (nameEl) {
-      name = (nameEl.textContent || "").trim();
-    } else {
-      // Fallback: first non-empty text node
-      const walk = row.querySelector('span, div');
-      if (walk) name = (walk.textContent || "").trim();
+    const texts = [];
+    row.querySelectorAll('*').forEach(el => {
+      const t = directText(el);
+      if (t) texts.push(t);
+    });
+
+    // Time: rightmost text matching the time regex
+    let time = '';
+    for (let i = texts.length - 1; i >= 0; i--) {
+      if (TIME_RE.test(texts[i])) {
+        time = texts[i];
+        break;
+      }
     }
 
-    // Time: typically a small <span> with a short string
-    let time = "";
-    const timeEl =
-      row.querySelector('[class*="time"], [class*="timestamp"], time, [aria-label*=":"]');
-    if (timeEl) {
-      time = (timeEl.textContent || "").trim();
+    // Name: explicit selector first, then first non-time, non-snippet
+    let name = '';
+    const nameEl = row.querySelector('h3, h4, [class*="name"]:not([class*="time"]):not([class*="timestamp"])');
+    if (nameEl) {
+      name = directText(nameEl) || (nameEl.textContent || '').trim().split('\n')[0];
     }
-    if (!time) {
-      // Fallback: the shortest text span of length <= 20
-      const spans = row.querySelectorAll('span');
-      for (const sp of spans) {
-        const t = (sp.textContent || "").trim();
-        if (t && t.length > 0 && t.length <= 20) {
-          if (!time || t.length < time.length) time = t;
-        }
+    if (!name) {
+      for (const t of texts) {
+        if (!t || t === time) continue;
+        if (TIME_RE.test(t)) continue;
+        if (/^[\p{Extended_Pictographic}\s]+$/u.test(t)) continue;
+        if (/^You:\s/.test(t)) continue;
+        if (/\u201c|\u201d/.test(t)) continue;
+        if (t.length > 80) continue;
+        name = t;
+        break;
       }
     }
 
@@ -234,21 +253,33 @@ _ROW_EXTRACTOR_JS = r"""
 def _scrape_with_playwright() -> tuple[list[dict], str | None]:
     """Returns (raw_rows, error_or_none). Each raw row is {name, time}."""
     try:
-        from agents.shared.playwright_profile import launch_persistent_profile
+        from agents.shared.camoufox_proxy import launch_camoufox
     except Exception as e:
-        return [], f"playwright_profile import failed: {e}"
+        return [], f"camoufox_proxy import failed: {e}"
 
     try:
-        with launch_persistent_profile(PROFILE_DIR, headless=True) as browser:
-            pages = browser.pages
-            page = pages[0] if pages else browser.new_page()
+        # Camoufox + persistent context, mirroring gmessages-auth.py
+        # exactly. Google Messages Web inspects the navigator on every
+        # load — chromium gets `signin/rejected` even with the
+        # --enable-automation flag stripped, but Camoufox's patched
+        # Firefox passes cleanly with the same profile cookies the
+        # auth flow already wrote.
+        with launch_camoufox(
+            proxy_cfg=None,
+            headless="virtual",
+            os_name="windows",
+            persistent_context=True,
+            user_data_dir=PROFILE_DIR,
+        ) as ctx:
+            pages = ctx.pages
+            page = pages[0] if pages else ctx.new_page()
             page.goto(MESSAGES_URL, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
             page.wait_for_timeout(POST_LOAD_SETTLE_MS)
 
-            # Sanity check: if we bounce to the auth page, the profile
-            # is no longer paired and the user needs to re-run gmessages-auth.
+            # Sanity check: if we bounce to /welcome the profile lost
+            # its session and the user needs to re-run gmessages-auth.
             current = page.url or ""
-            if "authentication" in current:
+            if "/web/welcome" in current or "authentication" in current:
                 return [], "profile expired — re-run gmessages-auth.py"
 
             rows: list[dict] = page.evaluate(_ROW_EXTRACTOR_JS)

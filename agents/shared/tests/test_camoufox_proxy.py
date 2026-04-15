@@ -215,6 +215,63 @@ def test_launch_camoufox_default_viewport_is_1280x800(monkeypatch):
     assert config["window.outerHeight"] == 800
 
 
+# ─── persistent context (gmessages-web flow) ───────────────────────
+
+
+def test_launch_camoufox_persistent_context_forwards_user_data_dir(monkeypatch, tmp_path):
+    """Google Messages Web sign-in needs cookies/localStorage to persist
+    across launches (long-lived auth, 2FA only on first sign-in). The
+    auth flow saves to a profile dir and the periodic mine reads from
+    it, so launch_camoufox must accept persistent_context + user_data_dir."""
+    captured = {}
+
+    class FakeInstance:
+        def __enter__(self):
+            return MagicMock()
+        def __exit__(self, *a):
+            return None
+
+    monkeypatch.setattr(
+        camoufox_proxy,
+        "_Camoufox",
+        lambda **kw: captured.update(kw) or FakeInstance(),
+    )
+
+    profile = tmp_path / "gmessages-profile"
+    with camoufox_proxy.launch_camoufox(
+        None, persistent_context=True, user_data_dir=profile
+    ) as _:
+        pass
+
+    assert captured["persistent_context"] is True
+    assert captured["user_data_dir"] == str(profile)
+
+
+def test_launch_camoufox_omits_persistent_kwargs_by_default(monkeypatch):
+    """Existing consumers (Costco daemon, Amazon browser) launch fresh
+    Camoufox each time. They must NOT see persistent_context or
+    user_data_dir injected when not requested."""
+    captured = {}
+
+    class FakeInstance:
+        def __enter__(self):
+            return MagicMock()
+        def __exit__(self, *a):
+            return None
+
+    monkeypatch.setattr(
+        camoufox_proxy,
+        "_Camoufox",
+        lambda **kw: captured.update(kw) or FakeInstance(),
+    )
+
+    with camoufox_proxy.launch_camoufox(None) as _:
+        pass
+
+    assert "persistent_context" not in captured
+    assert "user_data_dir" not in captured
+
+
 # ─── Constants ──────────────────────────────────────────────────────
 
 

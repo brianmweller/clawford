@@ -138,11 +138,18 @@ def launch_persistent_profile(
     xvfb_display: int | None = None,
     executable_path: str | None = None,
     args: list[str] | None = None,
+    ignore_default_args: list[str] | None = None,
 ) -> Iterator[Any]:
     """Context manager yielding a Playwright persistent Chromium context.
 
     Cleans stale singleton locks before launch. Optionally starts Xvfb
     on the requested display. On exit, closes the context.
+
+    `ignore_default_args` lets callers strip Playwright's default switches
+    that some sites use to detect automation (notably --enable-automation,
+    which Google Messages Web rejects during QR pairing). Forwarded to
+    chromium.launch_persistent_context only when the caller passes it,
+    so existing consumers see no behavior change.
     """
     profile = Path(profile_dir)
     ensure_profile_dir(profile)
@@ -154,13 +161,17 @@ def launch_persistent_profile(
     launch_args = list(args) if args is not None else list(_DEFAULT_ARGS)
     exe = executable_path or _DEFAULT_CHROMIUM
 
+    launch_kwargs: dict[str, Any] = dict(
+        user_data_dir=str(profile),
+        headless=headless,
+        args=launch_args,
+        executable_path=exe,
+    )
+    if ignore_default_args is not None:
+        launch_kwargs["ignore_default_args"] = list(ignore_default_args)
+
     with _sync_playwright() as p:
-        browser = p.chromium.launch_persistent_context(
-            user_data_dir=str(profile),
-            headless=headless,
-            args=launch_args,
-            executable_path=exe,
-        )
+        browser = p.chromium.launch_persistent_context(**launch_kwargs)
         try:
             yield browser
         finally:
