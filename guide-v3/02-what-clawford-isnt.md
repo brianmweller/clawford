@@ -215,20 +215,41 @@ Running without it hasn't hurt. That is the honest answer.
 
 ## What the migration looked like
 
-*This section gets polished at the end of the migration (Phase 7) with real receipts — calendar time per phase, specific incidents avoided during the migration window, measurable wins. For the working version, see the migration plan file itself.*
+The plan called for "3-4 calendar weeks of evenings/weekends." The actual migration ran across **two calendar days** (2026-04-14 and 2026-04-15) and **~25 commits**. Total delta in the liberation arc: **+20,470 insertions, -4,364 deletions** — net positive because the new shared library is real code that replaces a black box. The shape that came out the other side is smaller, more legible, and self-contained.
 
-Rough shape of the plan:
+### Per-phase shape
 
-- **Phase 0** — Draft this chapter as a decision doc and scaffold `guide-v3/` so the rest of the migration has somewhere to land.
-- **Phase 1** — Bootstrap `codex` auth on the VPS and introduce a shared `llm.py` backend shim that both `openclaw infer` and `codex` dispatch through. No call sites touched yet.
-- **Phase 2** — Build the complete shared library (Tier 1, Tier 2, Tier 3, plus `brain.py`) before migrating any agent. Shapes derived from existing duplicated code.
-- **Phase 3** — Pilot-migrate news-digest (Lowly Worm). Verify by firing every cron in a day-in-the-life simulation, not by running long parallel soaks.
-- **Phase 4** — Fleet-port the remaining five agents in complexity-ascending order.
-- **Phase 5** — Rewrite `deploy.py`'s three OpenClaw-coupled Safeguards.
-- **Phase 6** — Stop OpenClaw processes; promote `codex` to the default backend.
-- **Phase 7** — Delete the `oc()` wrapper, rename `~/.openclaw/` → `~/.clawford/`, polish this chapter with receipts, finalize v3.
+- **Phase 0+1** — 1 commit. Drafted this chapter as a decision doc, scaffolded `guide-v3/`, and wrote the first version of [`agents/shared/llm.py`](../agents/shared/llm.py) as a direct codex/responses HTTP broker. The original plan called for a dispatch shim that supported both `openclaw infer` and `codex`; the shim turned out to be unnecessary because every call site in the fleet flipped to the new broker before any back-compat path was needed.
+- **Phase 2** — 5 commits. Built the entire shared library before migrating any agent: `telegram.py`, `retry_policy.py`, `brain.py`, `heartbeat_base.py`, `google_oauth.py`, `playwright_profile.py`, `camoufox_proxy.py`. Each module came in with its own `tests/test_*.py` written first, watched red, implemented green. The full-library-first sequencing turned out to be the cheapest shape — every Phase 4 agent migration was a thin call-site flip rather than a code-write.
+- **Phase 3** — 9 commits. Pilot-migrated news-digest end-to-end. Wrapped two false starts (the morning-edition cron contract had a subtle stdout shape bug that took two follow-up fixes to nail) — both surfaced inside a day-in-the-life simulation, not in a long parallel soak. Hours, not days.
+- **Phase 4** — 5 main commits + ~10 follow-ups across the five remaining agents. Complexity-ascending order: shopping → family-calendar → connector → meetings-coach → fix-it. The 5 AM PT fleet-brief path emerged here as a load-bearing convention: every morning cron writes to `cache/morning-brief-ready.txt`, and a single `morning-fleet-deliver-host.sh` at `0 12 * * *` UTC aggregates and ships. The rule got documented in agent memory after one cron — shopping — was caught populating at the wrong time.
+- **Phase 5** — 2 commits. Rewrote `deploy.py`'s three OpenClaw-coupled Safeguards (6/7/8) and drafted [Ch 06 — Infra setup](06-infra-setup.md). Safeguard 8 (exec-approvals baseline drift) got retired with a tombstone comment because the OpenClaw approvals concept it guarded no longer existed.
+- **Phase 6** — 3 commits. Stopped the OpenClaw gateway container, made `deploy.py` live-run zero-OC (verified by a structural test that monkeypatches every helper to raise), and drafted [Ch 04 — VPS setup](04-vps-setup.md) and [Ch 07 — Intro to agents](07-intro-to-agents.md).
+- **Phase 7** — this commit + a few follow-ups. Deleted ~350 LoC of OpenClaw plumbing from `deploy.py` (`oc()`, `oc_json()`, the cron-reconciliation trio, the channel/binding/approvals trio, `check_compose_yml_drift`), removed the Safeguard 11 docker-compose drift check, deleted `ops/docker-compose.yml`, `agents/shared/deploy_wrapper.sh`, and `ops/exec-approvals-baseline.json`. Polished this chapter with the receipts you're reading now.
 
-Red/green TDD throughout. Tests first, confirm red, implement, confirm green — no bottom-up implementations.
+### Incidents avoided by discipline
+
+Two stand out from the migration window itself:
+
+- **2026-04-15 — post-meeting-scan idempotency.** Mid-Phase-4, the meetings-coach `post-meeting-scan` cron started double-confirming meeting debriefs because it didn't check whether a debrief was already in `~/Dropbox/openclaw-backup/commitments/active.md` before re-staging it. The fix landed as a 6-test-case unit suite (happy path, idempotent skip, Krisp 401 rate-limit, fresh alert, no-transcripts silence, partial confirm + dismiss) that pinned the state-machine semantics. Without TDD discipline — specifically writing the test cases against real `cache/pending-debrief-*.json` files and asserting the active-md grep — the bug would have re-surfaced silently the next time the cron got touched, and the symptom (3-5 duplicate Telegram messages per meeting) would have looked like a delivery layer issue rather than a state issue.
+- **The 5 AM PT fleet-brief drift.** Shopping's first migration commit copied the OpenClaw cron's old schedule (`0 14 * * *` = 7 AM PT) into the host-cron registration without questioning it. The next morning the brief landed on time but the *digest* was missing — because the fleet-brief aggregator at 12:00 UTC was reading a `cache/morning-brief-ready.txt` file that hadn't been written yet. Cost: one extra commit and ~20 minutes of head-scratching. The recovery introduced the **5 AM PT fleet path** convention as a hard rule: every daily brief populates at `30 10 * * *` UTC and the fleet aggregator delivers at `0 12 * * *` UTC. That convention now lives in agent memory and will catch the next agent that tries to direct-send.
+
+### Measurable wins
+
+- **~260x reduction in per-call LLM token overhead.** The codex CLI prepends ~8,100 tokens of agentic framing to every call. The direct-HTTP broker in [`agents/shared/llm.py`](../agents/shared/llm.py) sends ~25 tokens of system-prompt scaffolding. For a fleet that fires dozens of cron ticks a day, the difference is the gap between "subscription is fine" and "subscription is fine *and* I have headroom for new agents."
+- **~350 lines of `deploy.py` deleted in Phase 7 alone.** The whole Phase 7 sweep removed ~1,000 lines of test + production OpenClaw code paths. `deploy.py` is now a file-sync + validation tool — exactly the shape it should have always been.
+- **Zero-OC live-run invariant.** `deploy.py` no longer references the OpenClaw gateway anywhere. The structural guarantee is enforced by a test (`test_phase7_openclaw_helpers_deleted`) that fails loudly if any deleted symbol gets resurrected.
+- **Test count grew.** ~810 tests passing across the fleet at the end of Phase 7, up from the pre-liberation baseline. Not net additions (some OpenClaw-coupled tests got deleted alongside their subjects) but an honest expansion of what's covered. The TDD discipline carried throughout: every shared-library module landed with tests in the same commit or earlier, never later.
+
+### What didn't change
+
+The shared brain — git-tracked schemas under `ops/brain/*` plus Dropbox-synced runtime state under `~/Dropbox/openclaw-backup/people|status|facts|queues/*` — survived the migration untouched. The architectural prediction in section 7 ("What a personal fleet actually needs") held up exactly: the brain was always Clawford, never OpenClaw, and a directory rename and some helper consolidation in [`agents/shared/brain.py`](../agents/shared/brain.py) is the only thing that needed doing. The shape of the diagram in section 7 is unchanged from end to end. What changed is the contents of one box.
+
+### The one thing I'd do differently
+
+If Phase 0 had written `agents/shared/llm.py` as a real direct-HTTP broker instead of a dispatch shim with two backends, the fleet would have reached this shape a day or two earlier. The reversed order was correct given uncertainty about whether codex would behave on the VPS, but the direct-HTTP shape turned out to be both simpler *and* faster *and* cheaper than a dispatch shim — once it was in front of me. Sometimes the right answer is to skip the bridge and just take the leap. The discipline that made it safe to do this — red/green TDD, day-in-the-life simulations, per-agent commits — held up everywhere it was applied.
+
+Red/green TDD throughout. Tests first, confirm red, implement, confirm green — no bottom-up implementations. The single hardest rule to follow turned out to be the most important one.
 
 ## See also
 
