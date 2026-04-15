@@ -7,7 +7,7 @@
 **TL;DR**
 
 - This chapter is a holding pen, not a finished lesson set. Each entry below came out of a real session where something went wrong, got diagnosed, got fixed, and left behind a rule worth remembering. The entries are deliberately in a raw format — a short pain description, a rule, a how-to-apply — so a future edit pass can lift the strongest ones into their proper chapters.
-- Lessons land here straight from a fresh incident, then graduate into the chapter that's their natural home. Graduated so far: Lesson A → [Ch 07 — Intro to agents](07-intro-to-agents.md#how-a-deploy-actually-moves-code-to-production) (the deploy path), Lessons B / E / F → [Ch 06 — Infra setup](06-infra-setup.md#the-host-cron-runtime) (the host-cron exec bit, the full-agent-id discipline, and the file-based opt-out pattern), all on 2026-04-15. The remaining entries (C, D, G) are still raw.
+- Lessons land here straight from a fresh incident, then graduate into the chapter that's their natural home. Graduated so far: Lesson A → [Ch 07 — Intro to agents](07-intro-to-agents.md#how-a-deploy-actually-moves-code-to-production) (the deploy path), Lessons B / E / F → [Ch 06 — Infra setup](06-infra-setup.md#the-host-cron-runtime) (the host-cron exec bit, the full-agent-id discipline, and the file-based opt-out pattern), Lesson D → [Ch 05 — Dev setup](05-dev-setup.md#windows-dev-box--the-crlf-line-ending-trap) (Windows CRLF trap), all on 2026-04-15. The remaining entries (C, G) are still raw.
 - If you're reading this chapter as a learner, pick the rules that match the problem you're currently chasing. If you're reading it as an editor, the best homes are called out at the end of each entry.
 
 ---
@@ -21,18 +21,6 @@
 **How to apply.** Before writing a single line of installer code, write a pytest case that subprocess-runs the installer against a stubbed environment (stubbed `crontab`, stubbed `\$HOME`, stubbed env vars) and asserts the observable behavior. Watch it fail. Read the failure reason and confirm it's the right one (the code does not exist yet, or returns the wrong value, or skips the safety check). Then write the code. Re-run, watch it pass. Move to the next case. If the test is hard to write, the code is hard to trust — refactor for testability before shoveling more code at the problem. And any time you touch an infra file, run its *neighbors'* tests too, because pre-existing bugs hide behind skipifs and stale comments the same way they did in Phase 6.5.
 
 **Best home.** A short dedicated chapter on testing the infra layer, or a section inside `06-infra-setup.md` titled "How tests work here". The existing feedback memory on TDD covers the *rule*; the guide should cover the *harness pattern* — stub `crontab`, stub `\$HOME`, subprocess the real script, inspect the state file.
-
----
-
-## D. Windows autocrlf breaks bash scripts over SSH and SCP
-
-**The rule.** A Windows development box with default `core.autocrlf=true` flips shell scripts to CRLF on checkout while keeping the index clean as LF. The working copy is CRLF. SCP'ing a CRLF `.sh` file directly to the VPS makes it unrunnable — bash reads `set -euo pipefail\r` as `set -euo pipefail` followed by a stray `\r` token and dies with the cryptic error `set: pipefail: invalid option name`. Normal `git push` + VPS `git pull` is unaffected because the wire format is always LF, but ad-hoc file transfers trip on this.
-
-**The pain.** I hit this inside the TDD loop for the disabled-agents mechanism. I was SCPing iterations of `install-host-cron.sh` to the VPS to run pytest against them on a real Linux environment (MSYS bash on the dev box skips shell tests due to a deliberate `win32` skipif). Every iteration failed at install time with `set: pipefail: invalid option name`. The first error was confusing because the script runs fine locally under Git Bash. The clue was `file ops/scripts/install-host-cron.sh` reporting "CRLF line terminators" and `git ls-files --eol` showing `i/lf w/crlf` — index LF, working-copy CRLF. Ten seconds to fix once the diagnosis was in hand, two minutes to diagnose.
-
-**How to apply.** For ad-hoc SCP of bash scripts from a Windows dev box to the VPS, strip CR in flight: `tr -d '\r' < ops/scripts/install-host-cron.sh | ssh openclaw@198.51.100.42 "cat > ~/repo/ops/scripts/install-host-cron.sh"`. The long-term fix is to add a `.gitattributes` rule pinning `*.sh text eol=lf` and then `git add --renormalize .` to rewrite the working copy. With that in place, Windows checkouts stay LF regardless of the global `autocrlf` setting, and the problem disappears. This is a one-commit change that would retire an entire class of future surprises.
-
-**Best home.** Short caveat in `04-vps-setup.md` in the dev-box section. One paragraph plus the two workarounds.
 
 ---
 

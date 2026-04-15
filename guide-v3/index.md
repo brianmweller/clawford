@@ -14,7 +14,7 @@
 | 02 | [What Clawford Isn't](02-what-clawford-isnt.md) | **drafted** (Phase 0) |
 | 03 | Before you start *(to migrate from v2)* | pending |
 | 04 | [VPS setup](04-vps-setup.md) | **drafted** (Phase 6) |
-| 05 | Dev setup *(to migrate from v2)* | pending |
+| 05 | [Dev setup](05-dev-setup.md) | **drafted** (Phase 7d) |
 | 06 | [Infra setup](06-infra-setup.md) | **drafted** (Phase 5) |
 | 07 | [Intro to agents](07-intro-to-agents.md) | **drafted** (Phase 6) |
 | 07-0 | Your first agent *(to migrate from v2)* | pending |
