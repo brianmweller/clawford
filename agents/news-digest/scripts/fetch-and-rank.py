@@ -36,7 +36,7 @@ for _p in Path(__file__).resolve().parents:
 
 from agents.shared import llm
 
-WORKSPACE = Path(os.path.expanduser("~/.openclaw/news-digest-workspace"))
+WORKSPACE = Path(os.path.expanduser("~/.clawford/news-digest-workspace"))
 CACHE_DIR = WORKSPACE / "cache"
 PREFS_FILE = WORKSPACE / "preferences" / "model.json"
 

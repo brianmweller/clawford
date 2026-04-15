@@ -76,11 +76,11 @@ MAX_HOLD_SECONDS = 20 * 60  # 20 minutes
 # adds.
 MAX_CHUNK_CHARS = 3900
 
-# Workspace path inside the container. Set the OPENCLAW_WORKSPACE_BASE
+# Workspace path inside the container. Set the CLAWFORD_WORKSPACE_BASE
 # env var to override for tests.
 WORKSPACE_BASE = os.environ.get(
-    "OPENCLAW_WORKSPACE_BASE",
-    os.path.expanduser("~/.openclaw"),
+    "CLAWFORD_WORKSPACE_BASE",
+    os.path.expanduser("~/.clawford"),
 )
 
 

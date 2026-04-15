@@ -21,7 +21,7 @@
 - **Rules:** Never force-push. Never push if safety check finds secrets. Alert human if issues.
 
 ### Agent Workspaces (read + limited repair write)
-- **Path:** `.openclaw/{agent-name}-workspace/` for each agent
+- **Path:** `.clawford/{agent-name}-workspace/` for each agent
 - **Permissions:** Read all files. Write only when performing a diagnosed repair, and only to: cron configs, TOOLS.md (to fix broken tool references), and workspace metadata files.
 - **Usage:** When asked to repair an agent, inspect their workspace files to diagnose the issue. Check their SOUL.md, TOOLS.md, cron configs, and logs.
 - **Hard limits:**
@@ -31,7 +31,7 @@
   - Always log what you read and what you changed to your own status file
 
 ### Your Own Workspace
-- **Path:** `.openclaw/fix-it-workspace/`
+- **Path:** `.clawford/fix-it-workspace/`
 - **Permissions:** Full read/write
 - **Usage:** Your logs, your repair history, your scripts. Keep it organized.
 
@@ -108,7 +108,7 @@ claude -p "now fix Y" --output-format text --add-dir ~/Dropbox/openclaw-backup/ 
 ## Monitoring Scripts
 
 ### diagnose-approval.py — RUN THIS FIRST when asked about an approval ID
-- **Path:** `~/.openclaw/fix-it-workspace/scripts/diagnose-approval.py`
+- **Path:** `~/.clawford/fix-it-workspace/scripts/diagnose-approval.py`
 - **Purpose:** Trace an approval ID to its source cron and agent. This is the FIRST tool you run when Sam asks "what is approval X?" or "what fired this prompt?". You MUST run it before answering. See SOUL.md "Diagnostic Discipline" rule 1.
 - **Usage:**
   - `python3 diagnose-approval.py 2f2894a3` — find approval by id prefix
@@ -118,8 +118,8 @@ claude -p "now fix Y" --output-format text --add-dir ~/Dropbox/openclaw-backup/ 
 - **Quote its output in your reply.** Sam flags any diagnosis that asserts a cron name without quoted evidence — that is a P1 probation violation.
 
 ### security-audit.py
-- **Path:** `~/.openclaw/fix-it-workspace/scripts/security-audit.py`
-- **Purpose:** Replaces the chr()-obfuscated `python3 -c` that previously lived in the security-audit cron prompt. Reads `/home/node/.openclaw/exec-approvals.json` directly, runs `openclaw security audit --deep`, applies enrichment rules, prints emoji-headed severity report.
+- **Path:** `~/.clawford/fix-it-workspace/scripts/security-audit.py`
+- **Purpose:** Replaces the chr()-obfuscated `python3 -c` that previously lived in the security-audit cron prompt. Reads `/home/openclaw/.clawford/exec-approvals.json` directly, runs `openclaw security audit --deep`, applies enrichment rules, prints emoji-headed severity report.
 - **Usage:** `python3 security-audit.py` — prints report to stdout.
 - **Called by:** the security-audit cron (Sunday 04:00 UTC). The cron prompt now just runs the script and forwards stdout to Telegram. Do NOT regenerate the report yourself.
 - **Exit code:** always 0. Audit results are reported, not failed on.
@@ -138,7 +138,7 @@ claude -p "now fix Y" --output-format text --add-dir ~/Dropbox/openclaw-backup/ 
 - **No LLM calls.** Pure Python, stdlib only, zero cost. Idempotent — safe to rerun.
 - **On failure:** Report the error to Sam on Telegram. Common causes: Mistress Mouse's cache missing (her cron failed first), or a brain file has unexpected format. The script degrades gracefully — missing inputs produce "No data available" sections, not crashes.
 - **Inputs it reads:**
-  - `~/.openclaw/family-calendar-workspace/cache/morning-briefing.txt` (Mistress Mouse)
+  - `~/.clawford/family-calendar-workspace/cache/morning-briefing.txt` (Mistress Mouse)
   - `~/Dropbox/openclaw-backup/agents/*.status.md` (all agents, first 8 lines only)
   - `~/Dropbox/openclaw-backup/commitments/active.md`
   - `~/Dropbox/openclaw-backup/tasks/queue.md`

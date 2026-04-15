@@ -65,7 +65,7 @@ class NewsDigestProbe(HeartbeatProbe):
     ) -> None:
         super().__init__(brain_dir=brain_dir)
         self.workspace = workspace or os.path.expanduser(
-            "~/.openclaw/news-digest-workspace"
+            "~/.clawford/news-digest-workspace"
         )
         self.linkedin_profile_dir = os.path.join(self.workspace, "linkedin-profile")
         self.preferences_model = os.path.join(

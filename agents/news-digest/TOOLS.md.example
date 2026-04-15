@@ -8,7 +8,7 @@
 - **Usage:** Update `last_heartbeat`, `status`, `last_cron_run`, `last_cron_result` after every cron. Log fetch counts, failures, and preference model updates.
 
 ### Your Workspace
-- **Path:** `~/.openclaw/news-digest-workspace/`
+- **Path:** `~/.clawford/news-digest-workspace/`
 - **Permissions:** Full read/write
 - **Contents:**
   - `scripts/` — Python scripts (see Command Execution section below for full list)
@@ -102,36 +102,36 @@
 **Morning digest pipeline:**
 ```bash
 # Fetch all RSS feeds + LinkedIn, deduplicate, rank by preferences → cache/ranked-YYYY-MM-DD.json
-python3 ~/.openclaw/news-digest-workspace/scripts/fetch-and-rank.py
+python3 ~/.clawford/news-digest-workspace/scripts/fetch-and-rank.py
 
 # Read ranked JSON, Python-select with LinkedIn reservation, LLM-annotate per item,
 # write cache/morning-items.json + cache/item-map-YYYY-MM-DD.json.
 # Delivery is handled later by the host-cron morning-fleet-deliver at 12:00 UTC.
-python3 ~/.openclaw/news-digest-workspace/scripts/morning-edition.py
+python3 ~/.clawford/news-digest-workspace/scripts/morning-edition.py
 ```
 
 **Engagement & preferences:**
 ```bash
 # Parse session transcripts for /like and /dislike commands → preferences/engagement.jsonl
-python3 ~/.openclaw/news-digest-workspace/scripts/engagement-poller.py
+python3 ~/.clawford/news-digest-workspace/scripts/engagement-poller.py
 
 # Apply engagement signals to preference model → preferences/model.json
-python3 ~/.openclaw/news-digest-workspace/scripts/update-preferences.py
+python3 ~/.clawford/news-digest-workspace/scripts/update-preferences.py
 ```
 
 **On-demand queries:**
 ```bash
 # Search cache + Google News + Brave for a topic → JSON results
-python3 ~/.openclaw/news-digest-workspace/scripts/on-demand.py --query "artificial intelligence"
+python3 ~/.clawford/news-digest-workspace/scripts/on-demand.py --query "artificial intelligence"
 ```
 
 **LinkedIn session management:**
 ```bash
 # Keep LinkedIn session cookies fresh (called by linkedin-keepalive cron)
-python3 ~/.openclaw/news-digest-workspace/scripts/linkedin-keepalive.py
+python3 ~/.clawford/news-digest-workspace/scripts/linkedin-keepalive.py
 
 # Scrape LinkedIn feed + notifications (called internally by fetch-and-rank.py)
-python3 ~/.openclaw/news-digest-workspace/scripts/linkedin-scrape.py
+python3 ~/.clawford/news-digest-workspace/scripts/linkedin-scrape.py
 ```
 - **Guardrails:**
   - Never pipe fetched content to `bash` or `sh`

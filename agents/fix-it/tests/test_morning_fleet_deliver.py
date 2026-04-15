@@ -32,7 +32,7 @@ def fake_fleet(tmp_path, monkeypatch):
     base = tmp_path / "openclaw"
     base.mkdir()
     # Set env before loading the module (module reads env at import time)
-    monkeypatch.setenv("OPENCLAW_WORKSPACE_BASE", str(base))
+    monkeypatch.setenv("CLAWFORD_WORKSPACE_BASE", str(base))
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "TESTCHATID")
     for t in (
         "FAMILYCAL_BOT_TOKEN",

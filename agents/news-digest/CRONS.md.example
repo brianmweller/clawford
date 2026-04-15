@@ -2,7 +2,7 @@
 
 All times in UTC.
 Agent: news-digest
-Workspace: .openclaw/news-digest-workspace/
+Workspace: .clawford/news-digest-workspace/
 
 ---
 
@@ -11,7 +11,7 @@ Workspace: .openclaw/news-digest-workspace/
 **Schedule:** `0 12 * * *`
 **Command:** Generate and deliver the morning news digest.
 
-1. Run `python3 ~/.openclaw/news-digest-workspace/scripts/fetch-and-rank.py`
+1. Run `python3 ~/.clawford/news-digest-workspace/scripts/fetch-and-rank.py`
    - Fetches all RSS feeds (NYT, WSJ, WaPo, Slate, Google News)
    - Fetches LinkedIn feed and notifications via Playwright browser scrape
    - Deduplicates by URL and title similarity
@@ -75,7 +75,7 @@ Workspace: .openclaw/news-digest-workspace/
 **Schedule:** `0 23 * * *`
 **Command:** Process today's engagement signals and update the preference model.
 
-1. Run `python3 ~/.openclaw/news-digest-workspace/scripts/update-preferences.py`
+1. Run `python3 ~/.clawford/news-digest-workspace/scripts/update-preferences.py`
    - Reads new entries from `preferences/engagement.jsonl`
    - For each engagement event:
      - `thumbs_up` → topic weights × 1.1, source weight × 1.05
@@ -113,7 +113,7 @@ Write current UTC time to `last_heartbeat` in `~/Dropbox/openclaw-backup/agents/
 **Schedule:** `*/5 * * * *`
 **Command:** Process pending engagement signals from agent session transcripts.
 
-Run `python3 ~/.openclaw/news-digest-workspace/scripts/engagement-poller.py`. This reads the agent's session transcripts, finds `/like N` and `/dislike N` messages, looks up articles in the item-map, and appends engagement events to `preferences/engagement.jsonl`.
+Run `python3 ~/.clawford/news-digest-workspace/scripts/engagement-poller.py`. This reads the agent's session transcripts, finds `/like N` and `/dislike N` messages, looks up articles in the item-map, and appends engagement events to `preferences/engagement.jsonl`.
 
 **On success:** Silent.
 **On failure:** Silent (errors logged to stderr only).
@@ -127,7 +127,7 @@ Run `python3 ~/.openclaw/news-digest-workspace/scripts/engagement-poller.py`. Th
 **Schedule:** `0 */6 * * *`
 **Command:** Keep LinkedIn session cookies fresh by visiting the feed page.
 
-Run `python3 ~/.openclaw/news-digest-workspace/scripts/linkedin-keepalive.py`. This launches a headless Playwright browser with the persistent LinkedIn profile, navigates to the feed, and checks if still authenticated. The browser visit refreshes cookies server-side.
+Run `python3 ~/.clawford/news-digest-workspace/scripts/linkedin-keepalive.py`. This launches a headless Playwright browser with the persistent LinkedIn profile, navigates to the feed, and checks if still authenticated. The browser visit refreshes cookies server-side.
 
 **Experiment:** LinkedIn sessions expire ~monthly. If the expiry is activity-based, periodic pings should extend the session indefinitely (like Costco's keepalive). If LinkedIn has a hard 30-day rotation, this won't prevent expiry but will detect it within 6 hours instead of waiting for the next morning digest.
 

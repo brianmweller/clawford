@@ -21,7 +21,7 @@ from urllib.parse import quote_plus
 
 import feedparser
 
-WORKSPACE = Path(os.path.expanduser("~/.openclaw/news-digest-workspace"))
+WORKSPACE = Path(os.path.expanduser("~/.clawford/news-digest-workspace"))
 CACHE_DIR = WORKSPACE / "cache"
 
 

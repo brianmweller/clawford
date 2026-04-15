@@ -10,7 +10,7 @@
 #
 # How retirement works in Phase 6.5+:
 #
-#   1. Add "fix-it" to ~/.openclaw/disabled-agents.txt.
+#   1. Add "fix-it" to ~/.clawford/disabled-agents.txt.
 #   2. Re-run ops/scripts/install-host-cron.sh. The installer's
 #      disabled-agents mechanism skips every fix-it cron on install
 #      and evicts any pre-existing fix-it crontab entries in its
@@ -19,10 +19,10 @@
 #      file.
 #   3. Mark fix-it.status.md as "retired" in the shared brain.
 #
-# Scripts under ~/.openclaw/fix-it-workspace/scripts/ are preserved so
+# Scripts under ~/.clawford/fix-it-workspace/scripts/ are preserved so
 # Sam can still run them manually from a Claude Code session.
 #
-# Reversal: remove "fix-it" from ~/.openclaw/disabled-agents.txt, then
+# Reversal: remove "fix-it" from ~/.clawford/disabled-agents.txt, then
 #           rerun ops/scripts/install-host-cron.sh.
 
 set -euo pipefail
@@ -31,7 +31,7 @@ if [ "${1:-}" != "--confirm" ]; then
     cat <<'EOF'
 retire.sh — Mr Fixit retirement (post-Phase-7).
 
-This adds fix-it to ~/.openclaw/disabled-agents.txt, re-runs
+This adds fix-it to ~/.clawford/disabled-agents.txt, re-runs
 install-host-cron.sh to evict live fix-it crons, and marks
 fix-it.status.md as retired. Scripts are preserved for manual use.
 
@@ -47,7 +47,7 @@ EOF
     exit 1
 fi
 
-DISABLED_AGENTS_FILE="${DISABLED_AGENTS_FILE:-$HOME/.openclaw/disabled-agents.txt}"
+DISABLED_AGENTS_FILE="${DISABLED_AGENTS_FILE:-$HOME/.clawford/disabled-agents.txt}"
 INSTALLER="$HOME/repo/ops/scripts/install-host-cron.sh"
 BRAIN="$HOME/Dropbox/openclaw-backup"
 UTC=$(date -u +"%Y-%m-%d %H:%M UTC")
@@ -108,9 +108,9 @@ Mr Fixit was retired on $DATE per probation.md. Fix-it's host-cron
 entries were evicted from the VPS crontab by install-host-cron.sh's
 disabled-agents sweep. Retirement is persistent: subsequent installer
 runs keep fix-it disabled as long as "fix-it" appears in
-~/.openclaw/disabled-agents.txt.
+~/.clawford/disabled-agents.txt.
 
-Scripts are preserved under ~/.openclaw/fix-it-workspace/scripts/ for
+Scripts are preserved under ~/.clawford/fix-it-workspace/scripts/ for
 ad-hoc manual use via Claude Code sessions:
   - diagnose-approval.py
   - security-audit.py
@@ -119,7 +119,7 @@ ad-hoc manual use via Claude Code sessions:
 
 The Telegram binding is dormant.
 
-Reversal: remove "fix-it" from ~/.openclaw/disabled-agents.txt, then
+Reversal: remove "fix-it" from ~/.clawford/disabled-agents.txt, then
           bash ~/repo/ops/scripts/install-host-cron.sh
 EOF
 echo "  written: $BRAIN/agents/fix-it.status.md"

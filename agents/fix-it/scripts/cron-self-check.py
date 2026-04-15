@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-WORKSPACE = Path(os.path.expanduser("~/.openclaw/fix-it-workspace"))
+WORKSPACE = Path(os.path.expanduser("~/.clawford/fix-it-workspace"))
 CACHE_DIR = WORKSPACE / "cache"
 LAST_RUN_FILE = CACHE_DIR / "last-cron-self-check.json"
 INSTALL_SCRIPT = Path("/home/openclaw/repo/ops/scripts/install-host-cron.sh")

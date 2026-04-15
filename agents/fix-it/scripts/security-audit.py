@@ -6,12 +6,12 @@ Replaces the inline chr()-obfuscated python -c that previously lived in the
 security-audit cron prompt. Pure Python, no shell, no obfuscation.
 
 What it does (post-Phase-6.5 native audit):
-  1. Read ~/.openclaw/exec-approvals.json and emit per-agent policy
+  1. Read ~/.clawford/exec-approvals.json and emit per-agent policy
   2. Run native Python checks:
       - chattr +i on each agent's SOUL.md / IDENTITY.md
-      - file-mode 0600 on ~/.codex/auth.json and ~/openclaw/.env
+      - file-mode 0600 on ~/.codex/auth.json and ~/clawford/.env
       - brain directory exists with expected subdirs
-      - world-writable files under ~/.openclaw/*-workspace/
+      - world-writable files under ~/.clawford/*-workspace/
   3. Apply enrichment rules (suppress known-acceptable findings)
   4. Format an emoji-headed severity report
 
@@ -30,14 +30,14 @@ from typing import Callable
 
 APPROVALS_PATH = os.environ.get(
     "EXEC_APPROVALS_PATH",
-    os.path.expanduser("~/.openclaw/exec-approvals.json"),
+    os.path.expanduser("~/.clawford/exec-approvals.json"),
 )
 
 # Default host paths for the native audit. Overridable via run_native_audit()
 # kwargs for tests.
-DEFAULT_WORKSPACE_ROOT = Path(os.path.expanduser("~/.openclaw"))
+DEFAULT_WORKSPACE_ROOT = Path(os.path.expanduser("~/.clawford"))
 DEFAULT_CODEX_AUTH_PATH = Path(os.path.expanduser("~/.codex/auth.json"))
-DEFAULT_ENV_PATH = Path(os.path.expanduser("~/openclaw/.env"))
+DEFAULT_ENV_PATH = Path(os.path.expanduser("~/clawford/.env"))
 DEFAULT_BRAIN_PATH = Path(os.path.expanduser("~/Dropbox/openclaw-backup"))
 EXPECTED_BRAIN_SUBDIRS = frozenset({
     "agents", "people", "facts", "queues", "commitments",
@@ -121,11 +121,11 @@ def run_native_audit(
     render_report() expects.
 
     Checks performed:
-      1. SOUL.md / IDENTITY.md in each ~/.openclaw/*-workspace/ have
+      1. SOUL.md / IDENTITY.md in each ~/.clawford/*-workspace/ have
          the immutable (chattr +i) attribute.
-      2. ~/.codex/auth.json and ~/openclaw/.env exist with mode 0600.
+      2. ~/.codex/auth.json and ~/clawford/.env exist with mode 0600.
       3. ~/Dropbox/openclaw-backup/ exists with expected subdirs.
-      4. No world-writable files under ~/.openclaw/*-workspace/.
+      4. No world-writable files under ~/.clawford/*-workspace/.
 
     All path arguments are overridable for tests. `lsattr_runner` takes
     a Path and returns the mode string (containing 'i' if immutable),
@@ -167,7 +167,7 @@ def run_native_audit(
     # 2. Secret file modes
     for label, path in (
         ("~/.codex/auth.json", codex_auth_path),
-        ("~/openclaw/.env", env_path),
+        ("~/clawford/.env", env_path),
     ):
         if not path.exists():
             findings["HIGH"].append(f"credential missing: {label}")

@@ -2,7 +2,7 @@
 
 All times in UTC. Adjust for your local timezone.
 Agent: fix-it
-Workspace: .openclaw/fix-it-workspace/
+Workspace: .clawford/fix-it-workspace/
 
 ---
 
@@ -185,7 +185,7 @@ This is the "who watches the watchman" cron. If this one breaks, the human will 
 **Command:** Generate the daily Obsidian briefing file from agent outputs and shared brain.
 
 1. Run `python3 ~/Dropbox/openclaw-backup/scripts/obsidian-briefing/generate.py`
-   - Reads Mistress Mouse's cached morning briefing (`~/.openclaw/family-calendar-workspace/cache/morning-briefing.txt`)
+   - Reads Mistress Mouse's cached morning briefing (`~/.clawford/family-calendar-workspace/cache/morning-briefing.txt`)
    - Reads all agent status files (`~/Dropbox/openclaw-backup/agents/*.status.md`)
    - Reads open commitments (`~/Dropbox/openclaw-backup/commitments/active.md`)
    - Reads open tasks (`~/Dropbox/openclaw-backup/tasks/queue.md`)

@@ -19,8 +19,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-WORKSPACE = Path(os.path.expanduser("~/.openclaw/news-digest-workspace"))
-SESSIONS_DIR = Path(os.path.expanduser("~/.openclaw/agents/news-digest/sessions"))
+WORKSPACE = Path(os.path.expanduser("~/.clawford/news-digest-workspace"))
+SESSIONS_DIR = Path(os.path.expanduser("~/.clawford/agents/news-digest/sessions"))
 CACHE_DIR = WORKSPACE / "cache"
 ENGAGEMENT_FILE = WORKSPACE / "preferences" / "engagement.jsonl"
 STATE_FILE = CACHE_DIR / "poller-state.json"

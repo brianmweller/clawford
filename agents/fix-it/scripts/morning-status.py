@@ -18,7 +18,7 @@ fix-it/morning-status cron with a pure Python script that:
        (e) status == degraded + fresh           → OPEN ALERT
        (f) default                              → HEALTHY
   6. Formats the emoji-headed report
-  7. Writes ~/.openclaw/fix-it-workspace/cache/morning-brief-ready.txt
+  7. Writes ~/.clawford/fix-it-workspace/cache/morning-brief-ready.txt
      for the morning-fleet-deliver cron to pick up at 12:00 UTC
 
 The LLM-cron-message classification rules and report format are
@@ -49,7 +49,7 @@ FLEET_HEALTH_PATH = os.path.join(BRAIN, "fleet-health.json")
 KNOWN_ISSUES_PATH = os.path.join(BRAIN, "fix-it", "KNOWN_ISSUES.md")
 VALIDATE_PY = os.path.join(BRAIN, "scripts", "validate.py")
 OUTPUT_PATH = os.path.expanduser(
-    "~/.openclaw/fix-it-workspace/cache/morning-brief-ready.txt"
+    "~/.clawford/fix-it-workspace/cache/morning-brief-ready.txt"
 )
 
 FLEET_HEALTH_STALE_HOURS = 6

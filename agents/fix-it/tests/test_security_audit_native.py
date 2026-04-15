@@ -6,7 +6,7 @@ so the audit has to run in-process. The native audit checks the things
 that actually matter post-liberation:
 
   1. chattr +i on each agent's SOUL.md / IDENTITY.md
-  2. File modes on ~/.codex/auth.json and ~/openclaw/.env
+  2. File modes on ~/.codex/auth.json and ~/clawford/.env
   3. Brain directory sanity (expected subdirs present)
   4. World-writable walk of the workspaces
   5. lsattr availability (degrades cleanly if missing)
@@ -61,8 +61,8 @@ def fake_host_layout(tmp_path: Path):
     layout = Layout()
     layout.root = tmp_path
 
-    # Two fake agent workspaces under ~/.openclaw/
-    layout.workspace_root = tmp_path / ".openclaw"
+    # Two fake agent workspaces under ~/.clawford/
+    layout.workspace_root = tmp_path / ".clawford"
     layout.workspace_root.mkdir()
     for agent in ("fix-it", "news-digest"):
         ws = layout.workspace_root / f"{agent}-workspace"
@@ -81,9 +81,9 @@ def fake_host_layout(tmp_path: Path):
     layout.codex_auth.write_text("{}", encoding="utf-8")
     layout.codex_auth.chmod(0o600)
 
-    layout.openclaw_dir = tmp_path / "openclaw"
-    layout.openclaw_dir.mkdir()
-    layout.env_file = layout.openclaw_dir / ".env"
+    layout.clawford_dir = tmp_path / "openclaw"
+    layout.clawford_dir.mkdir()
+    layout.env_file = layout.clawford_dir / ".env"
     layout.env_file.write_text("SECRET=x", encoding="utf-8")
     layout.env_file.chmod(0o600)
 
