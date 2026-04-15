@@ -2,29 +2,28 @@
 """fleet-health.py — central agent health orchestrator.
 
 R3 of the registry-based health system. Reads agents/shared/fleet-
-manifest.json, invokes each agent's heartbeat.py inside the openclaw
-gateway container via `docker exec`, parses each result, aggregates
-into a FleetHealthReport, and writes it to
-~/Dropbox/openclaw-backup/fleet-health.json.
+manifest.json, invokes each agent's heartbeat.py as a host subprocess,
+parses each result, aggregates into a FleetHealthReport, and writes it
+to ~/Dropbox/openclaw-backup/fleet-health.json.
 
 Replaces the per-agent */30 heartbeat host crons + the 3 remaining
 LLM-native heartbeat crons with a single */15 host cron.
 
+Phase 6.5 (2026-04-15): invoke_agent_probe moved from `docker exec
+openclaw-gateway python3 probe-agent.py …` to a bare host subprocess.
+The workspace files are the same bind-mounted tree the container saw,
+and the host now has every Python dep the heartbeat modules need via
+ops/scripts/install-host-deps.sh.
+
 Architecture:
-  manifest → loop docker exec heartbeat.py → parse stdout JSON →
+  manifest → loop probe-agent.py per agent → parse stdout JSON →
   aggregate AgentProbeReport[] → FleetHealthReport →
   write fleet-health.json + emit SCRIPT_CONTRACT JSON summary.
 
-The agent's own run() still writes its .status.md file as a side
-effect during this transition (R3 ↔ R6). Once R4 (morning-status
-refactor) lands, fix-it/morning-status reads fleet-health.json
-instead of scraping .status.md, and R6 retires the per-agent
-.status.md writes.
-
 Conforms to agents/shared/SCRIPT_CONTRACT.md: always exits 0,
 prints exactly one JSON line to stdout. Run via host cron through
-ops/scripts/script-contract-host.sh so the wrapper relays any
-aggregated alert to Telegram.
+ops/scripts/fleet-health-host.sh which relays any aggregated alert
+to Telegram.
 """
 from __future__ import annotations
 
@@ -45,10 +44,7 @@ FLEET_MANIFEST_PATH = os.path.join(REPO_ROOT, "agents", "shared", "fleet-manifes
 FLEET_HEALTH_OUTPUT = os.path.expanduser(
     "~/Dropbox/openclaw-backup/fleet-health.json"
 )
-CONTAINER_NAME = os.environ.get(
-    "OPENCLAW_CONTAINER",
-    "openclaw-openclaw-gateway-1",
-)
+HOST_PYTHON = os.environ.get("CLAWFORD_HOST_PYTHON", "/usr/bin/python3")
 PER_AGENT_TIMEOUT_S = 60
 
 
@@ -68,35 +64,36 @@ def _import_fleet_types():
     return mod
 
 
-PROBE_AGENT_WRAPPER = "/home/node/repo/ops/scripts/probe-agent.py"
+def _probe_agent_wrapper_path() -> str:
+    """Resolve probe-agent.py against the current REPO_ROOT. Computed
+    at call time (not import time) so tests that monkeypatch REPO_ROOT
+    pick up the new value."""
+    return os.path.join(REPO_ROOT, "ops", "scripts", "probe-agent.py")
 
 
 def invoke_agent_probe(spec, run_subprocess) -> dict:
-    """Run one agent's probe() function inside the container and
-    return a probe-shape dict. `run_subprocess` is the subprocess.run
-    callable, injected so tests can stub it.
+    """Run one agent's probe() function as a host subprocess and return
+    a probe-shape dict. `run_subprocess` is the subprocess.run callable,
+    injected so tests can stub it.
 
     Invocation goes through ops/scripts/probe-agent.py rather than
-    calling the heartbeat.py directly. probe-agent.py imports the
-    heartbeat module dynamically and calls probe() — bypassing
-    run() and main(), so no .status.md side effects fire on every
-    */15 orchestrator tick (R6).
+    calling heartbeat.py's main() — probe-agent.py imports the heartbeat
+    module dynamically and calls probe() directly, bypassing run(), so
+    no .status.md side effects fire on every */15 orchestrator tick.
 
-    The script's stdout is one JSON line per SCRIPT_CONTRACT; we
-    parse the LAST non-empty line to tolerate any logging noise.
+    The script's stdout is one JSON line per SCRIPT_CONTRACT; we parse
+    the LAST non-empty line to tolerate any logging noise.
+
+    Phase 6.5: was `docker exec openclaw-gateway python3 probe-agent.py`;
+    now `/usr/bin/python3 probe-agent.py`. Workspace paths are expanded
+    via os.path.expanduser so `~/.openclaw/...` resolves to the host's
+    home directory instead of the container's `/home/node/...`.
     """
-    workspace_inside_container = (
-        spec.workspace.replace("~", "/home/node")
-        if spec.workspace.startswith("~")
-        else spec.workspace
-    )
+    workspace = os.path.expanduser(spec.workspace)
     module_rel, _func = spec.parse_probe_entrypoint()
-    script_path = os.path.join(workspace_inside_container, module_rel)
+    script_path = os.path.join(workspace, module_rel)
 
-    cmd = [
-        "docker", "exec", CONTAINER_NAME,
-        "python3", PROBE_AGENT_WRAPPER, script_path,
-    ]
+    cmd = [HOST_PYTHON, _probe_agent_wrapper_path(), script_path]
     try:
         proc = run_subprocess(
             cmd,
@@ -107,7 +104,7 @@ def invoke_agent_probe(spec, run_subprocess) -> dict:
     except subprocess.TimeoutExpired:
         return {"status": "error", "error": f"timeout after {PER_AGENT_TIMEOUT_S}s"}
     except Exception as e:
-        return {"status": "error", "error": f"docker exec failed: {e}"}
+        return {"status": "error", "error": f"probe subprocess failed: {e}"}
 
     stdout = (proc.stdout or "").strip()
     if not stdout:

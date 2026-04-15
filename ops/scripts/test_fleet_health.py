@@ -2,11 +2,16 @@
 
 R3 of the registry-based health system. Verifies the orchestrator:
   - reads fleet-manifest.json correctly
-  - invokes each agent's heartbeat.py via docker exec (mocked)
+  - invokes each agent's heartbeat.py as a host subprocess (mocked)
   - parses each probe result
   - aggregates into FleetHealthReport
   - writes fleet-health.json with the expected schema
   - emits SCRIPT_CONTRACT stdout summary that the host wrapper relays
+
+Phase 6.5: the invocation path used to go through `docker exec` into
+the openclaw gateway container. Post-6.5 it's a bare host subprocess
+via /usr/bin/python3. The mocks no longer see "docker" in the cmd
+list.
 
 Run: cd ops/scripts && python3 -m pytest test_fleet_health.py -v
 """
@@ -131,10 +136,11 @@ def test_run_all_agents_ok_writes_clean_report(fake_repo):
     assert "connector" in report["agents"]
     assert report["agents"]["shopping"]["status"] == "ok"
 
-    # 2 docker exec invocations
+    # 2 bare-host python3 invocations (Phase 6.5 — no docker exec)
     assert len(calls) == 2
-    assert "docker" in calls[0]
-    assert "exec" in calls[0]
+    assert "docker" not in calls[0]
+    assert any("python3" in part for part in calls[0]), calls[0]
+    assert any("probe-agent.py" in part for part in calls[0]), calls[0]
 
 
 # ─── one agent degraded ──────────────────────────────────────────────
