@@ -3,26 +3,27 @@
 #
 # DO NOT RUN THIS UNLESS PROBATION HAS FAILED.
 #
-# Probation runs 2026-04-11 → 2026-04-25. If Mr Fixit fails any criterion
-# in ~/Dropbox/openclaw-backup/fix-it/probation.md (P1, P2, or P3 are
-# one-strike; P4 is two-strike), execute this script to retire the agent.
+# Probation runs 2026-04-11 → 2026-04-25. If Mr Fixit fails any
+# criterion in ~/Dropbox/openclaw-backup/fix-it/probation.md (P1, P2,
+# or P3 are one-strike; P4 is two-strike), execute this script to
+# retire the agent.
 #
-# Phase 6.5 made fix-it's cron layer fully host-native — there is no
-# LLM-driven layer left to remove. Retirement now means:
+# How retirement works in Phase 6.5+:
 #
-#   1. Remove fix-it's host-cron entries from the VPS crontab
-#   2. Mark fix-it.status.md as "retired" in the shared brain
+#   1. Add "fix-it" to ~/.openclaw/disabled-agents.txt.
+#   2. Re-run ops/scripts/install-host-cron.sh. The installer's
+#      disabled-agents mechanism skips every fix-it cron on install
+#      and evicts any pre-existing fix-it crontab entries in its
+#      drift sweep. Retirement is persistent — subsequent installer
+#      runs will keep fix-it disabled as long as it appears in the
+#      file.
+#   3. Mark fix-it.status.md as "retired" in the shared brain.
 #
 # Scripts under ~/.openclaw/fix-it-workspace/scripts/ are preserved so
 # Sam can still run them manually from a Claude Code session.
 #
-# WARNING: re-running ops/scripts/install-host-cron.sh AFTER retirement
-# will RESTORE the fix-it cron entries. Making retirement persist across
-# installer runs would require a disabled-agents mechanism in
-# install-host-cron.sh — that is not yet implemented. For now, retirement
-# is one-way until the next install-host-cron.sh run.
-#
-# Reversal: bash ~/repo/ops/scripts/install-host-cron.sh
+# Reversal: remove "fix-it" from ~/.openclaw/disabled-agents.txt, then
+#           rerun ops/scripts/install-host-cron.sh.
 
 set -euo pipefail
 
@@ -30,8 +31,9 @@ if [ "${1:-}" != "--confirm" ]; then
     cat <<'EOF'
 retire.sh — Mr Fixit retirement (post-Phase-7).
 
-This removes fix-it's host-cron entries and marks fix-it.status.md as
-retired. Scripts are preserved for manual use.
+This adds fix-it to ~/.openclaw/disabled-agents.txt, re-runs
+install-host-cron.sh to evict live fix-it crons, and marks
+fix-it.status.md as retired. Scripts are preserved for manual use.
 
 Prerequisites:
   - Probation has failed (check ~/Dropbox/openclaw-backup/fix-it/probation.md)
@@ -45,10 +47,11 @@ EOF
     exit 1
 fi
 
+DISABLED_AGENTS_FILE="${DISABLED_AGENTS_FILE:-$HOME/.openclaw/disabled-agents.txt}"
+INSTALLER="$HOME/repo/ops/scripts/install-host-cron.sh"
 BRAIN="$HOME/Dropbox/openclaw-backup"
 UTC=$(date -u +"%Y-%m-%d %H:%M UTC")
 DATE=$(date -u +%Y-%m-%d)
-MARKER="# === fix-it retired ($DATE) ==="
 
 echo "============================================"
 echo "  Mr Fixit — Retirement"
@@ -56,33 +59,38 @@ echo "  $UTC"
 echo "============================================"
 echo ""
 
-# Step 1: remove fix-it entries from crontab
-echo "Step 1: Removing fix-it host-cron entries..."
-CURRENT=$(crontab -l 2>/dev/null || echo "")
-if [ -z "$CURRENT" ]; then
-    echo "  (no crontab; nothing to remove)"
-elif echo "$CURRENT" | grep -qF "$MARKER"; then
-    echo "  already retired (marker present); skipping"
+# Step 1: add fix-it to the disabled-agents file (idempotent)
+echo "Step 1: Adding 'fix-it' to $DISABLED_AGENTS_FILE..."
+mkdir -p "$(dirname "$DISABLED_AGENTS_FILE")"
+touch "$DISABLED_AGENTS_FILE"
+if grep -qE '^[[:space:]]*fix-it[[:space:]]*$' "$DISABLED_AGENTS_FILE"; then
+    echo "  already present"
 else
-    FILTERED=$(echo "$CURRENT" | grep -v -E '# (fix-it-|script-contract-fix-it-)' || true)
-    if [ "$FILTERED" = "$CURRENT" ]; then
-        echo "  (no fix-it entries found in crontab)"
-    else
-        REMOVED=$(echo "$CURRENT" | grep -c -E '# (fix-it-|script-contract-fix-it-)' || true)
-        {
-            echo "$FILTERED"
-            echo ""
-            echo "$MARKER"
-            echo "# retire.sh removed $REMOVED fix-it host crons on $UTC."
-            echo "# DO NOT re-run install-host-cron.sh for fix-it — it will restore these."
-        } | crontab -
-        echo "  removed $REMOVED fix-it cron entries"
-    fi
+    {
+        if [ -s "$DISABLED_AGENTS_FILE" ]; then
+            cat "$DISABLED_AGENTS_FILE"
+        fi
+        echo "# Retired via agents/fix-it/retire.sh on $DATE"
+        echo "fix-it"
+    } > "$DISABLED_AGENTS_FILE.tmp"
+    mv "$DISABLED_AGENTS_FILE.tmp" "$DISABLED_AGENTS_FILE"
+    echo "  added"
 fi
 echo ""
 
-# Step 2: mark status retired
-echo "Step 2: Marking fix-it.status.md as retired..."
+# Step 2: re-run install-host-cron.sh so the installer evicts live
+# fix-it crons via its disabled-agents sweep
+echo "Step 2: Re-running install-host-cron.sh to evict fix-it crons..."
+if [ ! -x "$INSTALLER" ] && [ ! -f "$INSTALLER" ]; then
+    echo "  ERROR: installer not found at $INSTALLER" >&2
+    echo "  Resolve manually: bash \$HOME/repo/ops/scripts/install-host-cron.sh" >&2
+    exit 1
+fi
+bash "$INSTALLER"
+echo ""
+
+# Step 3: mark status retired
+echo "Step 3: Marking fix-it.status.md as retired..."
 mkdir -p "$BRAIN/agents"
 cat > "$BRAIN/agents/fix-it.status.md" <<EOF
 # Fix-It — Status
@@ -96,10 +104,14 @@ cat > "$BRAIN/agents/fix-it.status.md" <<EOF
 
 ## Retirement note
 
-Mr Fixit was retired on $DATE per probation.md. Host-cron entries were
-removed from the VPS crontab on this date. Scripts are preserved under
-~/.openclaw/fix-it-workspace/scripts/ for ad-hoc manual use via Claude
-Code sessions:
+Mr Fixit was retired on $DATE per probation.md. Fix-it's host-cron
+entries were evicted from the VPS crontab by install-host-cron.sh's
+disabled-agents sweep. Retirement is persistent: subsequent installer
+runs keep fix-it disabled as long as "fix-it" appears in
+~/.openclaw/disabled-agents.txt.
+
+Scripts are preserved under ~/.openclaw/fix-it-workspace/scripts/ for
+ad-hoc manual use via Claude Code sessions:
   - diagnose-approval.py
   - security-audit.py
   - heartbeat.py
@@ -107,7 +119,8 @@ Code sessions:
 
 The Telegram binding is dormant.
 
-Reversal: bash ~/repo/ops/scripts/install-host-cron.sh
+Reversal: remove "fix-it" from ~/.openclaw/disabled-agents.txt, then
+          bash ~/repo/ops/scripts/install-host-cron.sh
 EOF
 echo "  written: $BRAIN/agents/fix-it.status.md"
 echo ""
@@ -116,11 +129,12 @@ echo "============================================"
 echo "  Retirement complete."
 echo ""
 echo "  Verify crons removed:"
-echo "    crontab -l | grep fix-it    (should print nothing except the marker)"
+echo "    crontab -l | grep fix-it    (should print nothing)"
 echo ""
-echo "  WARNING: re-running install-host-cron.sh will restore fix-it crons."
-echo "  Until a disabled-agents mechanism lands, retirement is one-way."
+echo "  Verify disabled-agents file:"
+echo "    cat $DISABLED_AGENTS_FILE"
 echo ""
 echo "  Reversal:"
-echo "    bash ~/repo/ops/scripts/install-host-cron.sh"
+echo "    Remove 'fix-it' from $DISABLED_AGENTS_FILE"
+echo "    bash \$HOME/repo/ops/scripts/install-host-cron.sh"
 echo "============================================"
