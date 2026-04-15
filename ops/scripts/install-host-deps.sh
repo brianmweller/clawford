@@ -6,6 +6,12 @@
 # wrappers no longer `docker exec` into the container — they invoke
 # /usr/bin/python3 directly against bind-mounted scripts.
 #
+# PREREQUISITE: run install-host-system-deps.sh once first (with sudo).
+# Several of the Python packages installed below — pillow transitively,
+# camoufox's headful fallback — need apt packages (libjpeg-dev,
+# libfreetype6-dev, zlib1g-dev, libpng-dev, xvfb, openbox) that the
+# system-deps script installs.
+#
 # Install mode: `pip install --user --break-system-packages`.
 #   --user lands packages under ~/.local/lib/python3.12/site-packages/
 #   --break-system-packages opts into installing into the system-managed
