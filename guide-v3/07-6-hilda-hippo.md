@@ -90,7 +90,7 @@ What turned out to be happening: Costco's custom B2C policy ships a hand-rolled 
 
 I discovered this by stepping through the minified B2C JavaScript in DevTools and finding the literal `d.setFullYear(2010)` call. It took me two hours. The fix (commit `a26ff39`) was to inject a patched `window.setCookie` after the login form renders, manually set the two test cookies with correct expiry, and hide the visible error div in case it had already rendered.
 
-The B2C reauth path is still not reliable after Act III — there are other issues in the post-KMSI flow where the form-POST just doesn't fire — and in practice the Act II public-client path made it irrelevant anyway. But the setCookie bug is the kind of thing worth writing down somewhere, because it is exactly the flavor of bug you'd never guess at and exactly the kind of flavor that a future Costco auth break might bring back. See the memory file on the B2C setCookie bug for the patch content.
+The B2C reauth path is still not reliable after Act III — there are other issues in the post-KMSI flow where the form-POST just doesn't fire — and in practice the Act II public-client path made it irrelevant anyway. But the setCookie bug is the kind of thing worth writing down somewhere, because it is exactly the flavor of bug you'd never guess at and exactly the kind of flavor that a future Costco auth break might bring back. The patched `window.setCookie` shim lives in commit `a26ff39` if you ever need to revisit it.
 
 ### Act IV — Stabilization (2026-04-12 through 2026-04-15)
 
