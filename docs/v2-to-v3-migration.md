@@ -1,6 +1,6 @@
 # Guide v2 → v3 migration checklist
 
-*Last updated: 2026-04-14 (Phase 0)*
+*Last updated: 2026-04-15 (Phase 5)*
 
 Per-chapter disposition for the migration from `guide-v2/` (OpenClaw-era) to `guide-v3/` (Clawford-native). Dispositions:
 
@@ -20,7 +20,7 @@ Status values: **pending**, **in_progress**, **done**.
 | 02 | `02-before-you-start.md` | migrate | 03 | `03-before-you-start.md` | pending | Phase 7 | Add one-line "this is the Clawford-native guide" note at top |
 | 03 | `03-vps-setup.md` | migrate | 04 | `04-vps-setup.md` | pending | Phase 6 | Replace OpenClaw install step with `codex` install + auth bootstrap |
 | 04 | `04-dev-setup.md` | migrate | 05 | `05-dev-setup.md` | pending | Phase 7 | Minor updates; pattern of "Claude Code + test harness" stays |
-| 05 | `05-infra-setup.md` | **rewrite** | 06 | `06-infra-setup.md` | pending | Phase 5 | v2 version has OpenClaw gateway at the center. v3 describes the shared library (`agents/shared/*`), shared brain (git + Dropbox split), and Clawford-native deploy.py with the new Safeguard shapes. |
+| 05 | `05-infra-setup.md` | **rewrite** | 06 | `06-infra-setup.md` | **done** | Phase 5 | v3 describes the shared library (`agents/shared/*`), shared brain (git + Dropbox split), Clawford-native deploy.py with 10 safeguards (Safeguard 8 retired with tombstone), and the host-cron runtime. OpenClaw gateway framing dropped. |
 | 06 | `06-intro-to-agents.md` | **rewrite** | 07 | `07-intro-to-agents.md` | pending | Phase 6 | v2 has "two kinds of crons" (OpenClaw vs host), the permissive-exec-approvals rationale, the 8-workspace-files pattern loaded by OpenClaw. All of these are OpenClaw-era framings that disappear in v3. Keep the script-contract and LLM-vs-deterministic seam (those survive), drop the rest. |
 | 07-0 | `07-0-your-first-agent.md` | migrate | 07-0 | `07-0-your-first-agent.md` | pending | Phase 4 | Update deploy steps for Clawford-native flow |
 | 07-1 | `07-1-mr-fixit.md` | migrate | 07-1 | `07-1-mr-fixit.md` | pending | Phase 4 (fix-it sub-phase) | Update references to deploy.py + host crons; the `cron-self-check` story changes to "diff expected-crons.json against crontab -l" |

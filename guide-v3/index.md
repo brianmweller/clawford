@@ -2,7 +2,7 @@
 
 # Clawford Guide (v3)
 
-*Last updated: 2026-04-14 (Phase 0 scaffolding) · Live guide, under active migration from v2*
+*Last updated: 2026-04-15 (Phase 5 — Ch 06 drafted) · Live guide, under active migration from v2*
 
 > **Guide v3 is under active construction.** This is the Clawford-native guide that replaces the OpenClaw-era [guide v2](../guide-v2/index.md). Most chapters are still migrating from v2, with OpenClaw-era scar tissue stripped. For the fully-populated (but frozen) OpenClaw-era version, see guide-v2. For the strategic reasoning behind the rewrite, start with [Ch 02 — What Clawford Isn't](02-what-clawford-isnt.md).
 
@@ -15,7 +15,7 @@
 | 03 | Before you start *(to migrate from v2)* | pending |
 | 04 | VPS setup *(to migrate from v2, replacing OpenClaw install with codex)* | pending |
 | 05 | Dev setup *(to migrate from v2)* | pending |
-| 06 | Infra setup *(to rewrite; describes Clawford runtime + shared library)* | pending |
+| 06 | [Infra setup](06-infra-setup.md) | **drafted** (Phase 5) |
 | 07 | Intro to agents *(to rewrite; most of v2 version is OpenClaw-era scar tissue)* | pending |
 | 07-0 | Your first agent *(to migrate from v2)* | pending |
 | 07-1 | Mr Fixit 🦊🔧 *(to migrate from v2)* | pending |
