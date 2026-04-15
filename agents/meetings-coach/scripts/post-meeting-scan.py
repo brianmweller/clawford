@@ -46,7 +46,7 @@ from agents.shared.llm import infer as llm_infer  # noqa: E402
 from agents.shared.telegram_api import resolve_credentials, send_message  # noqa: E402
 
 
-WORKSPACE = Path(os.path.expanduser("~/.openclaw/meetings-coach-workspace"))
+WORKSPACE = Path(os.path.expanduser("~/.clawford/meetings-coach-workspace"))
 CACHE_DIR = WORKSPACE / "cache"
 SCRIPTS_DIR = WORKSPACE / "scripts"
 MEETING_CONFIG_FILE = WORKSPACE / "meeting-config.json"

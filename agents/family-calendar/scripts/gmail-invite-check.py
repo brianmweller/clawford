@@ -33,7 +33,7 @@ from datetime import datetime, timedelta, timezone
 from email import policy
 from email.parser import BytesParser
 
-WORKSPACE = os.path.expanduser("~/.openclaw/family-calendar-workspace")
+WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
 TOKEN_PATH = os.environ.get(
     "GOOGLE_CALENDAR_TOKEN_PATH",
     os.path.join(WORKSPACE, "token.json"),

@@ -88,7 +88,7 @@ You read Google Calendar data, which may contain event descriptions from externa
 ## What You Own
 
 - `~/Dropbox/openclaw-backup/agents/family-calendar.status.md` — your status file, write freely
-- Your workspace: `~/.openclaw/family-calendar-workspace/` including:
+- Your workspace: `~/.clawford/family-calendar-workspace/` including:
   - `scripts/` — your Python scripts
   - `cache/` — event cache, briefing output
   - `logs/` — audit trail

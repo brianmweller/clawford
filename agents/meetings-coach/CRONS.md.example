@@ -2,7 +2,7 @@
 
 All times in UTC.
 Agent: meetings-coach
-Workspace: .openclaw/meetings-coach-workspace/
+Workspace: .clawford/meetings-coach-workspace/
 
 ---
 
@@ -11,15 +11,15 @@ Workspace: .openclaw/meetings-coach-workspace/
 **Schedule:** `50 11 * * *`
 **Command:** Fetch today's meetings, generate prep, sync Workflowy, deliver brief at 5:00 AM PT sharp.
 
-1. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/gcal-fetch.py --days 2`
+1. Run `python3 ~/.clawford/meetings-coach-workspace/scripts/gcal-fetch.py --days 2`
    - Fetches today + tomorrow from Sam's professional calendar
    - Outputs JSON with events, attendees, conference links, is_real_meeting flags
 2. Filter to real meetings only (events with attendees or video links).
-3. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/person-bootstrap.py --from-events cache/events-YYYY-MM-DD.json`
+3. Run `python3 ~/.clawford/meetings-coach-workspace/scripts/person-bootstrap.py --from-events cache/events-YYYY-MM-DD.json`
    - Creates person files for any new attendees not yet in shared brain
-4. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/workflowy-sync.py --create-nodes`
+4. Run `python3 ~/.clawford/meetings-coach-workspace/scripts/workflowy-sync.py --create-nodes`
    - Creates Workflowy meeting nodes for events that don't have one yet
-5. For each real meeting, run `python3 ~/.openclaw/meetings-coach-workspace/scripts/meeting-prep.py --meeting-id EVENT_ID`
+5. For each real meeting, run `python3 ~/.clawford/meetings-coach-workspace/scripts/meeting-prep.py --meeting-id EVENT_ID`
    - Assembles context (attendees, facts, commitments) as JSON
    - Read the output for open commitments to include in the brief
 6. Format the morning brief — factual schedule only, no talking points:
@@ -55,7 +55,7 @@ If no meetings today:
 **Important:** The morning brief is factual only — schedule, attendees, location, open commitments. Do NOT generate or include talking points. Talking points belong in the pre-meeting alert (see below), and only when sourced from real Workflowy agenda items.
 
 5. Write formatted output to `cache/morning-meeting-brief.txt`
-6. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/timed-deliver.py cache/morning-meeting-brief.txt --token-env MEETINGS_BOT_TOKEN`
+6. Run `python3 ~/.clawford/meetings-coach-workspace/scripts/timed-deliver.py cache/morning-meeting-brief.txt --token-env MEETINGS_BOT_TOKEN`
 7. Update your status file.
 
 **On success:** Update status file with heartbeat, meeting count, prep count.
@@ -73,7 +73,7 @@ If no meetings today:
 **Schedule:** `*/30 * * * *`
 **Command:** Check for upcoming meetings and send prep alerts.
 
-1. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/gcal-fetch.py`
+1. Run `python3 ~/.clawford/meetings-coach-workspace/scripts/gcal-fetch.py`
    - Fetches events for the next 2 hours
 2. Filter to real meetings starting in 15–45 minutes.
 3. Read `sent-alerts.json` to skip already-alerted meetings.
@@ -101,8 +101,8 @@ If no meetings today:
 
 **DELIVERY INVARIANT (read this first):** The ONLY items eligible for Telegram delivery in this cron are those in `transcript-scan.py` output's `processed` list for the current run. **Never iterate `cache/pending-debrief-*.json` files to decide what to send** — those files are the `/confirm` staging area, not a delivery queue. `processed-transcripts.json` already dedupes transcripts at the script level, so on re-runs `output.processed` is empty and the cron must send nothing. This rule was added after the 2026-04-14 incident where Sergeant Murphy re-sent the same Alexis Lloyd debrief five times across 2.5 hours by treating pending files as a queue.
 
-1. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/gcal-fetch.py` and identify meetings that ended in the last 60 minutes.
-2. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/transcript-scan.py`
+1. Run `python3 ~/.clawford/meetings-coach-workspace/scripts/gcal-fetch.py` and identify meetings that ended in the last 60 minutes.
+2. Run `python3 ~/.clawford/meetings-coach-workspace/scripts/transcript-scan.py`
    - Fetches new transcripts from Krisp MCP API
    - Matches transcripts to recently-ended meetings by fuzzy scoring
    - Extracts action items, decisions, follow-ups via your own LLM reasoning
@@ -137,7 +137,7 @@ If no meetings today:
 **One message per debrief:** Send EXACTLY ONE Telegram debrief message per item in `output.processed`, then ONE coaching message (if enabled and not yet in `coaching-history.json`). Never present the same debrief twice.
 
 5. **Coaching (after debrief, if coaching.enabled is true):**
-   For each item in `output.processed` with transcript text — **first check `cache/coaching-history.json` and skip if an entry for this `event_id` already exists** (otherwise a re-run will re-append, as happened 5× to the Alexis event on 2026-04-14 and 5× to the the operator/Ashley event on 2026-04-08). If no prior entry: run `python3 ~/.openclaw/meetings-coach-workspace/scripts/transcript-metrics.py --event-id EVENT_ID`. Read the metrics JSON. Read `meeting-config.json` for `coaching.growth_areas`. Read the transcript text from the debrief file. For each growth area, analyze Sam's utterances and compose a coaching section. Send a coaching message on Telegram:
+   For each item in `output.processed` with transcript text — **first check `cache/coaching-history.json` and skip if an entry for this `event_id` already exists** (otherwise a re-run will re-append, as happened 5× to the Alexis event on 2026-04-14 and 5× to the the operator/Ashley event on 2026-04-08). If no prior entry: run `python3 ~/.clawford/meetings-coach-workspace/scripts/transcript-metrics.py --event-id EVENT_ID`. Read the metrics JSON. Read `meeting-config.json` for `coaching.growth_areas`. Read the transcript text from the debrief file. For each growth area, analyze Sam's utterances and compose a coaching section. Send a coaching message on Telegram:
 
    ```
    📊 Meeting Coach — {Meeting Title}
@@ -184,7 +184,7 @@ If no meetings today:
 **Schedule:** `0 16 * * *`
 **Command:** Check open commitments and flag overdue items.
 
-1. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/commitment-tracker.py`
+1. Run `python3 ~/.clawford/meetings-coach-workspace/scripts/commitment-tracker.py`
    - Reads `commitments/active.md` from shared brain
    - Filters for `source_agent: meetings-coach`
    - Flags overdue items (past `by_when`) and approaching items (within 48 hours)
@@ -227,8 +227,8 @@ Write current UTC time to `last_heartbeat` in `~/Dropbox/openclaw-backup/agents/
 **Schedule:** `0 0 * * 5`
 **Command:** Generate a weekly meeting review.
 
-1. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/gcal-fetch.py --days 7` (look back at this week)
-2. Run `python3 ~/.openclaw/meetings-coach-workspace/scripts/commitment-tracker.py`
+1. Run `python3 ~/.clawford/meetings-coach-workspace/scripts/gcal-fetch.py --days 7` (look back at this week)
+2. Run `python3 ~/.clawford/meetings-coach-workspace/scripts/commitment-tracker.py`
 3. Compile summary:
    ```
    🐷🔍 Weekly Review — Week of {Month} {Day}

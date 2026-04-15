@@ -11,10 +11,10 @@ http://localhost:19823/callback.
 Usage:
   python3 krisp-auth-manual.py
 
-Token storage — cross-platform `~/.openclaw/meetings-coach-workspace/
+Token storage — cross-platform `~/.clawford/meetings-coach-workspace/
 cache/krisp-tokens/`. This mirrors the VPS workspace layout exactly so
 the scp-to-VPS step is trivial (identical paths on both sides). The
-`~/.openclaw/` tree is outside the git repo, so tokens never risk
+`~/.clawford/` tree is outside the git repo, so tokens never risk
 accidental commit. The OLD hardcoded E:/Dropbox/Startup/Flux/data/
 path is no longer used — it coupled Clawford to the Flux project.
 """
@@ -32,7 +32,7 @@ from threading import Thread
 
 import httpx
 
-TOKEN_DIR = Path.home() / ".openclaw" / "meetings-coach-workspace" / "cache" / "krisp-tokens"
+TOKEN_DIR = Path.home() / ".clawford" / "meetings-coach-workspace" / "cache" / "krisp-tokens"
 AUTH_ENDPOINT = "https://api.krisp.ai/platform/v1/oauth2/authorize"
 TOKEN_ENDPOINT = "https://api.krisp.ai/platform/v1/oauth2/token"
 REDIRECT_URI = "http://localhost:19823/callback"
@@ -196,7 +196,7 @@ def main():
 
     print("Done! Now copy tokens.json to the VPS:")
     print(f"  scp -i ~/.ssh/id_ed25519 {tokens_path} \\")
-    print(f"    openclaw@198.51.100.42:/home/openclaw/.openclaw/meetings-coach-workspace/cache/krisp-tokens/")
+    print(f"    openclaw@198.51.100.42:/home/openclaw/.clawford/meetings-coach-workspace/cache/krisp-tokens/")
 
 
 if __name__ == "__main__":

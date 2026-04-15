@@ -6,7 +6,7 @@ the workspace `.env` fallback that `workflowy-sync.py` already used.
 
 Under host-native Phase 6.5 cron the env var isn't exported, so the
 heartbeat reported workflowy_auth=missing even though the key was
-present in ~/.openclaw/meetings-coach-workspace/.env and workflowy-sync.py
+present in ~/.clawford/meetings-coach-workspace/.env and workflowy-sync.py
 was running fine against it. This test pins the fix: check_auth() must
 mirror the same resolver as workflowy-sync.get_api_key().
 """
@@ -42,7 +42,7 @@ def fake_workspace(tmp_path, monkeypatch):
     (ws / "token.json").write_text('{"fake": true}', encoding="utf-8")
 
     monkeypatch.delenv("WORKFLOWY_API_KEY", raising=False)
-    # Redirect HOME so any ~/openclaw/.env on the test runner's box
+    # Redirect HOME so any ~/clawford/.env on the test runner's box
     # can't accidentally satisfy the resolver.
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr("os.path.expanduser", lambda p: p.replace("~", str(tmp_path)))
@@ -63,7 +63,7 @@ def test_workflowy_auth_ok_from_workspace_env_file(fake_workspace):
     """The fix: no env var, but workspace/.env contains the key → ok.
 
     This is the Phase 6.5 host-cron case — deploy.py writes the key
-    into ~/.openclaw/meetings-coach-workspace/.env, but the cron
+    into ~/.clawford/meetings-coach-workspace/.env, but the cron
     environment doesn't export it as a shell variable.
     """
     env_file = fake_workspace["ws"] / ".env"

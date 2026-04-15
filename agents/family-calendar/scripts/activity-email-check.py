@@ -33,7 +33,7 @@ import re
 import sys
 from datetime import datetime, timezone
 
-WORKSPACE = os.path.expanduser("~/.openclaw/family-calendar-workspace")
+WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
 TOKEN_PATH = os.environ.get(
     "GOOGLE_CALENDAR_TOKEN_PATH",
     os.path.join(WORKSPACE, "token.json"),

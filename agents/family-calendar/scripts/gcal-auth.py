@@ -9,8 +9,8 @@ read family Google Calendars.
 Usage: python3 gcal-auth.py [--credentials PATH] [--token PATH]
 
 Defaults:
-  --credentials: ~/.openclaw/family-calendar-workspace/credentials.json
-  --token:       ~/.openclaw/family-calendar-workspace/token.json
+  --credentials: ~/.clawford/family-calendar-workspace/credentials.json
+  --token:       ~/.clawford/family-calendar-workspace/token.json
 
 Prerequisites:
   1. Google Cloud Console: create project, enable Calendar API + Gmail API
@@ -49,10 +49,10 @@ SCOPES = [
 ]
 
 DEFAULT_CREDS = os.path.expanduser(
-    "~/.openclaw/family-calendar-workspace/credentials.json"
+    "~/.clawford/family-calendar-workspace/credentials.json"
 )
 DEFAULT_TOKEN = os.path.expanduser(
-    "~/.openclaw/family-calendar-workspace/token.json"
+    "~/.clawford/family-calendar-workspace/token.json"
 )
 
 

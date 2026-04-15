@@ -25,7 +25,7 @@ from difflib import SequenceMatcher
 import urllib.request
 import urllib.error
 
-WORKSPACE = os.path.expanduser("~/.openclaw/meetings-coach-workspace")
+WORKSPACE = os.path.expanduser("~/.clawford/meetings-coach-workspace")
 CACHE_DIR = os.path.join(WORKSPACE, "cache")
 LINKS_FILE = os.path.join(CACHE_DIR, "workflowy-links.json")
 CONTACTS_CACHE_FILE = os.path.join(CACHE_DIR, "contact-names.json")
@@ -55,11 +55,11 @@ def get_api_key():
     key = os.environ.get("WORKFLOWY_API_KEY", "")
     if not key:
         # Fallback: read from .env files. Workspace .env is the primary
-        # source inside Docker (where the host ~/openclaw/.env isn't mounted).
+        # source inside Docker (where the host ~/clawford/.env isn't mounted).
         for env_file in [
             os.path.join(WORKSPACE, ".env"),
-            os.path.expanduser("~/openclaw/.env"),
-            "/home/openclaw/openclaw/.env",
+            os.path.expanduser("~/clawford/.env"),
+            "/home/openclaw/clawford/.env",
             os.path.expanduser("~/.env"),
             "/tmp/.env",
         ]:

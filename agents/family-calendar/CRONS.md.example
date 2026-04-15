@@ -2,7 +2,7 @@
 
 All times in UTC.
 Agent: family-calendar
-Workspace: .openclaw/family-calendar-workspace/
+Workspace: .clawford/family-calendar-workspace/
 
 ---
 
@@ -11,7 +11,7 @@ Workspace: .openclaw/family-calendar-workspace/
 **Schedule:** `50 11 * * *`
 **Command:** Fetch all family calendars, format briefing, deliver at 5:00 AM PT sharp.
 
-1. Run `python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 2`
+1. Run `python3 ~/.clawford/family-calendar-workspace/scripts/gcal-fetch.py --days 2`
    - Fetches today + tomorrow from all configured calendars
    - Outputs JSON with events, conflicts, and per-calendar labels
 2. Format the morning briefing:
@@ -22,7 +22,7 @@ Workspace: .openclaw/family-calendar-workspace/
    - If today is a standard routine day with no extra events: "Standard [weekday] — no exceptions"
    - Note the day's pickup arrangement (Mon = Sam + swimming, Fri = Sam, other = Jamie)
 3. Write formatted output to `cache/morning-briefing.txt`
-4. Run `python3 ~/.openclaw/family-calendar-workspace/scripts/timed-deliver.py cache/morning-briefing.txt --token-env FAMILYCAL_BOT_TOKEN`
+4. Run `python3 ~/.clawford/family-calendar-workspace/scripts/timed-deliver.py cache/morning-briefing.txt --token-env FAMILYCAL_BOT_TOKEN`
 5. Update your status file.
 
 **Morning briefing format:**
@@ -78,7 +78,7 @@ Pickup: {Jamie / Sam} at 3:30 PM.
 **Schedule:** `*/5 * * * *`
 **Command:** Poll for upcoming events and send reminders.
 
-1. Run `python3 ~/.openclaw/family-calendar-workspace/scripts/reminder-check.py`
+1. Run `python3 ~/.clawford/family-calendar-workspace/scripts/reminder-check.py`
    - Checks all calendars for events in the next 60 minutes
    - Reads `sent-reminders.json` to skip already-sent reminders
    - Returns JSON: list of reminders to send, or empty array
@@ -125,7 +125,7 @@ Stale errors in the status file can cause Mr Fixit to raise false alerts, so pru
 **Schedule:** `15 */2 * * *`
 **Command:** Check Gmail for emails from Example Preschool, Example Swim School, and Example Ballet Studio.
 
-1. Run `python3 ~/.openclaw/family-calendar-workspace/scripts/activity-email-check.py`
+1. Run `python3 ~/.clawford/family-calendar-workspace/scripts/activity-email-check.py`
    - Searches Gmail for emails from activity providers (last 48 hours)
    - Uses gpt-5.4-nano to parse email content for schedule-relevant items
    - Outputs JSON array of action items, cancellations, closures
@@ -146,7 +146,7 @@ Stale errors in the status file can cause Mr Fixit to raise false alerts, so pru
 **Schedule:** `30 */3 * * *`
 **Command:** Check Gmail for calendar invites.
 
-1. Run `python3 ~/.openclaw/family-calendar-workspace/scripts/gmail-invite-check.py`
+1. Run `python3 ~/.clawford/family-calendar-workspace/scripts/gmail-invite-check.py`
    - Searches for ICS attachments and Google Calendar notifications
    - Outputs JSON array of new invites
 2. For each invite: send a Telegram message:
@@ -162,7 +162,7 @@ Stale errors in the status file can cause Mr Fixit to raise false alerts, so pru
 **Schedule:** `0 1 * * 0`
 **Command:** Generate a week-ahead schedule overview.
 
-1. Run `python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 7`
+1. Run `python3 ~/.clawford/family-calendar-workspace/scripts/gcal-fetch.py --days 7`
 2. Format as a day-by-day overview with key events, conflicts, and pickup arrangements.
 3. Deliver to Telegram.
 
@@ -175,7 +175,7 @@ Stale errors in the status file can cause Mr Fixit to raise false alerts, so pru
 **Schedule:** `45 */2 * * *`
 **Command:** Scan WhatsApp messages for schedule-relevant content.
 
-1. Run `python3 ~/.openclaw/family-calendar-workspace/scripts/chat-parse-schedule.py`
+1. Run `python3 ~/.clawford/family-calendar-workspace/scripts/chat-parse-schedule.py`
    - Reads recent WhatsApp messages from OpenClaw session transcripts
    - Outputs JSON array of messages with schedule-relevant content
 2. For each message with schedule content (cancellations, time changes, pickup changes):

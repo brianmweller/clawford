@@ -38,7 +38,7 @@ for _p in Path(__file__).resolve().parents:
 from agents.shared.heartbeat_base import HeartbeatProbe  # noqa: E402
 
 
-WORKSPACE = os.path.expanduser("~/.openclaw/family-calendar-workspace")
+WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
 BRAIN = os.path.expanduser("~/Dropbox/openclaw-backup")
 OUTPUT_FILE = os.path.join(BRAIN, "agents", "family-calendar.status.md")
 

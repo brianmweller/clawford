@@ -31,7 +31,7 @@ for _p in Path(__file__).resolve().parents:
         break
 
 
-WORKSPACE = Path(os.path.expanduser("~/.openclaw/meetings-coach-workspace"))
+WORKSPACE = Path(os.path.expanduser("~/.clawford/meetings-coach-workspace"))
 CACHE_DIR = WORKSPACE / "cache"
 SCRIPTS_DIR = WORKSPACE / "scripts"
 BRIEF_FILE = CACHE_DIR / "morning-brief-ready.txt"

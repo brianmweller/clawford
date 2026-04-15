@@ -8,8 +8,8 @@ to read Sam's professional Google Calendar.
 Usage: python3 gcal-auth.py [--credentials PATH] [--token PATH]
 
 Defaults:
-  --credentials: ~/.openclaw/meetings-coach-workspace/credentials.json
-  --token:       ~/.openclaw/meetings-coach-workspace/token.json
+  --credentials: ~/.clawford/meetings-coach-workspace/credentials.json
+  --token:       ~/.clawford/meetings-coach-workspace/token.json
 
 Prerequisites:
   1. Google Cloud Console: create project (or reuse existing), enable Calendar API
@@ -28,10 +28,10 @@ import sys
 SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 
 DEFAULT_CREDS = os.path.expanduser(
-    "~/.openclaw/meetings-coach-workspace/credentials.json"
+    "~/.clawford/meetings-coach-workspace/credentials.json"
 )
 DEFAULT_TOKEN = os.path.expanduser(
-    "~/.openclaw/meetings-coach-workspace/token.json"
+    "~/.clawford/meetings-coach-workspace/token.json"
 )
 
 

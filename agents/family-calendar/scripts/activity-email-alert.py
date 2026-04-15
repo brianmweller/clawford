@@ -36,7 +36,7 @@ from agents.shared.llm import infer as llm_infer  # noqa: E402
 from agents.shared.telegram_api import resolve_credentials, send_message  # noqa: E402
 
 
-WORKSPACE = Path(os.path.expanduser("~/.openclaw/family-calendar-workspace"))
+WORKSPACE = Path(os.path.expanduser("~/.clawford/family-calendar-workspace"))
 CACHE_DIR = WORKSPACE / "cache"
 SCRIPTS_DIR = WORKSPACE / "scripts"
 LAST_RUN_FILE = CACHE_DIR / "last-activity-email.json"

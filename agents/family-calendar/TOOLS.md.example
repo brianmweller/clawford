@@ -3,7 +3,7 @@
 ## Filesystem Access
 
 ### Your Workspace (full read/write)
-- **Path:** `~/.openclaw/family-calendar-workspace/`
+- **Path:** `~/.clawford/family-calendar-workspace/`
 - **Contents:**
   - `scripts/` — Python scripts for calendar fetching, reminders, delivery
   - `cache/` — event cache (events-YYYY-MM-DD.json), briefing output (morning-briefing.txt)
@@ -27,7 +27,7 @@
 ### Shell / Exec
 - **Available:** Yes, for running Python scripts in your workspace.
 - **Guardrails:**
-  - Only run scripts in `~/.openclaw/family-calendar-workspace/scripts/`
+  - Only run scripts in `~/.clawford/family-calendar-workspace/scripts/`
   - Never pipe calendar data or event descriptions to bash
   - Never run `rm -rf`
   - Log all commands and output
@@ -36,44 +36,44 @@
 
 **Fetch calendar events:**
 ```bash
-python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py
-python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --date 2026-04-08
-python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --days 7
-python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-fetch.py --calendar-id sam.smith@example.com
+python3 ~/.clawford/family-calendar-workspace/scripts/gcal-fetch.py
+python3 ~/.clawford/family-calendar-workspace/scripts/gcal-fetch.py --date 2026-04-08
+python3 ~/.clawford/family-calendar-workspace/scripts/gcal-fetch.py --days 7
+python3 ~/.clawford/family-calendar-workspace/scripts/gcal-fetch.py --calendar-id sam.smith@example.com
 ```
 
 **Check for upcoming reminders:**
 ```bash
-python3 ~/.openclaw/family-calendar-workspace/scripts/reminder-check.py
+python3 ~/.clawford/family-calendar-workspace/scripts/reminder-check.py
 ```
 
 **Timed delivery (hold until top of hour):**
 ```bash
-python3 ~/.openclaw/family-calendar-workspace/scripts/timed-deliver.py cache/morning-briefing.txt --token-env FAMILYCAL_BOT_TOKEN
+python3 ~/.clawford/family-calendar-workspace/scripts/timed-deliver.py cache/morning-briefing.txt --token-env FAMILYCAL_BOT_TOKEN
 ```
 
 **Gmail invite check:**
 ```bash
-python3 ~/.openclaw/family-calendar-workspace/scripts/gmail-invite-check.py
-python3 ~/.openclaw/family-calendar-workspace/scripts/gmail-invite-check.py --hours 48
+python3 ~/.clawford/family-calendar-workspace/scripts/gmail-invite-check.py
+python3 ~/.clawford/family-calendar-workspace/scripts/gmail-invite-check.py --hours 48
 ```
 
 **Activity email check (Example Preschool, Example Swim School, Example Ballet Studio):**
 ```bash
-python3 ~/.openclaw/family-calendar-workspace/scripts/activity-email-check.py
-python3 ~/.openclaw/family-calendar-workspace/scripts/activity-email-check.py --dry-run
+python3 ~/.clawford/family-calendar-workspace/scripts/activity-email-check.py
+python3 ~/.clawford/family-calendar-workspace/scripts/activity-email-check.py --dry-run
 ```
 
 **Calendar write-back:**
 ```bash
 # Preview (no changes)
-python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-write.py preview-create --calendar-id Sam --summary "Dentist" --start "2026-04-10T14:00" --end "2026-04-10T15:00"
+python3 ~/.clawford/family-calendar-workspace/scripts/gcal-write.py preview-create --calendar-id Sam --summary "Dentist" --start "2026-04-10T14:00" --end "2026-04-10T15:00"
 # Create (requires --confirm)
-python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-write.py create --calendar-id Sam --summary "Dentist" --start "2026-04-10T14:00" --end "2026-04-10T15:00" --confirm
+python3 ~/.clawford/family-calendar-workspace/scripts/gcal-write.py create --calendar-id Sam --summary "Dentist" --start "2026-04-10T14:00" --end "2026-04-10T15:00" --confirm
 # Move
-python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-write.py move --calendar-id Sam --event-id EVENT_ID --new-start "2026-04-11T15:00" --new-end "2026-04-11T16:00" --confirm
+python3 ~/.clawford/family-calendar-workspace/scripts/gcal-write.py move --calendar-id Sam --event-id EVENT_ID --new-start "2026-04-11T15:00" --new-end "2026-04-11T16:00" --confirm
 # Remove
-python3 ~/.openclaw/family-calendar-workspace/scripts/gcal-write.py remove --calendar-id Sam --event-id EVENT_ID --confirm
+python3 ~/.clawford/family-calendar-workspace/scripts/gcal-write.py remove --calendar-id Sam --event-id EVENT_ID --confirm
 ```
 
 ---

@@ -29,7 +29,7 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 
-WORKSPACE = os.path.expanduser("~/.openclaw/meetings-coach-workspace")
+WORKSPACE = os.path.expanduser("~/.clawford/meetings-coach-workspace")
 CONFIG_PATH = os.path.join(WORKSPACE, "meeting-config.json")
 TOKEN_PATH = os.environ.get(
     "GOOGLE_CALENDAR_TOKEN_PATH",

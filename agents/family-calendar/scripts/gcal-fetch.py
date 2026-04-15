@@ -30,7 +30,7 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 
-WORKSPACE = os.path.expanduser("~/.openclaw/family-calendar-workspace")
+WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
 CONFIG_PATH = os.path.join(WORKSPACE, "calendar-config.json")
 TOKEN_PATH = os.environ.get(
     "GOOGLE_CALENDAR_TOKEN_PATH",
@@ -49,7 +49,7 @@ CACHE_DIR = os.path.join(WORKSPACE, "cache")
 # owned by Murphy; everything else is Mistress Mouse. We read Murphy's
 # cache file directly since both workspaces are on the same volume.
 WORKFLOWY_LINKS_PATH = os.path.expanduser(
-    "~/.openclaw/meetings-coach-workspace/cache/workflowy-links.json"
+    "~/.clawford/meetings-coach-workspace/cache/workflowy-links.json"
 )
 
 

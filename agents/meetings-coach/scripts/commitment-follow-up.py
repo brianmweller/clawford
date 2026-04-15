@@ -32,7 +32,7 @@ for _p in Path(__file__).resolve().parents:
 from agents.shared.telegram_api import resolve_credentials, send_message  # noqa: E402
 
 
-WORKSPACE = Path(os.path.expanduser("~/.openclaw/meetings-coach-workspace"))
+WORKSPACE = Path(os.path.expanduser("~/.clawford/meetings-coach-workspace"))
 CACHE_DIR = WORKSPACE / "cache"
 SCRIPTS_DIR = WORKSPACE / "scripts"
 LAST_RUN_FILE = CACHE_DIR / "last-commitment-follow-up.json"

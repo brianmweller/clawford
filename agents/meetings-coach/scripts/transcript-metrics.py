@@ -23,7 +23,7 @@ import os
 import re
 import sys
 
-WORKSPACE = os.path.expanduser("~/.openclaw/meetings-coach-workspace")
+WORKSPACE = os.path.expanduser("~/.clawford/meetings-coach-workspace")
 CACHE_DIR = os.path.join(WORKSPACE, "cache")
 CONFIG_PATH = os.path.join(WORKSPACE, "meeting-config.json")
 

@@ -39,7 +39,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 
-WORKSPACE = os.path.expanduser("~/.openclaw/meetings-coach-workspace")
+WORKSPACE = os.path.expanduser("~/.clawford/meetings-coach-workspace")
 CACHE_DIR = os.path.join(WORKSPACE, "cache")
 BRAIN = os.path.expanduser("~/Dropbox/openclaw-backup")
 BRAIN_PEOPLE = os.path.join(BRAIN, "people")

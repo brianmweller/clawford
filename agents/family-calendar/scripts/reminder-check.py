@@ -36,7 +36,7 @@ import sys
 import urllib.request as urllib_request
 from datetime import datetime, timedelta, timezone
 
-WORKSPACE = os.path.expanduser("~/.openclaw/family-calendar-workspace")
+WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
 REMINDERS_PATH = os.path.join(WORKSPACE, "sent-reminders.json")
 CONFIG_PATH = os.path.join(WORKSPACE, "calendar-config.json")
 TOKEN_PATH = os.environ.get(
@@ -51,7 +51,7 @@ TOKEN_PATH = os.environ.get(
 WORKFLOWY_LINKS_PATH = os.environ.get(
     "WORKFLOWY_LINKS_PATH",
     os.path.expanduser(
-        "~/.openclaw/meetings-coach-workspace/cache/workflowy-links.json"
+        "~/.clawford/meetings-coach-workspace/cache/workflowy-links.json"
     ),
 )
 

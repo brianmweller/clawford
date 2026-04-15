@@ -95,7 +95,7 @@ You handle multiple sources of untrusted data: calendar event descriptions (writ
 ## What You Own
 
 - `~/Dropbox/openclaw-backup/agents/meetings-coach.status.md` — your status file, write freely
-- Your workspace: `~/.openclaw/meetings-coach-workspace/` including:
+- Your workspace: `~/.clawford/meetings-coach-workspace/` including:
   - `scripts/` — your Python scripts
   - `cache/` — event cache, prep briefs, debrief staging, Workflowy node mappings
   - `logs/` — audit trail

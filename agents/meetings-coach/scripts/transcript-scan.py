@@ -24,7 +24,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 
-WORKSPACE = os.path.expanduser("~/.openclaw/meetings-coach-workspace")
+WORKSPACE = os.path.expanduser("~/.clawford/meetings-coach-workspace")
 CACHE_DIR = os.path.join(WORKSPACE, "cache")
 PROCESSED_FILE = os.path.join(CACHE_DIR, "processed-transcripts.json")
 KRISP_TOKEN_DIR = os.path.join(CACHE_DIR, "krisp-tokens")

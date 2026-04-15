@@ -17,7 +17,7 @@ import time
 import traceback
 from datetime import datetime, timezone
 
-WORKSPACE = os.path.expanduser("~/.openclaw/meetings-coach-workspace")
+WORKSPACE = os.path.expanduser("~/.clawford/meetings-coach-workspace")
 BRAIN = os.path.expanduser("~/Dropbox/openclaw-backup")
 OUTPUT_FILE = os.path.join(BRAIN, "agents", "meetings-coach.status.md")
 
@@ -93,8 +93,8 @@ def _resolve_workflowy_api_key() -> str:
         return key
     for env_file in [
         os.path.join(WORKSPACE, ".env"),
-        os.path.expanduser("~/openclaw/.env"),
-        "/home/openclaw/openclaw/.env",
+        os.path.expanduser("~/clawford/.env"),
+        "/home/openclaw/clawford/.env",
         os.path.expanduser("~/.env"),
         "/tmp/.env",
     ]:
