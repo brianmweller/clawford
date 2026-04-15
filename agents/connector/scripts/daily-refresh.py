@@ -480,7 +480,8 @@ def _build_google_services():
     token_path = _find_google_token()
     if not token_path:
         raise RuntimeError(
-            "No Google token.json found in ~/.openclaw/*/token.json or family-calendar/"
+            "No Google token.json found under ~/.openclaw/family-calendar-workspace/ "
+            "or ~/.openclaw/meetings-coach-workspace/"
         )
 
     token_data = json.loads(token_path.read_text(encoding="utf-8"))
