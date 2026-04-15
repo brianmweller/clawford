@@ -1000,9 +1000,15 @@ things to go wrong, verify each step before moving on.
 All commands prefixed with `oc` (Docker exec wrapper — define in your shell):
 
 ```bash
-oc() { docker compose -f ~/openclaw/docker-compose.yml exec -T openclaw-gateway openclaw "$@"; }
-oci() { docker compose -f ~/openclaw/docker-compose.yml exec -it openclaw-gateway openclaw "$@"; }
+oc() { docker compose -f ~/repo/ops/docker-compose.yml exec -T openclaw-gateway openclaw "$@"; }
+oci() { docker compose -f ~/repo/ops/docker-compose.yml exec -it openclaw-gateway openclaw "$@"; }
 ```
+
+The `~/openclaw/docker-compose.yml` path also works because post-
+Phase-3b-followup it is a symlink to `~/repo/ops/docker-compose.yml`.
+Either path resolves to the same git-tracked compose file; prefer
+the `~/repo/ops/` form in fresh configs so the runtime and git
+source of truth are visibly the same place.
 
 | Action | Command |
 |--------|---------|
