@@ -44,8 +44,10 @@ DATAIMPULSE_STICKY_PORT = 10000
 
 # humanize=False + fixed config = consistent device fingerprint.
 # Amazon grants MFA exemption per device; randomized fingerprints
-# trigger MFA on every launch. Same concern for the Costco daemon.
-_CLAWFORD_HUMANIZE = False
+# trigger MFA on every launch. This is the fleet default — callers
+# that want per-launch variability (e.g. the Costco daemon's Azure
+# B2C signin flow) can pass humanize=True explicitly.
+_CLAWFORD_HUMANIZE_DEFAULT = False
 
 
 def _Camoufox(**kwargs):  # pragma: no cover — replaced in tests
@@ -135,6 +137,7 @@ def launch_camoufox(
     height: int = 800,
     headless: "bool | str" = False,
     os_name: str = "windows",
+    humanize: bool = _CLAWFORD_HUMANIZE_DEFAULT,
     extra_config: dict | None = None,
     persistent_context: bool = False,
     user_data_dir: str | os.PathLike | None = None,
@@ -144,6 +147,10 @@ def launch_camoufox(
     `proxy_cfg` is the dict returned by get_proxy_config (or None for
     a bare-IP launch). `geoip` is toggled automatically based on
     whether proxy_cfg is set.
+
+    `humanize` defaults to False (the fleet default — see the module
+    docstring). Callers whose flow wants per-launch variability (e.g.
+    the Costco B2C signin path) can pass humanize=True explicitly.
 
     `extra_config` is merged into the default viewport config so
     individual callers can override specific Camoufox properties
@@ -164,7 +171,7 @@ def launch_camoufox(
         proxy=proxy_cfg,
         geoip=bool(proxy_cfg),
         os=os_name,
-        humanize=_CLAWFORD_HUMANIZE,
+        humanize=humanize,
         config=config,
         i_know_what_im_doing=True,
     )

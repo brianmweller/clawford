@@ -17,6 +17,9 @@
 #   */5 * * * *   family-calendar-reminder-check  → FAMILYCAL_BOT_TOKEN
 #   */5 * * * *   news-digest-engagement-poll     → NEWSDIGEST_BOT_TOKEN
 #   0 23 * * *    news-digest-preference-update   → NEWSDIGEST_BOT_TOKEN  (Phase 3b — pure-Python, calls llm.infer internally)
+#   30 10 * * *   shopping-morning-delivery-brief → SHOPPING_BOT_TOKEN   (Phase 4 — writes cache/morning-brief-ready.txt)
+#   0 14 * * *    shopping-delivery-digest        → SHOPPING_BOT_TOKEN   (Phase 4 — daily 10 AM ET digest, pure-Python compose + send)
+#   0 14 1 * *    shopping-subscribe-save-review  → SHOPPING_BOT_TOKEN   (Phase 4 — monthly S&S review)
 #
 # Removed in R3 (replaced by fleet-health):
 #   */30 * * * *  shopping-heartbeat              → covered by fleet-health
@@ -47,6 +50,9 @@ CONTRACT_ENTRIES=(
   "*/5 * * * *|family-calendar-reminder-check|/home/node/.openclaw/family-calendar-workspace/scripts/reminder-check.py|FAMILYCAL_BOT_TOKEN|90"
   "*/5 * * * *|news-digest-engagement-poll|/home/node/.openclaw/news-digest-workspace/scripts/engagement-poller.py|NEWSDIGEST_BOT_TOKEN|60"
   "0 23 * * *|news-digest-preference-update|/home/node/.openclaw/news-digest-workspace/scripts/update-preferences.py|NEWSDIGEST_BOT_TOKEN|300"
+  "30 10 * * *|shopping-morning-delivery-brief|/home/node/.openclaw/shopping-workspace/scripts/morning-delivery-brief.py|SHOPPING_BOT_TOKEN|300"
+  "0 14 * * *|shopping-delivery-digest|/home/node/.openclaw/shopping-workspace/scripts/delivery-digest.py|SHOPPING_BOT_TOKEN|900"
+  "0 14 1 * *|shopping-subscribe-save-review|/home/node/.openclaw/shopping-workspace/scripts/subscribe-save-review.py|SHOPPING_BOT_TOKEN|300"
 )
 
 # Markers for old entries to REMOVE on next install run. Used by the

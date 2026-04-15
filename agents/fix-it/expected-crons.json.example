@@ -44,38 +44,6 @@
   "news-digest": {
   },
   "shopping": {
-    "costco-token-refresh": {
-      "cron": "*/12 * * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "default",
-      "to": "111111111",
-      "message": "Refresh the Costco id_token. Run with a 5-minute timeout: timeout 300 python3 ~/.openclaw/shopping-workspace/scripts/costco-token-daemon.py. The daemon takes 30-180 seconds depending on Costco server speed \u00e2\u20ac\u201d do NOT use a shorter timeout. Capture the exit code and the last few lines of output. BEFORE writing the result, read the EXISTING cache/last-token-refresh.json to get the previous run status. Then write the current run result to cache/last-token-refresh.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"exit_code\": <int>, \"status\": \"ok\" or \"error\", \"summary\": \"<one sentence>\"}. ALERT LOGIC: If exit_code != 0 AND the PREVIOUS run was also error, send Telegram: \"\u00f0\u0178\u00a6\u203a Costco token refresh failed twice in a row.\" If previous was ok, do NOT alert. DO NOT touch ~/Dropbox/openclaw-backup/agents/shopping.status.md \u00e2\u20ac\u201d fleet-health.json (R6 orchestrator) is the authoritative health source."
-    },
-    "morning-delivery-brief": {
-      "cron": "50 11 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "shopping",
-      "to": "111111111",
-      "message": "Generate and deliver the morning delivery snapshot. 1) Run: python3 ~/.openclaw/shopping-workspace/scripts/amazon-orders.py --recent --days 3. Read the JSON output. 2) Run: python3 ~/.openclaw/shopping-workspace/scripts/costco-orders.py --recent --days 3. Read the JSON output. If Costco auth fails, note it and continue. 3) Filter to items arriving TODAY or with tracking updates in the last 24 hours. If nothing is arriving today and no recent tracking updates, write a one-liner: '\u00f0\u0178\u00a6\u203a No deliveries expected today.' 4) Format as a compact morning snapshot (not the full delivery digest \u00e2\u20ac\u201d that runs at 10 AM):\n\n\u00f0\u0178\u00a6\u203a Deliveries Today \u00e2\u20ac\u201d {Weekday}, {Month} {Day}\n\n\u00f0\u0178\u201c\u00a6 ARRIVING TODAY\n\u00e2\u20ac\u00a2 {Item} \u00e2\u20ac\u201d {Store}, {tracking status}\n\n\u00f0\u0178\u0161\u0161 TRACKING UPDATE\n\u00e2\u20ac\u00a2 {Item} \u00e2\u20ac\u201d {Store}, {new status}\n\n\u00f0\u0178\u00a6\u203a {count} item(s) arriving\n\nIf nothing: '\u00f0\u0178\u00a6\u203a No deliveries expected today. Full report at 10 AM.'\n\n5) Write to cache/morning-delivery-brief.txt. 6) Run: python3 ~/.openclaw/shopping-workspace/scripts/timed-deliver.py cache/morning-delivery-brief.txt --token-env SHOPPING_BOT_TOKEN. 7) Write result to ~/.openclaw/shopping-workspace/cache/last-morning-brief.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"items_today\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/shopping.status.md \u00e2\u20ac\u201d fleet-health.json (R6 orchestrator) is the authoritative health source."
-    },
-    "delivery-digest": {
-      "cron": "0 14 * * *",
-      "no_deliver": true,
-      "announce": false,
-      "account": "shopping",
-      "to": "111111111",
-      "message": "Generate the daily delivery report. 0) FIRST, refresh the Costco token: Run python3 ~/.openclaw/shopping-workspace/scripts/costco-token-daemon.py. Wait for it to finish (takes ~30-90 seconds). If exit code 0, the token is fresh. If non-zero, note Costco will be unavailable and continue. 1) Run: python3 ~/.openclaw/shopping-workspace/scripts/amazon-orders.py --recent --days 7. Read the JSON output \u00e2\u20ac\u201d these are Amazon orders. 2) Run: python3 ~/.openclaw/shopping-workspace/scripts/costco-orders.py --recent --days 7. Read the JSON output \u00e2\u20ac\u201d these are Costco orders. If this fails with auth_failed, note it and continue. 3) Run: python3 ~/.openclaw/shopping-workspace/scripts/gmail-search.py --query \"from:shipment-tracking@amazon.com newer_than:7d\" --query \"from:costco@t.costco.com subject:shipped newer_than:7d\" --query \"from:no-reply@amazon.com subject:Delivered newer_than:3d\". Read the JSON array of matching shipping notifications. 4) Combine results. Categories are MUTUALLY EXCLUSIVE \u00e2\u20ac\u201d every item must appear in EXACTLY ONE group. Apply these rules in order: (a) Delivered = status==Delivered in the last 3 days (takes priority, even if delivery date is today); (b) Arriving Today = not yet delivered AND delivery date == today; (c) This Week = not yet delivered AND delivery date in next 7 days (excluding today); (d) Recently Ordered = ordered but no ship/delivery date yet. 5) Format the report following the delivery-digest template in ~/.openclaw/shopping-workspace/CRONS.md and deliver to Telegram. If any source failed, deliver what you have and note failures in Source notes. DO NOT touch ~/Dropbox/openclaw-backup/agents/shopping.status.md \u00e2\u20ac\u201d fleet-health.json (R6 orchestrator) is the authoritative health source."
-    },
-    "subscribe-save-review": {
-      "cron": "0 14 1 * *",
-      "no_deliver": false,
-      "announce": true,
-      "account": "shopping",
-      "to": "111111111",
-      "message": "Monthly Subscribe & Save review. 1) Run: python3 ~/.openclaw/shopping-workspace/scripts/amazon-orders.py --subscriptions. Read the JSON output. 2) Run: python3 ~/.openclaw/shopping-workspace/scripts/gmail-search.py --query \"from:no-reply@amazon.com subject:Subscribe & Save newer_than:30d\". Read matching emails for shipment details. 3) List all S&S items with: item name, quantity, price, next shipment date. 4) Note any price changes or out-of-stock items. 5) Format following the S&S review template in ~/.openclaw/shopping-workspace/CRONS.md and deliver to Telegram. Ask Sam if he wants any changes. DO NOT touch ~/Dropbox/openclaw-backup/agents/shopping.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source."
-    }
   },
   "fix-it": {
     "cron-self-check": {

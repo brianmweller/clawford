@@ -272,6 +272,54 @@ def test_launch_camoufox_omits_persistent_kwargs_by_default(monkeypatch):
     assert "user_data_dir" not in captured
 
 
+def test_launch_camoufox_humanize_kwarg_overrides_default(monkeypatch):
+    """The Costco daemon wants `humanize=True` for its Azure B2C signin
+    flow (the Costco endpoint is sensitive to deterministic fingerprints
+    in a way Amazon isn't). Callers must be able to opt in explicitly."""
+    captured = {}
+
+    class FakeInstance:
+        def __enter__(self):
+            return MagicMock()
+        def __exit__(self, *a):
+            return None
+
+    monkeypatch.setattr(
+        camoufox_proxy,
+        "_Camoufox",
+        lambda **kw: captured.update(kw) or FakeInstance(),
+    )
+
+    with camoufox_proxy.launch_camoufox(None, humanize=True) as _:
+        pass
+
+    assert captured["humanize"] is True
+
+
+def test_launch_camoufox_default_humanize_is_false(monkeypatch):
+    """Default humanize stays False to preserve the Amazon MFA-exemption
+    fingerprint invariant — that's why the Clawford fleet hardcoded it
+    to False before the kwarg was added."""
+    captured = {}
+
+    class FakeInstance:
+        def __enter__(self):
+            return MagicMock()
+        def __exit__(self, *a):
+            return None
+
+    monkeypatch.setattr(
+        camoufox_proxy,
+        "_Camoufox",
+        lambda **kw: captured.update(kw) or FakeInstance(),
+    )
+
+    with camoufox_proxy.launch_camoufox(None) as _:
+        pass
+
+    assert captured["humanize"] is False
+
+
 # ─── Constants ──────────────────────────────────────────────────────
 
 
