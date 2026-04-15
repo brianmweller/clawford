@@ -23,6 +23,10 @@
 #   30 */3 * * *  family-calendar-gmail-invite-alert   → FAMILYCAL_BOT_TOKEN (Phase 4 — format + send per-invite Telegram alerts)
 #   45 */2 * * *  family-calendar-whatsapp-chat-alert  → FAMILYCAL_BOT_TOKEN (Phase 4 — LLM classifies WhatsApp messages via Baileys session store)
 #   0 12 * * *    family-calendar-whatsapp-schedule-post → FAMILYCAL_BOT_TOKEN (Phase 4 — compose daily summary for the operator to manually forward)
+#   0 */2 * * *   connector-gmessages-mine              → CONNECTOR_BOT_TOKEN  (Phase 4 — Camoufox scrape of Google Messages Web)
+#   0 10 * * *    connector-daily-refresh               → CONNECTOR_BOT_TOKEN  (Phase 4 — runs 30 min before morning-relationship-nudge at 30 10 UTC so people-scan sees fresh last_interaction)
+#   30 10 * * *   connector-morning-relationship-nudge  → CONNECTOR_BOT_TOKEN  (Phase 4 — daily nudge for 5 AM PT fleet; Monday recap folds weekly-review)
+#   0 8,20 * * *  connector-notes-triage-alert          → CONNECTOR_BOT_TOKEN  (Phase 4 — LLM classifies inbox notes twice daily)
 #
 # Removed in R3 (replaced by fleet-health):
 #   */30 * * * *  shopping-heartbeat              → covered by fleet-health
@@ -59,6 +63,10 @@ CONTRACT_ENTRIES=(
   "30 */3 * * *|family-calendar-gmail-invite-alert|/home/node/.openclaw/family-calendar-workspace/scripts/gmail-invite-alert.py|FAMILYCAL_BOT_TOKEN|120"
   "45 */2 * * *|family-calendar-whatsapp-chat-alert|/home/node/.openclaw/family-calendar-workspace/scripts/whatsapp-chat-alert.py|FAMILYCAL_BOT_TOKEN|180"
   "0 12 * * *|family-calendar-whatsapp-schedule-post|/home/node/.openclaw/family-calendar-workspace/scripts/whatsapp-schedule-post.py|FAMILYCAL_BOT_TOKEN|120"
+  "0 */2 * * *|connector-gmessages-mine|/home/node/.openclaw/connector-workspace/scripts/gmessages-mine.py|CONNECTOR_BOT_TOKEN|300"
+  "0 10 * * *|connector-daily-refresh|/home/node/.openclaw/connector-workspace/scripts/daily-refresh.py|CONNECTOR_BOT_TOKEN|600"
+  "30 10 * * *|connector-morning-relationship-nudge|/home/node/.openclaw/connector-workspace/scripts/morning-relationship-nudge.py|CONNECTOR_BOT_TOKEN|300"
+  "0 8,20 * * *|connector-notes-triage-alert|/home/node/.openclaw/connector-workspace/scripts/notes-triage-alert.py|CONNECTOR_BOT_TOKEN|180"
 )
 
 # Markers for old entries to REMOVE on next install run. Used by the

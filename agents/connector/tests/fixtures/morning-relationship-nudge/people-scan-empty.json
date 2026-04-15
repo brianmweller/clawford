@@ -1,0 +1,16 @@
+{
+  "status": "ok",
+  "overdue": [],
+  "overdue_total": 0,
+  "approaching": [],
+  "healthy": [],
+  "demoted_upcoming": [],
+  "summary": {
+    "total": 42,
+    "overdue": 0,
+    "approaching": 0,
+    "healthy": 42,
+    "demoted_upcoming": 0,
+    "skipped": 0
+  }
+}

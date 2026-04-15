@@ -1,0 +1,63 @@
+{
+  "status": "ok",
+  "overdue": [
+    {
+      "slug": "alice-smith",
+      "name": "Alice Smith",
+      "circles": ["friends-close"],
+      "relationship": "College roommate",
+      "relationship_type": "friend",
+      "preferred_channel": "text",
+      "tone": "warm",
+      "context_notes": "",
+      "last_interaction": "2026-02-15",
+      "days_since": 58,
+      "cadence_days": 30,
+      "cadence_circle": "friends-close",
+      "days_overdue": 28
+    },
+    {
+      "slug": "bob-jones",
+      "name": "Bob Jones",
+      "circles": ["family-extended"],
+      "relationship": "Cousin",
+      "relationship_type": "family",
+      "preferred_channel": "phone",
+      "tone": "casual",
+      "context_notes": "",
+      "last_interaction": "2026-03-10",
+      "days_since": 35,
+      "cadence_days": 21,
+      "cadence_circle": "family-extended",
+      "days_overdue": 14
+    }
+  ],
+  "overdue_total": 2,
+  "approaching": [
+    {
+      "slug": "carol-nguyen",
+      "name": "Carol Nguyen",
+      "circles": ["friends-close"],
+      "relationship": "Hiking buddy",
+      "relationship_type": "friend",
+      "preferred_channel": "text",
+      "tone": "casual",
+      "context_notes": "",
+      "last_interaction": "2026-03-18",
+      "days_since": 27,
+      "cadence_days": 30,
+      "cadence_circle": "friends-close",
+      "days_overdue": -3
+    }
+  ],
+  "healthy": [],
+  "demoted_upcoming": [],
+  "summary": {
+    "total": 42,
+    "overdue": 2,
+    "approaching": 1,
+    "healthy": 39,
+    "demoted_upcoming": 0,
+    "skipped": 0
+  }
+}

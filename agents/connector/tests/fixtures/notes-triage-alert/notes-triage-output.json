@@ -1,0 +1,38 @@
+{
+  "status": "ok",
+  "untriaged": [
+    {
+      "id": "note-001",
+      "content": "Priya's chemo is Monday — she mentioned feeling tired lately",
+      "created_at": "2026-04-13T18:20:00Z",
+      "author": "the operator"
+    },
+    {
+      "id": "note-002",
+      "content": "Promised Jay I'd look into that portfolio rebalance by Friday",
+      "created_at": "2026-04-13T19:05:00Z",
+      "author": "the operator"
+    },
+    {
+      "id": "note-003",
+      "content": "Need to book dentist for Avery — 6 months since last visit",
+      "created_at": "2026-04-14T08:15:00Z",
+      "author": "the operator"
+    },
+    {
+      "id": "note-004",
+      "content": "Grab more paper towels from Costco",
+      "created_at": "2026-04-14T09:00:00Z",
+      "author": "the operator"
+    },
+    {
+      "id": "note-005",
+      "content": "Something about the thing at the place — ask later",
+      "created_at": "2026-04-14T09:30:00Z",
+      "author": "the operator"
+    }
+  ],
+  "count": 5,
+  "already_triaged": 12,
+  "total_in_inbox": 17
+}

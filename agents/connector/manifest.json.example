@@ -35,12 +35,14 @@
   "scripts": [
     "scripts/people-scan.py",
     "scripts/notes-triage.py",
+    "scripts/notes-triage-alert.py",
     "scripts/commitment-scan.py",
     "scripts/timed-deliver.py",
     "scripts/heartbeat.py",
     "scripts/daily-refresh.py",
     "scripts/gmessages-mine.py",
-    "scripts/gmessages-auth.py"
+    "scripts/gmessages-auth.py",
+    "scripts/morning-relationship-nudge.py"
   ],
   "state_files": [
     {
@@ -125,35 +127,32 @@
       "cron": "0 */2 * * *",
       "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. Scrape Google Messages Web via the paired Camoufox profile and write per-contact last-message dates to cache/mined-gmessages.json. daily-refresh.py then reads that cache to stamp last_interaction on iMessage/SMS contacts. Run: python3 ~/.openclaw/connector-workspace/scripts/gmessages-mine.py. If status is 'ok', return EXACTLY the empty string (zero bytes, no narration). If status is 'degraded' with alert referencing profile missing/expired, deliver a short Telegram message so the operator knows to re-pair. Any other 'error' or 'degraded' state should also go to Telegram.",
       "announce": false,
-      "no_deliver": true
+      "no_deliver": true,
+      "enabled": false
     },
     {
       "name": "daily-refresh",
       "cron": "30 11 * * *",
       "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. Refresh last_interaction across ~/Dropbox/openclaw-backup/people/*.md by re-mining the past 14 days of Gmail, Google Calendar, and Krisp transcripts, and write the next 14 days of upcoming GCal attendees to upcoming-meetings.json so people-scan can demote people you already have on the calendar. Run: python3 ~/.openclaw/connector-workspace/scripts/daily-refresh.py. Parse the JSON from stdout. If status is 'ok' or 'degraded' with people_updated > 0, return EXACTLY the empty string (zero bytes, no narration, no acknowledgement). If status is 'error' or the alert field is set, deliver a short Telegram message describing the failure so the operator knows the refresh is broken. DO NOT touch ~/Dropbox/openclaw-backup/agents/connector.status.md \u2014 fleet-health.json owns health.",
       "announce": false,
-      "no_deliver": true
+      "no_deliver": true,
+      "enabled": false
     },
     {
       "name": "morning-relationship-nudge",
       "cron": "50 11 * * *",
       "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Generate and deliver the morning relationship nudge. 1) Run: python3 ~/.openclaw/connector-workspace/scripts/people-scan.py. Read the JSON output \u2014 it contains overdue, approaching, and healthy contacts with their check-in status. 2) Format the nudge using the template in CRONS.md. Group by overdue then approaching. Include each person's name, relationship, days since last contact, and preferred channel. 3) If no overdue or approaching: use the 'everyone accounted for' template. 4) Write formatted output to cache/morning-nudge.txt. 5) Run: python3 ~/.openclaw/connector-workspace/scripts/timed-deliver.py cache/morning-nudge.txt --token-env CONNECTOR_BOT_TOKEN. 6) DO NOT touch ~/Dropbox/openclaw-backup/agents/connector.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source.",
       "announce": false,
-      "no_deliver": true
+      "no_deliver": true,
+      "enabled": false
     },
     {
       "name": "notes-triage",
       "cron": "0 8,20 * * *",
       "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Triage untriaged notes from the inbox. Run: python3 ~/.openclaw/connector-workspace/scripts/notes-triage.py. Read the JSON output. If no untriaged notes, return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. If untriaged notes exist: read pending-triage.json to skip already-presented notes. For each new note, categorize it (fact/commitment/task/shopping/unclear). Present up to 10 on Telegram with categories and '/confirm to save \u00b7 /dismiss N to skip item N'. Record presented note IDs in pending-triage.json.",
       "announce": false,
-      "no_deliver": true
-    },
-    {
-      "name": "weekly-review",
-      "cron": "0 0 * * 0",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Generate the weekly relationship review. 1) Run people-scan.py to get current check-in state. 2) Read checkin-log.json for this week's check-ins. 3) Compile: check-ins recorded, notes triaged, facts added, people tracked, still-overdue contacts. 4) Format using the template in CRONS.md. 5) Deliver to Telegram.",
-      "announce": true,
-      "no_deliver": false
+      "no_deliver": true,
+      "enabled": false
     }
   ]
 }

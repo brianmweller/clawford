@@ -1,0 +1,77 @@
+{
+  "status": "ok",
+  "overdue": [
+    {
+      "slug": "a",
+      "name": "Alpha",
+      "circles": ["friends-close"],
+      "relationship": "Friend 1",
+      "preferred_channel": "text",
+      "last_interaction": "2026-02-01",
+      "days_since": 72,
+      "cadence_days": 30,
+      "cadence_circle": "friends-close",
+      "days_overdue": 42
+    },
+    {
+      "slug": "b",
+      "name": "Beta",
+      "circles": ["friends-close"],
+      "relationship": "Friend 2",
+      "preferred_channel": "text",
+      "last_interaction": "2026-02-05",
+      "days_since": 68,
+      "cadence_days": 30,
+      "cadence_circle": "friends-close",
+      "days_overdue": 38
+    },
+    {
+      "slug": "c",
+      "name": "Gamma",
+      "circles": ["friends-close"],
+      "relationship": "Friend 3",
+      "preferred_channel": "text",
+      "last_interaction": "2026-02-10",
+      "days_since": 63,
+      "cadence_days": 30,
+      "cadence_circle": "friends-close",
+      "days_overdue": 33
+    },
+    {
+      "slug": "d",
+      "name": "Delta",
+      "circles": ["friends-close"],
+      "relationship": "Friend 4",
+      "preferred_channel": "text",
+      "last_interaction": "2026-02-15",
+      "days_since": 58,
+      "cadence_days": 30,
+      "cadence_circle": "friends-close",
+      "days_overdue": 28
+    },
+    {
+      "slug": "e",
+      "name": "Epsilon",
+      "circles": ["friends-close"],
+      "relationship": "Friend 5",
+      "preferred_channel": "text",
+      "last_interaction": "2026-02-20",
+      "days_since": 53,
+      "cadence_days": 30,
+      "cadence_circle": "friends-close",
+      "days_overdue": 23
+    }
+  ],
+  "overdue_total": 8,
+  "approaching": [],
+  "healthy": [],
+  "demoted_upcoming": [],
+  "summary": {
+    "total": 42,
+    "overdue": 8,
+    "approaching": 0,
+    "healthy": 34,
+    "demoted_upcoming": 0,
+    "skipped": 0
+  }
+}
