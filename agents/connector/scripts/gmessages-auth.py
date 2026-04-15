@@ -25,9 +25,9 @@ Run interactively (or via stored env var):
     ssh -i ~/.ssh/id_ed25519 openclaw@203.0.113.10
     cd ~/openclaw
     docker compose exec openclaw-gateway \\
-        python3 /home/node/.openclaw/connector-workspace/scripts/gmessages-auth.py
+        python3 /home/openclaw/.clawford/connector-workspace/scripts/gmessages-auth.py
 
-Profile path:        ~/.openclaw/connector-workspace/gmessages-profile/
+Profile path:        ~/.clawford/connector-workspace/gmessages-profile/
 2FA screenshot path: ~/Dropbox/openclaw-backup/tmp/gmessages-2fa.png
 """
 from __future__ import annotations
@@ -50,7 +50,7 @@ for _p in Path(__file__).resolve().parents:
 
 
 PROFILE_DIR = Path(
-    os.path.expanduser("~/.openclaw/connector-workspace/gmessages-profile")
+    os.path.expanduser("~/.clawford/connector-workspace/gmessages-profile")
 )
 TFA_SCREENSHOT = Path(
     os.path.expanduser("~/Dropbox/openclaw-backup/tmp/gmessages-2fa.png")

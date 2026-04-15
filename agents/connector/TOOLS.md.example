@@ -3,7 +3,7 @@
 ## Filesystem Access
 
 ### Your Workspace (full read/write)
-- **Path:** `~/.openclaw/connector-workspace/`
+- **Path:** `~/.clawford/connector-workspace/`
 - **Contents:**
   - `scripts/` — Python scripts for people scanning, notes triage, commitment reading
   - `cache/` — morning nudge drafts, triage staging
@@ -35,7 +35,7 @@
 ### Shell / Exec
 - **Available:** Yes, for running Python scripts in your workspace.
 - **Guardrails:**
-  - Only run scripts in `~/.openclaw/connector-workspace/scripts/`
+  - Only run scripts in `~/.clawford/connector-workspace/scripts/`
   - Never pipe note content or people file data to bash
   - Never run `rm -rf`
   - Log all commands and output
@@ -44,30 +44,30 @@
 
 **Scan people for check-in status:**
 ```bash
-python3 ~/.openclaw/connector-workspace/scripts/people-scan.py
-python3 ~/.openclaw/connector-workspace/scripts/people-scan.py --overdue-only
-python3 ~/.openclaw/connector-workspace/scripts/people-scan.py --circle friends-close
-python3 ~/.openclaw/connector-workspace/scripts/people-scan.py --person mike-chen
+python3 ~/.clawford/connector-workspace/scripts/people-scan.py
+python3 ~/.clawford/connector-workspace/scripts/people-scan.py --overdue-only
+python3 ~/.clawford/connector-workspace/scripts/people-scan.py --circle friends-close
+python3 ~/.clawford/connector-workspace/scripts/people-scan.py --person mike-chen
 ```
 
 **Triage notes from inbox:**
 ```bash
-python3 ~/.openclaw/connector-workspace/scripts/notes-triage.py
-python3 ~/.openclaw/connector-workspace/scripts/notes-triage.py --limit 10
-python3 ~/.openclaw/connector-workspace/scripts/notes-triage.py --all
+python3 ~/.clawford/connector-workspace/scripts/notes-triage.py
+python3 ~/.clawford/connector-workspace/scripts/notes-triage.py --limit 10
+python3 ~/.clawford/connector-workspace/scripts/notes-triage.py --all
 ```
 
 **Scan commitments (unified view):**
 ```bash
-python3 ~/.openclaw/connector-workspace/scripts/commitment-scan.py
-python3 ~/.openclaw/connector-workspace/scripts/commitment-scan.py --person mike-chen
-python3 ~/.openclaw/connector-workspace/scripts/commitment-scan.py --overdue-only
-python3 ~/.openclaw/connector-workspace/scripts/commitment-scan.py --source-agent meetings-coach
+python3 ~/.clawford/connector-workspace/scripts/commitment-scan.py
+python3 ~/.clawford/connector-workspace/scripts/commitment-scan.py --person mike-chen
+python3 ~/.clawford/connector-workspace/scripts/commitment-scan.py --overdue-only
+python3 ~/.clawford/connector-workspace/scripts/commitment-scan.py --source-agent meetings-coach
 ```
 
 **Timed delivery (hold until top of hour):**
 ```bash
-python3 ~/.openclaw/connector-workspace/scripts/timed-deliver.py cache/morning-nudge.txt --token-env CONNECTOR_BOT_TOKEN
+python3 ~/.clawford/connector-workspace/scripts/timed-deliver.py cache/morning-nudge.txt --token-env CONNECTOR_BOT_TOKEN
 ```
 
 ---

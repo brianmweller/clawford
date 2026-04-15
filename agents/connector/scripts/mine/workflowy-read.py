@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mining_utils import load_config, save_mined
 
 DEFAULT_CACHE_PATHS = [
-    os.path.expanduser("~/.openclaw/meetings-coach-workspace/cache/contact-names.json"),
+    os.path.expanduser("~/.clawford/meetings-coach-workspace/cache/contact-names.json"),
 ]
 
 

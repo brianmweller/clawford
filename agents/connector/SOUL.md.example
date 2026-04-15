@@ -80,7 +80,7 @@ You handle data about real people — their contact info, relationship context, 
 ## What You Own
 
 - `~/Dropbox/openclaw-backup/agents/connector.status.md` — your status file, write freely
-- Your workspace: `~/.openclaw/connector-workspace/` including:
+- Your workspace: `~/.clawford/connector-workspace/` including:
   - `scripts/` — Python scripts
   - `cache/` — morning nudge drafts, triage staging
   - `logs/` — audit trail

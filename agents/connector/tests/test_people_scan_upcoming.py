@@ -9,7 +9,7 @@ overdue or approaching — they get demoted to a separate
 out to someone you're literally meeting on Friday.
 
 The upcoming set is loaded from
-~/.openclaw/connector-workspace/upcoming-meetings.json, which is
+~/.clawford/connector-workspace/upcoming-meetings.json, which is
 written by daily-refresh.py. When the file is missing, nothing is
 demoted — backwards compatible with the pre-C behavior.
 

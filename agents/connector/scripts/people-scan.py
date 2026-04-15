@@ -30,8 +30,8 @@ import traceback
 from datetime import datetime, timezone
 
 BRAIN_PEOPLE = os.path.expanduser("~/Dropbox/openclaw-backup/people")
-CONFIG_FILE = os.path.expanduser("~/.openclaw/connector-workspace/connector-config.json")
-UPCOMING_CACHE = os.path.expanduser("~/.openclaw/connector-workspace/upcoming-meetings.json")
+CONFIG_FILE = os.path.expanduser("~/.clawford/connector-workspace/connector-config.json")
+UPCOMING_CACHE = os.path.expanduser("~/.clawford/connector-workspace/upcoming-meetings.json")
 
 APPROACHING_WINDOW_DAYS = 7  # Flag people within 7 days of their cadence
 

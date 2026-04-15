@@ -22,7 +22,7 @@ from mining_utils import get_google_credentials, load_config, normalize_email, n
 
 DEFAULT_TOKEN_PATHS = [
     os.path.join(os.path.dirname(__file__), "..", "..", "..", "family-calendar", "token.json"),
-    os.path.expanduser("~/.openclaw/family-calendar-workspace/token.json"),
+    os.path.expanduser("~/.clawford/family-calendar-workspace/token.json"),
 ]
 
 

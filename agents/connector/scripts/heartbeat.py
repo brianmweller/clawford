@@ -37,7 +37,7 @@ import traceback
 from datetime import datetime, timedelta, timezone
 
 
-WORKSPACE = os.path.expanduser("~/.openclaw/connector-workspace")
+WORKSPACE = os.path.expanduser("~/.clawford/connector-workspace")
 BRAIN = os.path.expanduser("~/Dropbox/openclaw-backup")
 OUTPUT_FILE = os.path.join(BRAIN, "agents", "connector.status.md")
 

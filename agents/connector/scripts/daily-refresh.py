@@ -35,10 +35,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 MINE_DIR = SCRIPT_DIR / "mine"
 
 BRAIN_PEOPLE = Path(os.path.expanduser("~/Dropbox/openclaw-backup/people"))
-WORKSPACE = Path(os.path.expanduser("~/.openclaw/connector-workspace"))
+WORKSPACE = Path(os.path.expanduser("~/.clawford/connector-workspace"))
 UPCOMING_CACHE = WORKSPACE / "upcoming-meetings.json"
 GMESSAGES_CACHE = WORKSPACE / "cache" / "mined-gmessages.json"
-MC_CACHE = Path(os.path.expanduser("~/.openclaw/meetings-coach-workspace/cache"))
+MC_CACHE = Path(os.path.expanduser("~/.clawford/meetings-coach-workspace/cache"))
 
 LOOKBACK_DAYS = 30
 LOOKAHEAD_DAYS = 14
@@ -462,8 +462,8 @@ def _operator_emails() -> set[str]:
 
 def _find_google_token() -> Path | None:
     candidates = [
-        Path(os.path.expanduser("~/.openclaw/family-calendar-workspace/token.json")),
-        Path(os.path.expanduser("~/.openclaw/meetings-coach-workspace/token.json")),
+        Path(os.path.expanduser("~/.clawford/family-calendar-workspace/token.json")),
+        Path(os.path.expanduser("~/.clawford/meetings-coach-workspace/token.json")),
     ]
     for p in candidates:
         if p.exists():
@@ -480,8 +480,8 @@ def _build_google_services():
     token_path = _find_google_token()
     if not token_path:
         raise RuntimeError(
-            "No Google token.json found under ~/.openclaw/family-calendar-workspace/ "
-            "or ~/.openclaw/meetings-coach-workspace/"
+            "No Google token.json found under ~/.clawford/family-calendar-workspace/ "
+            "or ~/.clawford/meetings-coach-workspace/"
         )
 
     token_data = json.loads(token_path.read_text(encoding="utf-8"))

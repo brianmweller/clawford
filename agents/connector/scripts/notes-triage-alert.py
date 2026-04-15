@@ -34,7 +34,7 @@ from agents.shared.llm import infer as llm_infer  # noqa: E402
 from agents.shared.telegram_api import resolve_credentials, send_message  # noqa: E402
 
 
-WORKSPACE = Path(os.path.expanduser("~/.openclaw/connector-workspace"))
+WORKSPACE = Path(os.path.expanduser("~/.clawford/connector-workspace"))
 SCRIPTS_DIR = WORKSPACE / "scripts"
 CACHE_DIR = WORKSPACE / "cache"
 TRIAGE_FILE = WORKSPACE / "pending-triage.json"

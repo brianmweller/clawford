@@ -6,7 +6,7 @@ visits messages.google.com/web/conversations, extracts the conversation
 list (name + relative time), resolves the time strings to yyyy-mm-dd in
 the operator's local timezone, and writes the results to
 
-    ~/.openclaw/connector-workspace/cache/mined-gmessages.json
+    ~/.clawford/connector-workspace/cache/mined-gmessages.json
 
 daily-refresh.py reads that cache to stamp last_interaction on matching
 people files (by phone when the name is a raw number, by name otherwise).
@@ -38,7 +38,7 @@ for _p in Path(__file__).resolve().parents:
         break
 
 
-WORKSPACE = Path(os.path.expanduser("~/.openclaw/connector-workspace"))
+WORKSPACE = Path(os.path.expanduser("~/.clawford/connector-workspace"))
 PROFILE_DIR = WORKSPACE / "gmessages-profile"
 CACHE_FILE = WORKSPACE / "cache" / "mined-gmessages.json"
 MESSAGES_URL = "https://messages.google.com/web/conversations"

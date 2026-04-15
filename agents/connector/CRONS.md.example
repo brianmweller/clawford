@@ -2,7 +2,7 @@
 
 All times in UTC.
 Agent: connector
-Workspace: .openclaw/connector-workspace/
+Workspace: .clawford/connector-workspace/
 
 ---
 
@@ -11,7 +11,7 @@ Workspace: .openclaw/connector-workspace/
 **Schedule:** `50 11 * * *`
 **Command:** Scan people files, compute check-in status, deliver nudge at 5:00 AM PT sharp.
 
-1. Run `python3 ~/.openclaw/connector-workspace/scripts/people-scan.py`
+1. Run `python3 ~/.clawford/connector-workspace/scripts/people-scan.py`
    - Reads all people files, loads cadence config, computes overdue/approaching
    - Outputs JSON with overdue, approaching, healthy arrays and summary
 2. Read the JSON output.
@@ -39,7 +39,7 @@ If no overdue or approaching:
 ```
 
 4. Write formatted output to `cache/morning-nudge.txt`
-5. Run `python3 ~/.openclaw/connector-workspace/scripts/timed-deliver.py cache/morning-nudge.txt --token-env CONNECTOR_BOT_TOKEN`
+5. Run `python3 ~/.clawford/connector-workspace/scripts/timed-deliver.py cache/morning-nudge.txt --token-env CONNECTOR_BOT_TOKEN`
 6. Update your status file.
 
 **On success:** Update status file with heartbeat, overdue count, approaching count.
@@ -57,7 +57,7 @@ If no overdue or approaching:
 **Schedule:** `0 8,20 * * *`
 **Command:** Read inbox, present untriaged notes for categorization.
 
-1. Run `python3 ~/.openclaw/connector-workspace/scripts/notes-triage.py`
+1. Run `python3 ~/.clawford/connector-workspace/scripts/notes-triage.py`
    - Reads `inbox.md`, parses entries, filters for `triaged: false`
    - Outputs JSON with untriaged notes array
 2. Read the JSON output.
@@ -122,7 +122,7 @@ Write current UTC time to `last_heartbeat` in `~/Dropbox/openclaw-backup/agents/
 **Schedule:** `0 0 * * 0`
 **Command:** Generate a weekly relationship review.
 
-1. Run `python3 ~/.openclaw/connector-workspace/scripts/people-scan.py` to get current state.
+1. Run `python3 ~/.clawford/connector-workspace/scripts/people-scan.py` to get current state.
 2. Read `checkin-log.json` for this week's check-ins.
 3. Count notes triaged this week (from `pending-triage.json` history or brain writes).
 4. Compile summary:

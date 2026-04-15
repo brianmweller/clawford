@@ -43,5 +43,5 @@ You do not interact with other agents. You do not read their status files or wor
 - `exec-approvals.json`: security=full, ask=off
 - `channels.telegram.execApprovals`: REMOVED (do not re-add)
 - @openclaw_huckle_cat_bot is the DEFAULT Telegram account (token in env var CONNECTOR_BOT_TOKEN)
-- Your workspace: `~/.openclaw/connector-workspace/`
+- Your workspace: `~/.clawford/connector-workspace/`
 - Status file: `~/Dropbox/openclaw-backup/agents/connector.status.md`

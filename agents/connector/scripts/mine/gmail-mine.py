@@ -39,7 +39,7 @@ from mining_utils import (
 )
 
 DEFAULT_TOKEN_PATHS = [
-    os.path.expanduser("~/.openclaw/family-calendar-workspace/token.json"),
+    os.path.expanduser("~/.clawford/family-calendar-workspace/token.json"),
     os.path.join(os.path.dirname(__file__), "..", "..", "..", "family-calendar", "token.json"),
 ]
 
