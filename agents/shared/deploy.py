@@ -1654,32 +1654,14 @@ def deploy_one(agent_id: str, args: argparse.Namespace) -> int:
         note("State files")
         sync_state_files(mf)
 
-    if not args.skip_channel:
-        note("Channel / binding / approvals")
-        ensure_channel(mf)
-        ensure_binding(mf)
-        ensure_approvals(mf)
-
-    if not args.skip_crons:
-        note("Crons")
-        if _DRY:
-            # Post-Phase-4, every agent's cron run via host cron
-            # (install-host-cron.sh), not the OpenClaw gateway. Dry-run
-            # doesn't need to reach into the gateway to reconcile state.
-            # Phase 6 removes this block entirely once live deploys also
-            # stop touching the gateway.
-            log("DRY RUN: skipping cron reconciliation "
-                "(post-Phase 4 crons run via host cron; Phase 6 removes this block)", "info")
-        else:
-            vps_env = load_vps_env()
-            telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID") or vps_env.get("TELEGRAM_CHAT_ID", "")
-            if not telegram_chat_id:
-                log("TELEGRAM_CHAT_ID not in env — crons may fail delivery", "warn")
-            live = fetch_live_crons(mf.agent_id)
-            ops = plan_cron_ops(mf, live, telegram_chat_id)
-            applied, failed = apply_cron_ops(ops, args.remove_orphans)
-            if failed:
-                return 1
+    # Phase 6 (2026-04-15): channel/binding/approvals and cron reconciliation
+    # no longer run through the OpenClaw gateway. Telegram delivery is wired
+    # directly via agents.shared.telegram; crons are installed via
+    # ops/scripts/install-host-cron.sh. The ensure_channel / ensure_binding /
+    # ensure_approvals / fetch_live_crons / plan_cron_ops / apply_cron_ops
+    # helpers survive as dead code for Phase 7 to sweep alongside oc()/oc_json().
+    # --skip-channel, --skip-crons, --remove-orphans CLI flags also become
+    # orphans; Phase 7 deletes them.
 
     # Safeguard 6: smoke test. Post-Phase-5: runs the manifest's smoke_test
     # script as a host subprocess and asserts exit 0 + non-empty stdout.

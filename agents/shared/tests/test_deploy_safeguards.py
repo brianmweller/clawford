@@ -93,6 +93,118 @@ def test_dry_run_invokes_no_oc(
 
 
 # ---------------------------------------------------------------------------
+# Phase 6: live-run must also not touch oc() — the stronger invariant
+# ---------------------------------------------------------------------------
+
+
+def test_live_run_invokes_no_oc(
+    deploy_module, fake_source_repo, fake_workspace, monkeypatch, tmp_path,
+):
+    """Phase 6 acceptance: a LIVE deploy (not dry-run) must not invoke any
+    oc-adjacent helper. This is strictly stronger than the Phase 5 dry-run
+    invariant.
+
+    Post-Phase 6, main() no longer calls ensure_channel / ensure_binding /
+    ensure_approvals or fetch_live_crons / plan_cron_ops / apply_cron_ops.
+    The helper function *bodies* still exist as dead code (Phase 7 deletes
+    them), but deploy_one has no path that reaches them.
+    """
+    def raiser(*args, **kwargs):
+        raise AssertionError(
+            f"oc-path was called from live-run: args={args} kwargs={kwargs}"
+        )
+
+    monkeypatch.setattr(deploy_module, "oc", raiser)
+    monkeypatch.setattr(deploy_module, "oc_json", raiser)
+    monkeypatch.setattr(deploy_module, "oc_cron_add", raiser)
+    monkeypatch.setattr(deploy_module, "oc_cron_rm", raiser)
+    monkeypatch.setattr(deploy_module, "oc_cron_edit_message", raiser)
+    monkeypatch.setattr(deploy_module, "fetch_live_crons", raiser)
+    monkeypatch.setattr(deploy_module, "plan_cron_ops", raiser)
+    monkeypatch.setattr(deploy_module, "apply_cron_ops", raiser)
+    monkeypatch.setattr(deploy_module, "ensure_channel", raiser)
+    monkeypatch.setattr(deploy_module, "ensure_binding", raiser)
+    monkeypatch.setattr(deploy_module, "ensure_approvals", raiser)
+
+    monkeypatch.setattr(deploy_module, "BACKUPS_ROOT", tmp_path / "backups", raising=False)
+    monkeypatch.setattr(deploy_module, "_DRY", False, raising=False)
+
+    rc = deploy_module.deploy_one(
+        "testagent",
+        _make_args(
+            dry_run=False,
+            skip_files=True,
+            skip_crons=False,
+            skip_channel=False,
+        ),
+    )
+    assert rc == 0, f"live-run deploy returned {rc}, expected 0"
+
+
+def test_live_run_skips_channel_binding_approvals(
+    deploy_module, fake_source_repo, fake_workspace, monkeypatch, tmp_path,
+):
+    """Live deploy must NOT call ensure_channel / ensure_binding /
+    ensure_approvals. Pre-Phase 6 those were invoked unconditionally from
+    main() at lines 1657-1661; Phase 6 removes that block."""
+    def raiser(*args, **kwargs):
+        raise AssertionError(
+            f"channel/binding/approvals helper was called from live-run: "
+            f"args={args} kwargs={kwargs}"
+        )
+
+    monkeypatch.setattr(deploy_module, "ensure_channel", raiser)
+    monkeypatch.setattr(deploy_module, "ensure_binding", raiser)
+    monkeypatch.setattr(deploy_module, "ensure_approvals", raiser)
+
+    monkeypatch.setattr(deploy_module, "BACKUPS_ROOT", tmp_path / "backups", raising=False)
+    monkeypatch.setattr(deploy_module, "_DRY", False, raising=False)
+
+    rc = deploy_module.deploy_one(
+        "testagent",
+        _make_args(
+            dry_run=False,
+            skip_files=True,
+            skip_crons=False,
+            skip_channel=False,
+        ),
+    )
+    assert rc == 0, f"live-run deploy returned {rc}, expected 0"
+
+
+def test_live_run_skips_cron_reconciliation(
+    deploy_module, fake_source_repo, fake_workspace, monkeypatch, tmp_path,
+):
+    """Live deploy must NOT call fetch_live_crons / plan_cron_ops /
+    apply_cron_ops. Pre-Phase 6 these were invoked from main()'s else
+    branch at lines 1673-1682; Phase 6 removes that block so crons live
+    exclusively under ops/scripts/install-host-cron.sh."""
+    def raiser(*args, **kwargs):
+        raise AssertionError(
+            f"cron-reconciliation helper was called from live-run: "
+            f"args={args} kwargs={kwargs}"
+        )
+
+    monkeypatch.setattr(deploy_module, "fetch_live_crons", raiser)
+    monkeypatch.setattr(deploy_module, "plan_cron_ops", raiser)
+    monkeypatch.setattr(deploy_module, "apply_cron_ops", raiser)
+
+    monkeypatch.setattr(deploy_module, "BACKUPS_ROOT", tmp_path / "backups", raising=False)
+    monkeypatch.setattr(deploy_module, "_DRY", False, raising=False)
+
+    rc = deploy_module.deploy_one(
+        "testagent",
+        _make_args(
+            dry_run=False,
+            skip_files=True,
+            skip_crons=False,
+            skip_channel=True,
+        ),
+    )
+    assert rc == 0, f"live-run deploy returned {rc}, expected 0"
+
+
+# ---------------------------------------------------------------------------
 # Safeguard 7: validate_manifest
 # ---------------------------------------------------------------------------
 

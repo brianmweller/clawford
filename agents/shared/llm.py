@@ -1,5 +1,12 @@
 """agents/shared/llm.py — Clawford LLM broker.
 
+Lineage: the original liberation plan (Phase 1) called for a dispatch shim
+with `_run_openclaw` / `_run_codex` backends selected via
+CLAWFORD_LLM_BACKEND. That shim was never needed — by the time Phase 4
+landed the fleet, every agent already called infer() directly and the
+OpenClaw backend path was dead. Phase 6 (2026-04-15) confirmed the
+codex-only shape and promoted it from "current default" to "only option."
+
 Calls ChatGPT-subscription-backed OpenAI Responses API directly at
 https://chatgpt.com/backend-api/codex/responses, using the OAuth
 credentials stored in ~/.codex/auth.json (shared with the codex CLI).
