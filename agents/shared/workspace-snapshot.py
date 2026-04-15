@@ -42,7 +42,7 @@ except Exception:
 
 
 AGENTS = ["shopping", "family-calendar", "meetings-coach", "news-digest", "connector", "fix-it"]
-WORKSPACES_ROOT = Path(os.path.expanduser("~/.openclaw"))
+WORKSPACES_ROOT = Path(os.path.expanduser("~/.clawford"))
 SNAPSHOTS_ROOT = Path(
     os.path.expanduser("~/Dropbox/openclaw-backup/workspace-snapshots")
 )

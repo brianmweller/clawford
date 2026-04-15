@@ -54,7 +54,7 @@ def valid_manifest_dict():
             {
                 "id": "shopping",
                 "display_name": "Hilda Hippo",
-                "workspace": "~/.openclaw/shopping-workspace",
+                "workspace": "~/.clawford/shopping-workspace",
                 "bot_token_env": "SHOPPING_BOT_TOKEN",
                 "probe_entrypoint": "scripts/heartbeat.py::probe",
                 "expected_probes": ["costco_session", "amazon_session"],
@@ -62,7 +62,7 @@ def valid_manifest_dict():
             {
                 "id": "connector",
                 "display_name": "Huckle Cat",
-                "workspace": "~/.openclaw/connector-workspace",
+                "workspace": "~/.clawford/connector-workspace",
                 "bot_token_env": "CONNECTOR_BOT_TOKEN",
                 "probe_entrypoint": "scripts/heartbeat.py::probe",
                 "expected_probes": ["missing_files"],
@@ -86,20 +86,20 @@ def test_agent_health_spec_expands_workspace_home(types_module):
     spec = types_module.AgentHealthSpec.from_dict({
         "id": "test",
         "display_name": "Test",
-        "workspace": "~/.openclaw/test-workspace",
+        "workspace": "~/.clawford/test-workspace",
         "bot_token_env": "TEST_BOT_TOKEN",
         "probe_entrypoint": "scripts/heartbeat.py::probe",
         "expected_probes": [],
     })
     # Expansion happens on read
-    assert spec.workspace_expanded() == os.path.expanduser("~/.openclaw/test-workspace")
+    assert spec.workspace_expanded() == os.path.expanduser("~/.clawford/test-workspace")
 
 
 def test_agent_health_spec_parses_entrypoint(types_module):
     spec = types_module.AgentHealthSpec.from_dict({
         "id": "test",
         "display_name": "Test",
-        "workspace": "~/.openclaw/test-workspace",
+        "workspace": "~/.clawford/test-workspace",
         "bot_token_env": "TEST_BOT_TOKEN",
         "probe_entrypoint": "scripts/heartbeat.py::probe",
         "expected_probes": [],

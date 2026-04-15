@@ -8,7 +8,7 @@ it". The mechanism tested here closes that gap.
 Contract:
 
   - The installer reads `${DISABLED_AGENTS_FILE}` (default
-    `$HOME/.openclaw/disabled-agents.txt`). One agent id per line.
+    `$HOME/.clawford/disabled-agents.txt`). One agent id per line.
     Lines starting with `#` and blank lines are ignored. Leading /
     trailing whitespace is stripped.
   - If the file is missing, the installer behaves exactly as before.
@@ -119,7 +119,7 @@ def _run_installer(
 
 def _fake_home(tmp_path: Path) -> Path:
     home = tmp_path / "home"
-    (home / ".openclaw").mkdir(parents=True)
+    (home / ".clawford").mkdir(parents=True)
     return home
 
 
@@ -132,7 +132,7 @@ def test_no_disabled_file_installs_everything(tmp_path):
     """
     bin_dir, state_file = _write_fake_crontab(tmp_path)
     home = _fake_home(tmp_path)
-    missing = home / ".openclaw" / "disabled-agents.txt"
+    missing = home / ".clawford" / "disabled-agents.txt"
     assert not missing.exists()
 
     result = _run_installer(bin_dir, home, missing)
@@ -158,7 +158,7 @@ def test_disabled_agent_entries_skipped_on_fresh_install(tmp_path):
     """
     bin_dir, state_file = _write_fake_crontab(tmp_path)
     home = _fake_home(tmp_path)
-    disabled = home / ".openclaw" / "disabled-agents.txt"
+    disabled = home / ".clawford" / "disabled-agents.txt"
     disabled.write_text("fix-it\n")
 
     result = _run_installer(bin_dir, home, disabled)
@@ -206,7 +206,7 @@ def test_existing_disabled_agent_entries_are_evicted(tmp_path):
     """
     bin_dir, state_file = _write_fake_crontab(tmp_path)
     home = _fake_home(tmp_path)
-    disabled = home / ".openclaw" / "disabled-agents.txt"
+    disabled = home / ".clawford" / "disabled-agents.txt"
     disabled.write_text("fix-it\n")
 
     # Seed: a fix-it-brain-validation line that matches what the
@@ -214,7 +214,7 @@ def test_existing_disabled_agent_entries_are_evicted(tmp_path):
     seed = (
         "0 */6 * * * "
         f"{CONTRACT_WRAPPER} fix-it-brain-validation "
-        "/home/openclaw/.openclaw/fix-it-workspace/scripts/brain-validation-check.py "
+        "/home/openclaw/.clawford/fix-it-workspace/scripts/brain-validation-check.py "
         "TELEGRAM_BOT_TOKEN 120 # script-contract-fix-it-brain-validation\n"
         "0 0 * * * /home/openclaw/repo/ops/scripts/fix-it-cron-self-check-host.sh "
         "# fix-it-cron-self-check-host\n"
@@ -244,7 +244,7 @@ def test_disabled_file_ignores_comments_and_blanks(tmp_path):
     """
     bin_dir, state_file = _write_fake_crontab(tmp_path)
     home = _fake_home(tmp_path)
-    disabled = home / ".openclaw" / "disabled-agents.txt"
+    disabled = home / ".clawford" / "disabled-agents.txt"
     disabled.write_text(
         "# disabled agents — operator-managed\n"
         "\n"
@@ -278,7 +278,7 @@ def test_hyphen_boundary_does_not_match_mid_word(tmp_path):
     """
     bin_dir, state_file = _write_fake_crontab(tmp_path)
     home = _fake_home(tmp_path)
-    disabled = home / ".openclaw" / "disabled-agents.txt"
+    disabled = home / ".clawford" / "disabled-agents.txt"
     disabled.write_text("fix-it\n")
 
     # Seed a line with marker "# fix-itchy-probe" — it begins with
@@ -309,7 +309,7 @@ def test_multiple_disabled_agents(tmp_path):
     are absent and every other agent's crons are installed."""
     bin_dir, state_file = _write_fake_crontab(tmp_path)
     home = _fake_home(tmp_path)
-    disabled = home / ".openclaw" / "disabled-agents.txt"
+    disabled = home / ".clawford" / "disabled-agents.txt"
     disabled.write_text("fix-it\nnews-digest\n")
 
     result = _run_installer(bin_dir, home, disabled)

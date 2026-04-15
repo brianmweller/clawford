@@ -1,7 +1,7 @@
 """Safeguard 1: pre-deploy workspace backup.
 
 Before any file write, deploy.py must tar the target workspace to
-~/.openclaw/deploy-backups/<agent>-<timestamp>.tar.gz. The backup
+~/.clawford/deploy-backups/<agent>-<timestamp>.tar.gz. The backup
 captures the PRE-WRITE state so rollback is trivial.
 """
 from __future__ import annotations
@@ -37,7 +37,7 @@ def test_backup_tarball_exists_before_overwrite(
     deploy_module, prepopulated_workspace, monkeypatch, tmp_path
 ):
     """When deploy overwrites an existing workspace file, a backup tarball
-    must exist at ~/.openclaw/deploy-backups/<agent>-<ts>.tar.gz containing
+    must exist at ~/.clawford/deploy-backups/<agent>-<ts>.tar.gz containing
     the PRE-overwrite content of that file."""
     backups_dir = tmp_path / "deploy-backups"
     monkeypatch.setattr(
@@ -79,7 +79,7 @@ def test_backup_tarball_exists_before_overwrite(
 def test_backup_directory_created_if_missing(
     deploy_module, prepopulated_workspace, monkeypatch, tmp_path
 ):
-    """If ~/.openclaw/deploy-backups/ doesn't exist yet, deploy.py creates it."""
+    """If ~/.clawford/deploy-backups/ doesn't exist yet, deploy.py creates it."""
     backups_dir = tmp_path / "fresh-never-existed-backups"
     monkeypatch.setattr(
         deploy_module, "BACKUPS_ROOT", backups_dir, raising=False

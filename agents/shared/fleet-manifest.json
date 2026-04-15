@@ -5,7 +5,7 @@
     {
       "id": "shopping",
       "display_name": "Hilda Hippo",
-      "workspace": "~/.openclaw/shopping-workspace",
+      "workspace": "~/.clawford/shopping-workspace",
       "bot_token_env": "SHOPPING_BOT_TOKEN",
       "probe_entrypoint": "scripts/heartbeat.py::probe",
       "expected_probes": [
@@ -18,7 +18,7 @@
     {
       "id": "connector",
       "display_name": "Huckle Cat",
-      "workspace": "~/.openclaw/connector-workspace",
+      "workspace": "~/.clawford/connector-workspace",
       "bot_token_env": "CONNECTOR_BOT_TOKEN",
       "probe_entrypoint": "scripts/heartbeat.py::probe",
       "expected_probes": [
@@ -30,7 +30,7 @@
     {
       "id": "family-calendar",
       "display_name": "Mistress Mouse",
-      "workspace": "~/.openclaw/family-calendar-workspace",
+      "workspace": "~/.clawford/family-calendar-workspace",
       "bot_token_env": "FAMILYCAL_BOT_TOKEN",
       "probe_entrypoint": "scripts/heartbeat.py::probe",
       "expected_probes": [
@@ -43,7 +43,7 @@
     {
       "id": "meetings-coach",
       "display_name": "Sergeant Murphy",
-      "workspace": "~/.openclaw/meetings-coach-workspace",
+      "workspace": "~/.clawford/meetings-coach-workspace",
       "bot_token_env": "MEETINGS_BOT_TOKEN",
       "probe_entrypoint": "scripts/heartbeat.py::probe",
       "expected_probes": [
@@ -54,7 +54,7 @@
     {
       "id": "news-digest",
       "display_name": "Lowly Worm",
-      "workspace": "~/.openclaw/news-digest-workspace",
+      "workspace": "~/.clawford/news-digest-workspace",
       "bot_token_env": "NEWSDIGEST_BOT_TOKEN",
       "probe_entrypoint": "scripts/heartbeat.py::probe",
       "expected_probes": [
@@ -67,7 +67,7 @@
     {
       "id": "fix-it",
       "display_name": "Mr Fixit",
-      "workspace": "~/.openclaw/fix-it-workspace",
+      "workspace": "~/.clawford/fix-it-workspace",
       "bot_token_env": "TELEGRAM_BOT_TOKEN",
       "probe_entrypoint": "scripts/heartbeat.py::probe",
       "expected_probes": [

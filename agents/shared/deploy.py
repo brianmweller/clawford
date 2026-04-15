@@ -50,7 +50,7 @@ except Exception:
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # .../Clawford
-BACKUPS_ROOT = Path(os.path.expanduser("~/.openclaw/deploy-backups"))
+BACKUPS_ROOT = Path(os.path.expanduser("~/.clawford/deploy-backups"))
 
 # Off-VPS mirror: Dropbox syncs this path to the user's workstation with
 # 180-day version history. Critical safety net for regression recovery —
@@ -66,11 +66,10 @@ BACKUP_RETENTION = 10  # keep last N backups per agent
 # workspace after --bootstrap-configs but before the operator hand-edits.
 BOOTSTRAP_SENTINEL = "CLAWFORD_BOOTSTRAP_UNEDITED"
 
-# VPS-side secrets file. The gateway container reads this at boot, but a
-# human running `python3 deploy.py` from a fresh shell wouldn't have its
-# values in os.environ — so load it explicitly before the cron-sync step
-# consults TELEGRAM_CHAT_ID et al.
-VPS_ENV_FILE = Path(os.path.expanduser("~/openclaw/.env"))
+# VPS-side secrets file. A human running `python3 deploy.py` from a
+# fresh shell wouldn't have its values in os.environ — so load it
+# explicitly before the cron-sync step consults TELEGRAM_CHAT_ID et al.
+VPS_ENV_FILE = Path(os.path.expanduser("~/clawford/.env"))
 
 
 def load_vps_env() -> dict[str, str]:
@@ -214,9 +213,6 @@ class Manifest:
     config_files: list[ConfigFile]
     scripts: list[str]
     state_files: list[StateFile]
-    approvals_allowlist: list[str]
-    approvals_policy: str
-    approvals_security: str
     crons: list[Cron]
     source_dir: Path = field(default_factory=Path)
     smoke_test: dict | None = None  # {"script": "scripts/heartbeat.py", "max_wait_s": int}
@@ -227,13 +223,11 @@ class Manifest:
 
     @property
     def container_workspace(self) -> str:
-        # Host `~/.openclaw/<agent>-workspace` is bind-mounted into the
-        # gateway container at `/home/node/.openclaw/<agent>-workspace`.
-        expanded = os.path.expanduser(self.workspace)
-        home = os.path.expanduser("~")
-        if expanded.startswith(home):
-            return "/home/node" + expanded[len(home):]
-        return expanded
+        # Vestigial — the gateway container is retired post-Phase-6.
+        # Returns the expanded host workspace unchanged. Kept as an
+        # attribute so older callers still resolve, but no callers
+        # remap into /home/node/ anymore.
+        return os.path.expanduser(self.workspace)
 
 
 def load_manifest_from_dict(data: dict, source_dir: Path | None = None, source_label: str = "<dict>") -> Manifest:
@@ -281,12 +275,6 @@ def load_manifest_from_dict(data: dict, source_dir: Path | None = None, source_l
             StateFile(path=sf["path"], seed_if_absent=sf.get("seed_if_absent"))
             for sf in data.get("state_files", [])
         ],
-        approvals_allowlist=data.get("approvals", {}).get(
-            "allowlist",
-            ["/usr/bin/*", "/bin/*", "/usr/local/bin/*"],
-        ),
-        approvals_policy=data.get("approvals", {}).get("policy", "full"),
-        approvals_security=data.get("approvals", {}).get("security", "full"),
         crons=crons,
         source_dir=source_dir or Path(),
         smoke_test=data.get("smoke_test"),

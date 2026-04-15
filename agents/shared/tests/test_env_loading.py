@@ -1,13 +1,13 @@
-"""deploy.py must consult ~/openclaw/.env for TELEGRAM_CHAT_ID.
+"""deploy.py must consult ~/clawford/.env for TELEGRAM_CHAT_ID.
 
-On the VPS, secrets live in ~/openclaw/.env (loaded by the gateway
-container). A human running `python3 deploy.py` from a shell that never
-sourced the env file would see TELEGRAM_CHAT_ID missing and get a
-"not in env — crons may fail delivery" warning every time. That
-warning has been firing on every audit run as a false alarm.
+On the VPS, secrets live in ~/clawford/.env. A human running
+`python3 deploy.py` from a shell that never sourced the env file would
+see TELEGRAM_CHAT_ID missing and get a "not in env — crons may fail
+delivery" warning every time. That warning has been firing on every
+audit run as a false alarm.
 
 Fix: deploy.py provides a load_vps_env() helper that parses
-~/openclaw/.env into a dict, and the cron-sync path falls back to it
+~/clawford/.env into a dict, and the cron-sync path falls back to it
 when os.environ is empty.
 """
 from __future__ import annotations
@@ -31,14 +31,14 @@ def test_load_vps_env_parses_simple_key_value(tmp_path, monkeypatch):
     env_file = tmp_path / ".env"
     env_file.write_text(
         "TELEGRAM_CHAT_ID=111111111\n"
-        "OPENCLAW_GATEWAY_PORT=18789\n",
+        "EXTRA_KEY=18789\n",
         encoding="utf-8",
     )
     deploy = _import_deploy()
     monkeypatch.setattr(deploy, "VPS_ENV_FILE", env_file)
     env = deploy.load_vps_env()
     assert env["TELEGRAM_CHAT_ID"] == "111111111"
-    assert env["OPENCLAW_GATEWAY_PORT"] == "18789"
+    assert env["EXTRA_KEY"] == "18789"
 
 
 def test_load_vps_env_ignores_comments_and_blank_lines(tmp_path, monkeypatch):

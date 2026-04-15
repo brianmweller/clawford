@@ -3,12 +3,12 @@
 Phase 2a landed the shared modules (telegram_api, retry_policy, brain)
 but never hooked `agents/shared/` into the deploy flow, so the
 per-agent exemplars like `family-calendar/scripts/timed-deliver.py`
-referenced a `~/.openclaw/shared/` directory that deploy.py never
+referenced a `~/.clawford/shared/` directory that deploy.py never
 created. Phase 2b + 3a then compounded the problem with new shared
 modules (heartbeat_base, google_oauth, playwright_profile,
 camoufox_proxy, llm) and per-agent import shims that assumed the
-repo root was an ancestor of the script — which is true locally but
-not inside the openclaw gateway container.
+repo root was an ancestor of the script — which was true locally but
+not inside the gateway container during the OpenClaw era.
 
 sync_shared_library fixes this by mirroring `agents/shared/*.py`
 (runtime modules only) into `<workspace>/agents/shared/*.py` during

@@ -24,8 +24,8 @@ the preflight and cascades into "approval required" messages.
 
 Cron messages can instead invoke this wrapper:
 
-  python3 /home/node/repo/agents/shared/contract_wrap.py \\
-          /home/node/.openclaw/<ws>/scripts/<script>.py [args...]
+  python3 /home/openclaw/repo/agents/shared/contract_wrap.py \\
+          /home/openclaw/.clawford/<ws>/scripts/<script>.py [args...]
 
 That's a single bare command with two .py positional arguments and no
 shell operators — the preflight is not triggered. The wrapper handles

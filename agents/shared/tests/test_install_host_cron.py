@@ -103,7 +103,7 @@ def test_drift_detection_evicts_stale_schedule_and_installs_new(tmp_path):
     stale = (
         "0 14 * * * "
         f"{CONTRACT_WRAPPER} shopping-delivery-digest "
-        "/home/openclaw/.openclaw/shopping-workspace/scripts/delivery-digest.py "
+        "/home/openclaw/.clawford/shopping-workspace/scripts/delivery-digest.py "
         "SHOPPING_BOT_TOKEN 900 # script-contract-shopping-delivery-digest\n"
     )
     state_file.write_text(stale)
@@ -149,7 +149,7 @@ def test_matching_line_is_idempotent(tmp_path):
     correct = (
         "30 10 * * * "
         f"{CONTRACT_WRAPPER} shopping-delivery-digest "
-        "/home/openclaw/.openclaw/shopping-workspace/scripts/delivery-digest.py "
+        "/home/openclaw/.clawford/shopping-workspace/scripts/delivery-digest.py "
         "SHOPPING_BOT_TOKEN 900 # script-contract-shopping-delivery-digest\n"
     )
     state_file.write_text(correct)
