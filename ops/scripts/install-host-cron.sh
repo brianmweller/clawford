@@ -69,6 +69,27 @@ STALE_MARKERS=(
 )
 
 NEW_LINES=()
+# Markers for entries whose existing crontab line no longer matches
+# what we'd install (schedule / wrapper path / script path / token env /
+# timeout changed since last run). These are evicted in the same sweep
+# as STALE_MARKERS below so the new line can be added fresh.
+DRIFT_MARKERS=()
+
+# Snapshot the current crontab ONCE up front so every drift-detection
+# comparison reads the same starting state. Re-reading inside the loops
+# would mask drift if another run modified the crontab mid-invocation.
+CURRENT_CRONTAB=$(crontab -l 2>/dev/null || true)
+
+# Helper: return the first existing crontab line whose literal content
+# contains the given marker, or empty string if no match.
+existing_line_for_marker() {
+  local marker="$1"
+  if [[ -z "$CURRENT_CRONTAB" ]]; then
+    echo ""
+    return
+  fi
+  echo "$CURRENT_CRONTAB" | grep -F -- "$marker" | head -1
+}
 
 # Process direct entries
 for entry in "${DIRECT_ENTRIES[@]}"; do
@@ -81,13 +102,19 @@ for entry in "${DIRECT_ENTRIES[@]}"; do
   fi
   chmod +x "$wrapper"
 
-  if crontab -l 2>/dev/null | grep -Fq "$marker"; then
-    existing=$(crontab -l | grep -F "$marker")
+  desired_line="$schedule $wrapper $marker"
+  existing=$(existing_line_for_marker "$marker")
+
+  if [[ "$existing" == "$desired_line" ]]; then
     echo "[install-host-cron] already installed: $existing"
     continue
   fi
 
-  NEW_LINES+=("$schedule $wrapper $marker")
+  if [[ -n "$existing" ]]; then
+    echo "[install-host-cron] drift detected, evicting stale: $existing"
+    DRIFT_MARKERS+=("$marker")
+  fi
+  NEW_LINES+=("$desired_line")
 done
 
 # Process generic contract entries
@@ -102,36 +129,45 @@ for entry in "${CONTRACT_ENTRIES[@]}"; do
   IFS='|' read -r schedule logname script_path token_env timeout_s <<< "$entry"
   marker="# script-contract-$logname"
 
-  if crontab -l 2>/dev/null | grep -Fq "$marker"; then
-    existing=$(crontab -l | grep -F "$marker")
+  desired_line="$schedule $CONTRACT_WRAPPER $logname $script_path $token_env $timeout_s $marker"
+  existing=$(existing_line_for_marker "$marker")
+
+  if [[ "$existing" == "$desired_line" ]]; then
     echo "[install-host-cron] already installed: $existing"
     continue
   fi
 
-  NEW_LINES+=("$schedule $CONTRACT_WRAPPER $logname $script_path $token_env $timeout_s $marker")
+  if [[ -n "$existing" ]]; then
+    echo "[install-host-cron] drift detected, evicting stale: $existing"
+    DRIFT_MARKERS+=("$marker")
+  fi
+  NEW_LINES+=("$desired_line")
 done
 
-# Drop any stale crontab lines whose marker matches STALE_MARKERS.
-# This handles the install-host-cron.sh "yo-yo" case where a prior
-# version of this script registered an entry that's since been
-# replaced (e.g. R3 replacing 3 per-agent heartbeat crons with one
-# fleet-health entry). Without this the operator would have to
-# `crontab -e` manually to remove the old lines.
+# Drop any stale crontab lines whose marker matches STALE_MARKERS
+# (long-retired entries from past migrations) OR DRIFT_MARKERS (entries
+# whose schedule/path/etc. changed in this run). STALE handles the
+# "yo-yo" case from R3; DRIFT handles schedule edits to live entries
+# (e.g. Phase 4's shopping-delivery-digest 0 14 → 30 10 move).
+#
+# Without this pass the operator would have to `crontab -e` manually to
+# remove the old lines — and the "already installed" check would mask
+# the need.
 STALE_REMOVED=0
-if [[ ${#STALE_MARKERS[@]} -gt 0 ]]; then
-  CURRENT=$(crontab -l 2>/dev/null || true)
-  if [[ -n "$CURRENT" ]]; then
-    FILTERED="$CURRENT"
-    for marker in "${STALE_MARKERS[@]}"; do
-      if echo "$FILTERED" | grep -Fq "$marker"; then
-        FILTERED=$(echo "$FILTERED" | grep -vF "$marker")
-        STALE_REMOVED=$((STALE_REMOVED + 1))
-        echo "[install-host-cron] removed stale entry: $marker"
-      fi
-    done
-    if [[ "$STALE_REMOVED" -gt 0 ]]; then
-      echo "$FILTERED" | crontab -
+ALL_EVICT_MARKERS=("${STALE_MARKERS[@]}" "${DRIFT_MARKERS[@]}")
+if [[ ${#ALL_EVICT_MARKERS[@]} -gt 0 ]] && [[ -n "$CURRENT_CRONTAB" ]]; then
+  FILTERED="$CURRENT_CRONTAB"
+  for marker in "${ALL_EVICT_MARKERS[@]}"; do
+    if echo "$FILTERED" | grep -Fq -- "$marker"; then
+      FILTERED=$(echo "$FILTERED" | grep -vF -- "$marker")
+      STALE_REMOVED=$((STALE_REMOVED + 1))
+      echo "[install-host-cron] removed stale entry: $marker"
     fi
+  done
+  if [[ "$STALE_REMOVED" -gt 0 ]]; then
+    echo "$FILTERED" | crontab -
+    # Refresh snapshot so the append step below sees the post-sweep state.
+    CURRENT_CRONTAB=$(crontab -l 2>/dev/null || true)
   fi
 fi
 
