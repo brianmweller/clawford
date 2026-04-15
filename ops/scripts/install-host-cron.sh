@@ -170,7 +170,10 @@ if [[ ${#ALL_EVICT_MARKERS[@]} -gt 0 ]] && [[ -n "$CURRENT_CRONTAB" ]]; then
   FILTERED="$CURRENT_CRONTAB"
   for marker in "${ALL_EVICT_MARKERS[@]}"; do
     if echo "$FILTERED" | grep -Fq -- "$marker"; then
-      FILTERED=$(echo "$FILTERED" | grep -vF -- "$marker")
+      # `|| true` guards against the set -e trap that fires when
+      # grep -vF matches NO lines (e.g. we just evicted the only
+      # entry in FILTERED, leaving an empty result + exit 1).
+      FILTERED=$(echo "$FILTERED" | grep -vF -- "$marker" || true)
       STALE_REMOVED=$((STALE_REMOVED + 1))
       echo "[install-host-cron] removed stale entry: $marker"
     fi
