@@ -24,7 +24,7 @@
 | 07-3 | Mistress Mouse 🐭📅 *(net-new in v3)* | pending |
 | 07-4 | Sergeant Murphy 🐷🔍 *(net-new in v3)* | pending |
 | 07-5 | Huckle Cat 🐱🤝 *(net-new in v3)* | pending |
-| 07-6 | Hilda Hippo 🦛🛒 *(net-new in v3)* | pending |
+| 07-6 | [Hilda Hippo 🦛🛒](07-6-hilda-hippo.md) | **drafted** (Phase 7d) |
 | 07-7 | Auth architectures *(net-new in v3)* | pending |
 | 08 | Security and hardening *(net-new in v3)* | pending |
 | 09 | Scripts and configs reference | pending |
