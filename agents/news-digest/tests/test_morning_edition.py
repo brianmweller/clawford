@@ -261,6 +261,22 @@ def test_build_prompt_asks_for_items_object_keyed_by_id(mod):
     assert '"extended_headline"' in prompt
 
 
+def test_build_prompt_discourages_also_noted_overuse(mod):
+    """Regression gate for the Phase-3b-followup category skew: the
+    first real run put 4 items in 📋 Also Noted with only 1 Econ and
+    1 US Policy. The prompt now explicitly tells the LLM to avoid
+    defaulting to Also Noted and prefer a topic-specific bucket."""
+    articles = _mixed_feed(non_li=15, linkedin=3)
+    selected = mod.select_items(articles)
+    prompt = mod.build_prompt(selected)
+    lower = prompt.lower()
+    # The prompt mentions "only" near "Also Noted" — an explicit
+    # "Also Noted only as a fallback" directive — and asks for spread.
+    assert "📋 also noted" in lower
+    assert "only" in lower
+    assert "fallback" in lower or "no other" in lower
+
+
 # ─── parse_response ─────────────────────────────────────────────────
 
 

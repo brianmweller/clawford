@@ -92,18 +92,30 @@ Annotate each of the following articles for the morning news digest.
 
 For each article, produce exactly two fields:
   - `category`: one of these labels (with the leading emoji):
-        🤖 AI & Tech
-        💰 Economics
-        🌍 World
-        🏛️ US Policy
-        🔗 LinkedIn
-        📋 Also Noted
+        🤖 AI & Tech       — AI, ML, chips, semiconductors, startups building software/hardware
+        💰 Economics       — markets, inflation, fed, rates, earnings, M&A, business cycles
+        🌍 World           — international politics, diplomacy, foreign policy, wars, trade
+        🏛️ US Policy       — Congress, SCOTUS, White House, regulation, domestic legislation
+        🔗 LinkedIn        — anything with source=linkedin (always goes here)
+        📋 Also Noted      — FALLBACK ONLY: use this when no other label fits
+
   - `extended_headline`: a one-sentence rewritten headline that
      explains WHY the item matters — context, stakes, who it affects.
      Keep it concrete and specific; no filler like "could be important".
 
-LinkedIn items (source=linkedin or source_label contains "LinkedIn")
-always go in the 🔗 LinkedIn category.
+LinkedIn items (source=linkedin) always go in the 🔗 LinkedIn category.
+
+Categorization rules:
+  - Assign 📋 Also Noted ONLY when the item genuinely doesn't fit any
+    of the five topic-specific labels. It is a fallback, not a default.
+    If you're tempted to use Also Noted because categorization is
+    ambiguous, pick the closest topic-specific bucket instead.
+  - Aim for a spread across the first five categories rather than
+    clustering everything into one. A healthy digest has items in
+    at least 3 different topic-specific buckets.
+  - A business/markets story about AI goes in 💰 Economics only if
+    the story is primarily about money; if it's primarily about the
+    tech, it goes in 🤖 AI & Tech.
 
 Return a JSON object with a single top-level key `items` whose value
 is an array of objects. Each object MUST include the original `id`
