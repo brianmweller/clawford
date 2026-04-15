@@ -439,3 +439,36 @@ def test_cli_main_wraps_errors_in_script_contract_json(tmp_path, monkeypatch, ca
     result = json.loads(captured.out.strip())
     assert result["status"] == "error"
     assert "TELEGRAM_BOT_TOKEN" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# send_chat_action — typing indicator for the inbox dispatcher
+# ---------------------------------------------------------------------------
+
+
+def test_send_chat_action_posts_to_sendChatAction(monkeypatch):
+    telegram = _reload_telegram()
+    stub, captured = _make_urlopen_stub(factory=_ok_response)
+    monkeypatch.setattr(telegram.urllib.request, "urlopen", stub)
+
+    telegram.send_chat_action("TOKEN_ABC", "chat123", "typing")
+
+    req = captured["requests"][0]
+    assert req.full_url == "https://api.telegram.org/botTOKEN_ABC/sendChatAction"
+    body = json.loads(req.data)
+    assert body["chat_id"] == "chat123"
+    assert body["action"] == "typing"
+
+
+def test_send_chat_action_returns_true_on_ok(monkeypatch):
+    telegram = _reload_telegram()
+    stub, _ = _make_urlopen_stub(factory=_ok_response)
+    monkeypatch.setattr(telegram.urllib.request, "urlopen", stub)
+    assert telegram.send_chat_action("T", "c", "typing") is True
+
+
+def test_send_chat_action_returns_false_on_network_error(monkeypatch):
+    telegram = _reload_telegram()
+    stub, _ = _make_urlopen_stub(sequence=[urllib.error.URLError("refused")])
+    monkeypatch.setattr(telegram.urllib.request, "urlopen", stub)
+    assert telegram.send_chat_action("T", "c", "typing") is False

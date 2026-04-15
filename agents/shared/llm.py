@@ -86,7 +86,11 @@ class InferResult:
     """Normalized result of an LLM inference call.
 
     On success: text/model populated, usage counts set, returncode==0,
-    error is None, .ok is True.
+    error is None, .ok is True. If the model chose to call a tool
+    instead of replying with text, .function_call is populated with
+    {call_id, name, arguments (dict)} and .text is empty — callers
+    check .function_call first, execute the tool, and feed the result
+    back via a second infer() call with input_items=[...].
 
     On failure: .ok is False, .error carries a human-readable reason,
     .text may be empty. Token counts may be zero or partial depending
@@ -101,6 +105,8 @@ class InferResult:
     total_tokens: int = 0
     returncode: int = 0
     error: str | None = None
+    function_call: dict | None = None
+    response_id: str = ""
 
     @property
     def ok(self) -> bool:
@@ -113,18 +119,21 @@ class InferResult:
 
 
 def infer(
-    prompt: str,
+    prompt: str | None = None,
     *,
     instructions: str = DEFAULT_INSTRUCTIONS,
     model: str = DEFAULT_MODEL,
     json_mode: bool = False,
     timeout: int = DEFAULT_TIMEOUT_S,
+    tools: list[dict] | None = None,
+    input_items: list[dict] | None = None,
 ) -> InferResult:
     """Run an LLM inference call through the ChatGPT-subscription codex
     responses endpoint.
 
     Args:
-        prompt: User message.
+        prompt: Simple user message — builds `input=[{role, content}]`
+            for you. Mutually exclusive with input_items.
         instructions: System-prompt-equivalent sent as the `instructions`
             field. Keep this small — every token costs.
         model: Model ID. Default "gpt-5.4". Pass "gpt-5.3-codex" if you
@@ -133,10 +142,29 @@ def infer(
             model returns valid JSON directly. The caller can then
             json.loads(result.text) without fence-stripping hacks.
         timeout: Socket timeout in seconds for the HTTPS call.
+        tools: Optional list of tool definitions in the OpenAI Responses
+            API shape ({type:function, name, description, parameters}).
+            When present, the model may emit a function_call which lands
+            in InferResult.function_call instead of .text.
+        input_items: Multi-turn mode: pass a full input-items list
+            (prior user turns, assistant replies, function_call items,
+            function_call_output items). Mutually exclusive with prompt.
+            Used by tool_use.py to chain calls.
 
     Returns:
         InferResult. Always returned, never raises — check .ok.
     """
+    if prompt is not None and input_items is not None:
+        return InferResult(
+            returncode=22,
+            error="prompt and input_items are mutually exclusive",
+        )
+    if prompt is None and input_items is None:
+        return InferResult(
+            returncode=22,
+            error="must pass either prompt or input_items",
+        )
+
     auth_path = _auth_path()
     try:
         auth = _load_auth(auth_path)
@@ -156,6 +184,8 @@ def infer(
         instructions=instructions,
         model=model,
         json_mode=json_mode,
+        tools=tools,
+        input_items=input_items,
     )
 
     try:
@@ -228,20 +258,29 @@ def _load_auth(auth_path: Path) -> dict:
 
 def _build_request_body(
     *,
-    prompt: str,
+    prompt: str | None,
     instructions: str,
     model: str,
     json_mode: bool,
+    tools: list[dict] | None = None,
+    input_items: list[dict] | None = None,
 ) -> dict:
+    if input_items is not None:
+        input_value = input_items
+    else:
+        input_value = [{"role": "user", "content": prompt}]
+
     body: dict = {
         "model": model,
         "instructions": instructions,
-        "input": [{"role": "user", "content": prompt}],
+        "input": input_value,
         "store": False,
         "stream": True,
     }
     if json_mode:
         body["text"] = {"format": {"type": "json_object"}}
+    if tools:
+        body["tools"] = tools
     return body
 
 
@@ -268,17 +307,21 @@ def _post_responses(auth: dict, body: dict, *, timeout: int):
 
 
 def _parse_sse_response(response) -> InferResult:
-    """Read an SSE stream and extract text + usage.
+    """Read an SSE stream and extract text, usage, and tool calls.
 
     Events of interest:
-      - response.output_text.done: has the final text in `.text`
-      - response.completed: has model, usage in `.response.{model,usage}`
+      - response.output_text.done: final text in `.text`
+      - response.output_item.done: if item.type=="function_call", the
+        complete function-call item is here with {call_id, name, arguments}
+      - response.completed: model, usage, response_id
     """
     final_text = ""
     model = ""
     input_tokens = 0
     output_tokens = 0
     total_tokens = 0
+    function_call: dict | None = None
+    response_id = ""
 
     for raw_line in response:
         try:
@@ -295,9 +338,23 @@ def _parse_sse_response(response) -> InferResult:
         etype = event.get("type", "")
         if etype == "response.output_text.done":
             final_text = event.get("text", "")
+        elif etype == "response.output_item.done":
+            item = event.get("item") or {}
+            if item.get("type") == "function_call":
+                raw_args = item.get("arguments", "")
+                try:
+                    parsed_args = json.loads(raw_args) if raw_args else {}
+                except json.JSONDecodeError:
+                    parsed_args = {"__raw": raw_args}
+                function_call = {
+                    "call_id": item.get("call_id", "") or item.get("id", ""),
+                    "name": item.get("name", ""),
+                    "arguments": parsed_args,
+                }
         elif etype == "response.completed":
             resp = event.get("response") or {}
             model = resp.get("model", "") or model
+            response_id = resp.get("id", "") or response_id
             usage = resp.get("usage") or {}
             input_tokens = usage.get("input_tokens", 0) or 0
             output_tokens = usage.get("output_tokens", 0) or 0
@@ -311,6 +368,8 @@ def _parse_sse_response(response) -> InferResult:
         output_tokens=output_tokens,
         total_tokens=total_tokens,
         returncode=0,
+        function_call=function_call,
+        response_id=response_id,
     )
 
 

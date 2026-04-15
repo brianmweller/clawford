@@ -47,6 +47,7 @@ import urllib.request
 from datetime import datetime, timezone
 
 TELEGRAM_API_URL_TEMPLATE = "https://api.telegram.org/bot{token}/sendMessage"
+TELEGRAM_CHAT_ACTION_URL_TEMPLATE = "https://api.telegram.org/bot{token}/sendChatAction"
 MAX_MESSAGE_CHARS = 4000
 CHUNK_CHARS = 3900
 INTER_CHUNK_DELAY_S = 0.3
@@ -98,6 +99,36 @@ def send_message(
         return True
     except Exception as e:
         print(f"telegram send failed: {e}", file=sys.stderr)
+        return False
+
+
+def send_chat_action(
+    token: str,
+    chat_id: str,
+    action: str = "typing",
+    *,
+    timeout: int = DEFAULT_TIMEOUT_S,
+) -> bool:
+    """POST to sendChatAction — used by the inbox dispatcher to show a
+    "typing..." indicator while the LLM is composing a reply.
+
+    Returns True on Telegram's ok=true, False on any failure. Never
+    raises — the indicator is cosmetic; a failure here shouldn't block
+    the actual reply.
+    """
+    url = TELEGRAM_CHAT_ACTION_URL_TEMPLATE.format(token=token)
+    payload = {"chat_id": chat_id, "action": action}
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read())
+        return bool(body.get("ok", False))
+    except Exception:
         return False
 
 

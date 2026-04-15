@@ -460,3 +460,167 @@ def test_infer_refresh_failure_returns_error(fake_auth, monkeypatch):
     result = llm.infer("ping")
     assert not result.ok
     assert "refresh" in (result.error or "").lower()
+
+
+# ---------------------------------------------------------------------------
+# Tests — tool use (native Responses function calling)
+# ---------------------------------------------------------------------------
+
+
+def _function_call_events(call_id: str = "fc_123", name: str = "get_weather",
+                          arguments: str = '{"location":"SF"}',
+                          model: str = "gpt-5.4") -> list[dict]:
+    """SSE events that emit a single tool call and no text."""
+    return [
+        {"type": "response.created"},
+        {"type": "response.in_progress"},
+        {"type": "response.output_item.added"},
+        {"type": "response.function_call_arguments.delta",
+         "delta": arguments[:5], "item_id": call_id, "output_index": 0},
+        {"type": "response.function_call_arguments.delta",
+         "delta": arguments[5:], "item_id": call_id, "output_index": 0},
+        {"type": "response.function_call_arguments.done",
+         "arguments": arguments, "item_id": call_id, "output_index": 0},
+        {"type": "response.output_item.done",
+         "item": {
+             "type": "function_call",
+             "call_id": call_id,
+             "name": name,
+             "arguments": arguments,
+             "id": call_id,
+         }},
+        {"type": "response.completed",
+         "response": {
+             "id": "resp_fake_tool",
+             "model": model,
+             "usage": {"input_tokens": 30, "output_tokens": 10, "total_tokens": 40},
+         }},
+    ]
+
+
+def test_infer_accepts_tools_param_and_sends_in_body(fake_auth, monkeypatch):
+    """When tools=[...] is passed, the request body must include the tools field."""
+    llm = _reload_llm()
+    stub, captured = _make_urlopen_stub(
+        lambda: FakeHTTPResponse(_sse_body(_default_responses_events("pong")))
+    )
+    monkeypatch.setattr(llm.urllib.request, "urlopen", stub)
+
+    tools = [{
+        "type": "function",
+        "name": "get_weather",
+        "description": "Get the current weather in a given location",
+        "parameters": {
+            "type": "object",
+            "properties": {"location": {"type": "string"}},
+            "required": ["location"],
+        },
+    }]
+    llm.infer("what's the weather?", tools=tools)
+
+    req = captured["requests"][0]
+    body = json.loads(req.data)
+    assert body["tools"] == tools
+
+
+def test_infer_without_tools_omits_tools_field(fake_auth, monkeypatch):
+    """Backwards compat: calls without tools must NOT have a tools field in body."""
+    llm = _reload_llm()
+    stub, captured = _make_urlopen_stub(
+        lambda: FakeHTTPResponse(_sse_body(_default_responses_events("hello")))
+    )
+    monkeypatch.setattr(llm.urllib.request, "urlopen", stub)
+
+    llm.infer("hello")
+
+    body = json.loads(captured["requests"][0].data)
+    assert "tools" not in body
+
+
+def test_infer_parses_function_call_from_sse_stream(fake_auth, monkeypatch):
+    """When the model emits a function_call, InferResult.function_call must
+    contain {call_id, name, arguments (dict)} and text may be empty."""
+    llm = _reload_llm()
+    stub, _ = _make_urlopen_stub(
+        lambda: FakeHTTPResponse(_sse_body(
+            _function_call_events(call_id="fc_abc", name="get_fleet_health",
+                                  arguments='{"verbose":true}')
+        ))
+    )
+    monkeypatch.setattr(llm.urllib.request, "urlopen", stub)
+
+    result = llm.infer("how's the fleet?", tools=[{"type": "function", "name": "get_fleet_health"}])
+
+    assert result.ok
+    assert result.function_call is not None
+    assert result.function_call["call_id"] == "fc_abc"
+    assert result.function_call["name"] == "get_fleet_health"
+    assert result.function_call["arguments"] == {"verbose": True}
+
+
+def test_infer_text_only_response_has_no_function_call(fake_auth, monkeypatch):
+    """When the model replies with plain text (no tool call), function_call
+    on the result must be None."""
+    llm = _reload_llm()
+    stub, _ = _make_urlopen_stub(
+        lambda: FakeHTTPResponse(_sse_body(_default_responses_events("just chatting")))
+    )
+    monkeypatch.setattr(llm.urllib.request, "urlopen", stub)
+
+    result = llm.infer("hi", tools=[{"type": "function", "name": "x"}])
+
+    assert result.ok
+    assert result.text == "just chatting"
+    assert result.function_call is None
+
+
+def test_infer_accepts_input_items_list_for_multi_turn(fake_auth, monkeypatch):
+    """The dispatcher needs to feed a list of input items (prior user turns,
+    assistant replies, function_call, function_call_output) back to the
+    model to continue a multi-turn conversation. infer() must accept this
+    as `input_items` and pass it as `input` in the body, bypassing the
+    simple prompt-wrapper."""
+    llm = _reload_llm()
+    stub, captured = _make_urlopen_stub(
+        lambda: FakeHTTPResponse(_sse_body(_default_responses_events("ok")))
+    )
+    monkeypatch.setattr(llm.urllib.request, "urlopen", stub)
+
+    items = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hi back"},
+        {"role": "user", "content": "and now?"},
+    ]
+    llm.infer(prompt=None, input_items=items)
+
+    body = json.loads(captured["requests"][0].data)
+    assert body["input"] == items
+
+
+def test_infer_prompt_and_input_items_are_mutually_exclusive(fake_auth, monkeypatch):
+    """Passing both prompt= and input_items= is a programmer error.
+    infer() should return a not-ok result with a clear message rather
+    than silently preferring one over the other."""
+    llm = _reload_llm()
+    stub, _ = _make_urlopen_stub(
+        lambda: FakeHTTPResponse(_sse_body(_default_responses_events()))
+    )
+    monkeypatch.setattr(llm.urllib.request, "urlopen", stub)
+
+    result = llm.infer(prompt="hi", input_items=[{"role": "user", "content": "hi"}])
+    assert not result.ok
+    assert "mutually exclusive" in (result.error or "").lower() or "both" in (result.error or "").lower()
+
+
+def test_infer_result_captures_response_id(fake_auth, monkeypatch):
+    """InferResult.response_id is populated from response.completed.response.id.
+    The dispatcher uses this for debug-traceability (not for chaining — store
+    must be False per codex backend)."""
+    llm = _reload_llm()
+    stub, _ = _make_urlopen_stub(
+        lambda: FakeHTTPResponse(_sse_body(_default_responses_events("pong")))
+    )
+    monkeypatch.setattr(llm.urllib.request, "urlopen", stub)
+
+    result = llm.infer("ping")
+    assert result.response_id == "resp_fake"
