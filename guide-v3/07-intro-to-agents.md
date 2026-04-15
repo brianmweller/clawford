@@ -88,6 +88,62 @@ When `agents/shared/deploy.py <agent-id>` runs, it reads this file and does the 
 
 > ⚠️ **Warning.** `manifest.json` is gitignored and `IDENTITY.md` and `USER.md` are gitignored for the same reason: real values contain PII (family names, calendar IDs, bot tokens). The checked-in versions are `*.example` files. On first-time setup, `deploy.py <agent> --bootstrap-configs` scaffolds each missing real file by copying its `.example` sibling and prepending a `CLAWFORD_BOOTSTRAP_UNEDITED` sentinel. Hand-edit the dummy values, delete the sentinel line, redeploy. Safeguard 10 refuses to deploy any agent that still has the sentinel on line 1.
 
+## How a deploy actually moves code to production
+
+There is exactly one canonical path from a code change in your editor to that change running on the VPS. Skipping any step in this sequence will burn an hour and confuse things.
+
+```bash
+# 1. Edit, commit, push from the dev box.
+git add agents/shopping/scripts/delivery-digest.py
+git commit -m "shopping: handle out-of-stock items"
+git push origin master
+
+# 2. SSH to the VPS and pull.
+ssh openclaw@<vps>
+cd ~/repo
+git pull --ff-only origin master
+
+# 3. Run deploy.py FROM THE VPS SHELL.
+python3 agents/shared/deploy.py shopping --yes-updates
+```
+
+**The trap to avoid:** running `deploy.py` on the dev box. The tool has no `scp`, no `rsync`, no `ssh` — it just writes files into `\$HOME/.clawford/<agent>-workspace/` on whatever box runs it. On the VPS that path is the production workspace. On a laptop it's a mirror that nothing reads. A `--dry-run` from a laptop will happily enumerate planned changes against the dead mirror and print a clean plan, which is exactly the kind of false confirmation that makes the trap dangerous.
+
+The first time I hit this, I spent an hour re-deriving why a local `deploy.py` kept complaining about six missing config files (`IDENTITY.md`, `TOOLS.md`, `AGENTS.md`, and friends). The hydrated PII versions of those files don't exist on the dev box — they live only on the VPS, gitignored — and the local mirror had no `fix-it-workspace/` directory at all because the laptop had never been a real deploy source. A `grep` for `scp\|rsync\|ssh` inside `deploy.py` came back empty and the fog cleared. The local invocation was writing to a directory nothing on the production host would ever read.
+
+**Useful exception.** A local `--dry-run` against a fully-hydrated checkout can validate a manifest change without touching the VPS. In practice, SSH'ing to the VPS and running the dry-run there is faster than hydrating PII files locally, so this exception almost never gets used.
+
+### When the VPS working tree is dirty
+
+`install-host-cron.sh` runs occasionally on the VPS and can leave the working tree slightly dirty (mode flips on host wrappers, untracked log files, or stash artifacts from past sessions). Before pulling, check with `git status`. If there's noise:
+
+```bash
+git stash push -m "pre-deploy noise <YYYY-MM-DD>"
+git pull --ff-only origin master
+git stash list   # inspect the stash
+git stash drop   # if the stash was just noise (the usual case)
+```
+
+The dirty-tree state is almost always benign — host wrapper mode bits, untracked logs, or a half-applied edit from a prior session. Inspecting the stash before dropping it costs ten seconds and catches the rare case where it isn't noise.
+
+### When deploy.py refuses on a drift violation
+
+`deploy.py` Safeguard 4 (workspace drift) refuses to overwrite a workspace file that has changed since the last deploy's recorded backup. The intent is to catch hand-edits made directly on the VPS that haven't been committed back.
+
+Nine times out of ten, the "drift" is a false positive — the workspace content is byte-identical to the repo source, the safeguard is matching on a stat-only difference. Diff the file against the repo first:
+
+```bash
+diff ~/.clawford/<agent>-workspace/<file> ~/repo/agents/<agent>/<file>
+```
+
+If the diff is empty, re-run with `--accept-drift`:
+
+```bash
+python3 agents/shared/deploy.py <agent> --yes-updates --accept-drift
+```
+
+If the diff is non-empty, the drift is real — someone edited the workspace file directly on the VPS, and that edit is not in git. Pull the workspace file back into local git first (`scp` it to the dev box, commit it as-is to preserve the live state, edit locally, push, pull, deploy normally). Don't blindly `--accept-drift` a real drift; you'll lose the live edit on the next deploy.
+
 ## LLM vs deterministic — where the line sits
 
 The most important design rule in Clawford is that **the LLM does not touch the real world directly**. The LLM reasons; deterministic code acts.

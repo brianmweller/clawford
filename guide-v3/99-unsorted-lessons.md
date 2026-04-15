@@ -7,20 +7,8 @@
 **TL;DR**
 
 - This chapter is a holding pen, not a finished lesson set. Each entry below came out of a real session where something went wrong, got diagnosed, got fixed, and left behind a rule worth remembering. The entries are deliberately in a raw format — a short pain description, a rule, a how-to-apply — so a future edit pass can lift the strongest ones into their proper chapters.
-- The six lessons in the first pass all came out of the Phase 6.5 → Phase 7 migration and the cleanup work that followed. They are about deploy paths, host-cron hygiene, matching rules, test harness discipline, and file-based opt-outs.
+- Lessons land here straight from a fresh incident, then graduate into the chapter that's their natural home. Lesson A graduated to [Ch 07 — Intro to agents](07-intro-to-agents.md#how-a-deploy-actually-moves-code-to-production) on 2026-04-15. The remaining entries are still raw.
 - If you're reading this chapter as a learner, pick the rules that match the problem you're currently chasing. If you're reading it as an editor, the best homes are called out at the end of each entry.
-
----
-
-## A. The deploy path is SSH + pull + run on the VPS, not local
-
-**The rule.** There is exactly one canonical way to land a code change on the production fleet. Commit to master, push to origin, SSH to the VPS, `git pull --ff-only origin master`, then run `python3 agents/shared/deploy.py <agent> --yes-updates` *from the VPS shell*. If you invoke `deploy.py` on your laptop, it writes to a local workspace mirror under `\$HOME/.openclaw/<agent>-workspace/` that nothing on the production host ever reads. The local mirror is useful for offline dry-runs against a fully-hydrated checkout, and for nothing else.
-
-**The pain.** A session I ran on 2026-04-15 started with "push Phase 7 commits and deploy if needed" and spent an hour re-deriving this. The clues arrived one at a time. First the local `deploy.py` complained about six missing config files (`IDENTITY.md`, `TOOLS.md`, `AGENTS.md`, `HEARTBEAT.md`, `CRONS.md`, `probation.md`) — the PII-hydrated versions that were gitignored after the 2026-04 sanitization sweep. Then the local `~/.openclaw/` directory turned out to have no `fix-it-workspace/` at all, meaning the local box had never been a real deploy source for that agent. Then a grep for `scp|rsync|ssh` inside `agents/shared/deploy.py` came back empty. The tool only writes to `\$HOME/.openclaw/<agent>-workspace/` on whatever box runs it. On the VPS that path is the production workspace. On a laptop it's a dead mirror. The fact that the local box is fine for dry-runs makes this harder to see, because a dry-run will happily enumerate the planned changes even though the "target" is nothing anyone reads.
-
-**How to apply.** When someone asks you to deploy an agent, skip the local invocation entirely. Open an SSH session, `cd ~/repo`, pull, run the deploy tool with the agent id, and read the output. If the VPS working tree is dirty when you arrive (it frequently is, from prior install-host-cron runs or from ad-hoc edits), `git stash push -m '<reason>'`, then pull, then `git stash drop` after verifying the stash is noise. If the agent's deploy refuses on a drift violation, diff the workspace file against the repo first; 9 times out of 10 the content is identical and you can add `--accept-drift` to the same command. The only situation where local `deploy.py` is the right answer is a standalone dry-run where you explicitly want to validate a manifest change without touching the VPS — and even then, SSH'ing is usually faster than hydrating PII files locally.
-
-**Best home.** `07-intro-to-agents.md`, in a new section called something like "How a deploy actually moves code to production". This is probably the single biggest gap in the current guide for anyone onboarding cold.
 
 ---
 
