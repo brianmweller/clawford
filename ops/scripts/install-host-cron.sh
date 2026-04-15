@@ -31,6 +31,17 @@
 #   */30 * * * *  meetings-coach-pre-meeting-alert      → MEETINGS_BOT_TOKEN   (Phase 4 — 15-45 min lookahead, sent-alerts.json dedup)
 #   15,45 * * * * meetings-coach-post-meeting-scan      → MEETINGS_BOT_TOKEN   (Phase 4 — Krisp transcript scan + LLM coaching; preserves 74c726c idempotency)
 #   0 16 * * *    meetings-coach-commitment-follow-up   → MEETINGS_BOT_TOKEN   (Phase 4 — overdue/approaching alert at 9 AM PT)
+#   0 */6 * * *   fix-it-brain-validation               → TELEGRAM_BOT_TOKEN   (Phase 4 — wraps validate.py, alerts on schema failures)
+#   0 */2 * * *   fix-it-conflict-scan                  → TELEGRAM_BOT_TOKEN   (Phase 4 — pure-Python Dropbox conflicted copy detector)
+#   0 12 * * *    fix-it-file-size-monitor              → TELEGRAM_BOT_TOKEN   (Phase 4 — pure-Python large-file monitor)
+#   0 4 * * 0     fix-it-security-audit-alert           → TELEGRAM_BOT_TOKEN   (Phase 4 — wraps security-audit.py, forwards report; degrades after Phase 6)
+#   10 12 * * *   fix-it-obsidian-briefing-check        → TELEGRAM_BOT_TOKEN   (Phase 4 — wraps obsidian-briefing/generate.py)
+#   30 3 * * *    fix-it-workspace-snapshot-check       → TELEGRAM_BOT_TOKEN   (Phase 4 — wraps workspace-snapshot.py)
+#   0 0 * * *     fix-it-cron-self-check                → TELEGRAM_BOT_TOKEN   (Phase 4 — diffs install-host-cron.sh against crontab -l)
+#   0 3 1 * *     fix-it-monthly-archival               → TELEGRAM_BOT_TOKEN   (Phase 4 — pure-Python confidence decay archival)
+#   0 16 25 4 *   fix-it-probation-end-reminder         → TELEGRAM_BOT_TOKEN   (Phase 4 — annual one-shot, fires April 25)
+# Retired in Phase 4 (no host cron):
+#   fix-it:update-check  — `openclaw update` is meaningless after Phase 6 decommission
 #
 # Removed in R3 (replaced by fleet-health):
 #   */30 * * * *  shopping-heartbeat              → covered by fleet-health
@@ -75,6 +86,15 @@ CONTRACT_ENTRIES=(
   "*/30 * * * *|meetings-coach-pre-meeting-alert|/home/node/.openclaw/meetings-coach-workspace/scripts/pre-meeting-alert.py|MEETINGS_BOT_TOKEN|180"
   "15,45 * * * *|meetings-coach-post-meeting-scan|/home/node/.openclaw/meetings-coach-workspace/scripts/post-meeting-scan.py|MEETINGS_BOT_TOKEN|300"
   "0 16 * * *|meetings-coach-commitment-follow-up|/home/node/.openclaw/meetings-coach-workspace/scripts/commitment-follow-up.py|MEETINGS_BOT_TOKEN|120"
+  "0 */6 * * *|fix-it-brain-validation|/home/node/.openclaw/fix-it-workspace/scripts/brain-validation-check.py|TELEGRAM_BOT_TOKEN|120"
+  "0 */2 * * *|fix-it-conflict-scan|/home/node/.openclaw/fix-it-workspace/scripts/conflict-scan.py|TELEGRAM_BOT_TOKEN|120"
+  "0 12 * * *|fix-it-file-size-monitor|/home/node/.openclaw/fix-it-workspace/scripts/file-size-monitor.py|TELEGRAM_BOT_TOKEN|120"
+  "0 4 * * 0|fix-it-security-audit-alert|/home/node/.openclaw/fix-it-workspace/scripts/security-audit-alert.py|TELEGRAM_BOT_TOKEN|180"
+  "10 12 * * *|fix-it-obsidian-briefing-check|/home/node/.openclaw/fix-it-workspace/scripts/obsidian-briefing-check.py|TELEGRAM_BOT_TOKEN|240"
+  "30 3 * * *|fix-it-workspace-snapshot-check|/home/node/.openclaw/fix-it-workspace/scripts/workspace-snapshot-check.py|TELEGRAM_BOT_TOKEN|600"
+  "0 0 * * *|fix-it-cron-self-check|/home/node/.openclaw/fix-it-workspace/scripts/cron-self-check.py|TELEGRAM_BOT_TOKEN|60"
+  "0 3 1 * *|fix-it-monthly-archival|/home/node/.openclaw/fix-it-workspace/scripts/monthly-archival.py|TELEGRAM_BOT_TOKEN|600"
+  "0 16 25 4 *|fix-it-probation-end-reminder|/home/node/.openclaw/fix-it-workspace/scripts/probation-end-reminder.py|TELEGRAM_BOT_TOKEN|60"
 )
 
 # Markers for old entries to REMOVE on next install run. Used by the

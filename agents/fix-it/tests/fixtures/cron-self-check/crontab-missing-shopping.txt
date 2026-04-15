@@ -1,0 +1,4 @@
+*/5 * * * * /home/openclaw/repo/ops/scripts/costco-token-refresh-host.sh # costco-token-refresh-host
+0 12 * * * /home/openclaw/repo/ops/scripts/morning-fleet-deliver-host.sh # morning-fleet-deliver-host
+0 */6 * * * /home/openclaw/repo/ops/scripts/script-contract-host.sh linkedin-keepalive /path/linkedin-keepalive.py NEWSDIGEST_BOT_TOKEN 300 # script-contract-linkedin-keepalive
+*/5 * * * * /home/openclaw/repo/ops/scripts/script-contract-host.sh family-calendar-reminder-check /path/reminder-check.py FAMILYCAL_BOT_TOKEN 90 # script-contract-family-calendar-reminder-check
