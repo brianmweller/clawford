@@ -55,7 +55,6 @@ def _seed_shared_library(repo: Path) -> Path:
     (shared / "write-status.py").write_text("# status writer\n", encoding="utf-8")
     (shared / "contract_wrap.py").write_text("# contract wrapper\n", encoding="utf-8")
     (shared / "import_from_deploy_sh.py").write_text("# legacy importer\n", encoding="utf-8")
-    (shared / "deploy_wrapper.sh").write_text("#!/bin/sh\n", encoding="utf-8")
     (shared / "SCRIPT_CONTRACT.md").write_text("# contract doc\n", encoding="utf-8")
     (shared / "fleet-manifest.json").write_text("{}\n", encoding="utf-8")
 
@@ -149,8 +148,8 @@ def test_sync_shared_library_skips_other_deploy_only_modules(
     deploy_module, seeded_repo, fake_workspace
 ):
     """workspace-snapshot.py, contract_wrap.py, write-status.py,
-    import_from_deploy_sh.py, deploy_wrapper.sh, SCRIPT_CONTRACT.md,
-    fleet-manifest.json are all deploy-side only."""
+    import_from_deploy_sh.py, SCRIPT_CONTRACT.md, fleet-manifest.json
+    are all deploy-side only."""
     mf = deploy_module.load_manifest(
         seeded_repo / "agents" / "testagent" / "manifest.json"
     )
@@ -162,7 +161,6 @@ def test_sync_shared_library_skips_other_deploy_only_modules(
         "contract_wrap.py",
         "write-status.py",
         "import_from_deploy_sh.py",
-        "deploy_wrapper.sh",
         "SCRIPT_CONTRACT.md",
         "fleet-manifest.json",
     ):
