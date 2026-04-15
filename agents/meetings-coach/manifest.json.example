@@ -143,7 +143,6 @@
       "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Check open commitments from meetings. Run: python3 ~/.openclaw/meetings-coach-workspace/scripts/commitment-tracker.py. Read the JSON output. If there are overdue or approaching items: send a follow-up summary on Telegram using the format in CRONS.md. If no actionable items, return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. Write result to ~/.openclaw/meetings-coach-workspace/cache/last-commitment.json as JSON: {\"timestamp\": \"<ISO UTC>\", \"overdue\": <N>, \"approaching\": <N>, \"status\": \"ok\" | \"error\", \"summary\": \"<one sentence>\"}. DO NOT touch ~/Dropbox/openclaw-backup/agents/meetings-coach.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source.",
       "announce": false,
       "no_deliver": true
-    },
     }
   ]
 }
