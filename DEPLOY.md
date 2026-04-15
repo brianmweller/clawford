@@ -945,4 +945,4 @@ source of truth are visibly the same place.
 | Pair Telegram | `oc pairing approve telegram {CODE}` |
 | View approvals | `oc approvals get` |
 
-See `guide/09-cli-reference.md` for the full reference.
+See `guide-v1/09-cli-reference.md` for the full historical reference (frozen, OpenClaw-era).

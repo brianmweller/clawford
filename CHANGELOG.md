@@ -189,7 +189,7 @@ track continues through `docs/v2-to-v3-migration.md`.
 ## 0.2.0 — 2026-04-03
 
 ### Added
-- 10-chapter setup guide (`guide/`)
+- 10-chapter setup guide (`guide-v1/`, originally `guide/`)
 - Busytown character theme for all agents
 - Rudolf Von Flugel agent spec (Telegram ↔ local Claude Code relay)
 - Dynamic agent discovery in `validate.py` (no more hardcoded agent list)
