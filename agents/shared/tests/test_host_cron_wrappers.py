@@ -136,27 +136,42 @@ def test_python_wrappers_use_explicit_bin_path(wrapper_path: Path) -> None:
     )
 
 
+FORBIDDEN_CRON_PATHS = (
+    "/home/node/.openclaw/",      # container path retired in Phase 6.5
+    "/home/openclaw/.openclaw/",  # host openclaw path retired in Phase 7b
+)
+REQUIRED_CRON_PATH_PREFIX = "/home/openclaw/.clawford/"
+
+
 def test_install_host_cron_contract_entries_use_host_paths() -> None:
     """Every CONTRACT_ENTRY and DIRECT_ENTRIES line in install-host-cron.sh
-    must reference /home/openclaw/.openclaw/... for scripts, not
-    /home/node/.openclaw/... — the latter is the container path only.
+    must reference /home/openclaw/.clawford/... for scripts.
 
-    After Phase 6.5, script-contract-host.sh invokes `/usr/bin/python3
-    "$SCRIPT"` directly on the host. A /home/node/ path in the CONTRACT_ENTRY
-    would silently fail on every cron tick.
+    Phase 6.5 moved scripts off the container path /home/node/.openclaw/...
+    onto host paths so /usr/bin/python3 can resolve them. Phase 7b then
+    renamed the host workspace root from .openclaw → .clawford. Both
+    legacy prefixes are now hard-forbidden in this file.
     """
     source = (SCRIPTS_DIR / "install-host-cron.sh").read_text(encoding="utf-8")
     stripped = _strip_comments(source)
 
-    forbidden = "/home/node/.openclaw/"
-    if forbidden in stripped:
-        offending_lines = [
-            line for line in stripped.splitlines() if forbidden in line
-        ]
+    for forbidden in FORBIDDEN_CRON_PATHS:
+        if forbidden in stripped:
+            offending_lines = [
+                line for line in stripped.splitlines() if forbidden in line
+            ]
+            raise AssertionError(
+                f"install-host-cron.sh references {forbidden!r} in "
+                f"{len(offending_lines)} non-comment line(s). Phase 7b "
+                f"renamed the host workspace root to "
+                f"{REQUIRED_CRON_PATH_PREFIX}; update the CONTRACT_ENTRIES "
+                f"and DIRECT_ENTRIES to match.\n\n"
+                + "\n".join(f"  {ln.strip()}" for ln in offending_lines[:5])
+            )
+
+    if REQUIRED_CRON_PATH_PREFIX not in stripped:
         raise AssertionError(
-            f"install-host-cron.sh references {forbidden!r} in "
-            f"{len(offending_lines)} non-comment line(s). Phase 6.5 migrated "
-            f"every CONTRACT_ENTRY to /home/openclaw/.openclaw/ so host "
-            f"python3 can resolve them.\n\n"
-            + "\n".join(f"  {ln.strip()}" for ln in offending_lines[:5])
+            f"install-host-cron.sh has no references to "
+            f"{REQUIRED_CRON_PATH_PREFIX}. Phase 7b expects every "
+            f"CONTRACT_ENTRY to use the renamed host workspace root."
         )
