@@ -1376,6 +1376,85 @@ def sync_shared_library(mf: Manifest) -> tuple[int, int]:
     return updated, skipped
 
 
+def heal_cross_workspace_symlinks(mf: Manifest) -> list[str]:
+    """Replace any symlink inside the workspace whose target is OUTSIDE
+    the workspace with an independent file copy.
+
+    Why: once P1.2 bubblewrap isolation lands, a symlink that points
+    across workspaces silently breaks every time its agent's cron
+    runs under bwrap — the namespace only binds the agent's own
+    workspace, so the symlink target isn't visible inside. The canonical
+    case was shopping-workspace/token.json → ../family-calendar-
+    workspace/token.json on 2026-04-16; gmail-search errored with
+    "token.json not found" and the operator's /arriving went dark on the
+    Gmail side.
+
+    Fix is idempotent: if the symlink is already a real file, skip.
+    If the target is inside the same workspace, keep the symlink
+    (within-workspace symlinks resolve inside the namespace fine).
+    Only cross-workspace symlinks get resolved — the copy is taken
+    from the target's current contents so the agent gets a fresh
+    snapshot on every deploy.
+
+    Returns the list of healed paths (relative to the workspace).
+    """
+    healed: list[str] = []
+    workspace = mf.expanded_workspace.resolve()
+    if not workspace.is_dir():
+        return healed
+
+    for child in workspace.rglob("*"):
+        if not child.is_symlink():
+            continue
+        try:
+            target = child.resolve(strict=False)
+        except (OSError, RuntimeError):
+            continue
+        try:
+            target.relative_to(workspace)
+            # Target is inside the workspace — symlink is bwrap-safe,
+            # leave it.
+            continue
+        except ValueError:
+            pass
+        # Cross-workspace (or outside-workspace) symlink — heal it.
+        if not target.is_file():
+            # Dangling symlink — log and skip; we don't invent content.
+            log(
+                f"dangling symlink (cross-workspace target missing): "
+                f"{child.relative_to(workspace)} → {target}",
+                "warn",
+            )
+            continue
+        if _DRY:
+            log(
+                f"would heal symlink: {child.relative_to(workspace)} → "
+                f"{target} (cross-workspace, copy-in-place)",
+                "plan",
+            )
+            continue
+        try:
+            content = target.read_bytes()
+            child.unlink()
+            child.write_bytes(content)
+            # Preserve restrictive mode if the target was restricted
+            # (token files typically land at 0600).
+            try:
+                os.chmod(child, target.stat().st_mode & 0o777)
+            except OSError:
+                pass
+        except OSError as e:
+            log(f"failed to heal symlink {child}: {e}", "warn")
+            continue
+        rel = str(child.relative_to(workspace))
+        log(
+            f"healed cross-workspace symlink: {rel} → independent copy",
+            "plan",
+        )
+        healed.append(rel)
+    return healed
+
+
 def sync_state_files(mf: Manifest) -> tuple[int, int]:
     created = preserved = 0
     workspace = mf.expanded_workspace
@@ -1586,6 +1665,15 @@ def deploy_one(agent_id: str, args: argparse.Namespace) -> int:
         sync_shared_library(mf)
         note("State files")
         sync_state_files(mf)
+        # Heal any cross-workspace symlinks (e.g. a historical
+        # token.json → ../other-workspace/token.json) that would
+        # silently break under P1.2 bwrap isolation.
+        note("Cross-workspace symlink heal")
+        healed = heal_cross_workspace_symlinks(mf)
+        if healed:
+            log(f"healed {len(healed)} cross-workspace symlink(s)", "ok")
+        else:
+            log("no cross-workspace symlinks to heal", "ok")
 
     # Safeguard 6: smoke test. Post-Phase-5: runs the manifest's smoke_test
     # script as a host subprocess and asserts exit 0 + non-empty stdout.
