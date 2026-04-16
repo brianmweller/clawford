@@ -400,3 +400,63 @@ def review_action(
         agent_id=agent_id,
         action_kind=action_kind,
     )
+
+
+# ---------------------------------------------------------------------------
+# Convenience: review-or-exit for cron scripts
+# ---------------------------------------------------------------------------
+
+
+def review_or_exit(
+    *,
+    agent_id: str,
+    action_kind: str,
+    payload: Any,
+    role_summary: str = "",
+    context: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    infer_fn: Optional[Callable] = None,
+    print_envelope: Optional[Callable[[dict], None]] = None,
+    exit_fn: Optional[Callable[[int], None]] = None,
+) -> ReviewVerdict:
+    """Review a proposed action; on a blocking DENY, print a degraded
+    envelope to stdout and sys.exit(0) — don't return.
+
+    The script never writes a non-`status` field that downstream code
+    might read, because it never gets that far. WARN / DENY-warn /
+    SAFE / ERROR all return the verdict so the caller can keep going.
+
+    `print_envelope` and `exit_fn` are injected for tests so the
+    helper is exercisable without process exit.
+    """
+    if not role_summary:
+        role_summary = role_summary_for(agent_id)
+    verdict = review_action(
+        agent_id=agent_id,
+        action_kind=action_kind,
+        payload=payload,
+        role_summary=role_summary,
+        context=context,
+        trace_id=trace_id,
+        infer_fn=infer_fn,
+    )
+    if verdict.verdict in ("warn", "deny"):
+        print(
+            f"[reviewer] {verdict.verdict.upper()} mode={verdict.mode} "
+            f"agent={agent_id} action={action_kind}: {verdict.reason}",
+            file=sys.stderr,
+        )
+    if verdict.blocking:
+        envelope = {
+            "status": "degraded",
+            "alert": (
+                f"{action_kind} blocked by outbound reviewer: "
+                f"{verdict.reason or 'no reason given'}"
+            ),
+            "review": verdict.as_dict(),
+        }
+        printer = print_envelope or (lambda obj: print(json.dumps(obj)))
+        printer(envelope)
+        exiter = exit_fn or sys.exit
+        exiter(0)
+    return verdict
