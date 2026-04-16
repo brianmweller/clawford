@@ -185,6 +185,17 @@ def _classify_agent(
     return "alert", alert_text
 
 
+def _format_age(age: timedelta) -> str:
+    """Render a timedelta as a compact 'Xh Ym' / 'Ym' string."""
+    total_min = int(age.total_seconds() // 60)
+    if total_min < 0:
+        total_min = 0
+    hours, minutes = divmod(total_min, 60)
+    if hours:
+        return f"{hours}h {minutes}m ago"
+    return f"{minutes}m ago"
+
+
 def _format_report(
     overall: str,
     buckets: dict[str, str],
@@ -192,6 +203,8 @@ def _format_report(
     known_reasons: dict[str, str],
     validate_result: tuple,
     conflicts: list[str],
+    generated_at: datetime,
+    age: timedelta,
 ) -> str:
     """Render the morning status report in the existing emoji-headed format."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -230,7 +243,9 @@ def _format_report(
     lines.append(
         f"Dropbox: {'no conflicts' if not conflicts else f'{len(conflicts)} conflicted copies'}"
     )
-    lines.append("Platform heartbeat: n/a (fleet-health.json is source of truth)")
+    lines.append(
+        f"Fleet-health: generated {generated_at.strftime('%H:%M UTC')} ({_format_age(age)})"
+    )
 
     # 🚨 Open alerts section
     alerts_in_bucket = [a for a, b in buckets.items() if b == "alert"]
@@ -310,6 +325,7 @@ def run() -> dict:
 
     report_text = _format_report(
         overall, buckets, agent_alerts, known_reasons, validate_result, conflicts,
+        generated_at, age,
     )
 
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)

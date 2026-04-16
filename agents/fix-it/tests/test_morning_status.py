@@ -334,6 +334,36 @@ def test_run_includes_brain_validation_line(stub_paths, monkeypatch):
     assert "Brain: PASS (25 pass, 0 fail, 17 warn)" in text
 
 
+def test_run_includes_fleet_health_freshness_line(stub_paths):
+    mod, brain, output, fleet_health, _ki = stub_paths
+    # Fleet-health generated 12 minutes ago
+    _write_fleet_health(
+        fleet_health,
+        {"shopping": {"status": "ok"}},
+        generated_offset_min=-12,
+    )
+    mod.run()
+    text = output.read_text(encoding="utf-8")
+    assert "Fleet-health: generated " in text
+    assert "UTC (" in text
+    assert "ago)" in text
+    # The old vestigial line must be gone
+    assert "Platform heartbeat" not in text
+
+
+def test_run_fleet_health_age_formats_hours_when_over_60min(stub_paths):
+    mod, brain, output, fleet_health, _ki = stub_paths
+    # 3h 5m old but still fresh (< 6h threshold)
+    _write_fleet_health(
+        fleet_health,
+        {"shopping": {"status": "ok"}},
+        generated_offset_min=-(3 * 60 + 5),
+    )
+    mod.run()
+    text = output.read_text(encoding="utf-8")
+    assert "3h 5m ago" in text
+
+
 # ─── main() SCRIPT_CONTRACT ──────────────────────────────────────────
 
 
