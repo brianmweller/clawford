@@ -472,3 +472,59 @@ def test_send_chat_action_returns_false_on_network_error(monkeypatch):
     stub, _ = _make_urlopen_stub(sequence=[urllib.error.URLError("refused")])
     monkeypatch.setattr(telegram.urllib.request, "urlopen", stub)
     assert telegram.send_chat_action("T", "c", "typing") is False
+
+
+# ---------------------------------------------------------------------------
+# answer_callback_query
+# ---------------------------------------------------------------------------
+
+
+def test_answer_callback_query_posts_to_correct_url(monkeypatch):
+    telegram = _reload_telegram()
+    stub, captured = _make_urlopen_stub(factory=_ok_response)
+    monkeypatch.setattr(telegram.urllib.request, "urlopen", stub)
+
+    telegram.answer_callback_query("TOKEN_XYZ", "cbq_42")
+
+    req = captured["requests"][0]
+    assert req.full_url == "https://api.telegram.org/botTOKEN_XYZ/answerCallbackQuery"
+    body = json.loads(req.data)
+    assert body["callback_query_id"] == "cbq_42"
+    assert "text" not in body
+
+
+def test_answer_callback_query_passes_toast_text(monkeypatch):
+    telegram = _reload_telegram()
+    stub, captured = _make_urlopen_stub(factory=_ok_response)
+    monkeypatch.setattr(telegram.urllib.request, "urlopen", stub)
+
+    telegram.answer_callback_query("T", "cbq_1", text="Noted!")
+
+    body = json.loads(captured["requests"][0].data)
+    assert body["text"] == "Noted!"
+    assert "show_alert" not in body
+
+
+def test_answer_callback_query_passes_show_alert(monkeypatch):
+    telegram = _reload_telegram()
+    stub, captured = _make_urlopen_stub(factory=_ok_response)
+    monkeypatch.setattr(telegram.urllib.request, "urlopen", stub)
+
+    telegram.answer_callback_query("T", "cbq_1", text="Error!", show_alert=True)
+
+    body = json.loads(captured["requests"][0].data)
+    assert body["show_alert"] is True
+
+
+def test_answer_callback_query_returns_true_on_ok(monkeypatch):
+    telegram = _reload_telegram()
+    stub, _ = _make_urlopen_stub(factory=_ok_response)
+    monkeypatch.setattr(telegram.urllib.request, "urlopen", stub)
+    assert telegram.answer_callback_query("T", "cbq_1") is True
+
+
+def test_answer_callback_query_returns_false_on_failure(monkeypatch):
+    telegram = _reload_telegram()
+    stub, _ = _make_urlopen_stub(sequence=[urllib.error.URLError("refused")])
+    monkeypatch.setattr(telegram.urllib.request, "urlopen", stub)
+    assert telegram.answer_callback_query("T", "cbq_1") is False

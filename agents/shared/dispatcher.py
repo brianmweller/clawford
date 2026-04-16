@@ -4,22 +4,27 @@ dispatch(agent_id, update) is called by telegram_inbox for each inbound
 update. Stateless entry point, hammered from the async poll loop:
 
   1. chat_id gate: drop anything not from the operator (TELEGRAM_CHAT_ID env)
-  2. Extract the user's text from update.message.text OR the synthetic
+  2. Callback shortcut: confirm/cancel/engagement callbacks bypass
+     the LLM and call executors directly (Phase C)
+  3. Extract the user's text from update.message.text OR the synthetic
      text from update.callback_query.data
-  3. Load the agent's config (tools + executors + system prompt)
-  4. Fire chat_action(typing) so the user knows we're working
-  5. Load the conversation window; append the user turn
-  6. Run tool_use.run() with the full input_items
-  7. Persist the user turn + every new item returned from tool_use
-  8. Send the final text reply
+  4. Load the agent's config (tools + executors + system prompt)
+  5. Fire chat_action(typing) so the user knows we're working
+  6. Load the conversation window; append the user turn
+  7. Run tool_use.run() with the full input_items
+  8. Auto-attach inline keyboard buttons on pending action markers
+  9. Persist the user turn + every new item returned from tool_use
+  10. Send the final text reply (with reply_markup if buttons present)
 
 Single-user by design (TELEGRAM_CHAT_ID is a single int). Multi-user
 support would need a per-chat state partitioning layer; not built.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
+import secrets
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -32,6 +37,7 @@ except ImportError:  # pragma: no cover — py<3.9
     ZoneInfo = None  # type: ignore
 
 import conversation  # type: ignore
+import pending_actions  # type: ignore
 import telegram_api  # type: ignore
 import tool_use  # type: ignore
 
@@ -220,6 +226,265 @@ def _extract_user_text(update: dict) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Callback shortcut — confirm/cancel/engagement bypass the LLM
+# ---------------------------------------------------------------------------
+
+ENGAGEMENT_MAP = {
+    "like": "thumbs_up",
+    "dislike": "thumbs_down",
+    "more": "more",
+}
+
+
+def _extract_callback_query(update: dict) -> tuple[str, str] | None:
+    """If this update is a callback_query, return (cbq_id, data).
+    Otherwise return None."""
+    cbq = update.get("callback_query")
+    if not cbq:
+        return None
+    cbq_id = cbq.get("id", "")
+    data = cbq.get("data", "")
+    if not data:
+        return None
+    return cbq_id, data
+
+
+def _handle_confirm(
+    cfg: AgentConfig, agent_id: str, chat_id: str,
+    action_id: str, cbq_id: str,
+) -> None:
+    telegram_api.answer_callback_query(cfg.token, cbq_id)
+
+    action = pending_actions.load_by_id(agent_id, action_id)
+    if action is None:
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            "That action has expired or was already handled.",
+        )
+        return
+
+    kind = action.get("kind", "")
+    executor_name = f"confirm_{kind}"
+    executor = cfg.executors.get(executor_name)
+    if executor is None:
+        pending_actions.remove(agent_id, action_id)
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            f"No handler for action kind '{kind}'.",
+        )
+        return
+
+    try:
+        result = executor(**action.get("payload", {}))
+        pending_actions.remove(agent_id, action_id)
+        if isinstance(result, dict):
+            status = result.get("status", "ok")
+            if status == "error":
+                msg = f"Failed: {result.get('error', result.get('message', 'unknown'))}"
+            else:
+                summary = action.get("summary", action_id)
+                msg = f"Done: {summary}"
+        else:
+            msg = str(result) if result else f"Done: {action.get('summary', action_id)}"
+        telegram_api.send_message(cfg.token, chat_id, msg)
+    except Exception as exc:
+        log.error("confirm executor %s failed: %s", executor_name, exc)
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            f"Failed: {exc}",
+        )
+
+
+def _handle_cancel(
+    cfg: AgentConfig, agent_id: str, chat_id: str,
+    action_id: str, cbq_id: str,
+) -> None:
+    telegram_api.answer_callback_query(cfg.token, cbq_id)
+
+    action = pending_actions.remove(agent_id, action_id)
+    if action is None:
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            "Already handled or expired.",
+        )
+        return
+
+    summary = action.get("summary", action_id)
+    telegram_api.send_message(cfg.token, chat_id, f"Cancelled: {summary}")
+
+
+def _handle_confirm_all(
+    cfg: AgentConfig, agent_id: str, chat_id: str,
+    batch_id: str, cbq_id: str,
+) -> None:
+    telegram_api.answer_callback_query(cfg.token, cbq_id)
+
+    actions = pending_actions.load_by_batch(agent_id, batch_id)
+    if not actions:
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            "No pending actions in that batch (expired or already handled).",
+        )
+        return
+
+    results = []
+    for action in actions:
+        kind = action.get("kind", "")
+        executor = cfg.executors.get(f"confirm_{kind}")
+        if executor is None:
+            results.append(f"- {action.get('summary', '?')}: no handler")
+            pending_actions.remove(agent_id, action["id"])
+            continue
+        try:
+            executor(**action.get("payload", {}))
+            pending_actions.remove(agent_id, action["id"])
+            results.append(f"- {action.get('summary', '?')}: done")
+        except Exception as exc:
+            results.append(f"- {action.get('summary', '?')}: failed ({exc})")
+
+    telegram_api.send_message(
+        cfg.token, chat_id,
+        f"Batch confirmed ({len(results)} items):\n" + "\n".join(results),
+    )
+
+
+def _handle_cancel_all(
+    cfg: AgentConfig, agent_id: str, chat_id: str,
+    batch_id: str, cbq_id: str,
+) -> None:
+    telegram_api.answer_callback_query(cfg.token, cbq_id)
+
+    actions = pending_actions.load_by_batch(agent_id, batch_id)
+    if not actions:
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            "No pending actions in that batch.",
+        )
+        return
+
+    for action in actions:
+        pending_actions.remove(agent_id, action["id"])
+
+    telegram_api.send_message(
+        cfg.token, chat_id,
+        f"Cancelled all {len(actions)} items.",
+    )
+
+
+def _handle_engagement(
+    cfg: AgentConfig, chat_id: str,
+    action_type: str, article_id: str, cbq_id: str,
+) -> None:
+    telegram_api.answer_callback_query(cfg.token, cbq_id, text="Noted!")
+
+    executor = cfg.executors.get("record_engagement")
+    if executor is None:
+        return
+
+    try:
+        executor(article_id=article_id, action=action_type)
+    except Exception as exc:
+        log.warning("engagement executor failed: %s", exc)
+
+
+def _try_callback_shortcut(
+    cfg: AgentConfig, agent_id: str, chat_id: str, update: dict,
+) -> bool:
+    """Try to handle the update as a callback shortcut. Returns True if
+    handled (caller should return), False if it should fall through to
+    the normal LLM path."""
+    cbq = _extract_callback_query(update)
+    if cbq is None:
+        return False
+    cbq_id, data = cbq
+
+    if data.startswith("confirm_all:"):
+        batch_id = data[len("confirm_all:"):]
+        _handle_confirm_all(cfg, agent_id, chat_id, batch_id, cbq_id)
+        return True
+
+    if data.startswith("cancel_all:"):
+        batch_id = data[len("cancel_all:"):]
+        _handle_cancel_all(cfg, agent_id, chat_id, batch_id, cbq_id)
+        return True
+
+    if data.startswith("confirm:"):
+        action_id = data[len("confirm:"):]
+        _handle_confirm(cfg, agent_id, chat_id, action_id, cbq_id)
+        return True
+
+    if data.startswith("cancel:"):
+        action_id = data[len("cancel:"):]
+        _handle_cancel(cfg, agent_id, chat_id, action_id, cbq_id)
+        return True
+
+    # Engagement callbacks: like:N, dislike:N, more:N
+    for prefix, action_type in ENGAGEMENT_MAP.items():
+        if data.startswith(prefix + ":"):
+            article_id = data[len(prefix) + 1:]
+            _handle_engagement(cfg, chat_id, action_type, article_id, cbq_id)
+            return True
+
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Auto-attach inline keyboard on pending action markers
+# ---------------------------------------------------------------------------
+
+
+def _scan_pending_markers(new_items: list[dict]) -> list[dict]:
+    """Extract __pending_action__ markers from tool outputs."""
+    markers = []
+    for item in new_items:
+        if item.get("type") != "function_call_output":
+            continue
+        try:
+            data = json.loads(item.get("output", ""))
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        marker = data.get("__pending_action__")
+        if isinstance(marker, dict) and "id" in marker:
+            markers.append(marker)
+    return markers
+
+
+def _build_reply_markup(
+    agent_id: str, markers: list[dict], batch_id: str | None,
+) -> dict | None:
+    """Build an inline_keyboard reply_markup from pending action markers."""
+    if not markers:
+        return None
+
+    rows = []
+    for marker in markers:
+        action_id = marker["id"]
+        action = pending_actions.load_by_id(agent_id, action_id)
+        if action is None:
+            continue
+        confirm_label = action.get("confirm_label", "\u2705 Confirm")
+        cancel_label = action.get("cancel_label", "\u274c Cancel")
+        rows.append([
+            {"text": confirm_label, "callback_data": f"confirm:{action_id}"},
+            {"text": cancel_label, "callback_data": f"cancel:{action_id}"},
+        ])
+
+    if batch_id and len(markers) >= 2:
+        rows.append([
+            {"text": f"\u2705 Confirm all {len(markers)}",
+             "callback_data": f"confirm_all:{batch_id}"},
+            {"text": "\u274c Cancel all",
+             "callback_data": f"cancel_all:{batch_id}"},
+        ])
+
+    if not rows:
+        return None
+    return {"inline_keyboard": rows}
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -229,10 +494,6 @@ def dispatch(agent_id: str, update: dict) -> None:
     in asyncio.to_thread."""
     if not _authorized(update):
         log.debug("dropping unauthorized update: %s", update.get("update_id"))
-        return
-
-    text = _extract_user_text(update)
-    if not text:
         return
 
     try:
@@ -245,6 +506,14 @@ def dispatch(agent_id: str, update: dict) -> None:
         return
 
     chat_id = os.environ.get(CHAT_ID_ENV, "")
+
+    # Callback shortcut — confirm/cancel/engagement skip the LLM.
+    if _try_callback_shortcut(cfg, agent_id, chat_id, update):
+        return
+
+    text = _extract_user_text(update)
+    if not text:
+        return
 
     # Typing indicator — cosmetic, best-effort, keep going on failure.
     telegram_api.send_chat_action(cfg.token, chat_id, "typing")
@@ -278,4 +547,18 @@ def dispatch(agent_id: str, update: dict) -> None:
         for new_item in result.new_items:
             conversation.append(agent_id, new_item)
 
-    telegram_api.send_message(cfg.token, chat_id, reply_text)
+    # Auto-attach inline keyboard if tool outputs contain pending actions.
+    reply_markup = None
+    if result.ok:
+        markers = _scan_pending_markers(result.new_items)
+        if markers:
+            batch_id = None
+            if len(markers) >= 2:
+                batch_id = "batch_" + secrets.token_hex(4)
+                action_ids = [m["id"] for m in markers]
+                pending_actions.assign_batch(agent_id, action_ids, batch_id)
+            reply_markup = _build_reply_markup(agent_id, markers, batch_id)
+
+    telegram_api.send_message(
+        cfg.token, chat_id, reply_text, reply_markup=reply_markup,
+    )

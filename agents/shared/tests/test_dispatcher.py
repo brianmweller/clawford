@@ -211,9 +211,10 @@ def test_tool_use_error_sends_user_friendly_error_reply(disp):
 
 
 def test_callback_query_routes_as_user_message(disp):
-    """Tapping an inline keyboard button becomes a synthetic user
-    turn with text like 'callback: like:3' — the dispatcher routes it
-    through tool_use like any other message."""
+    """Tapping an inline keyboard button with an unrecognized prefix
+    becomes a synthetic user turn — the dispatcher routes it through
+    tool_use like any other message. (Known prefixes like confirm:/
+    cancel:/like: are handled by the callback shortcut path instead.)"""
     from tool_use import ToolUseResult
 
     mock_cfg = MagicMock()
@@ -230,24 +231,29 @@ def test_callback_query_routes_as_user_message(disp):
          patch.object(disp, "load_agent_config", return_value=mock_cfg), \
          patch.object(disp, "tool_use") as mock_tu:
         mock_tu.run.return_value = tu_result
-        disp.dispatch("fix-it", _callback_update("confirm:action_42"))
+        disp.dispatch("fix-it", _callback_update("custom_action:42"))
 
         tu_kwargs = mock_tu.run.call_args[1]
         user_turn = tu_kwargs["initial_items"][-1]
         assert user_turn["role"] == "user"
-        assert "confirm:action_42" in user_turn["content"]
+        assert "custom_action:42" in user_turn["content"]
 
 
 def test_empty_message_text_is_ignored(disp):
+    mock_cfg_obj = MagicMock()
+    mock_cfg_obj.token = "FAKE_FIXIT_TOKEN"
+    mock_cfg_obj.executors = {}
+
     with patch.object(disp, "telegram_api") as mock_tg, \
-         patch.object(disp, "load_agent_config") as mock_cfg:
+         patch.object(disp, "load_agent_config", return_value=mock_cfg_obj), \
+         patch.object(disp, "tool_use") as mock_tu:
         # Update with no text and no callback_query
         update = {"update_id": 5, "message": {
             "from": {"id": 111111111}, "chat": {"id": 111111111},
         }}
         disp.dispatch("fix-it", update)
         mock_tg.send_message.assert_not_called()
-        mock_cfg.assert_not_called()
+        mock_tu.run.assert_not_called()
 
 
 def test_unknown_agent_id_logs_but_doesnt_crash(disp):

@@ -48,6 +48,7 @@ from datetime import datetime, timezone
 
 TELEGRAM_API_URL_TEMPLATE = "https://api.telegram.org/bot{token}/sendMessage"
 TELEGRAM_CHAT_ACTION_URL_TEMPLATE = "https://api.telegram.org/bot{token}/sendChatAction"
+TELEGRAM_ANSWER_CBQ_URL_TEMPLATE = "https://api.telegram.org/bot{token}/answerCallbackQuery"
 MAX_MESSAGE_CHARS = 4000
 CHUNK_CHARS = 3900
 INTER_CHUNK_DELAY_S = 0.3
@@ -118,6 +119,41 @@ def send_chat_action(
     """
     url = TELEGRAM_CHAT_ACTION_URL_TEMPLATE.format(token=token)
     payload = {"chat_id": chat_id, "action": action}
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read())
+        return bool(body.get("ok", False))
+    except Exception:
+        return False
+
+
+def answer_callback_query(
+    token: str,
+    callback_query_id: str,
+    *,
+    text: str | None = None,
+    show_alert: bool = False,
+    timeout: int = DEFAULT_TIMEOUT_S,
+) -> bool:
+    """POST to answerCallbackQuery — dismisses the loading spinner on
+    an inline keyboard button tap. Optionally shows a toast (text) or
+    modal alert (show_alert=True).
+
+    Returns True on Telegram's ok=true, False on any failure. Never
+    raises — the ACK is cosmetic.
+    """
+    url = TELEGRAM_ANSWER_CBQ_URL_TEMPLATE.format(token=token)
+    payload: dict = {"callback_query_id": callback_query_id}
+    if text is not None:
+        payload["text"] = text
+    if show_alert:
+        payload["show_alert"] = True
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
