@@ -202,11 +202,17 @@ def build_audit_prompt(
     health_block: dict,
 ) -> str:
     health_summary = json.dumps(health_block, indent=2) if health_block else "(no health data)"
+    # The literal token "json" must appear in the user message — OpenAI's
+    # Responses API rejects json_mode=True requests whose input doesn't
+    # contain it (HTTP 400 "input messages must contain the word 'json'").
     return (
         f"Agent: {agent_id} ({display_name})\n\n"
         f"=== SOUL.md (declared role) ===\n{soul or '(missing)'}\n\n"
         f"=== MEMORY.md (accumulated rules) ===\n{memory or '(empty)'}\n\n"
-        f"=== fleet-health probe block (current state) ===\n{health_summary}\n"
+        f"=== fleet-health probe block (current state) ===\n{health_summary}\n\n"
+        f"Audit this agent for drift signals. Reply with valid json "
+        f"matching the schema in your instructions; an empty anomalies "
+        f"array is the right answer when nothing's wrong.\n"
     )
 
 
