@@ -1,10 +1,11 @@
 """agents/meetings-coach/tools.py — Sergeant Murphy's tool manifest.
 
-Phase B: read-only tools over cached meeting state. Phase C will add
-confirm_action_item / dismiss_action_item producer tools.
+Phase B: read-only tools over cached meeting state.
+Phase C: list/confirm/dismiss pending action items from post-meeting debriefs.
 """
 from __future__ import annotations
 
+import glob as glob_mod
 import json
 import os
 import subprocess
@@ -184,6 +185,88 @@ def get_recent_coaching_entries(limit: int = 5) -> dict:
     return {"count": len(data), "entries": data[-limit:]}
 
 
+# ---------------------------------------------------------------------------
+# Phase C producer tools — action item management
+# ---------------------------------------------------------------------------
+
+
+def list_pending_action_items() -> dict:
+    """Read all pending-debrief-*.json files, extract action items."""
+    pattern = os.path.join(CACHE, "pending-debrief-*.json")
+    files = sorted(glob_mod.glob(pattern))
+    items = []
+    for f in files:
+        data = _read_json(f)
+        if not data or data.get("status") != "pending_review":
+            continue
+        event_id = data.get("event_id", "")
+        meeting = data.get("meeting_title", "")
+        for i, ai in enumerate(data.get("krisp_action_items", [])):
+            items.append({
+                "item_id": f"{event_id}:{i}",
+                "meeting": meeting,
+                "meeting_start": data.get("meeting_start"),
+                "action_item": ai,
+                "status": "pending",
+            })
+    return {"count": len(items), "items": items}
+
+
+def confirm_action_item(item_id: str) -> dict:
+    """Mark an action item as accepted. Writes status to the debrief file.
+    No Workflowy integration per the operator's decision."""
+    event_id, _, idx_str = item_id.partition(":")
+    if not event_id or not idx_str:
+        return {"status": "error", "error": f"invalid item_id: {item_id}"}
+    debrief_path = os.path.join(CACHE, f"pending-debrief-{event_id}.json")
+    data = _read_json(debrief_path)
+    if not data:
+        return {"status": "error", "error": f"debrief not found for {event_id}"}
+
+    try:
+        idx = int(idx_str)
+    except ValueError:
+        return {"status": "error", "error": f"invalid index in item_id: {item_id}"}
+
+    accepted = data.setdefault("accepted_items", [])
+    if idx not in accepted:
+        accepted.append(idx)
+    data["last_updated"] = datetime.now(timezone.utc).isoformat()
+    with open(debrief_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    ai_text = ""
+    items = data.get("krisp_action_items", [])
+    if 0 <= idx < len(items):
+        ai_text = items[idx]
+    return {"status": "ok", "item_id": item_id, "action_item": ai_text}
+
+
+def dismiss_action_item(item_id: str) -> dict:
+    """Mark an action item as dismissed."""
+    event_id, _, idx_str = item_id.partition(":")
+    if not event_id or not idx_str:
+        return {"status": "error", "error": f"invalid item_id: {item_id}"}
+    debrief_path = os.path.join(CACHE, f"pending-debrief-{event_id}.json")
+    data = _read_json(debrief_path)
+    if not data:
+        return {"status": "error", "error": f"debrief not found for {event_id}"}
+
+    try:
+        idx = int(idx_str)
+    except ValueError:
+        return {"status": "error", "error": f"invalid index in item_id: {item_id}"}
+
+    dismissed = data.setdefault("dismissed_items", [])
+    if idx not in dismissed:
+        dismissed.append(idx)
+    data["last_updated"] = datetime.now(timezone.utc).isoformat()
+    with open(debrief_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    return {"status": "ok", "item_id": item_id, "dismissed": True}
+
+
 TOOLS: list[dict] = [
     {
         "type": "function",
@@ -248,6 +331,48 @@ TOOLS: list[dict] = [
             "required": [],
         },
     },
+    {
+        "type": "function",
+        "name": "list_pending_action_items",
+        "description": (
+            "Return all open action items from post-meeting debriefs. "
+            "Each item has an item_id, the meeting it came from, and "
+            "the action item text. Call when the operator asks 'what action "
+            "items do I have' or 'anything from that meeting'."
+        ),
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "type": "function",
+        "name": "confirm_action_item",
+        "description": (
+            "Mark an action item as accepted. Use the item_id from "
+            "list_pending_action_items. Call when the operator says 'accept "
+            "that' or 'I'll do it'."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "item_id": {"type": "string", "description": "Action item ID (event_id:index)"},
+            },
+            "required": ["item_id"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "dismiss_action_item",
+        "description": (
+            "Dismiss an action item — mark it as not relevant or "
+            "already done. Use the item_id from list_pending_action_items."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "item_id": {"type": "string"},
+            },
+            "required": ["item_id"],
+        },
+    },
 ]
 
 
@@ -257,4 +382,7 @@ EXECUTORS: dict = {
     "get_commitment_status": get_commitment_status,
     "get_coaching_config": get_coaching_config,
     "get_recent_coaching_entries": get_recent_coaching_entries,
+    "list_pending_action_items": list_pending_action_items,
+    "confirm_action_item": confirm_action_item,
+    "dismiss_action_item": dismiss_action_item,
 }

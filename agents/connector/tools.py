@@ -1,15 +1,14 @@
 """agents/connector/tools.py — Huckle Cat's tool manifest.
 
-Phase B: read-only tools over the relationship-tracking state Huckle
-Cat maintains. Huckle Cat's model is: mine message sources for contact
-touches, track days-since-last-contact, surface overdue relationships
-each morning.
+Phase B: read-only tools over the relationship-tracking state.
+Phase C: mark_checkin and snooze_reminder for manual relationship management.
 """
 from __future__ import annotations
 
 import glob
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 WORKSPACE = os.path.expanduser("~/.clawford/connector-workspace")
@@ -93,6 +92,49 @@ def get_config_summary() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase C producer tools
+# ---------------------------------------------------------------------------
+
+
+def mark_checkin(person_name: str) -> dict:
+    """Record a manual check-in for a relationship contact."""
+    data = _read_json(CHECKIN_LOG_PATH, default={"checkins": []})
+    if not isinstance(data.get("checkins"), list):
+        data["checkins"] = []
+
+    entry = {
+        "person": person_name,
+        "checked_in_at": datetime.now(timezone.utc).isoformat(),
+        "source": "manual",
+    }
+    data["checkins"].append(entry)
+
+    with open(CHECKIN_LOG_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    return {"status": "ok", "person": person_name, "logged_at": entry["checked_in_at"]}
+
+
+def snooze_reminder(person_name: str, days: int = 7) -> dict:
+    """Push the next overdue reminder out by N days for a given person."""
+    config = _read_json(CONFIG_PATH, default={})
+    snoozes = config.setdefault("snoozes", {})
+    snoozes[person_name.lower()] = {
+        "until": (datetime.now(timezone.utc) + timedelta(days=days)).isoformat(),
+        "snoozed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+
+    return {
+        "status": "ok", "person": person_name,
+        "snoozed_for_days": days,
+        "until": snoozes[person_name.lower()]["until"],
+    }
+
+
 TOOLS: list[dict] = [
     {
         "type": "function",
@@ -148,6 +190,40 @@ TOOLS: list[dict] = [
         ),
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
+    {
+        "type": "function",
+        "name": "mark_checkin",
+        "description": (
+            "Record that the operator has checked in with someone. Logs the "
+            "contact in checkin-log.json and resets the overdue timer. "
+            "Call when the operator says 'I talked to John today' or 'just "
+            "caught up with Sarah'."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "person_name": {"type": "string", "description": "Name of the person"},
+            },
+            "required": ["person_name"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "snooze_reminder",
+        "description": (
+            "Snooze the overdue reminder for a person by N days. Call "
+            "when the operator says 'snooze John' or 'remind me about Sarah "
+            "next week instead'. Default 7 days."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "person_name": {"type": "string"},
+                "days": {"type": "integer", "description": "Days to snooze (default 7)"},
+            },
+            "required": ["person_name"],
+        },
+    },
 ]
 
 
@@ -157,4 +233,6 @@ EXECUTORS: dict = {
     "get_pending_triage": get_pending_triage,
     "get_checkin_log": get_checkin_log,
     "get_config_summary": get_config_summary,
+    "mark_checkin": mark_checkin,
+    "snooze_reminder": snooze_reminder,
 }

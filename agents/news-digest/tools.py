@@ -116,6 +116,44 @@ def recent_engagements(limit: int = 15) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase C producer tools
+# ---------------------------------------------------------------------------
+
+
+def record_engagement(article_id: str, action: str) -> dict:
+    """Record a user engagement event (thumbs_up, thumbs_down, more)
+    for an article. Appends to engagement.jsonl. The dispatcher's
+    callback shortcut routes like:N/dislike:N/more:N here directly."""
+    valid_actions = {"thumbs_up", "thumbs_down", "more"}
+    if action not in valid_actions:
+        return {"status": "error", "error": f"invalid action: {action}. Use: {valid_actions}"}
+
+    entry = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "article_id": str(article_id),
+        "action": action,
+    }
+
+    # Try to enrich with title/topics from morning items cache
+    items = _read_json(MORNING_ITEMS_PATH, default=[])
+    if isinstance(items, list):
+        try:
+            idx = int(article_id) - 1
+            if 0 <= idx < len(items):
+                entry["title"] = items[idx].get("title") or items[idx].get("headline", "")
+                entry["topics"] = items[idx].get("topics", [])
+                entry["source"] = items[idx].get("source", "")
+        except (ValueError, IndexError):
+            pass
+
+    os.makedirs(os.path.dirname(ENGAGEMENT_PATH), exist_ok=True)
+    with open(ENGAGEMENT_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    return {"status": "ok", "article_id": article_id, "action": action}
+
+
 TOOLS: list[dict] = [
     {
         "type": "function",
@@ -158,6 +196,28 @@ TOOLS: list[dict] = [
             "required": [],
         },
     },
+    {
+        "type": "function",
+        "name": "record_engagement",
+        "description": (
+            "Record a thumbs-up, thumbs-down, or 'more' reaction on a "
+            "digest article. Pass the article number (1-based) from "
+            "today's digest and the action. Also called automatically "
+            "when the operator taps inline buttons on the morning digest."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "article_id": {"type": "string", "description": "Article number from the digest"},
+                "action": {
+                    "type": "string",
+                    "enum": ["thumbs_up", "thumbs_down", "more"],
+                    "description": "Engagement type",
+                },
+            },
+            "required": ["article_id", "action"],
+        },
+    },
 ]
 
 
@@ -165,4 +225,5 @@ EXECUTORS: dict = {
     "get_todays_digest": get_todays_digest,
     "get_topic_weights": get_topic_weights,
     "recent_engagements": recent_engagements,
+    "record_engagement": record_engagement,
 }

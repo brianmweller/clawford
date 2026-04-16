@@ -1,8 +1,8 @@
 """agents/family-calendar/tools.py — Mistress Mouse's tool manifest.
 
 Phase B: read-only tools over cached calendar events + reminders.
-Producer tools (propose_event_add / move / cancel with inline
-confirmation) come in Phase C.
+Phase C: producer tools — propose_event_add / move / cancel with
+inline confirmation buttons.
 """
 from __future__ import annotations
 
@@ -12,6 +12,9 @@ import subprocess
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+import pending_actions  # type: ignore
+from subprocess_helpers import run_json_script, is_subprocess_error  # type: ignore
 
 WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
 CACHE = os.path.join(WORKSPACE, "cache")
@@ -179,6 +182,93 @@ def get_recent_reminders_sent(limit: int = 10) -> dict:
     return {"count": len(items), "reminders": items}
 
 
+GCAL_WRITE_SCRIPT = os.path.join(WORKSPACE, "scripts", "gcal-write.py")
+
+
+# ---------------------------------------------------------------------------
+# Phase C producer tools
+# ---------------------------------------------------------------------------
+
+
+def propose_event_add(
+    calendar_id: str, summary: str, start: str,
+    end: str = "", location: str = "",
+) -> dict:
+    payload = {
+        "calendar_id": calendar_id, "summary": summary,
+        "start": start, "end": end, "location": location,
+    }
+    return pending_actions.stage(
+        "family-calendar", "calendar_add", payload,
+        f"Create '{summary}' on {start}",
+        confirm_label="\U0001f4c5 Create event", cancel_label="Skip",
+    )
+
+
+def propose_event_move(
+    calendar_id: str, event_id: str,
+    new_start: str, new_end: str = "",
+) -> dict:
+    payload = {
+        "calendar_id": calendar_id, "event_id": event_id,
+        "new_start": new_start, "new_end": new_end,
+    }
+    return pending_actions.stage(
+        "family-calendar", "calendar_move", payload,
+        f"Move event to {new_start}",
+        confirm_label="\U0001f4c5 Move it", cancel_label="Keep",
+    )
+
+
+def propose_event_cancel(calendar_id: str, event_id: str) -> dict:
+    payload = {"calendar_id": calendar_id, "event_id": event_id}
+    return pending_actions.stage(
+        "family-calendar", "calendar_cancel", payload,
+        f"Cancel event {event_id}",
+        confirm_label="\U0001f4c5 Cancel event", cancel_label="Keep",
+    )
+
+
+def confirm_calendar_add(
+    calendar_id: str, summary: str, start: str,
+    end: str = "", location: str = "",
+) -> dict:
+    args = ["create", "--calendar-id", calendar_id,
+            "--summary", summary, "--start", start, "--confirm"]
+    if end:
+        args.extend(["--end", end])
+    if location:
+        args.extend(["--location", location])
+    result = run_json_script(GCAL_WRITE_SCRIPT, *args)
+    if is_subprocess_error(result):
+        return {"status": "error", "error": result["__error__"]}
+    return result
+
+
+def confirm_calendar_move(
+    calendar_id: str, event_id: str,
+    new_start: str, new_end: str = "",
+) -> dict:
+    args = ["move", "--calendar-id", calendar_id,
+            "--event-id", event_id, "--new-start", new_start, "--confirm"]
+    if new_end:
+        args.extend(["--new-end", new_end])
+    result = run_json_script(GCAL_WRITE_SCRIPT, *args)
+    if is_subprocess_error(result):
+        return {"status": "error", "error": result["__error__"]}
+    return result
+
+
+def confirm_calendar_cancel(calendar_id: str, event_id: str) -> dict:
+    result = run_json_script(
+        GCAL_WRITE_SCRIPT, "remove",
+        "--calendar-id", calendar_id, "--event-id", event_id, "--confirm",
+    )
+    if is_subprocess_error(result):
+        return {"status": "error", "error": result["__error__"]}
+    return result
+
+
 TOOLS: list[dict] = [
     {
         "type": "function",
@@ -237,6 +327,61 @@ TOOLS: list[dict] = [
             "required": [],
         },
     },
+    {
+        "type": "function",
+        "name": "propose_event_add",
+        "description": (
+            "Stage a new calendar event for the operator's confirmation. "
+            "the operator will see inline buttons to create or skip. "
+            "Use after confirming the details conversationally."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "calendar_id": {"type": "string", "description": "Calendar label or email"},
+                "summary": {"type": "string", "description": "Event title"},
+                "start": {"type": "string", "description": "ISO datetime for start"},
+                "end": {"type": "string", "description": "ISO datetime for end (optional)"},
+                "location": {"type": "string", "description": "Location (optional)"},
+            },
+            "required": ["calendar_id", "summary", "start"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "propose_event_move",
+        "description": (
+            "Stage a calendar event move for the operator's confirmation. "
+            "Requires the calendar_id and event_id from a prior "
+            "get_events_for_day or get_week call."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "calendar_id": {"type": "string"},
+                "event_id": {"type": "string", "description": "Google Calendar event ID"},
+                "new_start": {"type": "string", "description": "ISO datetime for new start"},
+                "new_end": {"type": "string", "description": "ISO datetime for new end (optional)"},
+            },
+            "required": ["calendar_id", "event_id", "new_start"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "propose_event_cancel",
+        "description": (
+            "Stage a calendar event cancellation for the operator's confirmation. "
+            "Requires the calendar_id and event_id."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "calendar_id": {"type": "string"},
+                "event_id": {"type": "string"},
+            },
+            "required": ["calendar_id", "event_id"],
+        },
+    },
 ]
 
 
@@ -245,4 +390,11 @@ EXECUTORS: dict = {
     "get_week": get_week,
     "get_configured_calendars": get_configured_calendars,
     "get_recent_reminders_sent": get_recent_reminders_sent,
+    "propose_event_add": propose_event_add,
+    "propose_event_move": propose_event_move,
+    "propose_event_cancel": propose_event_cancel,
+    # Shortcut-only executors (not LLM-callable)
+    "confirm_calendar_add": confirm_calendar_add,
+    "confirm_calendar_move": confirm_calendar_move,
+    "confirm_calendar_cancel": confirm_calendar_cancel,
 }
