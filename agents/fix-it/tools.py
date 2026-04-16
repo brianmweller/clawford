@@ -24,8 +24,16 @@ import json
 import os
 import re
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+# The dispatcher exec_module's this file from agents/fix-it/ but does not
+# add that directory to sys.path. Self-bootstrap so sibling-module imports
+# (`_cron_lookup`) resolve. shared/ is already on the path via the dispatcher.
+_THIS_DIR = str(Path(__file__).resolve().parent)
+if _THIS_DIR not in sys.path:
+    sys.path.insert(0, _THIS_DIR)
 
 import memory_writer  # type: ignore
 import pending_actions  # type: ignore
