@@ -100,6 +100,16 @@ def test_envelope_has_agent_id_derived_from_path(tmp_path: Path) -> None:
     assert result.get("agent_id") == "shopping", result
 
 
+def test_envelope_strips_workspace_suffix_from_agent_id(tmp_path: Path) -> None:
+    """VPS layout: ~/.clawford/<agent>-workspace/scripts/foo.py
+    The canonical agent_id is `<agent>`, NOT `<agent>-workspace`."""
+    workspace_layout = tmp_path / "shopping-workspace" / "scripts"
+    target = _write_script(workspace_layout, "costco-orders.py",
+        'import json; print(json.dumps({"status": "ok"}))\n')
+    result = _run_wrapper(target)
+    assert result.get("agent_id") == "shopping", result
+
+
 def test_envelope_has_tool_name_derived_from_path(tmp_path: Path) -> None:
     """tool_name is the target script's stem."""
     target = _write_fake_agent_script(

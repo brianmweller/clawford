@@ -98,9 +98,14 @@ def parameters_hash(payload: dict) -> str:
 def _derive_agent_id(target_path: Path) -> str:
     """Infer the agent id from the script's path.
 
-    Canonical layout: `.../agents/<agent>/scripts/<script>.py` → `<agent>`.
+    Canonical layouts:
+      - `.../agents/<agent>/scripts/<script>.py` → `<agent>`
+      - `.../<agent>-workspace/scripts/<script>.py` → `<agent>`
+        (this is how agents run on the VPS — out of
+        ~/.clawford/<agent>-workspace/scripts/)
+
     Falls back to the script's parent-of-scripts directory name for
-    non-canonical layouts (tests with fabricated dirs).
+    other layouts (tests with fabricated dirs).
     """
     parts = target_path.resolve().parts
     for i, p in enumerate(parts):
@@ -108,7 +113,12 @@ def _derive_agent_id(target_path: Path) -> str:
             return parts[i + 1]
     parent = target_path.parent
     if parent.name == "scripts":
-        return parent.parent.name
+        # VPS workspace: ~/.clawford/<agent>-workspace/scripts/foo.py
+        # → strip the "-workspace" suffix to get the canonical id.
+        candidate = parent.parent.name
+        if candidate.endswith("-workspace"):
+            return candidate[: -len("-workspace")]
+        return candidate
     return parent.name
 
 
