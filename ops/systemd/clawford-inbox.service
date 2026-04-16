@@ -1,0 +1,18 @@
+[Unit]
+Description=Clawford Telegram inbox dispatcher daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/home/openclaw/clawford/.env
+ExecStartPre=/usr/bin/test ! -f /home/openclaw/.clawford/inbox-disabled
+ExecStart=/usr/bin/python3 /home/openclaw/repo/agents/shared/telegram_inbox.py
+WorkingDirectory=/home/openclaw/repo
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/home/openclaw/.clawford/logs/inbox.log
+StandardError=append:/home/openclaw/.clawford/logs/inbox.log
+
+[Install]
+WantedBy=default.target
