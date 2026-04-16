@@ -337,6 +337,7 @@ def _handle_confirm(
         telegram_api.send_message(
             cfg.token, chat_id,
             "That action has expired or was already handled.",
+            skip_review=True,
         )
         return
 
@@ -348,6 +349,7 @@ def _handle_confirm(
         telegram_api.send_message(
             cfg.token, chat_id,
             f"No handler for action kind '{kind}'.",
+            skip_review=True,
         )
         return
 
@@ -363,12 +365,13 @@ def _handle_confirm(
                 msg = f"Done: {summary}"
         else:
             msg = str(result) if result else f"Done: {action.get('summary', action_id)}"
-        telegram_api.send_message(cfg.token, chat_id, msg)
+        telegram_api.send_message(cfg.token, chat_id, msg, skip_review=True)
     except Exception as exc:
         log.error("confirm executor %s failed: %s", executor_name, exc)
         telegram_api.send_message(
             cfg.token, chat_id,
             f"Failed: {exc}",
+            skip_review=True,
         )
 
 
@@ -383,11 +386,14 @@ def _handle_cancel(
         telegram_api.send_message(
             cfg.token, chat_id,
             "Already handled or expired.",
+            skip_review=True,
         )
         return
 
     summary = action.get("summary", action_id)
-    telegram_api.send_message(cfg.token, chat_id, f"Cancelled: {summary}")
+    telegram_api.send_message(
+        cfg.token, chat_id, f"Cancelled: {summary}", skip_review=True,
+    )
 
 
 def _handle_confirm_all(
@@ -401,6 +407,7 @@ def _handle_confirm_all(
         telegram_api.send_message(
             cfg.token, chat_id,
             "No pending actions in that batch (expired or already handled).",
+            skip_review=True,
         )
         return
 
@@ -422,6 +429,7 @@ def _handle_confirm_all(
     telegram_api.send_message(
         cfg.token, chat_id,
         f"Batch confirmed ({len(results)} items):\n" + "\n".join(results),
+        skip_review=True,
     )
 
 
@@ -436,6 +444,7 @@ def _handle_cancel_all(
         telegram_api.send_message(
             cfg.token, chat_id,
             "No pending actions in that batch.",
+            skip_review=True,
         )
         return
 
@@ -445,6 +454,7 @@ def _handle_cancel_all(
     telegram_api.send_message(
         cfg.token, chat_id,
         f"Cancelled all {len(actions)} items.",
+        skip_review=True,
     )
 
 
@@ -647,6 +657,11 @@ def dispatch(agent_id: str, update: dict) -> None:
                 pending_actions.assign_batch(agent_id, action_ids, batch_id)
             reply_markup = _build_reply_markup(agent_id, markers, batch_id)
 
+    # Pass agent_id so the outbound reviewer (P0.1) can classify
+    # this LLM-composed reply against the agent's declared role
+    # before it leaves the process.
     telegram_api.send_message(
-        cfg.token, chat_id, reply_text, reply_markup=reply_markup,
+        cfg.token, chat_id, reply_text,
+        reply_markup=reply_markup,
+        agent_id=agent_id,
     )

@@ -56,6 +56,55 @@ DEFAULT_TIMEOUT_S = 10
 DEFAULT_TOKEN_ENV = "TELEGRAM_BOT_TOKEN"
 CHAT_ID_ENV = "TELEGRAM_CHAT_ID"
 
+# P0.1 wire-in: outbound reviewer integration. Lazy-imported inside
+# _review_outbound so importing telegram_api in tests that don't
+# stub the LLM stack still works (tests that DO want to exercise the
+# review path inject `agent_id=` explicitly).
+AGENT_ID_ENV_VAR = "CLAWFORD_AGENT_ID"
+# Cap the body chunk we hand to the classifier so prompt-build stays
+# fast and cheap. The reviewer doesn't need 4000 chars of body to
+# decide if Sergeant Murphy proposing a payment is off-role.
+REVIEW_BODY_CHARS = 800
+
+
+def _review_outbound(
+    *,
+    chat_id: str,
+    text: str,
+    agent_id: str | None,
+    role_summary: str | None,
+):
+    """Resolve agent_id, run review_action, return the verdict (or
+    None when we can't identify the calling agent — back-compat for
+    callers outside the contract_wrap.py shim)."""
+    effective_agent_id = agent_id or os.environ.get(AGENT_ID_ENV_VAR, "")
+    if not effective_agent_id:
+        return None
+    try:
+        # Lazy import: keeps a stub-friendly module load order for
+        # tests that mock urllib but not the LLM stack.
+        from reviewer import (  # type: ignore
+            review_action,
+            role_summary_for,
+        )
+    except Exception as e:
+        print(
+            f"telegram_api: reviewer import failed ({e}); skipping review",
+            file=sys.stderr,
+        )
+        return None
+    effective_role = role_summary or role_summary_for(effective_agent_id)
+    return review_action(
+        agent_id=effective_agent_id,
+        action_kind="telegram_send",
+        payload={
+            "chat_id": chat_id,
+            "text": text[:REVIEW_BODY_CHARS],
+            "truncated": len(text) > REVIEW_BODY_CHARS,
+        },
+        role_summary=effective_role,
+    )
+
 
 def send_message(
     token: str,
@@ -66,12 +115,52 @@ def send_message(
     disable_web_preview: bool = True,
     reply_markup: dict | None = None,
     timeout: int = DEFAULT_TIMEOUT_S,
+    agent_id: str | None = None,
+    role_summary: str | None = None,
+    skip_review: bool = False,
 ) -> bool:
     """POST a single message to Telegram sendMessage.
 
     Returns True on Telegram's ok=true, False on network error or
     ok=false. Never raises — callers can batch-send and check counts.
+
+    P0.1: every send routes through the outbound reviewer first when
+    we know which agent is calling. agent_id resolves from the kwarg
+    first, then from the CLAWFORD_AGENT_ID env var (set by
+    contract_wrap.py for any wrapped script). When neither is
+    available the review is skipped (back-compat for callers that
+    use this helper outside the wrapper). In `enforce` mode a DENY
+    verdict short-circuits to a logged False return before the HTTP
+    call ever happens; in `warn` (default) every verdict is logged
+    and the send proceeds.
+
+    `skip_review=True` is the escape hatch for the dispatcher's own
+    callback-ack and chat-action calls — those are mechanical
+    Telegram operations, not agent-composed payloads, and reviewing
+    them would just generate noise.
     """
+    if not skip_review:
+        verdict = _review_outbound(
+            chat_id=chat_id, text=text,
+            agent_id=agent_id, role_summary=role_summary,
+        )
+        if verdict is not None and verdict.blocking:
+            print(
+                f"telegram send DENIED by reviewer for "
+                f"agent={verdict.agent_id!r}: {verdict.reason}",
+                file=sys.stderr,
+            )
+            return False
+        if verdict is not None and verdict.verdict in ("warn", "deny"):
+            # Log every non-safe verdict (warn-mode-deny too) for the
+            # weekly review pass, even when not blocking.
+            print(
+                f"telegram send {verdict.verdict.upper()} from reviewer "
+                f"for agent={verdict.agent_id!r} mode={verdict.mode!r}: "
+                f"{verdict.reason}",
+                file=sys.stderr,
+            )
+
     url = TELEGRAM_API_URL_TEMPLATE.format(token=token)
     payload: dict = {
         "chat_id": chat_id,

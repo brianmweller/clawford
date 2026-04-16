@@ -87,6 +87,8 @@ if str(_HERE) not in sys.path:
 
 
 MODE_ENV_VAR = "CLAWFORD_REVIEWER_MODE"
+AGENT_ID_ENV_VAR = "CLAWFORD_AGENT_ID"
+TRACE_ID_ENV_VAR = "CLAWFORD_TRACE_ID"
 DEFAULT_MODE = "warn"
 ALLOWED_MODES = ("warn", "enforce")
 
@@ -97,11 +99,75 @@ DEFAULT_TIMEOUT_S = 15
 MAX_PAYLOAD_CHARS = 4_000
 
 
+# One-line role descriptors per agent. Used as the classifier's
+# baseline for "does this action fit the agent?". Edit when an
+# agent's remit genuinely changes — these are doc strings the
+# reviewer reads, not soft constraints the LLM might wander past.
+AGENT_ROLE_SUMMARIES: dict[str, str] = {
+    "fix-it": (
+        "Mr Fixit — fleet operator (monitoring, repair, archival, "
+        "morning status). Sends Telegram updates to the operator about "
+        "agent health, drift signals, and proposes-then-confirms "
+        "fixes via the propose/confirm pattern. Never sends external "
+        "messages or composes business email."
+    ),
+    "shopping": (
+        "Hilda Hippo — orders Amazon and Costco essentials, manages "
+        "Subscribe & Save, parses shipping/delivery emails, sends "
+        "delivery digests to the operator on Telegram. Never sends emails "
+        "to vendors or third parties on its own."
+    ),
+    "news-digest": (
+        "Lowly Worm — ranks news + LinkedIn content and composes a "
+        "morning digest for the operator on Telegram. READ-ONLY on LinkedIn "
+        "(does not auto-reply, does not send DMs, does not post or "
+        "comment). Never reaches outside the the operator-Telegram channel."
+    ),
+    "family-calendar": (
+        "Mistress Mouse — family calendar coordinator. Reminders, "
+        "scheduling, family-relevant emails, calendar writes to "
+        "the operator's own calendars. Telegram messages go to the operator only "
+        "(never WhatsApp groups, never external recipients)."
+    ),
+    "meetings-coach": (
+        "Sergeant Murphy — meeting prep + post-meeting debrief. "
+        "Pre-meeting alerts, agenda assembly, commitment tracking. "
+        "Sends Telegram messages to the operator; never composes or sends "
+        "business email or writes to others' calendars."
+    ),
+    "connector": (
+        "Huckle Cat — relationship cadence tracking + daily nudges. "
+        "Reads contact data (Gmail mining, Google Messages), sends "
+        "nudges + notes triage to the operator on Telegram. Never sends "
+        "external messages, never auto-replies."
+    ),
+}
+
+
 def _current_mode() -> str:
     raw = (os.environ.get(MODE_ENV_VAR) or DEFAULT_MODE).strip().lower()
     if raw not in ALLOWED_MODES:
         return DEFAULT_MODE
     return raw
+
+
+def _resolve_agent_id(explicit: Optional[str]) -> str:
+    if explicit:
+        return explicit
+    return os.environ.get(AGENT_ID_ENV_VAR, "")
+
+
+def _resolve_trace_id(explicit: Optional[str]) -> str:
+    if explicit:
+        return explicit
+    return os.environ.get(TRACE_ID_ENV_VAR, "")
+
+
+def role_summary_for(agent_id: str) -> str:
+    """Return the canonical one-line role for `agent_id`, or a soft
+    fallback if the id isn't in the roster (so a typo or new agent
+    doesn't crash the reviewer)."""
+    return AGENT_ROLE_SUMMARIES.get(agent_id, f"(no role summary registered for agent_id={agent_id!r})")
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +193,8 @@ class ReviewVerdict:
     reason: str = ""
     mode: str = DEFAULT_MODE
     trace_id: str = ""
+    agent_id: str = ""
+    action_kind: str = ""
 
     @property
     def safe(self) -> bool:
@@ -143,6 +211,8 @@ class ReviewVerdict:
             "reason": self.reason,
             "mode": self.mode,
             "trace_id": self.trace_id,
+            "agent_id": self.agent_id,
+            "action_kind": self.action_kind,
         }
 
 
@@ -317,6 +387,8 @@ def review_action(
             reason=getattr(result, "error", "") or "llm call failed",
             mode=active_mode,
             trace_id=getattr(result, "trace_id", "") or (trace_id or ""),
+            agent_id=agent_id,
+            action_kind=action_kind,
         )
 
     verdict, reason = _parse_verdict(getattr(result, "text", "") or "")
@@ -325,4 +397,6 @@ def review_action(
         reason=reason,
         mode=active_mode,
         trace_id=getattr(result, "trace_id", "") or (trace_id or ""),
+        agent_id=agent_id,
+        action_kind=action_kind,
     )

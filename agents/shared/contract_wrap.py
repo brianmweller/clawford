@@ -76,6 +76,7 @@ DEFAULT_TIMEOUT_S = 300
 TAIL_BYTES = 1500
 
 TRACE_ID_ENV_VAR = "CLAWFORD_TRACE_ID"
+AGENT_ID_ENV_VAR = "CLAWFORD_AGENT_ID"
 
 
 def parameters_hash(payload: dict) -> str:
@@ -208,8 +209,14 @@ def run(argv: list[str]) -> dict:
     # env var so LLM calls made inside the script can tag their own
     # stderr logs with the same id and the whole invocation threads.
     trace_id = os.environ.get(TRACE_ID_ENV_VAR) or _new_trace_id()
+    agent_id = os.environ.get(AGENT_ID_ENV_VAR) or _derive_agent_id(target_path)
     subprocess_env = os.environ.copy()
     subprocess_env[TRACE_ID_ENV_VAR] = trace_id
+    # Same propagation pattern as trace_id: shared modules running
+    # inside the subprocess (telegram_api, llm, reviewer) can read
+    # CLAWFORD_AGENT_ID to know which agent's behavior they're
+    # mediating without every caller having to plumb agent_id through.
+    subprocess_env[AGENT_ID_ENV_VAR] = agent_id
 
     def _finish(envelope: dict) -> dict:
         return _inject_forensic_fields(envelope, target_path, trace_id)
