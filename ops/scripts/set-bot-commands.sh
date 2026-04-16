@@ -52,7 +52,12 @@ set_commands "Mr Fixit" "$TELEGRAM_BOT_TOKEN" '{
   "commands": [
     {"command": "status", "description": "System status report"},
     {"command": "health", "description": "Quick health check all agents"},
-    {"command": "agents", "description": "List all agents and their status"}
+    {"command": "agents", "description": "List all agents and their status"},
+    {"command": "rerun", "description": "Re-run a cron: /rerun fix-it-conflict-scan reason"},
+    {"command": "snooze", "description": "Snooze noisy alerts: /snooze <pattern> <hours>"},
+    {"command": "refresh", "description": "Refresh a stuck session: /refresh costco|google"},
+    {"command": "confirm", "description": "Approve a pending fix action"},
+    {"command": "cancel", "description": "Cancel a pending fix action"}
   ]
 }'
 
