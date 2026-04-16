@@ -127,6 +127,37 @@ def _strip_markdown_fence(text: str) -> str:
 # ─── format_debrief ──────────────────────────────────────────────────
 
 
+_SPEAKER_PLACEHOLDER_RE = re.compile(r"\{\{\s*Speaker_\d+\s*\}\}\s*")
+
+
+def _extract_action_item(item) -> tuple[str, str, str]:
+    """Pull (who, what, by_when) from a Krisp-shaped or canonical action
+    item. Krisp MCP emits {"title", "assignee", "completed"} where
+    ``title`` often contains an unresolved ``{{Speaker_N}}`` token and
+    ``assignee`` is frequently ``None``. Callers should drop items whose
+    ``what`` comes back empty."""
+    if not isinstance(item, dict):
+        return "", str(item or "").strip(), ""
+    what = (
+        item.get("what")
+        or item.get("title")
+        or item.get("text")
+        or item.get("task")
+        or ""
+    )
+    what = _SPEAKER_PLACEHOLDER_RE.sub("", str(what)).strip()
+    who = (item.get("who") or item.get("assignee") or item.get("owner") or "") or ""
+    who = str(who).strip()
+    by_when = (
+        item.get("by_when")
+        or item.get("due")
+        or item.get("due_date")
+        or ""
+    ) or ""
+    by_when = str(by_when).strip()
+    return who, what, by_when
+
+
 def format_debrief(pending: dict) -> str:
     """Render the debrief Telegram message from a pending-debrief-*.json
     staged file."""
@@ -139,22 +170,20 @@ def format_debrief(pending: dict) -> str:
         "",
     ]
 
-    if action_items:
+    rendered_items: list[str] = []
+    for item in action_items:
+        who, what, by_when = _extract_action_item(item)
+        if not what:
+            continue
+        segment = f"{who}: {what}" if who else what
+        if by_when:
+            segment += f" (by {by_when})"
+        rendered_items.append(segment)
+
+    if rendered_items:
         lines.append("\U0001f3af ACTION ITEMS:")
-        for idx, item in enumerate(action_items, start=1):
-            if isinstance(item, dict):
-                who = (item.get("who") or "").strip()
-                what = (item.get("what") or "").strip()
-                by_when = (item.get("by_when") or "").strip()
-                segment = f"{idx}. "
-                if who:
-                    segment += f"{who}: "
-                segment += what
-                if by_when:
-                    segment += f" (by {by_when})"
-                lines.append(segment)
-            else:
-                lines.append(f"{idx}. {str(item)}")
+        for idx, segment in enumerate(rendered_items, start=1):
+            lines.append(f"{idx}. {segment}")
         lines.append("")
 
     if key_points:

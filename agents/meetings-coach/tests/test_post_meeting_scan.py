@@ -134,6 +134,97 @@ def test_format_debrief_includes_title_and_sections(mod, pending_alexis):
     assert "/dismiss" in msg
 
 
+def test_format_debrief_handles_krisp_native_action_item_shape(mod):
+    """Krisp MCP returns action_items as {title, assignee, completed},
+    not {who, what, by_when}. The renderer must extract content from
+    Krisp's native keys rather than silently dropping the item as '1. '.
+    Regression: 2026-04-16 Meet & Greet the operator/Steve debrief delivered
+    as '1. ' with no content."""
+    pending = {
+        "event_id": "e1",
+        "meeting_title": "Meet & Greet: Sam Smith | Steve Shadman",
+        "krisp_action_items": [
+            {
+                "title": "Steve to talk to the recruiting team and schedule more calls with the operator.",
+                "completed": False,
+                "assignee": None,
+            }
+        ],
+        "krisp_key_points": [],
+        "participants": ["the operator", "Steve"],
+    }
+    msg = mod.format_debrief(pending)
+    assert "ACTION ITEMS" in msg
+    assert "recruiting team" in msg
+    # The line must not collapse to a bare "1. "
+    assert "1. " in msg
+    for line in msg.splitlines():
+        if line.startswith("1. "):
+            assert line.strip() != "1."
+            assert len(line) > len("1. ")
+
+
+def test_format_debrief_strips_speaker_placeholder(mod):
+    """Krisp leaves {{Speaker_N}} template tokens in action item titles.
+    These are opaque to the operator on Telegram; strip them rather than
+    leaking the template through to the rendered message."""
+    pending = {
+        "event_id": "e2",
+        "meeting_title": "Meet & Greet",
+        "krisp_action_items": [
+            {
+                "title": "{{Speaker_2}} to talk to the recruiting team and schedule more calls with the operator.",
+                "completed": False,
+                "assignee": None,
+            }
+        ],
+        "krisp_key_points": [],
+        "participants": ["the operator", "Steve"],
+    }
+    msg = mod.format_debrief(pending)
+    assert "{{Speaker_2}}" not in msg
+    assert "Speaker_2" not in msg
+    assert "recruiting team" in msg
+
+
+def test_format_debrief_skips_empty_action_items(mod):
+    """If Krisp emits an empty-placeholder item (all fields null/empty),
+    skip it rather than rendering a bare '1. '. If ALL items are empty,
+    suppress the ACTION ITEMS header entirely."""
+    pending = {
+        "event_id": "e3",
+        "meeting_title": "Short Sync",
+        "krisp_action_items": [
+            {"title": "", "assignee": None, "completed": False},
+            {},
+        ],
+        "krisp_key_points": [],
+    }
+    msg = mod.format_debrief(pending)
+    assert "ACTION ITEMS" not in msg
+    assert "\n1. \n" not in msg
+    assert "\n1. " not in msg.rstrip() + "\n"
+
+
+def test_format_debrief_uses_assignee_when_present(mod):
+    """When Krisp resolves the assignee (non-null), surface it as the
+    'who' prefix on the rendered line."""
+    pending = {
+        "event_id": "e4",
+        "meeting_title": "1:1",
+        "krisp_action_items": [
+            {
+                "title": "Send updated Q2 roadmap draft",
+                "assignee": "the operator",
+                "completed": False,
+            }
+        ],
+        "krisp_key_points": [],
+    }
+    msg = mod.format_debrief(pending)
+    assert "the operator: Send updated Q2 roadmap draft" in msg
+
+
 # ─── coaching history ───────────────────────────────────────────────
 
 
