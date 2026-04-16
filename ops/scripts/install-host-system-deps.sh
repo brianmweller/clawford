@@ -28,6 +28,12 @@ PACKAGES=(
   # Camoufox headful fallback — virtual framebuffer + minimal WM
   xvfb
   openbox
+  # P1.2 — inter-agent isolation. Each agent's cron-invoked script
+  # runs inside an unprivileged user namespace via bwrap so a
+  # compromised agent can't read another agent's workspace files.
+  # Mr Fixit (fix-it) explicitly opts out — see
+  # feedback_fixit_bubblewrap_exempt.md.
+  bubblewrap
 )
 
 echo "[host-system-deps] apt-get update..."

@@ -38,6 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-liberation \
     fonts-dejavu-core \
     fontconfig \
+    bubblewrap \
   && pip3 install --no-cache-dir --break-system-packages \
     feedparser==6.0.11 \
     linkedin-api \

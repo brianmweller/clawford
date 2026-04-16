@@ -77,6 +77,10 @@ TAIL_BYTES = 1500
 
 TRACE_ID_ENV_VAR = "CLAWFORD_TRACE_ID"
 AGENT_ID_ENV_VAR = "CLAWFORD_AGENT_ID"
+# P1.2: per-agent isolation. Set CLAWFORD_ISOLATION_MODE=bwrap on the
+# host cron line to wrap the subprocess in bubblewrap. Mr Fixit is
+# always forced to "none" in isolation.resolve_isolation_mode().
+ISOLATION_MODE_ENV_VAR = "CLAWFORD_ISOLATION_MODE"
 
 
 def parameters_hash(payload: dict) -> str:
@@ -129,6 +133,94 @@ def _derive_tool_name(target_path: Path) -> str:
 
 def _new_trace_id() -> str:
     return str(uuid.uuid4())
+
+
+def _build_subprocess_argv(
+    *,
+    agent_id: str,
+    target_path: Path,
+    target_args: list[str],
+) -> list[str]:
+    """Compose the argv for the wrapped subprocess.
+
+    Default: `[python3, target.py, *args]`.
+
+    When CLAWFORD_ISOLATION_MODE=bwrap and the agent isn't on the
+    exempt list AND bwrap is available, returns the bwrap prefix
+    followed by the python invocation. Failures to set up isolation
+    fall through to the unwrapped command and log a warning — never
+    block the script.
+    """
+    base = [sys.executable, str(target_path), *target_args]
+    raw_mode = os.environ.get(ISOLATION_MODE_ENV_VAR, "").strip().lower()
+    if not raw_mode:
+        return base
+    try:
+        # Lazy import: keeps contract_wrap loadable in environments
+        # without the isolation module sitting next to it (e.g., when
+        # the wrapper is invoked before sync_shared_library has run).
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from isolation import (  # type: ignore
+            ISOLATION_BWRAP,
+            is_bwrap_available,
+            bwrap_command,
+            resolve_isolation_mode,
+        )
+    except Exception as e:
+        print(
+            f"[contract_wrap] isolation import failed ({e}); "
+            f"running unwrapped",
+            file=sys.stderr,
+        )
+        return base
+
+    effective = resolve_isolation_mode(
+        agent_id=agent_id, manifest_mode=raw_mode,
+    )
+    if effective != ISOLATION_BWRAP:
+        return base
+    if not is_bwrap_available():
+        print(
+            "[contract_wrap] CLAWFORD_ISOLATION_MODE=bwrap requested but "
+            "bwrap not on PATH; running unwrapped",
+            file=sys.stderr,
+        )
+        return base
+
+    workspace = _workspace_for(target_path)
+    brain_root = _brain_root()
+    repo_root = _repo_root()
+    prefix = bwrap_command(
+        agent_id=agent_id,
+        workspace=workspace,
+        brain_root=brain_root,
+        repo_root=repo_root,
+    )
+    return prefix + base
+
+
+def _workspace_for(target_path: Path) -> Path:
+    """Derive the workspace dir for a target script. Mirrors the path
+    convention used everywhere else: ~/.clawford/<agent>-workspace/."""
+    parent = target_path.parent
+    if parent.name == "scripts":
+        return parent.parent
+    return parent
+
+
+def _brain_root() -> Path | None:
+    p = Path(os.path.expanduser("~/Dropbox/openclaw-backup"))
+    return p if p.exists() else None
+
+
+def _repo_root() -> Path | None:
+    # Walk up from this file looking for the repo root (the first
+    # ancestor containing both `agents/` and `ops/`).
+    here = Path(__file__).resolve()
+    for ancestor in here.parents:
+        if (ancestor / "agents").is_dir() and (ancestor / "ops").is_dir():
+            return ancestor
+    return None
 
 
 def _inject_forensic_fields(
@@ -228,6 +320,16 @@ def run(argv: list[str]) -> dict:
     # mediating without every caller having to plumb agent_id through.
     subprocess_env[AGENT_ID_ENV_VAR] = agent_id
 
+    # P1.2: build the subprocess argv. When CLAWFORD_ISOLATION_MODE=bwrap
+    # AND bwrap is on PATH AND the agent isn't on the exempt list (Mr
+    # Fixit is forced to "none"), prefix the python invocation with the
+    # bwrap argv. Otherwise run unwrapped (back-compat default).
+    cmd_argv = _build_subprocess_argv(
+        agent_id=agent_id,
+        target_path=target_path,
+        target_args=target_args,
+    )
+
     def _finish(envelope: dict) -> dict:
         return _inject_forensic_fields(envelope, target_path, trace_id)
 
@@ -240,7 +342,7 @@ def run(argv: list[str]) -> dict:
 
     try:
         proc = subprocess.run(
-            [sys.executable, str(target_path), *target_args],
+            cmd_argv,
             capture_output=True,
             text=True,
             timeout=timeout,

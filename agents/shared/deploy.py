@@ -1165,6 +1165,7 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "heartbeat_base.py",
     "inbound_patterns.py",   # P0.4 — regex list for inbound scanner
     "inbound_scanner.py",    # P0.4 — scan_inbound() + semantic_guard()
+    "isolation.py",          # P1.2 — bubblewrap argv builder
     "llm.py",
     "memory_writer.py",
     "pending_actions.py",
