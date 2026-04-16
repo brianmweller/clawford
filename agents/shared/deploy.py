@@ -1192,6 +1192,10 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "scan_fields.py",        # P0.4 — wire-in helper (per-agent ingest)
     "subprocess_helpers.py",
     "telegram_api.py",
+    # Non-.py runtime data files (the sync uses literal filenames, no
+    # extension check) — included here so load-from-workspace lookups
+    # resolve without assuming the repo layout.
+    "fleet-manifest.json",   # consumed by doctor-audit + others
 )
 
 

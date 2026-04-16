@@ -137,12 +137,28 @@ def parse_args(argv: list[str]) -> dict:
 
 
 def load_fleet_agents(repo_root: Path | None = None) -> list[dict]:
-    """Return the list of agent metadata dicts from fleet-manifest.json."""
-    if repo_root is None:
-        repo_root = Path(__file__).resolve().parents[3]
-    path = repo_root / FLEET_MANIFEST_REL.replace("/", os.sep)
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return data.get("agents", [])
+    """Return the list of agent metadata dicts from fleet-manifest.json.
+
+    When run from the repo (parents[3] = repo root) or from a per-
+    agent workspace (parents[3] != repo root, but deploy.py mirrors
+    fleet-manifest.json into each workspace's agents/shared/), walk
+    ancestors looking for the file directly. Works in both layouts
+    without assuming either.
+    """
+    if repo_root is not None:
+        path = repo_root / FLEET_MANIFEST_REL.replace("/", os.sep)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data.get("agents", [])
+
+    rel = FLEET_MANIFEST_REL.replace("/", os.sep)
+    for ancestor in Path(__file__).resolve().parents:
+        candidate = ancestor / rel
+        if candidate.is_file():
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+            return data.get("agents", [])
+    raise FileNotFoundError(
+        f"fleet-manifest.json not found in any ancestor of {Path(__file__).resolve()}"
+    )
 
 
 def load_agent_doc(agent_id: str, filename: str, max_chars: int) -> str:
