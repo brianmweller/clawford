@@ -54,23 +54,20 @@ def _run_script(script_name: str, *args: str, timeout: int = SUBPROCESS_TIMEOUT_
 
 def _fmt_overdue_line(entry: dict) -> str:
     name = entry.get("name") or entry.get("slug") or "?"
-    relationship = (entry.get("relationship") or "").strip()
     days_since = entry.get("days_since")
     channel = (entry.get("preferred_channel") or "").strip()
 
-    rel_part = f" ({relationship})" if relationship else ""
-    days_part = f"{days_since} days since last contact" if days_since is not None else "never"
+    days_part = f"{days_since} days" if days_since is not None else "never"
     channel_part = f" · {channel}" if channel else ""
-    return f"  {name}{rel_part} — {days_part}{channel_part}"
+    return f"  {name} — {days_part}{channel_part}"
 
 
-def _fmt_approaching_line(entry: dict) -> str:
-    name = entry.get("name") or entry.get("slug") or "?"
-    relationship = (entry.get("relationship") or "").strip()
-    days_overdue = entry.get("days_overdue", 0)
-    due_in = max(-days_overdue, 0)
-    rel_part = f" ({relationship})" if relationship else ""
-    return f"  {name}{rel_part} — due in {due_in} days"
+# Display-group labels for the grouped nudge output.
+_GROUP_LABELS = {
+    "family": "\U0001f46a FAMILY",
+    "friends": "\U0001f91d FRIENDS",
+    "colleagues": "\U0001f454 COLLEAGUES",
+}
 
 
 def format_nudge(scan: dict, now_pacific: datetime) -> str:
@@ -85,30 +82,31 @@ def format_nudge(scan: dict, now_pacific: datetime) -> str:
     day = now_pacific.day
     header = f"\U0001f431\U0001f91d Relationship Check — {weekday}, {month} {day}"
 
-    overdue = scan.get("overdue") or []
-    approaching = scan.get("approaching") or []
-    overdue_total = scan.get("overdue_total", len(overdue))
+    overdue_by_group = scan.get("overdue_by_group") or {}
+    overdue_total = scan.get("overdue_total", 0)
     summary = scan.get("summary") or {}
     tracked_total = summary.get("total", 0)
 
+    # Flatten group counts to determine overall shape of the report.
+    grouped_counts = {g: len(items) for g, items in overdue_by_group.items()}
+    total_shown = sum(grouped_counts.values())
+
     lines: list[str] = [header, ""]
 
-    if not overdue and not approaching:
+    if total_shown == 0:
         lines.append("Everyone's accounted for. No overdue check-ins today.")
         lines.append("")
     else:
-        if overdue:
-            lines.append("\U0001f44b OVERDUE")
-            for entry in overdue:
+        # Render each group as its own section with an emoji header and
+        # a per-group count. Empty groups are skipped.
+        for group_key in ("family", "friends", "colleagues"):
+            entries = overdue_by_group.get(group_key) or []
+            if not entries:
+                continue
+            label = _GROUP_LABELS.get(group_key, group_key.upper())
+            lines.append(f"{label} ({len(entries)})")
+            for entry in entries:
                 lines.append(_fmt_overdue_line(entry))
-            hidden = overdue_total - len(overdue)
-            if hidden > 0:
-                lines.append(f"  … {hidden} more overdue not shown")
-            lines.append("")
-        if approaching:
-            lines.append("\u23f3 APPROACHING")
-            for entry in approaching:
-                lines.append(_fmt_approaching_line(entry))
             lines.append("")
 
     if now_pacific.weekday() == 0:
@@ -118,9 +116,12 @@ def format_nudge(scan: dict, now_pacific: datetime) -> str:
             lines.append(f"  {overdue_total} overdue going into the week")
         lines.append("")
 
+    # Footer: total overdue across all circles + tracked total. The
+    # approaching bucket is no longer displayed per the operator's feedback
+    # (2026-04-16) — approaching contacts didn't add useful signal.
     footer = (
         f"\U0001f431\U0001f91d {overdue_total} overdue · "
-        f"{len(approaching)} approaching · {tracked_total} tracked"
+        f"{tracked_total} tracked"
     )
     lines.append(footer)
 

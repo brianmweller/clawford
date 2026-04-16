@@ -63,6 +63,17 @@
     }
   ],
   "overdue_total": 8,
+  "overdue_by_group": {
+    "family": [],
+    "friends": [
+      {"slug": "a", "name": "Alpha", "days_since": 72, "days_overdue": 42, "preferred_channel": "text", "display_group": "friends"},
+      {"slug": "b", "name": "Beta", "days_since": 68, "days_overdue": 38, "preferred_channel": "text", "display_group": "friends"},
+      {"slug": "c", "name": "Gamma", "days_since": 63, "days_overdue": 33, "preferred_channel": "text", "display_group": "friends"},
+      {"slug": "d", "name": "Delta", "days_since": 58, "days_overdue": 28, "preferred_channel": "text", "display_group": "friends"},
+      {"slug": "e", "name": "Epsilon", "days_since": 53, "days_overdue": 23, "preferred_channel": "text", "display_group": "friends"}
+    ],
+    "colleagues": []
+  },
   "approaching": [],
   "healthy": [],
   "demoted_upcoming": [],

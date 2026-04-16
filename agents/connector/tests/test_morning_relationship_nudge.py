@@ -75,39 +75,38 @@ def test_format_nudge_includes_header_with_pacific_date(mrn, scan_mixed, tuesday
     assert "Tuesday, April 14" in body
 
 
-def test_format_nudge_lists_overdue_with_name_relationship_days_channel(
+def test_format_nudge_groups_overdue_by_circle(
     mrn, scan_mixed, tuesday_pacific
 ):
+    """Overdue entries render under per-circle section headers
+    (FAMILY / FRIENDS / COLLEAGUES), each with its own count."""
     body = mrn.format_nudge(scan_mixed, tuesday_pacific)
-    assert "OVERDUE" in body
-    # Alice: 58 days since, text channel
+    # Both groups with entries appear
+    assert "FAMILY" in body
+    assert "FRIENDS" in body
+    # Alice (friends-close) under FRIENDS
     assert "Alice Smith" in body
-    assert "College roommate" in body
     assert "58 days" in body
     assert "text" in body
-    # Bob: 35 days since, phone channel
+    # Bob (family-extended) under FAMILY
     assert "Bob Jones" in body
-    assert "Cousin" in body
     assert "35 days" in body
     assert "phone" in body
 
 
-def test_format_nudge_lists_approaching_with_days_until_due(
-    mrn, scan_mixed, tuesday_pacific
-):
+def test_format_nudge_omits_empty_groups(mrn, scan_mixed, tuesday_pacific):
+    """COLLEAGUES has 0 entries in the mixed fixture — its header
+    should not appear."""
     body = mrn.format_nudge(scan_mixed, tuesday_pacific)
-    assert "APPROACHING" in body
-    # Carol: days_overdue = -3 → due in 3 days
-    assert "Carol Nguyen" in body
-    assert "due in 3 days" in body
+    assert "COLLEAGUES" not in body
 
 
 def test_format_nudge_footer_counts(mrn, scan_mixed, tuesday_pacific):
     body = mrn.format_nudge(scan_mixed, tuesday_pacific)
-    # Footer: X overdue · Y approaching · Z tracked
+    # Footer: X overdue · Z tracked (approaching dropped per 2026-04-16)
     assert "2 overdue" in body
-    assert "1 approaching" in body
     assert "42 tracked" in body
+    assert "approaching" not in body.lower()
 
 
 # ─── format_nudge: empty state ───────────────────────────────────────
@@ -118,9 +117,10 @@ def test_format_nudge_empty_uses_accounted_for_line(
 ):
     body = mrn.format_nudge(scan_empty, tuesday_pacific)
     assert "Everyone" in body and "accounted for" in body
-    # No OVERDUE / APPROACHING section headers when both empty
-    assert "OVERDUE" not in body
-    assert "APPROACHING" not in body
+    # No group headers when all groups empty
+    assert "FAMILY" not in body
+    assert "FRIENDS" not in body
+    assert "COLLEAGUES" not in body
 
 
 def test_format_nudge_empty_still_shows_tracked_count(
@@ -133,22 +133,14 @@ def test_format_nudge_empty_still_shows_tracked_count(
 # ─── format_nudge: overdue_total > displayed overdue ─────────────────
 
 
-def test_format_nudge_notes_hidden_overdue_when_truncated(
+def test_format_nudge_truncated_footer_shows_full_total(
     mrn, scan_truncated, tuesday_pacific
 ):
-    """people-scan.py caps overdue at max_per_day (default 5). When
-    overdue_total exceeds len(overdue), the nudge should surface the
-    hidden count so the operator knows the displayed list is a preview."""
+    """When per-group cap truncates display (8 overdue, top-5 shown),
+    the footer overdue_total preserves visibility of the full count."""
     body = mrn.format_nudge(scan_truncated, tuesday_pacific)
-    # 8 total, 5 shown → 3 more
-    assert "3 more" in body
-
-
-def test_format_nudge_no_hidden_note_when_not_truncated(
-    mrn, scan_mixed, tuesday_pacific
-):
-    body = mrn.format_nudge(scan_mixed, tuesday_pacific)
-    assert "more" not in body.lower() or "overdue · " in body  # footer has "more"-free wording
+    # Footer shows full 8 overdue even though only 5 rendered
+    assert "8 overdue" in body
 
 
 # ─── format_nudge: Monday fold ───────────────────────────────────────

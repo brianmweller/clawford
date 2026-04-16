@@ -60,10 +60,18 @@ def _write_config(workspace: Path):
     (workspace / "connector-config.json").write_text(json.dumps({
         "cadences": {
             "friends-close": {"check_days": 30, "nudge": True},
+            "friends-acquaintance": {"check_days": 90, "nudge": True},
             "professional-inner": {"check_days": 7, "nudge": True},
+            "professional-outer": {"check_days": 90, "nudge": True},
+            "family-extended": {"check_days": 21, "nudge": True},
             "family-inner": {"check_days": 1, "nudge": False},
+            "holiday-card": {"check_days": 365, "nudge": False},
         },
-        "nudge": {"max_per_day": 5, "skip_circles": ["family-inner"]},
+        "nudge": {
+            "max_per_day": 5,
+            "max_per_group": 5,
+            "skip_circles": ["family-inner", "holiday-card"],
+        },
     }))
 
 
@@ -284,3 +292,58 @@ def test_run_keeps_phone_only_person(stub_brain):
     )
     result = stub_brain.ps.run()
     assert any(p["slug"] == "phone-only" for p in result["overdue"])
+
+
+# ── circle grouping (family / friends / colleagues) ───────────────
+
+
+def test_run_emits_overdue_by_group(stub_brain):
+    """Each overdue person gets a display_group (family|friends|
+    colleagues) and the run output includes `overdue_by_group` dict
+    keyed by group with the top 5 per group."""
+    _write_person(stub_brain.people, "aunt-marta", email="m@x.com",
+                  last_interaction=_days_ago_iso(40),
+                  circles="family-extended")
+    _write_person(stub_brain.people, "best-friend", email="b@x.com",
+                  last_interaction=_days_ago_iso(50),
+                  circles="friends-close")
+    _write_person(stub_brain.people, "work-lead", email="w@x.com",
+                  last_interaction=_days_ago_iso(20),
+                  circles="professional-inner")
+
+    result = stub_brain.ps.run()
+    by_group = result.get("overdue_by_group") or {}
+    assert set(by_group.keys()) == {"family", "friends", "colleagues"}
+    family_slugs = {p["slug"] for p in by_group["family"]}
+    friends_slugs = {p["slug"] for p in by_group["friends"]}
+    col_slugs = {p["slug"] for p in by_group["colleagues"]}
+    assert "aunt-marta" in family_slugs
+    assert "best-friend" in friends_slugs
+    assert "work-lead" in col_slugs
+
+
+def test_run_caps_each_group_at_top_5(stub_brain):
+    """With 8 overdue friends, only the top 5 (most-overdue-first) land
+    in overdue_by_group['friends']."""
+    for i in range(8):
+        _write_person(stub_brain.people, f"friend-{i:02d}",
+                      email=f"f{i}@x.com",
+                      last_interaction=_days_ago_iso(60 + i),
+                      circles="friends-close")
+    result = stub_brain.ps.run()
+    by_group = result["overdue_by_group"]
+    assert len(by_group["friends"]) == 5
+    # Most-overdue first, so friend-07 (67 days) through friend-03
+    # (63 days) are the 5 shown.
+    shown = [p["slug"] for p in by_group["friends"]]
+    assert shown[0] == "friend-07"
+    assert shown[-1] == "friend-03"
+
+
+def test_run_group_entries_carry_display_group_field(stub_brain):
+    _write_person(stub_brain.people, "aunt-marta", email="m@x.com",
+                  last_interaction=_days_ago_iso(40),
+                  circles="family-extended")
+    result = stub_brain.ps.run()
+    entry = next(p for p in result["overdue"] if p["slug"] == "aunt-marta")
+    assert entry.get("display_group") == "family"

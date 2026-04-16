@@ -35,6 +35,36 @@ UPCOMING_CACHE = os.path.expanduser("~/.clawford/connector-workspace/upcoming-me
 
 APPROACHING_WINDOW_DAYS = 7  # Flag people within 7 days of their cadence
 
+# Map each brain circle to the display group it renders under in the
+# morning nudge. Circles not listed here have no display_group (they
+# still appear in the flat `overdue` list but don't bucket into a
+# grouped section — effectively hiding them from the new multi-
+# message delivery format).
+CIRCLE_DISPLAY_GROUPS = {
+    "family-extended": "family",
+    "friends-close": "friends",
+    "friends-acquaintance": "friends",
+    "professional-inner": "colleagues",
+    "professional-outer": "colleagues",
+}
+
+# Order groups render in the digest.
+DISPLAY_GROUP_ORDER = ("family", "friends", "colleagues")
+
+# Max overdue entries shown per display group.
+DEFAULT_MAX_PER_GROUP = 5
+
+
+def _resolve_display_group(circles: list[str]) -> str | None:
+    """Return the first matching display group for a person's circles,
+    in the order they appear in the person file. Unmapped circles
+    are ignored; returns None if nothing matches."""
+    for c in circles:
+        g = CIRCLE_DISPLAY_GROUPS.get(c.strip())
+        if g:
+            return g
+    return None
+
 
 def parse_args():
     overdue_only = "--overdue-only" in sys.argv
@@ -220,6 +250,7 @@ def run() -> dict:
             "cadence_days": cadence_days,
             "cadence_circle": cadence_circle,
             "days_overdue": days_overdue,
+            "display_group": _resolve_display_group(circles),
         }
 
         # Component C: a confirmed upcoming meeting demotes the
@@ -260,10 +291,23 @@ def run() -> dict:
     max_per_day = config.get("nudge", {}).get("max_per_day", 5)
     overdue_display = overdue[:max_per_day]
 
+    # Group overdue by display group (family/friends/colleagues),
+    # capping each group's shown entries. Only entries with a mapped
+    # display_group appear in the grouped view — ungrouped circles
+    # still exist in the flat `overdue` list for back-compat.
+    max_per_group = config.get("nudge", {}).get("max_per_group", DEFAULT_MAX_PER_GROUP)
+    overdue_by_group: dict[str, list[dict]] = {g: [] for g in DISPLAY_GROUP_ORDER}
+    for entry in overdue:
+        g = entry.get("display_group")
+        if g and g in overdue_by_group:
+            if len(overdue_by_group[g]) < max_per_group:
+                overdue_by_group[g].append(entry)
+
     return {
         "status": "ok",
         "overdue": overdue_display,
         "overdue_total": len(overdue),
+        "overdue_by_group": overdue_by_group,
         "approaching": approaching,
         "healthy": healthy if not overdue_only else [],
         "demoted_upcoming": demoted_upcoming,
