@@ -1045,6 +1045,7 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "llm.py",
     "playwright_profile.py",
     "retry_policy.py",
+    "subprocess_helpers.py",
     "telegram_api.py",
 )
 
