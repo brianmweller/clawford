@@ -454,6 +454,37 @@ def test_format_item_message_includes_num_and_url(fake_fleet):
     assert "STAT" in text
 
 
+def test_format_item_message_suppresses_category_when_show_category_false(fake_fleet):
+    """deliver_items_with_buttons passes show_category=False for items
+    whose category matches the previous item — avoids repeating the
+    '🤖 AI & Tech' header on every consecutive AI-category message."""
+    text = fake_fleet["mod"]._format_item_message(SAMPLE_ITEMS[1], show_category=False)
+    assert "🤖 AI & Tech" not in text
+    # Headline + num + url + source_label still render.
+    assert "2." in text
+    assert "TSMC" in text
+
+
+def test_deliver_items_shows_category_only_on_section_transition(fake_fleet):
+    """Items 1 and 2 share category '🤖 AI & Tech'; item 3 switches
+    to '💰 Economics'. The delivery loop must print the category
+    header on items 1 and 3 only — NOT on item 2."""
+    sent_texts = []
+    def fake_send(bot_token, chat_id, text, silent=False, reply_markup=None):
+        sent_texts.append(text)
+        return True
+    with patch.object(fake_fleet["mod"], "send_telegram", side_effect=fake_send):
+        fake_fleet["mod"].deliver_items_with_buttons(
+            "FAKE_TOKEN", "CHAT", SAMPLE_ITEMS, footer_text=None,
+        )
+    # Item 1 (first AI) — shows category
+    assert "🤖 AI & Tech" in sent_texts[0]
+    # Item 2 (continues AI) — does NOT show category
+    assert "🤖 AI & Tech" not in sent_texts[1]
+    # Item 3 (switches to Economics) — shows category
+    assert "💰 Economics" in sent_texts[2]
+
+
 def test_buttons_for_item_uses_callback_data_format(fake_fleet):
     buttons = fake_fleet["mod"]._buttons_for_item(5)
     assert "inline_keyboard" in buttons

@@ -228,6 +228,106 @@ def test_select_items_top_ranked_non_linkedin_always_present(mod):
     assert top_non_li["id"] in ids
 
 
+# ─── LinkedIn notifications & messages (Bug #7) ───────────────────────
+
+
+def _linkedin_notif(id_: str, title: str, rank: float) -> dict:
+    return {
+        "id": id_, "title": title, "summary": title,
+        "link": "https://www.linkedin.com/notifications/",
+        "source": "linkedin",
+        "source_label": "LinkedIn Notification",
+        "topics": ["linkedin"],
+        "rank": rank,
+        "_is_notification": True,
+    }
+
+
+def _linkedin_msg(id_: str, title: str, rank: float) -> dict:
+    return {
+        "id": id_, "title": title, "summary": title,
+        "link": "https://www.linkedin.com/messaging/",
+        "source": "linkedin",
+        "source_label": "LinkedIn Message",
+        "topics": ["linkedin"],
+        "rank": rank,
+        "_is_message": True,
+    }
+
+
+def test_select_items_includes_notifications_at_end(mod):
+    """LinkedIn notifications were being dropped because they compete
+    against higher-scored feed posts for LINKEDIN_RESERVED=4 slots.
+    They must always appear in the selection — outside the main
+    target_total pool — so the operator sees them every morning."""
+    articles = _mixed_feed(non_li=25, linkedin=4)
+    articles.extend([
+        _linkedin_notif("nn0", "notif 0", 0.30),
+        _linkedin_notif("nn1", "notif 1", 0.25),
+        _linkedin_notif("nn2", "notif 2", 0.20),
+    ])
+    selected = mod.select_items(articles)
+    notif_ids = {s["id"] for s in selected if s.get("_is_notification")}
+    assert notif_ids == {"nn0", "nn1", "nn2"}, (
+        f"every notification must be selected, got {notif_ids}"
+    )
+
+
+def test_select_items_includes_messages_at_end(mod):
+    articles = _mixed_feed(non_li=25, linkedin=4)
+    articles.extend([
+        _linkedin_msg("mm0", "msg 0", 0.30),
+        _linkedin_msg("mm1", "msg 1", 0.25),
+    ])
+    selected = mod.select_items(articles)
+    msg_ids = {s["id"] for s in selected if s.get("_is_message")}
+    assert msg_ids == {"mm0", "mm1"}
+
+
+def test_select_items_notifications_do_not_compete_with_feed_posts(mod):
+    """Notifications and messages being added must not shrink the
+    number of feed LinkedIn items selected — the feed pool still gets
+    LINKEDIN_RESERVED=4 of its own slots."""
+    articles = _mixed_feed(non_li=25, linkedin=6)  # 6 feed posts
+    articles.extend([
+        _linkedin_notif("nn0", "notif 0", 0.30),
+        _linkedin_msg("mm0", "msg 0", 0.25),
+    ])
+    selected = mod.select_items(articles)
+    feed_selected = [
+        s for s in selected
+        if s.get("source") == "linkedin"
+        and not s.get("_is_notification")
+        and not s.get("_is_message")
+    ]
+    assert len(feed_selected) == mod.LINKEDIN_RESERVED
+
+
+def test_fallback_category_routes_notification_and_message_to_own_sections(mod):
+    notif = _linkedin_notif("nn0", "notif 0", 0.30)
+    msg = _linkedin_msg("mm0", "msg 0", 0.25)
+    assert mod._fallback_category(notif) == "🔔 LinkedIn Notifications"
+    assert mod._fallback_category(msg) == "💬 LinkedIn Messages"
+
+
+def test_merge_annotations_overrides_llm_category_for_notifs_and_msgs(mod):
+    """Even if the LLM labels a notification/message as 🔗 LinkedIn,
+    merge_annotations forces the distinct category so the digest
+    always renders notifications and messages as their own sections."""
+    selected = [
+        {**_linkedin_notif("nn0", "notif 0", 0.30), "num": 1},
+        {**_linkedin_msg("mm0", "msg 0", 0.25), "num": 2},
+    ]
+    annotations = [
+        {"id": "nn0", "category": "🔗 LinkedIn", "extended_headline": "n0"},
+        {"id": "mm0", "category": "🔗 LinkedIn", "extended_headline": "m0"},
+    ]
+    merged = mod.merge_annotations(selected, annotations)
+    cats = {m["id"]: m["category"] for m in merged}
+    assert cats["nn0"] == "🔔 LinkedIn Notifications"
+    assert cats["mm0"] == "💬 LinkedIn Messages"
+
+
 # ─── build_prompt ────────────────────────────────────────────────────
 
 

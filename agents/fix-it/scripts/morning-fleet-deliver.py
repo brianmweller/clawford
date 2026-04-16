@@ -125,24 +125,22 @@ def read_items(agent_id: str) -> tuple[list[dict] | None, str]:
     return data, "ok"
 
 
-def _format_item_message(item: dict) -> str:
+def _format_item_message(item: dict, show_category: bool = True) -> str:
     """Render a single digest item as the text of one Telegram message.
 
     Format:
-        {category_emoji} {Category}
+        {category_emoji} {Category}     (only when show_category=True)
 
         {num}. {extended_headline}
         {url}
 
-    Everything except num and extended_headline is optional — missing
-    fields are simply dropped. category is shown only when present
-    (the caller can skip repeating the same heading across consecutive
-    items; we include it unconditionally because each message stands
-    alone in the Telegram chat).
+    The caller (deliver_items_with_buttons) passes show_category=True
+    only for the first item of each category run, avoiding repetitive
+    section headers on consecutive same-category messages.
     """
     lines: list[str] = []
     category = (item.get("category") or "").strip()
-    if category:
+    if category and show_category:
         lines.append(category)
         lines.append("")
     num = item.get("num")
@@ -194,9 +192,13 @@ def deliver_items_with_buttons(
     sent = 0
     failed = 0
     n = len(items)
+    prev_category: str | None = None
     for i, item in enumerate(items):
         is_last = i == n - 1 and not footer_text
-        text = _format_item_message(item)
+        current_category = (item.get("category") or "").strip()
+        show_category = current_category != prev_category
+        text = _format_item_message(item, show_category=show_category)
+        prev_category = current_category
         num = item.get("num")
         buttons = _buttons_for_item(num) if num is not None else None
         ok = send_telegram(

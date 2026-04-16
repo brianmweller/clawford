@@ -84,6 +84,10 @@ CATEGORY_LABELS = (
     "🏛️ US Policy",
     "🔗 LinkedIn",
     "📋 Also Noted",
+    # LinkedIn notifications and DMs render as their own sections at
+    # the END of the digest so they don't get lost among news items.
+    "🔔 LinkedIn Notifications",
+    "💬 LinkedIn Messages",
 )
 
 _CATEGORY_ORDER = {label: i for i, label in enumerate(CATEGORY_LABELS)}
@@ -168,13 +172,15 @@ def select_items(
 ) -> list[dict]:
     """Pick the digest's articles from the ranked feed.
 
-    Deterministic selection: top-ranked non-LinkedIn plus the
-    highest-ranked LinkedIn items up to linkedin_reserved slots.
-    Total count is exactly target_total unless the ranked feed has
-    fewer articles than that. LinkedIn slots are claimed first so
-    non-LinkedIn backfill takes whatever remains.
+    Deterministic selection:
+      - Top-ranked non-LinkedIn (news) + top LinkedIn feed posts
+        fill target_total slots (LinkedIn feed gets linkedin_reserved).
+      - LinkedIn NOTIFICATIONS and MESSAGES are appended OUTSIDE
+        target_total — every notif/msg scraped makes it into the
+        digest so the operator sees them. These render as their own
+        sections at the end of the digest.
 
-    Assigns sequential `num` (1..N) after final ordering by rank so
+    Assigns sequential `num` (1..N) after final ordering so
     morning-fleet-deliver can label each Telegram message with a
     stable number that matches /like N / callback_data=like:N.
     """
@@ -185,8 +191,20 @@ def select_items(
         except (TypeError, ValueError):
             return 0.0
 
-    linkedin = sorted(
-        (a for a in articles if a.get("source") == "linkedin"),
+    notifications = [
+        a for a in articles
+        if a.get("source") == "linkedin" and a.get("_is_notification")
+    ]
+    messages = [
+        a for a in articles
+        if a.get("source") == "linkedin" and a.get("_is_message")
+    ]
+
+    linkedin_feed = sorted(
+        (a for a in articles
+         if a.get("source") == "linkedin"
+         and not a.get("_is_notification")
+         and not a.get("_is_message")),
         key=_rank,
         reverse=True,
     )
@@ -196,19 +214,24 @@ def select_items(
         reverse=True,
     )
 
-    li_slot_count = min(len(linkedin), linkedin_reserved)
+    li_slot_count = min(len(linkedin_feed), linkedin_reserved)
     non_li_slot_count = target_total - li_slot_count
     if non_li_slot_count < 0:
         non_li_slot_count = 0
 
-    selected = linkedin[:li_slot_count] + non_linkedin[:non_li_slot_count]
-    # Re-sort the combined set by rank so delivery order reflects
+    main = linkedin_feed[:li_slot_count] + non_linkedin[:non_li_slot_count]
+    # Re-sort the combined main set by rank so delivery order reflects
     # importance rather than source buckets.
-    selected.sort(key=_rank, reverse=True)
+    main.sort(key=_rank, reverse=True)
+    main = main[:target_total]
 
-    # Cap to target_total in case we have more LinkedIn than requested
-    # (possible when linkedin_reserved > target_total — defensive)
-    selected = selected[:target_total]
+    # Append notifications and messages AFTER the main pool. Sort
+    # each group by rank-desc so the most-engaging items render first
+    # within their section.
+    notifications.sort(key=_rank, reverse=True)
+    messages.sort(key=_rank, reverse=True)
+
+    selected = main + notifications + messages
 
     # Assign num 1..N
     for i, item in enumerate(selected, 1):
@@ -287,6 +310,10 @@ def _fallback_category(item: dict) -> str:
     drops an id from its response.
     """
     if item.get("source") == "linkedin":
+        if item.get("_is_notification"):
+            return "🔔 LinkedIn Notifications"
+        if item.get("_is_message"):
+            return "💬 LinkedIn Messages"
         return "🔗 LinkedIn"
     topics = set(item.get("topics", []))
     if topics & {"ai", "tech", "artificial_intelligence", "chatbots", "generative_ai"}:
@@ -323,7 +350,16 @@ def merge_annotations(
     merged: list[dict] = []
     for item in selected:
         ann = by_id.get(item["id"], {})
-        category = ann.get("category") or _fallback_category(item)
+        # LinkedIn notifications/messages get forced into their
+        # distinct categories regardless of LLM output — the prompt
+        # doesn't disambiguate these sub-types, so Python owns the
+        # final section routing.
+        if item.get("source") == "linkedin" and item.get("_is_notification"):
+            category = "🔔 LinkedIn Notifications"
+        elif item.get("source") == "linkedin" and item.get("_is_message"):
+            category = "💬 LinkedIn Messages"
+        else:
+            category = ann.get("category") or _fallback_category(item)
         headline = ann.get("extended_headline") or item.get("title", "")
         merged.append({
             "num": item["num"],
