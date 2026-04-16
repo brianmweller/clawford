@@ -21,19 +21,10 @@
       "immutable": true
     },
     {
-      "src": "TOOLS.md"
-    },
-    {
       "src": "AGENTS.md"
     },
     {
       "src": "USER.md"
-    },
-    {
-      "src": "HEARTBEAT.md"
-    },
-    {
-      "src": "CRONS.md"
     },
     {
       "src": "probation.md"
@@ -70,7 +61,7 @@
       "name": "brain-validation",
       "enabled": false,
       "cron": "0 */6 * * *",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Run: python3 ~/Dropbox/openclaw-backup/scripts/validate.py. If validation PASSES: return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary) AND DO NOT touch ~/Dropbox/openclaw-backup/agents/fix-it.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source. If validation FAILS: send me a Telegram message with the specific failures immediately.",
+      "message": "⚡ EXEC DISCIPLINE: run any `python3 <path>` command exactly as written — a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Run: python3 ~/Dropbox/openclaw-backup/scripts/validate.py. If validation PASSES: return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary) AND DO NOT touch ~/Dropbox/openclaw-backup/agents/fix-it.status.md — fleet-health.json (R6 orchestrator) is the authoritative health source. If validation FAILS: send me a Telegram message with the specific failures immediately.",
       "announce": false,
       "no_deliver": true
     },
@@ -78,7 +69,7 @@
       "name": "conflict-scan",
       "enabled": false,
       "cron": "0 */2 * * *",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Run: find ~/Dropbox/openclaw-backup/ -name '*conflicted copy*' -type f. If NO conflicts found: return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary) AND DO NOT touch ~/Dropbox/openclaw-backup/agents/fix-it.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source. If conflicts ARE found: send me a Telegram message with the filenames. Do NOT attempt to merge.",
+      "message": "⚡ EXEC DISCIPLINE: run any `python3 <path>` command exactly as written — a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Run: find ~/Dropbox/openclaw-backup/ -name '*conflicted copy*' -type f. If NO conflicts found: return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary) AND DO NOT touch ~/Dropbox/openclaw-backup/agents/fix-it.status.md — fleet-health.json (R6 orchestrator) is the authoritative health source. If conflicts ARE found: send me a Telegram message with the filenames. Do NOT attempt to merge.",
       "announce": false,
       "no_deliver": true
     },
@@ -86,7 +77,7 @@
       "name": "file-size-monitor",
       "enabled": false,
       "cron": "0 12 * * *",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Run: find ~/Dropbox/openclaw-backup/ -type f -size +500k. If NO large files found: return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary) AND DO NOT touch ~/Dropbox/openclaw-backup/agents/fix-it.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source. If large files ARE found: send me a Telegram message with the filenames and sizes.",
+      "message": "⚡ EXEC DISCIPLINE: run any `python3 <path>` command exactly as written — a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Run: find ~/Dropbox/openclaw-backup/ -type f -size +500k. If NO large files found: return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary) AND DO NOT touch ~/Dropbox/openclaw-backup/agents/fix-it.status.md — fleet-health.json (R6 orchestrator) is the authoritative health source. If large files ARE found: send me a Telegram message with the filenames and sizes.",
       "announce": false,
       "no_deliver": true
     },
@@ -94,7 +85,7 @@
       "name": "monthly-archival",
       "enabled": false,
       "cron": "0 3 1 * *",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Run monthly archival. Create ~/Dropbox/openclaw-backup/archive/YYYY-MM/ for current month. Scan ALL files matching ~/Dropbox/openclaw-backup/facts/*.md (every monthly file, not just the current month). For each fact entry, calculate effective_confidence = original_confidence * 0.5^(days_since_recorded / half_life) using category half-lives: identity=never, established=365, situation=90, preference=180, plan=30, logistics=7, rumor=14. Move facts with effective_confidence < 0.2 AND recorded > 90 days ago to the archive. Also scan tasks/queue.md and move tasks with status done and completed > 90 days ago. Write an archive manifest listing everything moved. Report results on Telegram.",
+      "message": "⚡ EXEC DISCIPLINE: run any `python3 <path>` command exactly as written — a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Run monthly archival. Create ~/Dropbox/openclaw-backup/archive/YYYY-MM/ for current month. Scan ALL files matching ~/Dropbox/openclaw-backup/facts/*.md (every monthly file, not just the current month). For each fact entry, calculate effective_confidence = original_confidence * 0.5^(days_since_recorded / half_life) using category half-lives: identity=never, established=365, situation=90, preference=180, plan=30, logistics=7, rumor=14. Move facts with effective_confidence < 0.2 AND recorded > 90 days ago to the archive. Also scan tasks/queue.md and move tasks with status done and completed > 90 days ago. Write an archive manifest listing everything moved. Report results on Telegram.",
       "announce": true,
       "no_deliver": false
     },
@@ -102,7 +93,7 @@
       "name": "security-audit",
       "enabled": false,
       "cron": "0 4 * * 0",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Run: python3 /home/openclaw/.clawford/fix-it-workspace/scripts/security-audit.py\n\nThe script reads /home/openclaw/.clawford/exec-approvals.json directly, runs openclaw security audit --deep, applies enrichment rules (suppresses tools.exec.security_full_configured and plugins.tools_reachable_permissive_policy), and prints the formatted emoji-headed severity report. Send the entire stdout to Telegram as ONE message. Do NOT use python3 -c. Do NOT use heredocs. Do NOT regenerate the report yourself \u2014 just run the script and forward its output verbatim.",
+      "message": "⚡ EXEC DISCIPLINE: run any `python3 <path>` command exactly as written — a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Run: python3 /home/openclaw/.clawford/fix-it-workspace/scripts/security-audit.py\n\nThe script reads /home/openclaw/.clawford/exec-approvals.json directly, runs openclaw security audit --deep, applies enrichment rules (suppresses tools.exec.security_full_configured and plugins.tools_reachable_permissive_policy), and prints the formatted emoji-headed severity report. Send the entire stdout to Telegram as ONE message. Do NOT use python3 -c. Do NOT use heredocs. Do NOT regenerate the report yourself — just run the script and forward its output verbatim.",
       "announce": true,
       "no_deliver": false
     },
@@ -110,7 +101,7 @@
       "name": "cron-self-check",
       "enabled": false,
       "cron": "0 0 * * *",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Check crons for ALL agents and re-register any missing ones. 1) Run: openclaw cron list. 2) Read ~/.clawford/fix-it-workspace/expected-crons.json \u2014 this contains the full cron config for every agent: name, schedule, delivery mode (no_deliver/announce), account, to, AND the complete message prompt. 3) For each agent in the config, check that every expected cron name appears in the live cron list. 4) If ALL present, return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. 5) If any are missing: re-register using the FULL config from the JSON \u2014 openclaw cron add --agent {agent} --name {name} --cron {schedule} --to {to} --account {account} {--no-deliver if no_deliver else --announce} --message {the full message from the JSON}. This restores the cron with its complete original prompt, not a placeholder. 6) After re-registering, send a Telegram alert: '\ud83e\udd8a\ud83d\udd27 Cron repair: re-registered {list of agent:cron pairs}'. DO NOT touch ~/Dropbox/openclaw-backup/agents/fix-it.status.md \u2014 fleet-health.json (R6 orchestrator) is the authoritative health source.",
+      "message": "⚡ EXEC DISCIPLINE: run any `python3 <path>` command exactly as written — a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Check crons for ALL agents and re-register any missing ones. 1) Run: openclaw cron list. 2) Read ~/.clawford/fix-it-workspace/expected-crons.json — this contains the full cron config for every agent: name, schedule, delivery mode (no_deliver/announce), account, to, AND the complete message prompt. 3) For each agent in the config, check that every expected cron name appears in the live cron list. 4) If ALL present, return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. 5) If any are missing: re-register using the FULL config from the JSON — openclaw cron add --agent {agent} --name {name} --cron {schedule} --to {to} --account {account} {--no-deliver if no_deliver else --announce} --message {the full message from the JSON}. This restores the cron with its complete original prompt, not a placeholder. 6) After re-registering, send a Telegram alert: '🦊🔧 Cron repair: re-registered {list of agent:cron pairs}'. DO NOT touch ~/Dropbox/openclaw-backup/agents/fix-it.status.md — fleet-health.json (R6 orchestrator) is the authoritative health source.",
       "announce": false,
       "no_deliver": true
     },
@@ -118,7 +109,7 @@
       "name": "obsidian-briefing",
       "enabled": false,
       "cron": "10 12 * * *",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Run: python3 ~/Dropbox/openclaw-backup/scripts/obsidian-briefing/generate.py. If it succeeds, return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. If it fails: send the error on Telegram.",
+      "message": "⚡ EXEC DISCIPLINE: run any `python3 <path>` command exactly as written — a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Run: python3 ~/Dropbox/openclaw-backup/scripts/obsidian-briefing/generate.py. If it succeeds, return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. If it fails: send the error on Telegram.",
       "announce": false,
       "no_deliver": true
     },
@@ -126,7 +117,7 @@
       "name": "probation-end-reminder",
       "enabled": false,
       "cron": "0 16 25 4 *",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. \ud83e\udd8a\ud83d\udd27 Probation review reminder. Today is 2026-04-25 \u2014 your 14-day probation window ends today. Read ~/Dropbox/openclaw-backup/fix-it/probation.md for the failure ledger Sam has been keeping. Send Sam one Telegram message: 'Probation ends today. Failures logged: {N}. Verdict requested: keep / extend / retire.' Then stop. Do not propose a verdict yourself \u2014 that is Sam's decision. Retirement command if needed: bash ~/repo/agents/fix-it/retire.sh",
+      "message": "⚡ EXEC DISCIPLINE: run any `python3 <path>` command exactly as written — a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. 🦊🔧 Probation review reminder. Today is 2026-04-25 — your 14-day probation window ends today. Read ~/Dropbox/openclaw-backup/fix-it/probation.md for the failure ledger Sam has been keeping. Send Sam one Telegram message: 'Probation ends today. Failures logged: {N}. Verdict requested: keep / extend / retire.' Then stop. Do not propose a verdict yourself — that is Sam's decision. Retirement command if needed: bash ~/repo/agents/fix-it/retire.sh",
       "announce": true,
       "no_deliver": false
     },
@@ -134,7 +125,7 @@
       "name": "workspace-snapshot",
       "enabled": false,
       "cron": "30 3 * * *",
-      "message": "\u26a1 EXEC DISCIPLINE: run any `python3 <path>` command exactly as written \u2014 a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Run: python3 /home/node/repo/agents/shared/workspace-snapshot.py. This tars each agent's workspace to ~/Dropbox/openclaw-backup/workspace-snapshots/<agent>-<date>.tar.gz with 14-day retention. Dropbox syncs the result off-VPS for regression recovery. If the script exits 0, return EXACTLY the empty string (zero bytes, no narration \u2014 not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. If it exits non-zero: send a Telegram alert with the error. Do NOT use python3 -c. Do NOT use heredocs.",
+      "message": "⚡ EXEC DISCIPLINE: run any `python3 <path>` command exactly as written — a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Run: python3 /home/node/repo/agents/shared/workspace-snapshot.py. This tars each agent's workspace to ~/Dropbox/openclaw-backup/workspace-snapshots/<agent>-<date>.tar.gz with 14-day retention. Dropbox syncs the result off-VPS for regression recovery. If the script exits 0, return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. If it exits non-zero: send a Telegram alert with the error. Do NOT use python3 -c. Do NOT use heredocs.",
       "announce": false,
       "no_deliver": true
     }

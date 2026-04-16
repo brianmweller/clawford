@@ -48,12 +48,9 @@ token.json
 # a CLAWFORD_BOOTSTRAP_UNEDITED sentinel comment that deploy.py refuses
 # until you replace the dummy values and delete the sentinel line.
 agents/*/AGENTS.md
-agents/*/CRONS.md
-agents/*/HEARTBEAT.md
 agents/*/IDENTITY.md
 agents/*/MEMORY.md
 agents/*/SOUL.md
-agents/*/TOOLS.md
 agents/*/USER.md
 agents/*/manifest.json
 agents/family-calendar/calendar-config.json

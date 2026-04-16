@@ -17,16 +17,10 @@
       "immutable": true
     },
     {
-      "src": "TOOLS.md"
-    },
-    {
       "src": "AGENTS.md"
     },
     {
       "src": "USER.md"
-    },
-    {
-      "src": "HEARTBEAT.md"
     },
     {
       "src": "MEMORY.md"

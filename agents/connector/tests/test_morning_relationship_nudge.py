@@ -2,7 +2,7 @@
 
 Phase 4 orchestrator that replaces the OpenClaw LLM cron
 `connector:morning-relationship-nudge`. Runs people-scan.py, formats the
-nudge per CRONS.md, and writes to cache/morning-brief-ready.txt for the
+nudge, and writes to cache/morning-brief-ready.txt for the
 5 AM PT fleet delivery path. On Mondays the weekly-review cron is folded
 in (Option C) via an additional MONDAY recap section.
 

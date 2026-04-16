@@ -1,0 +1,17 @@
+# MEMORY.md — Mr Fixit
+
+Persistent lessons and hard constraints learned from experience.
+This file is loaded at the start of every session.
+
+Add entries as you learn them. Each entry should include enough context
+that future sessions can judge when it applies.
+
+## Alert Classification
+
+- (Example) Known-transient fleet-health warnings that aren't worth alerting:
+  document pattern + reason here once observed.
+
+## Agent-Specific Patterns
+
+- (Example) If a specific agent's heartbeat regularly drifts at certain
+  hours, record the pattern here so it doesn't fire spurious alerts.

@@ -3,8 +3,8 @@
 
 Phase 4 liberation: replaces the OpenClaw LLM cron
 `connector:morning-relationship-nudge`. Runs people-scan.py, formats
-the nudge per CRONS.md, and writes cache/morning-brief-ready.txt for
-the 5 AM PT fleet delivery path. On Mondays the weekly-review cron is
+the nudge (see format_nudge() below), and writes cache/morning-brief-ready.txt
+for the 5 AM PT fleet delivery path. On Mondays the weekly-review cron is
 folded in (Option C) via an additional MONDAY recap section.
 
 Pure Python templating — people-scan output is structured, so no LLM

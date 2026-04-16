@@ -13,6 +13,10 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import memory_writer  # type: ignore
+
+AGENT_ID = "meetings-coach"
+
 WORKSPACE = os.path.expanduser("~/.clawford/meetings-coach-workspace")
 CACHE = os.path.join(WORKSPACE, "cache")
 CONFIG_PATH = os.path.join(WORKSPACE, "meeting-config.json")
@@ -188,6 +192,14 @@ def get_recent_coaching_entries(limit: int = 5) -> dict:
 # ---------------------------------------------------------------------------
 # Phase C producer tools — action item management
 # ---------------------------------------------------------------------------
+
+
+def propose_remember(rule: str, category: str = "General") -> dict:
+    return memory_writer.propose_pending_remember(AGENT_ID, rule, category)
+
+
+def confirm_remember(rule: str, category: str) -> dict:
+    return memory_writer.append_rule(AGENT_ID, rule, category)
 
 
 def list_pending_action_items() -> dict:
@@ -373,6 +385,25 @@ TOOLS: list[dict] = [
             "required": ["item_id"],
         },
     },
+    {
+        "type": "function",
+        "name": "propose_remember",
+        "description": (
+            "Stage a rule for the operator's confirmation, to be added to your "
+            "persistent MEMORY.md. the operator will see inline buttons to remember "
+            "or skip. Use when the operator says 'remember that...', 'from now on...', "
+            "or teaches you a new rule. Category is a short heading like "
+            "'Grocery Defaults' or 'Alert Classification'."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "rule": {"type": "string", "description": "The rule to remember"},
+                "category": {"type": "string", "description": "Category heading"},
+            },
+            "required": ["rule"],
+        },
+    },
 ]
 
 
@@ -385,4 +416,6 @@ EXECUTORS: dict = {
     "list_pending_action_items": list_pending_action_items,
     "confirm_action_item": confirm_action_item,
     "dismiss_action_item": dismiss_action_item,
+    "propose_remember": propose_remember,
+    "confirm_remember": confirm_remember,
 }

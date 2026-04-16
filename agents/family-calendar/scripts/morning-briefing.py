@@ -10,7 +10,7 @@ Writes to cache/morning-brief-ready.txt for the 5 AM PT fleet delivery
 path.
 
 Pure Python templating — the LLM isn't adding composition value for
-structured calendar data. The format spec lives in CRONS.md.
+structured calendar data. See format_brief() below for the output layout.
 
 SCRIPT_CONTRACT-compliant: always exits 0, prints one JSON line.
 """
@@ -159,7 +159,7 @@ def format_brief(
     week_events: list | None,
     now_pacific: datetime,
 ) -> str:
-    """Render the full morning brief per CRONS.md template.
+    """Render the full morning brief: today section (time-blocked) + tomorrow preview.
 
     `events` is the combined today+tomorrow list from gcal-fetch --days 2.
     `week_events` is optional — pass a 7-day list only on Mondays to

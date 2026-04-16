@@ -11,6 +11,10 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import memory_writer  # type: ignore
+
+AGENT_ID = "connector"
+
 WORKSPACE = os.path.expanduser("~/.clawford/connector-workspace")
 CACHE = os.path.join(WORKSPACE, "cache")
 CONFIG_PATH = os.path.join(WORKSPACE, "connector-config.json")
@@ -95,6 +99,14 @@ def get_config_summary() -> dict:
 # ---------------------------------------------------------------------------
 # Phase C producer tools
 # ---------------------------------------------------------------------------
+
+
+def propose_remember(rule: str, category: str = "General") -> dict:
+    return memory_writer.propose_pending_remember(AGENT_ID, rule, category)
+
+
+def confirm_remember(rule: str, category: str) -> dict:
+    return memory_writer.append_rule(AGENT_ID, rule, category)
 
 
 def mark_checkin(person_name: str) -> dict:
@@ -224,6 +236,25 @@ TOOLS: list[dict] = [
             "required": ["person_name"],
         },
     },
+    {
+        "type": "function",
+        "name": "propose_remember",
+        "description": (
+            "Stage a rule for the operator's confirmation, to be added to your "
+            "persistent MEMORY.md. the operator will see inline buttons to remember "
+            "or skip. Use when the operator says 'remember that...', 'from now on...', "
+            "or teaches you a new rule. Category is a short heading like "
+            "'Grocery Defaults' or 'Alert Classification'."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "rule": {"type": "string", "description": "The rule to remember"},
+                "category": {"type": "string", "description": "Category heading"},
+            },
+            "required": ["rule"],
+        },
+    },
 ]
 
 
@@ -235,4 +266,6 @@ EXECUTORS: dict = {
     "get_config_summary": get_config_summary,
     "mark_checkin": mark_checkin,
     "snooze_reminder": snooze_reminder,
+    "propose_remember": propose_remember,
+    "confirm_remember": confirm_remember,
 }

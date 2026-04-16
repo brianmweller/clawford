@@ -1043,6 +1043,7 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "google_oauth.py",
     "heartbeat_base.py",
     "llm.py",
+    "memory_writer.py",
     "pending_actions.py",
     "playwright_profile.py",
     "retry_policy.py",

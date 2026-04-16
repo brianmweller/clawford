@@ -2,7 +2,7 @@
 
 Phase 4 orchestrator that replaces the OpenClaw LLM cron
 `family-calendar:morning-briefing`. Runs gcal-fetch.py, formats the
-brief per CRONS.md (time-blocked today section + tomorrow preview, with
+brief (time-blocked today section + tomorrow preview, with
 a weekly overview appended on Mondays), and writes to
 cache/morning-brief-ready.txt for the 5 AM PT fleet delivery path.
 

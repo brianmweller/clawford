@@ -19,6 +19,9 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+import memory_writer  # type: ignore
+
+AGENT_ID = "fix-it"
 BRAIN = os.path.expanduser("~/Dropbox/openclaw-backup")
 FLEET_HEALTH_PATH = os.path.join(BRAIN, "fleet-health.json")
 KNOWN_ISSUES_PATH = os.path.join(BRAIN, "fix-it", "KNOWN_ISSUES.md")
@@ -85,6 +88,16 @@ def get_known_issues() -> str:
         return f"KNOWN_ISSUES.md unreadable: {exc}"
 
 
+def propose_remember(rule: str, category: str = "General") -> dict:
+    """Stage a memory-write for confirmation. Auto-attaches buttons."""
+    return memory_writer.propose_pending_remember(AGENT_ID, rule, category)
+
+
+def confirm_remember(rule: str, category: str) -> dict:
+    """Execute the staged memory-write. Called by dispatcher shortcut only."""
+    return memory_writer.append_rule(AGENT_ID, rule, category)
+
+
 TOOLS: list[dict] = [
     {
         "type": "function",
@@ -120,6 +133,24 @@ TOOLS: list[dict] = [
         ),
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
+    {
+        "type": "function",
+        "name": "propose_remember",
+        "description": (
+            "Stage a rule for the operator's confirmation, to be added to "
+            "your persistent MEMORY.md. the operator will see inline buttons "
+            "to remember or skip. Use when the operator says 'remember that...', "
+            "'from now on...', or teaches you a new rule."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "rule": {"type": "string", "description": "The rule to remember"},
+                "category": {"type": "string", "description": "Category heading (e.g. 'Alert Classification')"},
+            },
+            "required": ["rule"],
+        },
+    },
 ]
 
 
@@ -127,4 +158,7 @@ EXECUTORS: dict = {
     "get_fleet_health": get_fleet_health,
     "get_morning_status": get_morning_status,
     "get_known_issues": get_known_issues,
+    "propose_remember": propose_remember,
+    # Shortcut-only (not in TOOLS manifest):
+    "confirm_remember": confirm_remember,
 }

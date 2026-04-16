@@ -13,6 +13,10 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+import memory_writer  # type: ignore
+
+AGENT_ID = "news-digest"
+
 WORKSPACE = os.path.expanduser("~/.clawford/news-digest-workspace")
 CACHE = os.path.join(WORKSPACE, "cache")
 PREFS = os.path.join(WORKSPACE, "preferences")
@@ -121,6 +125,14 @@ def recent_engagements(limit: int = 15) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def propose_remember(rule: str, category: str = "General") -> dict:
+    return memory_writer.propose_pending_remember(AGENT_ID, rule, category)
+
+
+def confirm_remember(rule: str, category: str) -> dict:
+    return memory_writer.append_rule(AGENT_ID, rule, category)
+
+
 def record_engagement(article_id: str, action: str) -> dict:
     """Record a user engagement event (thumbs_up, thumbs_down, more)
     for an article. Appends to engagement.jsonl. The dispatcher's
@@ -218,6 +230,25 @@ TOOLS: list[dict] = [
             "required": ["article_id", "action"],
         },
     },
+    {
+        "type": "function",
+        "name": "propose_remember",
+        "description": (
+            "Stage a rule for the operator's confirmation, to be added to your "
+            "persistent MEMORY.md. the operator will see inline buttons to remember "
+            "or skip. Use when the operator says 'remember that...', 'from now on...', "
+            "or teaches you a new rule. Category is a short heading like "
+            "'Grocery Defaults' or 'Alert Classification'."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "rule": {"type": "string", "description": "The rule to remember"},
+                "category": {"type": "string", "description": "Category heading"},
+            },
+            "required": ["rule"],
+        },
+    },
 ]
 
 
@@ -226,4 +257,6 @@ EXECUTORS: dict = {
     "get_topic_weights": get_topic_weights,
     "recent_engagements": recent_engagements,
     "record_engagement": record_engagement,
+    "propose_remember": propose_remember,
+    "confirm_remember": confirm_remember,
 }

@@ -119,14 +119,25 @@ def _read_agent_doc(agent_dir: Path, name: str) -> str:
 
 
 def _build_system_prompt(agent_id: str, agent_dir: Path, tools: list[dict]) -> str:
-    """Concatenate SOUL + USER + MEMORY + a machine-generated tools doc."""
+    """Concatenate the 5 conversational docs + tool manifest + context.
+
+    Loaded: SOUL (principles), IDENTITY (persona/voice), USER (who the operator is),
+    AGENTS (fleet map for cross-agent routing), MEMORY (learned rules).
+    Not loaded: TOOLS/HEARTBEAT/CRONS (operational docs, redundant with code).
+    """
     parts = []
     soul = _read_agent_doc(agent_dir, "SOUL.md")
     if soul:
         parts.append("# Your identity (SOUL.md)\n\n" + soul.strip())
+    identity = _read_agent_doc(agent_dir, "IDENTITY.md")
+    if identity:
+        parts.append("# Your persona (IDENTITY.md)\n\n" + identity.strip())
     user = _read_agent_doc(agent_dir, "USER.md")
     if user:
         parts.append("# The user you serve (USER.md)\n\n" + user.strip())
+    agents_doc = _read_agent_doc(agent_dir, "AGENTS.md")
+    if agents_doc:
+        parts.append("# The fleet (AGENTS.md)\n\n" + agents_doc.strip())
     memory = _read_agent_doc(agent_dir, "MEMORY.md")
     if memory:
         parts.append("# Your persistent memory (MEMORY.md)\n\n" + memory.strip())

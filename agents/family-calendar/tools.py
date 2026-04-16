@@ -14,7 +14,10 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pending_actions  # type: ignore
+import memory_writer  # type: ignore
 from subprocess_helpers import run_json_script, is_subprocess_error  # type: ignore
+
+AGENT_ID = "family-calendar"
 
 WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
 CACHE = os.path.join(WORKSPACE, "cache")
@@ -188,6 +191,14 @@ GCAL_WRITE_SCRIPT = os.path.join(WORKSPACE, "scripts", "gcal-write.py")
 # ---------------------------------------------------------------------------
 # Phase C producer tools
 # ---------------------------------------------------------------------------
+
+
+def propose_remember(rule: str, category: str = "General") -> dict:
+    return memory_writer.propose_pending_remember(AGENT_ID, rule, category)
+
+
+def confirm_remember(rule: str, category: str) -> dict:
+    return memory_writer.append_rule(AGENT_ID, rule, category)
 
 
 def propose_event_add(
@@ -382,6 +393,25 @@ TOOLS: list[dict] = [
             "required": ["calendar_id", "event_id"],
         },
     },
+    {
+        "type": "function",
+        "name": "propose_remember",
+        "description": (
+            "Stage a rule for the operator's confirmation, to be added to your "
+            "persistent MEMORY.md. the operator will see inline buttons to remember "
+            "or skip. Use when the operator says 'remember that...', 'from now on...', "
+            "or teaches you a new rule. Category is a short heading like "
+            "'Grocery Defaults' or 'Alert Classification'."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "rule": {"type": "string", "description": "The rule to remember"},
+                "category": {"type": "string", "description": "Category heading"},
+            },
+            "required": ["rule"],
+        },
+    },
 ]
 
 
@@ -397,4 +427,6 @@ EXECUTORS: dict = {
     "confirm_calendar_add": confirm_calendar_add,
     "confirm_calendar_move": confirm_calendar_move,
     "confirm_calendar_cancel": confirm_calendar_cancel,
+    "propose_remember": propose_remember,
+    "confirm_remember": confirm_remember,
 }
