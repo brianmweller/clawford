@@ -192,8 +192,11 @@ def test_sync_shared_library_skips_other_deploy_only_modules(
     deploy_module, seeded_repo, fake_workspace
 ):
     """workspace-snapshot.py, contract_wrap.py, write-status.py,
-    import_from_deploy_sh.py, SCRIPT_CONTRACT.md, fleet-manifest.json
-    are all deploy-side only."""
+    import_from_deploy_sh.py, SCRIPT_CONTRACT.md are all deploy-side
+    only. (fleet-manifest.json was added to SHARED_RUNTIME_MODULES
+    in the P0.2 doctor-audit rollout because the script looks the
+    manifest up relative to its own __file__ — it's no longer
+    deploy-only.)"""
     mf = deploy_module.load_manifest(
         seeded_repo / "agents" / "testagent" / "manifest.json"
     )
@@ -206,7 +209,6 @@ def test_sync_shared_library_skips_other_deploy_only_modules(
         "write-status.py",
         "import_from_deploy_sh.py",
         "SCRIPT_CONTRACT.md",
-        "fleet-manifest.json",
     ):
         assert not (target / name).exists(), f"should not have deployed: {name}"
 
