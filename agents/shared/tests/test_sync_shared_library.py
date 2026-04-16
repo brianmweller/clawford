@@ -48,6 +48,18 @@ def _seed_shared_library(repo: Path) -> Path:
     (shared / "google_oauth.py").write_text("# google_oauth\n", encoding="utf-8")
     (shared / "playwright_profile.py").write_text("# playwright_profile\n", encoding="utf-8")
     (shared / "camoufox_proxy.py").write_text("# camoufox_proxy\n", encoding="utf-8")
+    # P0.1 + P0.4 modules — added 2026-04-16 after a production
+    # ModuleNotFoundError surfaced from activity-email-check.
+    (shared / "scan_fields.py").write_text("# scan_fields\n", encoding="utf-8")
+    (shared / "inbound_scanner.py").write_text("# inbound_scanner\n", encoding="utf-8")
+    (shared / "inbound_patterns.py").write_text("# inbound_patterns\n", encoding="utf-8")
+    (shared / "reviewer.py").write_text("# reviewer\n", encoding="utf-8")
+
+    # Data-only subdir (P0.4 prompt templates)
+    prompts = shared / "prompts"
+    prompts.mkdir(exist_ok=True)
+    (prompts / "anti_leakage.txt").write_text("anti-leakage suffix\n", encoding="utf-8")
+    (prompts / "semantic_guard.txt").write_text("classifier system prompt\n", encoding="utf-8")
 
     # Deploy-only / infra — must NOT get copied into workspaces
     (shared / "deploy.py").write_text("# deploy tool — never deploy into workspaces\n", encoding="utf-8")
@@ -100,8 +112,32 @@ def test_sync_shared_library_copies_all_runtime_modules(
         "google_oauth.py",
         "playwright_profile.py",
         "camoufox_proxy.py",
+        # P0.1 + P0.4 modules — wire-ins broke production with
+        # ModuleNotFoundError when these were missed during deploy.
+        "scan_fields.py",
+        "inbound_scanner.py",
+        "inbound_patterns.py",
+        "reviewer.py",
     ):
         assert (target / name).is_file(), f"missing runtime module: {name}"
+
+
+def test_sync_shared_library_copies_prompts_subdir(
+    deploy_module, seeded_repo, fake_workspace,
+):
+    """P0.4 prompt templates must land in <workspace>/agents/shared/prompts/.
+    inbound_scanner reads them at call time via __file__-relative paths."""
+    mf = deploy_module.load_manifest(
+        seeded_repo / "agents" / "testagent" / "manifest.json"
+    )
+    deploy_module.sync_shared_library(mf)
+
+    prompts_dir = fake_workspace / "agents" / "shared" / "prompts"
+    assert prompts_dir.is_dir(), f"prompts/ subdir not created: {prompts_dir}"
+    assert (prompts_dir / "anti_leakage.txt").is_file()
+    assert (prompts_dir / "semantic_guard.txt").is_file()
+    # Content preserved byte-for-byte.
+    assert "anti-leakage suffix" in (prompts_dir / "anti_leakage.txt").read_text(encoding="utf-8")
 
 
 def test_sync_shared_library_preserves_source_content(

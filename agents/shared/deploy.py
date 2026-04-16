@@ -1040,13 +1040,25 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "fleet_health_types.py",
     "google_oauth.py",
     "heartbeat_base.py",
+    "inbound_patterns.py",   # P0.4 — regex list for inbound scanner
+    "inbound_scanner.py",    # P0.4 — scan_inbound() + semantic_guard()
     "llm.py",
     "memory_writer.py",
     "pending_actions.py",
     "playwright_profile.py",
     "retry_policy.py",
+    "reviewer.py",           # P0.1 — outbound action classifier
+    "scan_fields.py",        # P0.4 — wire-in helper (per-agent ingest)
     "subprocess_helpers.py",
     "telegram_api.py",
+)
+
+
+# Subdirectories under agents/shared/ that must also be mirrored into
+# the workspace. Pure data files (prompt templates, etc.) read by the
+# runtime modules at call time.
+SHARED_RUNTIME_DIRS: tuple[str, ...] = (
+    "prompts",  # P0.4 — anti_leakage.txt + semantic_guard.txt
 )
 
 
@@ -1188,6 +1200,33 @@ def sync_shared_library(mf: Manifest) -> tuple[int, int]:
             updated += 1
         else:
             skipped += 1
+
+    # Mirror data-only subdirectories (prompt templates, etc.) so
+    # runtime modules can resolve sibling files via __file__-relative
+    # paths inside the workspace just like they do in the repo.
+    for sub in SHARED_RUNTIME_DIRS:
+        src_sub = src_dir / sub
+        if not src_sub.is_dir():
+            continue
+        dst_sub = dst_dir / sub
+        if not _DRY:
+            dst_sub.mkdir(parents=True, exist_ok=True)
+        for src_file in sorted(src_sub.iterdir()):
+            if not src_file.is_file():
+                continue
+            dst_file = dst_sub / src_file.name
+            action = copy_with_immutable(
+                src_file, dst_file, immutable=False, yes_updates=True,
+            )
+            if action in ("updated", "created"):
+                log(
+                    f"shared {('UPDATE' if action == 'updated' else 'CREATE')} "
+                    f"{sub}/{src_file.name}",
+                    "plan",
+                )
+                updated += 1
+            else:
+                skipped += 1
 
     return updated, skipped
 
