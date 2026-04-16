@@ -37,6 +37,8 @@ for _p in Path(__file__).resolve().parents:
             sys.path.insert(0, str(_p))
         break
 
+from agents.shared.scan_fields import scan_fields  # noqa: E402
+
 
 WORKSPACE = Path(os.path.expanduser("~/.clawford/connector-workspace"))
 PROFILE_DIR = WORKSPACE / "gmessages-profile"
@@ -160,15 +162,29 @@ def _row_to_contact(row: dict, today: date) -> dict | None:
     resolved = _resolve_relative_date(time_label, today)
     if not resolved:
         return None
+
+    # P0.4: the display name is attacker-controlled (anyone who sends
+    # an SMS or chat can set it). An attacker could set it to
+    # "[SYSTEM] ..." and have the agent read it during chat. Scan and
+    # (in enforce mode) replace with a placeholder; warn mode passes
+    # through but records the hit.
+    sanitized, warnings = scan_fields(
+        fields={"name": name},
+        source_type="gmessages",
+        source_id=name[:64],
+        workspace=WORKSPACE,
+    )
     contact = {
-        "name": name,
+        "name": sanitized["name"],
         "phone": "",
         "last_message_date": resolved,
     }
+    if warnings:
+        contact["scan_warnings"] = warnings
     # If the display name looks like a phone number (no letters), expose
     # it as phone too so daily-refresh can match by normalized digits.
-    if not any(ch.isalpha() for ch in name):
-        contact["phone"] = name
+    if not any(ch.isalpha() for ch in sanitized["name"]):
+        contact["phone"] = sanitized["name"]
     return contact
 
 

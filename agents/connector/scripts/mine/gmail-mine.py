@@ -21,6 +21,16 @@ import sys
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
+from pathlib import Path
+
+# --- shared library sys.path shim (P0.4 wire-in) ---
+for _p in Path(__file__).resolve().parents:
+    if (_p / "agents" / "shared").is_dir():
+        if str(_p) not in sys.path:
+            sys.path.insert(0, str(_p))
+        break
+
+from agents.shared.scan_fields import scan_fields  # noqa: E402
 
 # Add parent to path for mining_utils
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -99,6 +109,27 @@ def get_header(headers, name):
         if h.get("name", "").lower() == name.lower():
             return h.get("value", "")
     return ""
+
+
+_CONNECTOR_WORKSPACE = Path(os.path.expanduser("~/.clawford/connector-workspace"))
+
+
+def _scan_external_text(text: str, source_type: str, source_id: str) -> tuple[str, list[dict]]:
+    """Route one field through scan_fields; return (sanitized, warnings).
+
+    Wraps a single-field scan so the per-append sites stay readable.
+    In warn mode sanitized==text (pass-through with forensic log). In
+    enforce mode blocked fields come back as the placeholder string.
+    """
+    if not text:
+        return text, []
+    sanitized, warnings = scan_fields(
+        fields={"value": text},
+        source_type=source_type,
+        source_id=source_id,
+        workspace=_CONNECTOR_WORKSPACE,
+    )
+    return sanitized["value"], warnings
 
 
 def mine_gmail():
@@ -251,9 +282,19 @@ def mine_gmail():
                             if not c["last_seen"] or msg_date > c["last_seen"]:
                                 c["last_seen"] = msg_date
                         if subject and len(c["subjects"]) < 50:
-                            c["subjects"].append(subject)
+                            scanned_subj, w = _scan_external_text(
+                                subject, "gmail-subject", msg_id
+                            )
+                            c["subjects"].append(scanned_subj)
+                            if w:
+                                c.setdefault("scan_warnings", []).extend(w)
                         if body_excerpt and len(c["body_excerpts"]) < 10:
-                            c["body_excerpts"].append(body_excerpt)
+                            scanned_body, w = _scan_external_text(
+                                body_excerpt, "gmail-body", msg_id
+                            )
+                            c["body_excerpts"].append(scanned_body)
+                            if w:
+                                c.setdefault("scan_warnings", []).extend(w)
                         if sig and len(c["signatures"]) < 5:
                             c["signatures"].append(sig)
 
