@@ -1052,6 +1052,99 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
 )
 
 
+# Fields that flow from manifest.json.example → manifest.json on sync.
+# These are STRUCTURAL (same across all operators of this agent).
+# Fields NOT in this list are operator-private (crons with PII, approvals,
+# etc.) and must NEVER be overwritten by sync.
+MANIFEST_STRUCTURAL_FIELDS: tuple[str, ...] = (
+    "config_files",
+    "scripts",
+    "state_files",
+)
+
+
+def sync_manifest_structure(
+    actual_path: Path | str,
+    example_path: Path | str,
+) -> dict:
+    """Copy structural fields from manifest.json.example to manifest.json
+    while preserving operator-private fields (crons with PII, approvals).
+
+    Context: manifest.json is gitignored per PII remediation (cron prompts
+    contain real names, places, calendar IDs). Only manifest.json.example
+    is tracked. When a structural change needs to flow — adding/removing
+    config_files entries, updating scripts lists — it lands in .example
+    via git, then operators run this sync to apply it.
+
+    If manifest.json doesn't exist yet, bootstraps it from .example as a
+    fresh copy (operator will fill in crons next).
+
+    Returns a dict with status + diff description so callers can log
+    what changed.
+    """
+    actual_path = Path(actual_path)
+    example_path = Path(example_path)
+
+    if not example_path.exists():
+        return {
+            "status": "error",
+            "error": f"manifest.json.example not found at {example_path}",
+        }
+
+    try:
+        with open(example_path, encoding="utf-8") as f:
+            example = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"status": "error", "error": f"could not read .example: {exc}"}
+
+    if actual_path.exists():
+        try:
+            with open(actual_path, encoding="utf-8") as f:
+                actual = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            return {"status": "error", "error": f"could not read manifest.json: {exc}"}
+        bootstrapped = False
+    else:
+        # Bootstrap case: no manifest.json yet, seed it from .example.
+        actual = json.loads(json.dumps(example))
+        bootstrapped = True
+
+    diff = {"status": "ok", "bootstrapped": bootstrapped}
+
+    for field in MANIFEST_STRUCTURAL_FIELDS:
+        if field not in example:
+            continue
+        before = actual.get(field, [])
+        after = example[field]
+
+        # Human-readable diff for config_files / scripts / state_files
+        if field == "config_files":
+            before_srcs = [cf.get("src") for cf in before if isinstance(cf, dict)]
+            after_srcs = [cf.get("src") for cf in after if isinstance(cf, dict)]
+            diff["config_files_added"] = [s for s in after_srcs if s not in before_srcs]
+            diff["config_files_removed"] = [s for s in before_srcs if s not in after_srcs]
+        elif field == "scripts":
+            diff["scripts_added"] = [s for s in after if s not in before]
+            diff["scripts_removed"] = [s for s in before if s not in after]
+        elif field == "state_files":
+            before_paths = [sf.get("path") for sf in before if isinstance(sf, dict)]
+            after_paths = [sf.get("path") for sf in after if isinstance(sf, dict)]
+            diff["state_files_added"] = [p for p in after_paths if p not in before_paths]
+            diff["state_files_removed"] = [p for p in before_paths if p not in after_paths]
+
+        actual[field] = after
+
+    try:
+        actual_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(actual_path, "w", encoding="utf-8") as f:
+            json.dump(actual, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+    except OSError as exc:
+        return {"status": "error", "error": f"write failed: {exc}"}
+
+    return diff
+
+
 def sync_shared_library(mf: Manifest) -> tuple[int, int]:
     """Mirror the runtime `agents/shared/*.py` modules into
     `<workspace>/agents/shared/*.py` so scripts running inside the
@@ -1373,6 +1466,15 @@ def main() -> int:
             "the sentinel. Does not run a deploy."
         ),
     )
+    ap.add_argument(
+        "--sync-manifest", action="store_true",
+        help=(
+            "Sync structural fields (config_files, scripts, state_files) from "
+            "manifest.json.example to manifest.json, preserving operator-private "
+            "fields (crons with PII, approvals). Use this when a git pull brings "
+            "in structural manifest changes. Does not run a deploy."
+        ),
+    )
     args = ap.parse_args()
 
     _DRY = args.dry_run
@@ -1394,6 +1496,45 @@ def main() -> int:
             log("--bootstrap-configs requires an agent_id (or --all)", "err")
             return 2
         return bootstrap_configs(args.agent_id)
+
+    if args.sync_manifest:
+        def _sync_one(agent_id: str) -> int:
+            actual = REPO_ROOT / "agents" / agent_id / "manifest.json"
+            example = REPO_ROOT / "agents" / agent_id / "manifest.json.example"
+            result = sync_manifest_structure(actual, example)
+            if result.get("status") == "error":
+                log(f"{agent_id}: sync failed — {result.get('error')}", "err")
+                return 1
+            parts = []
+            for key in ("config_files_added", "config_files_removed",
+                        "scripts_added", "scripts_removed",
+                        "state_files_added", "state_files_removed"):
+                vals = result.get(key, [])
+                if vals:
+                    parts.append(f"{key}={vals}")
+            if result.get("bootstrapped"):
+                log(f"{agent_id}: bootstrapped from .example", "ok")
+            elif parts:
+                log(f"{agent_id}: synced — {', '.join(parts)}", "ok")
+            else:
+                log(f"{agent_id}: already in sync", "ok")
+            return 0
+        if args.all:
+            agents_dir = REPO_ROOT / "agents"
+            rc = 0
+            for child in sorted(agents_dir.iterdir()):
+                if not child.is_dir():
+                    continue
+                if child.name in args.exclude or child.name.startswith(("_", ".", "shared")):
+                    continue
+                if not (child / "manifest.json.example").exists():
+                    continue
+                rc |= _sync_one(child.name)
+            return rc
+        if not args.agent_id:
+            log("--sync-manifest requires an agent_id (or --all)", "err")
+            return 2
+        return _sync_one(args.agent_id)
 
     if args.all:
         agents_dir = REPO_ROOT / "agents"
