@@ -21,7 +21,7 @@
 | 07-1 | [Mr Fixit 🦊🔧](07-1-mr-fixit.md) | **drafted** (Phase 7d) |
 | 07-2a | [Lowly Worm — newsfeed 🐛📰](07-2a-lowly-worm-newsfeed.md) | **drafted** (Phase 7d) |
 | 07-2b | [Lowly Worm — social 🐛📰](07-2b-lowly-worm-social.md) | **drafted** (Phase 7d) |
-| 07-3 | Mistress Mouse 🐭📅 *(net-new in v3)* | pending |
+| 07-3 | [Mistress Mouse 🐭📅](07-3-mistress-mouse.md) | **drafted** (Phase 7d) |
 | 07-4 | Sergeant Murphy 🐷🔍 *(net-new in v3)* | pending |
 | 07-5 | Huckle Cat 🐱🤝 *(net-new in v3)* | pending |
 | 07-6 | [Hilda Hippo 🦛🛒](07-6-hilda-hippo.md) | **drafted** (Phase 7d) |
