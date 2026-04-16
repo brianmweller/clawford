@@ -54,6 +54,8 @@ def _seed_shared_library(repo: Path) -> Path:
     (shared / "inbound_scanner.py").write_text("# inbound_scanner\n", encoding="utf-8")
     (shared / "inbound_patterns.py").write_text("# inbound_patterns\n", encoding="utf-8")
     (shared / "reviewer.py").write_text("# reviewer\n", encoding="utf-8")
+    # P1.3 module
+    (shared / "rate_limit.py").write_text("# rate_limit\n", encoding="utf-8")
 
     # Data-only subdir (P0.4 prompt templates)
     prompts = shared / "prompts"
@@ -118,6 +120,8 @@ def test_sync_shared_library_copies_all_runtime_modules(
         "inbound_scanner.py",
         "inbound_patterns.py",
         "reviewer.py",
+        # P1.3 module
+        "rate_limit.py",
     ):
         assert (target / name).is_file(), f"missing runtime module: {name}"
 

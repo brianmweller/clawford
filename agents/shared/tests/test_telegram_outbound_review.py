@@ -230,3 +230,82 @@ def test_review_payload_truncated_for_large_bodies(
     payload_text = captured["payload"]["text"]
     assert len(payload_text) <= tg.REVIEW_BODY_CHARS
     assert captured["payload"]["truncated"] is True
+
+
+# ---------------------------------------------------------------------------
+# P1.3 wire-in: rate-limit blocks the duplicate before reviewer + HTTP
+# ---------------------------------------------------------------------------
+
+
+def test_rate_limit_blocks_duplicate_send(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two identical sends within the dedup window: first proceeds,
+    second is blocked by rate_limit BEFORE the reviewer/HTTP run."""
+    monkeypatch.setenv("CLAWFORD_AGENT_ID", "meetings-coach")
+    monkeypatch.setenv("CLAWFORD_RATE_LIMIT_MODE", "enforce")
+    monkeypatch.setenv("CLAWFORD_REVIEWER_MODE", "warn")  # don't let reviewer block
+
+    # Override the workspace template to point at the test's tmp dir
+    # so the rate-limit JSON state lands somewhere we control.
+    tg, rv = _reload_modules()
+    monkeypatch.setattr(
+        tg, "RATE_LIMIT_WORKSPACE_TEMPLATE", str(tmp_path / "{agent_id}-workspace"),
+    )
+    monkeypatch.setattr(rv, "review_action",
+                        lambda **kw: rv.ReviewVerdict(
+                            verdict="safe", agent_id=kw["agent_id"],
+                            action_kind=kw["action_kind"]))
+    urlopen = _fake_telegram_ok()
+    monkeypatch.setattr(tg.urllib.request, "urlopen", urlopen)
+
+    ok1 = tg.send_message("token-x", "111111111", "Heads up — meeting in 15 min")
+    ok2 = tg.send_message("token-x", "111111111", "Heads up — meeting in 15 min")
+    assert ok1 is True
+    assert ok2 is False, "duplicate must be blocked by rate_limit"
+    # urlopen called exactly once — the second send short-circuited.
+    assert urlopen.call_count == 1
+
+
+def test_rate_limit_warn_mode_logs_but_does_not_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CLAWFORD_AGENT_ID", "meetings-coach")
+    monkeypatch.setenv("CLAWFORD_RATE_LIMIT_MODE", "warn")
+    monkeypatch.setenv("CLAWFORD_REVIEWER_MODE", "warn")
+
+    tg, rv = _reload_modules()
+    monkeypatch.setattr(
+        tg, "RATE_LIMIT_WORKSPACE_TEMPLATE", str(tmp_path / "{agent_id}-workspace"),
+    )
+    monkeypatch.setattr(rv, "review_action",
+                        lambda **kw: rv.ReviewVerdict(
+                            verdict="safe", agent_id=kw["agent_id"],
+                            action_kind=kw["action_kind"]))
+    urlopen = _fake_telegram_ok()
+    monkeypatch.setattr(tg.urllib.request, "urlopen", urlopen)
+
+    tg.send_message("token-x", "111111111", "x")
+    ok2 = tg.send_message("token-x", "111111111", "x")
+    assert ok2 is True, "warn mode must not block the duplicate"
+    assert urlopen.call_count == 2
+
+
+def test_rate_limit_skipped_when_no_agent_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Back-compat: callers that don't identify their agent skip the
+    limiter (same shape as the reviewer)."""
+    monkeypatch.delenv("CLAWFORD_AGENT_ID", raising=False)
+    monkeypatch.setenv("CLAWFORD_RATE_LIMIT_MODE", "enforce")
+
+    tg, rv = _reload_modules()
+    urlopen = _fake_telegram_ok()
+    monkeypatch.setattr(tg.urllib.request, "urlopen", urlopen)
+
+    # Same payload twice — nothing should block because we don't know
+    # which agent to credit the rate-limit history to.
+    tg.send_message("token-x", "111111111", "x")
+    ok2 = tg.send_message("token-x", "111111111", "x")
+    assert ok2 is True
+    assert urlopen.call_count == 2

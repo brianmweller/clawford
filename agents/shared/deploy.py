@@ -1169,6 +1169,7 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "memory_writer.py",
     "pending_actions.py",
     "playwright_profile.py",
+    "rate_limit.py",         # P1.3 — outbound rate limit + dedup
     "retry_policy.py",
     "reviewer.py",           # P0.1 — outbound action classifier
     "scan_fields.py",        # P0.4 — wire-in helper (per-agent ingest)

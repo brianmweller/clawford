@@ -45,6 +45,7 @@ import traceback
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+from pathlib import Path
 
 TELEGRAM_API_URL_TEMPLATE = "https://api.telegram.org/bot{token}/sendMessage"
 TELEGRAM_CHAT_ACTION_URL_TEMPLATE = "https://api.telegram.org/bot{token}/sendChatAction"
@@ -65,6 +66,12 @@ AGENT_ID_ENV_VAR = "CLAWFORD_AGENT_ID"
 # fast and cheap. The reviewer doesn't need 4000 chars of body to
 # decide if Sergeant Murphy proposing a payment is off-role.
 REVIEW_BODY_CHARS = 800
+
+# P1.3 wire-in: deterministic rate limiter. Resolves the workspace
+# from agent_id (~/.clawford/<agent>-workspace) so the limiter's JSON
+# state lands per-agent without callers having to thread a workspace
+# Path through every send_message call.
+RATE_LIMIT_WORKSPACE_TEMPLATE = "~/.clawford/{agent_id}-workspace"
 
 
 def _review_outbound(
@@ -106,6 +113,50 @@ def _review_outbound(
     )
 
 
+def _rate_limit_check(
+    *, chat_id: str, text: str, agent_id: str | None,
+):
+    """Run the P1.3 deterministic rate limiter. Returns the verdict
+    (or None when we can't identify the calling agent / the limiter
+    isn't installed in this environment).
+
+    Same agent_id resolution as the reviewer: explicit kwarg first,
+    then CLAWFORD_AGENT_ID env. State persists per-agent under
+    ~/.clawford/<agent>-workspace/cache/rate-limits.json.
+    """
+    effective_agent_id = agent_id or os.environ.get(AGENT_ID_ENV_VAR, "")
+    if not effective_agent_id:
+        return None
+    try:
+        from rate_limit import check_rate_limit  # type: ignore
+    except Exception as e:
+        print(
+            f"telegram_api: rate_limit import failed ({e}); skipping limit",
+            file=sys.stderr,
+        )
+        return None
+    workspace = Path(os.path.expanduser(
+        RATE_LIMIT_WORKSPACE_TEMPLATE.format(agent_id=effective_agent_id)
+    ))
+    # Inline the canonical-JSON SHA-256 rather than importing
+    # contract_wrap.parameters_hash — contract_wrap.py is the deploy
+    # wrapper, not a workspace-side runtime module, and isn't synced
+    # into agent workspaces.
+    import hashlib  # noqa: E402 — local import keeps cold-load cheap
+    h = hashlib.sha256(
+        json.dumps(
+            {"chat_id": chat_id, "text": text},
+            sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    return check_rate_limit(
+        agent_id=effective_agent_id,
+        tool="telegram_send",
+        parameters_hash=h,
+        workspace=workspace,
+    )
+
+
 def send_message(
     token: str,
     chat_id: str,
@@ -140,6 +191,20 @@ def send_message(
     them would just generate noise.
     """
     if not skip_review:
+        # P1.3: deterministic rate limit FIRST. The limiter is sub-
+        # millisecond; no point spending an LLM call when we already
+        # know we're going to refuse.
+        rl = _rate_limit_check(chat_id=chat_id, text=text, agent_id=agent_id)
+        if rl is not None and not rl.allowed:
+            print(
+                f"telegram send {('DENIED' if rl.blocking else 'WARN')} "
+                f"by rate_limit ({rl.kind}) for agent={rl.agent_id!r} "
+                f"mode={rl.mode!r}: {rl.reason}",
+                file=sys.stderr,
+            )
+            if rl.blocking:
+                return False
+
         verdict = _review_outbound(
             chat_id=chat_id, text=text,
             agent_id=agent_id, role_summary=role_summary,
