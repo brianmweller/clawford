@@ -185,6 +185,65 @@ Earlier versions of the deploy tool shipped two safeguards that are now gone. Bo
 
 All safeguards run in an order that puts the file-system-touching ones *after* the read-only ones, so a failure at any structural check rolls back cleanly with nothing on disk.
 
+## How tests work here
+
+Infrastructure code in this repo — the deploy tool, the host-cron installer, the fleet-health orchestrator, the cookie managers, anything that mutates VPS state — is built test-first. Structural tests (grep the script for a forbidden substring) are cheap and useful and have their place, but they do not substitute for running the real thing against a stubbed environment and watching the real observable behavior.
+
+### The harness pattern
+
+Every infra-layer test that matters follows the same shape: **subprocess the real script against a stubbed environment, then inspect the state files it touched.** Concretely:
+
+- **Stub the VPS-shaped commands.** For the cron installer, that means stubbing `crontab` with a shell shim that reads + writes a state file (`$STATE`). For the deploy tool, that means stubbing `ssh` / `scp` / `rsync`. Every stub lives under `agents/shared/tests/stubs/` and is installed on `$PATH` via a pytest fixture that prepends the stubs directory.
+- **Stub `$HOME` and the env vars.** `monkeypatch.setenv("HOME", str(tmp_path))` and set every env var the script reads to a known value. The test runs against `tmp_path`, never against the real filesystem.
+- **Subprocess the real script.** `subprocess.run([str(script_path), ...], env=stubbed_env, capture_output=True, text=True)`. No monkey-patched internals, no direct function calls — the test exercises the same code path a real operator invocation would.
+- **Inspect the state files the script touched.** The assertions read `$STATE` (the stubbed crontab state), the stubbed `~/.clawford/` tree, the stubbed `.env`, and compare against the expected post-condition. The assertion is "after running this, the crontab state file contains exactly these lines," not "after running this, the code returned this value."
+
+The `agents/shared/tests/conftest.py` file ships the fixtures that make this pattern cheap: `stubs_on_path`, `fake_home`, `fake_crontab`, and a handful of assertion helpers. The next infra test should start by importing those fixtures, not by reinventing them.
+
+### Pitfalls inside the harness itself
+
+The harness is infra code too, and the same rule applies to it — the stubs are not exempt from TDD. Two harness bugs have bitten the fleet on 2026-04-15 and are worth calling out.
+
+**Pitfall 1 — Skipped tests drift silently.** An earlier version of `test_install_host_cron.py` had a `@pytest.mark.skipif(sys.platform == "win32")` on it and used seed crontab lines that referenced a pre-Phase-6.5 container path (`/home/node/.openclaw/...`). The skipif meant the test never ran on Windows dev boxes, and the post-Phase-6.5 rename to `/home/openclaw/.openclaw/...` never landed in the seed lines either, because nobody ever noticed the test was broken — it was invisibly skipped. The fix was to catch this during a fresh TDD run against the real installer on the VPS, where the stale seed lines produced a visible mismatch. **Rule:** any time you touch an infra file, run its *neighbors'* tests too. Pre-existing bugs hide behind skipifs and stale comments.
+
+**Pitfall 2 — Test stubs for piped commands need atomic write, not bare redirect.** The canonical case is `crontab`, which has `crontab -l` for reads and `crontab -` for writes, and is commonly used by shell code in a read-then-write pipeline against itself:
+
+```bash
+{ crontab -l; for l in "${NEW_LINES[@]}"; do echo "$l"; done } | crontab -
+```
+
+A naive stub writes the new content with a bare redirect:
+
+```bash
+#!/usr/bin/env bash
+# buggy stub
+if [ "$1" = "-l" ]; then cat "$STATE"; fi
+if [ "$1" = "-" ];  then cat > "$STATE"; fi   # ← truncates $STATE at pipeline setup time
+```
+
+The bug is subtle. `cat > "$STATE"` opens `$STATE` for writing at pipeline setup time, **before** the left-hand `crontab -l` has a chance to drain the existing content. The reader sees an empty file, the writer writes `{empty + NEW_LINES}` back, and every pre-existing line silently vanishes. Worse, an eviction test that seeds the state, runs the installer, and asserts the seed is gone will **pass for the wrong reason** — the race deleted the seed, not the installer's eviction logic. False green on a test that was supposed to verify a safety check.
+
+The fix is a one-line change to the stub — buffer stdin into a temp file and atomically rename:
+
+```bash
+#!/usr/bin/env bash
+# correct stub
+if [ "$1" = "-l" ]; then cat "$STATE"; fi
+if [ "$1" = "-" ];  then tmp=$(mktemp); cat > "$tmp"; mv "$tmp" "$STATE"; fi
+```
+
+The rename defers the state overwrite until stdin has been fully drained, and the race closes. **Rule:** any stub for a command that might be piped through itself in a read-then-write construction must use atomic replacement on the writer side. A cheap smoke test: `printf 'a\nb\n' > state; { crontab -l; echo c; } | crontab -; grep -q '^a$' state` — if that fails, the stub has the bug. Both crontab stubs in the test suite now use atomic replacement, and the `agents/shared/tests/stubs/crontab` shim is the canonical implementation.
+
+### When to skip TDD
+
+Almost never, for infra code. The exceptions are shallow enough to enumerate:
+
+- **Pure prose changes.** Editing a comment, a docstring, or a `.md` file doesn't need a test. Run the grep voice-grips, not pytest.
+- **One-shot migration scripts that run exactly once and then get deleted.** Even then, a dry-run preview with a fake target is usually cheaper than debugging a misfire after the fact.
+- **Config-only changes** where the behavior under test is "does the tool read the new key out of the config correctly" — if the existing tests cover the config-loading path, the new key is covered transitively.
+
+Everything else — any code that writes a file, mutates the crontab, touches `~/.clawford/`, talks to Dropbox, or invokes `ssh`/`scp`/`rsync` — gets a test first, always.
+
 ## Dropbox on a headless VPS
 
 Dropbox on a headless Linux VPS is the single fiddliest thing in the setup. Not because it's hard — because the fail modes are silent and the defaults assume a desktop user. Budget an hour the first time.

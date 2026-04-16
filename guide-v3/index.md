@@ -2,9 +2,9 @@
 
 # Clawford Guide (v3)
 
-*Last updated: 2026-04-15 (Phase 6 — Ch 04 and Ch 07 drafted) · Live guide, under active migration from v2*
+*Last updated: 2026-04-15 (Phase 7d — all chapters drafted) · Live guide*
 
-> **Guide v3 is under active construction.** This is the Clawford-native guide that replaces the OpenClaw-era [guide v2](../guide-v2/index.md). Most chapters are still migrating from v2, with OpenClaw-era scar tissue stripped. For the fully-populated (but frozen) OpenClaw-era version, see guide-v2. For the strategic reasoning behind the rewrite, start with [Ch 02 — What Clawford Isn't](02-what-clawford-isnt.md).
+> **Guide v3 is the live guide.** Every chapter in the table below is drafted against the post-liberation Clawford-native runtime. The OpenClaw-era [guide v2](../guide-v2/index.md) is frozen and preserved as historical record. For the strategic reasoning behind the rewrite, start with [Ch 02 — What Clawford Isn't](02-what-clawford-isnt.md).
 
 ## Full table of contents
 
@@ -29,7 +29,7 @@
 | 08 | [Security and hardening](08-security-and-hardening.md) | **drafted** (Phase 7d) |
 | 09 | [Scripts and configs reference](09-scripts-and-configs.md) | **drafted** (Phase 7d) |
 | 10 | [Glossary](10-glossary.md) *(renumbered from Ch 11)* | **drafted** (Phase 7d) |
-| 99 | [Unsorted operator lessons](99-unsorted-lessons.md) | **holding pen** — raw lessons awaiting triage into their natural chapters |
+| 99 | [Unsorted operator lessons](99-unsorted-lessons.md) | **drained** (Phase 7d) — historical record of the triage process; all lessons grafted into their natural chapters |
 
 See [`docs/v2-to-v3-migration.md`](../docs/v2-to-v3-migration.md) for the per-chapter migration checklist and status.
 
