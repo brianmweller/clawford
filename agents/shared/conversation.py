@@ -94,4 +94,39 @@ def load(agent_id: str) -> list[dict]:
             return []
 
     window = entries[-WINDOW_SIZE:]
-    return [e["item"] for e in window if "item" in e]
+    items = [e["item"] for e in window if "item" in e]
+    return _drop_orphan_tool_outputs(items)
+
+
+def _drop_orphan_tool_outputs(items: list[dict]) -> list[dict]:
+    """Filter out any function_call_output whose paired function_call
+    isn't in the window.
+
+    The codex Responses API rejects input with a `function_call_output`
+    that has no preceding `function_call` for the same call_id
+    ("No tool call found for function call output"). This happens when
+    the 20-item sliding window trims mid-pair — the function_call falls
+    off the front while its output becomes the first item in the
+    window. Walk once, tracking which call_ids have been seen as
+    function_call, and drop any function_call_output that references
+    an unseen id.
+    """
+    seen_call_ids: set[str] = set()
+    result: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        itype = item.get("type")
+        if itype == "function_call":
+            cid = item.get("call_id")
+            if cid:
+                seen_call_ids.add(cid)
+            result.append(item)
+        elif itype == "function_call_output":
+            cid = item.get("call_id")
+            if cid and cid in seen_call_ids:
+                result.append(item)
+            # else drop — orphan (paired function_call is outside window)
+        else:
+            result.append(item)
+    return result

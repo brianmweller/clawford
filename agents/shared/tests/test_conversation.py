@@ -138,6 +138,63 @@ def test_append_function_call_and_output_roundtrip(conv_module):
     assert items[2]["output"] == "6 agents ok"
 
 
+def test_load_drops_orphaned_function_call_outputs(conv_module):
+    """When the WINDOW_SIZE trim lands mid-pair, a function_call_output
+    without its paired function_call breaks the codex backend
+    ('No tool call found for function call output'). The loader must
+    drop orphan outputs so the window is internally consistent."""
+    # Construct 40 items where the pair straddles the window boundary:
+    # items 0-18: 19 user msgs — all trimmed off
+    # item 19: function_call (JUST outside the window)
+    # item 20: function_call_output (first item in window — orphan!)
+    # items 21-39: 19 more user msgs
+    for i in range(19):
+        conv_module.append("fix-it", {"role": "user", "content": f"msg {i}"})
+    conv_module.append("fix-it", {
+        "type": "function_call", "call_id": "call_orphan_abc",
+        "name": "get_x", "arguments": "{}",
+    })
+    conv_module.append("fix-it", {
+        "type": "function_call_output", "call_id": "call_orphan_abc",
+        "output": "ok",
+    })
+    for i in range(19, 38):
+        conv_module.append("fix-it", {"role": "user", "content": f"msg {i}"})
+
+    items = conv_module.load("fix-it")
+
+    # Every function_call_output in the window must have a preceding
+    # function_call with the same call_id.
+    seen_calls: set[str] = set()
+    for item in items:
+        if item.get("type") == "function_call":
+            seen_calls.add(item["call_id"])
+        elif item.get("type") == "function_call_output":
+            assert item["call_id"] in seen_calls, (
+                f"orphaned function_call_output in window: {item}"
+            )
+
+
+def test_load_keeps_intact_function_call_pairs(conv_module):
+    """Non-split pairs should pass through unchanged."""
+    conv_module.append("fix-it", {"role": "user", "content": "hi"})
+    conv_module.append("fix-it", {
+        "type": "function_call", "call_id": "call_ok",
+        "name": "get_x", "arguments": "{}",
+    })
+    conv_module.append("fix-it", {
+        "type": "function_call_output", "call_id": "call_ok",
+        "output": "result",
+    })
+    conv_module.append("fix-it", {"role": "assistant", "content": "done"})
+
+    items = conv_module.load("fix-it")
+    # All 4 items should be present in order
+    assert len(items) == 4
+    assert items[1]["call_id"] == "call_ok"
+    assert items[2]["call_id"] == "call_ok"
+
+
 def test_per_agent_isolation(conv_module):
     conv_module.append("fix-it", {"role": "user", "content": "fix-it msg"})
     conv_module.append("shopping", {"role": "user", "content": "shopping msg"})
