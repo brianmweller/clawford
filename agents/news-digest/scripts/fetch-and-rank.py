@@ -585,16 +585,43 @@ def main():
             }
             f.write(json.dumps(entry) + "\n")
 
-    # Print summary to stdout (agent reads this)
-    print(json.dumps({
-        "status": "ok",
+    # Classify the run: degraded if any source failed, error if
+    # everything failed (so morning-edition can bail out cleanly).
+    # Previously always reported 'ok' regardless of feed health,
+    # which masked sustained source outages behind a clean cron exit.
+    total_sources = len(RSS_FEEDS) + 1  # RSS feeds + LinkedIn
+    if errors and len(ranked) == 0:
+        run_status = "error"
+    elif errors:
+        run_status = "degraded"
+    else:
+        run_status = "ok"
+
+    alert = None
+    if run_status == "error":
+        alert = (
+            f"🐛 fetch-and-rank: all sources failed "
+            f"({len(errors)}/{total_sources})"
+        )
+    elif run_status == "degraded":
+        alert = (
+            f"🐛 fetch-and-rank: {len(errors)}/{total_sources} sources failed"
+        )
+
+    summary = {
+        "status": run_status,
         "date": today,
         "total_articles": len(ranked),
         "sources": list({a["source"] for a in ranked}),
         "errors": errors,
+        "sources_failed": len(errors),
+        "sources_total": total_sources,
         "output_file": str(output_file),
         "fetch_duration_sec": fetch_duration,
-    }))
+    }
+    if alert:
+        summary["alert"] = alert
+    print(json.dumps(summary))
 
 
 if __name__ == "__main__":

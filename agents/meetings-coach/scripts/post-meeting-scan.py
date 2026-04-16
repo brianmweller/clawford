@@ -28,7 +28,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 import sys
 import time
 import traceback
@@ -43,6 +42,10 @@ for _p in Path(__file__).resolve().parents:
         break
 
 from agents.shared.llm import infer as llm_infer  # noqa: E402
+from agents.shared.subprocess_helpers import (  # noqa: E402
+    is_subprocess_error,
+    run_json_script,
+)
 from agents.shared.telegram_api import resolve_credentials, send_message  # noqa: E402
 
 
@@ -95,26 +98,10 @@ Transcript excerpt (may be truncated):
 
 
 def _run_script(script_name: str, *args: str, timeout: int = SUBPROCESS_TIMEOUT_S):
-    cmd = [sys.executable, str(SCRIPTS_DIR / script_name)] + list(args)
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, check=False,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        return None
-    if result.returncode != 0:
-        return None
-    stdout = (result.stdout or "").strip()
-    if not stdout:
-        return None
-    try:
-        return json.loads(stdout)
-    except json.JSONDecodeError:
-        pass
-    try:
-        return json.loads(stdout.splitlines()[-1])
-    except (json.JSONDecodeError, IndexError):
-        return None
+    """Shim over agents.shared.subprocess_helpers.run_json_script so existing
+    call sites keep working. Returns parsed JSON on success or
+    {'__error__': ...} on any subprocess-level failure."""
+    return run_json_script(str(SCRIPTS_DIR / script_name), *args, timeout=timeout)
 
 
 def _write_atomic(path: Path, content: str) -> None:
@@ -408,11 +395,40 @@ def run() -> dict:
     now_utc = datetime.now(timezone.utc)
     now_iso = now_utc.isoformat()
 
-    # Populate gcal cache for transcript-scan
+    # Populate gcal cache for transcript-scan. Return value intentionally
+    # ignored — this is a cache warmer, not a data source. transcript-scan
+    # tolerates a stale/missing gcal cache.
     _run_script("gcal-fetch.py")
 
-    # Run transcript-scan — SINGLE SOURCE OF TRUTH for delivery
+    # Run transcript-scan — SINGLE SOURCE OF TRUTH for delivery. Without
+    # it we have no way to know which transcripts are newly ready, so
+    # propagate subprocess failures as a top-level error instead of the
+    # old 'degraded' masking (2026-04-15 silent-outage class).
     scan = _run_script("transcript-scan.py")
+    if is_subprocess_error(scan):
+        error_msg = scan["__error__"]
+        _write_atomic(
+            LAST_RUN_FILE,
+            json.dumps(
+                {
+                    "timestamp": now_iso,
+                    "status": "error",
+                    "error": error_msg,
+                    "summary": f"transcript-scan failed: {error_msg[:120]}",
+                },
+                indent=2,
+            ),
+        )
+        return {
+            "status": "error",
+            "error": error_msg,
+            "alert": f"\U0001f437\U0001f50d post-meeting-scan failed: {error_msg[:200]}",
+            "processed": 0,
+            "debriefs_sent": 0,
+            "coaching_sent": 0,
+            "cleanup_count": 0,
+            "krisp_401": False,
+        }
     if not isinstance(scan, dict):
         _write_atomic(
             LAST_RUN_FILE,
@@ -489,8 +505,10 @@ def run() -> dict:
             and item.get("has_raw_text")
             and not _already_coached(event_id)
         ):
+            # Coaching is best-effort: a per-event metrics failure
+            # should not abort the debrief loop for other events.
             metrics = _run_script("transcript-metrics.py", "--event-id", event_id)
-            if metrics is None:
+            if is_subprocess_error(metrics) or metrics is None:
                 coaching_llm_failures += 1
                 continue
             coaching_msg = _compose_coaching_message(pending, metrics, growth_areas)

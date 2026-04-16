@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import traceback
 from datetime import datetime, timezone
@@ -28,6 +27,10 @@ for _p in Path(__file__).resolve().parents:
             sys.path.insert(0, str(_p))
         break
 
+from agents.shared.subprocess_helpers import (  # noqa: E402
+    is_subprocess_error,
+    run_json_script,
+)
 from agents.shared.telegram_api import resolve_credentials, send_message  # noqa: E402
 
 
@@ -45,26 +48,10 @@ ALERT_WINDOW_MAX_MINUTES = 45
 
 
 def _run_script(script_name: str, *args: str, timeout: int = SUBPROCESS_TIMEOUT_S):
-    cmd = [sys.executable, str(SCRIPTS_DIR / script_name)] + list(args)
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, check=False,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        return None
-    if result.returncode != 0:
-        return None
-    stdout = (result.stdout or "").strip()
-    if not stdout:
-        return None
-    try:
-        return json.loads(stdout)
-    except json.JSONDecodeError:
-        pass
-    try:
-        return json.loads(stdout.splitlines()[-1])
-    except (json.JSONDecodeError, IndexError):
-        return None
+    """Shim over agents.shared.subprocess_helpers.run_json_script so existing
+    call sites keep working. Returns parsed JSON on success or
+    {'__error__': ...} on any subprocess-level failure."""
+    return run_json_script(str(SCRIPTS_DIR / script_name), *args, timeout=timeout)
 
 
 def _parse_event_dt(iso_str: str) -> datetime | None:
@@ -189,7 +176,7 @@ def _read_workflowy_agenda(event_id: str) -> list:
     """Best-effort read of Workflowy agenda items for an event. Tolerates
     failures — agenda is optional in the alert."""
     out = _run_script("workflowy-sync.py", "--read-agenda", event_id, timeout=60)
-    if not isinstance(out, dict):
+    if is_subprocess_error(out) or not isinstance(out, dict):
         return []
     items = out.get("agenda") or out.get("items") or []
     if not isinstance(items, list):
@@ -217,7 +204,31 @@ def run() -> dict:
     now_utc = datetime.now(timezone.utc)
 
     gcal = _run_script("gcal-fetch.py")
-    events = (gcal or {}).get("events", []) if isinstance(gcal, dict) else []
+
+    # gcal-fetch is the primary data source — without it we can't know
+    # which meetings are upcoming, so propagate subprocess failures as
+    # top-level errors instead of "no new meetings".
+    if is_subprocess_error(gcal):
+        error_msg = gcal["__error__"]
+        _write_atomic(
+            LAST_RUN_FILE,
+            json.dumps(
+                {
+                    "timestamp": now_utc.isoformat(),
+                    "status": "error",
+                    "error": error_msg,
+                    "summary": f"gcal-fetch failed: {error_msg[:120]}",
+                },
+                indent=2,
+            ),
+        )
+        return {
+            "status": "error",
+            "error": error_msg,
+            "alert": f"\U0001f437\U0001f50d pre-meeting-alert failed: {error_msg[:200]}",
+        }
+
+    events = gcal.get("events", []) if isinstance(gcal, dict) else []
 
     upcoming = filter_upcoming(events, now_utc)
     sent_ids = _load_sent_ids()
@@ -230,9 +241,13 @@ def run() -> dict:
         token, chat_id = resolve_credentials(BOT_TOKEN_ENV)
         for event in new_meetings:
             event_id = event["id"]
+            # meeting-prep is optional — render the alert with whatever
+            # we got. A prep failure must not block the alert itself.
             prep = _run_script("meeting-prep.py", "--meeting-id", event_id)
+            if is_subprocess_error(prep) or not isinstance(prep, dict):
+                prep = {}
             agenda = _read_workflowy_agenda(event_id)
-            msg = format_alert(event, prep or {}, agenda, now_utc)
+            msg = format_alert(event, prep, agenda, now_utc)
             if send_message(token, chat_id, msg, silent=False):
                 sent_count += 1
                 sent_new_ids.append(event_id)

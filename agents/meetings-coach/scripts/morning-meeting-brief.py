@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import traceback
 from datetime import datetime, timezone
@@ -30,6 +29,11 @@ for _p in Path(__file__).resolve().parents:
             sys.path.insert(0, str(_p))
         break
 
+from agents.shared.subprocess_helpers import (  # noqa: E402
+    is_subprocess_error,
+    run_json_script,
+)
+
 
 WORKSPACE = Path(os.path.expanduser("~/.clawford/meetings-coach-workspace"))
 CACHE_DIR = WORKSPACE / "cache"
@@ -42,26 +46,10 @@ SUBPROCESS_TIMEOUT_S = 90
 
 
 def _run_script(script_name: str, *args: str, timeout: int = SUBPROCESS_TIMEOUT_S):
-    cmd = [sys.executable, str(SCRIPTS_DIR / script_name)] + list(args)
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, check=False,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        return None
-    if result.returncode != 0:
-        return None
-    stdout = (result.stdout or "").strip()
-    if not stdout:
-        return None
-    try:
-        return json.loads(stdout)
-    except json.JSONDecodeError:
-        pass
-    try:
-        return json.loads(stdout.splitlines()[-1])
-    except (json.JSONDecodeError, IndexError):
-        return None
+    """Shim over agents.shared.subprocess_helpers.run_json_script so existing
+    call sites keep working. Returns parsed JSON on success or
+    {'__error__': ...} on any subprocess-level failure."""
+    return run_json_script(str(SCRIPTS_DIR / script_name), *args, timeout=timeout)
 
 
 def _parse_event_dt(iso_str: str) -> datetime | None:
@@ -262,54 +250,98 @@ def run() -> dict:
     now_utc = datetime.now(timezone.utc)
     now_pacific = now_utc.astimezone(PACIFIC)
 
-    daily = _run_script("gcal-fetch.py", "--days", "2")
-    daily_events = (daily or {}).get("events", []) if isinstance(daily, dict) else []
+    sources_failed: list[dict] = []
 
-    # Per-meeting prep lookups (open commitments)
+    # gcal-fetch --days 2 is the primary source for "what meetings do
+    # you have today/tomorrow". Without it the whole brief is a lie.
+    # Propagate subprocess failures as a top-level error.
+    daily = _run_script("gcal-fetch.py", "--days", "2")
+    if is_subprocess_error(daily):
+        error_msg = daily["__error__"]
+        _write_atomic(
+            LAST_RUN_FILE,
+            json.dumps(
+                {
+                    "timestamp": now_utc.isoformat(),
+                    "status": "error",
+                    "error": error_msg,
+                    "summary": f"gcal-fetch (daily) failed: {error_msg[:120]}",
+                },
+                indent=2,
+            ),
+        )
+        return {
+            "status": "error",
+            "error": error_msg,
+            "alert": f"\U0001f437\U0001f50d morning-meeting-brief failed: {error_msg[:200]}",
+        }
+
+    daily_events = daily.get("events", []) if isinstance(daily, dict) else []
+
+    # Per-meeting prep lookups (open commitments). Best-effort — a prep
+    # failure for one event should just drop context for that row, not
+    # kill the whole brief.
     today_events, _ = split_today_tomorrow(daily_events, now_pacific)
     prep_lookup: dict = {}
+    prep_failures = 0
     for event in today_events:
         eid = event.get("id", "")
         if not eid:
             continue
         prep = _run_script("meeting-prep.py", "--meeting-id", eid, timeout=60)
+        if is_subprocess_error(prep):
+            prep_failures += 1
+            continue
         if prep is not None:
             prep_lookup[eid] = prep
+    if prep_failures:
+        sources_failed.append(
+            {"source": "meeting-prep", "error": f"{prep_failures} event(s) failed"}
+        )
 
+    # Weekly overview is Monday-only and optional — track failures but
+    # keep emitting the brief without the week-ahead section.
     week_events: list | None = None
     if now_pacific.weekday() == 0:
         weekly = _run_script("gcal-fetch.py", "--days", "7")
-        if isinstance(weekly, dict):
+        if is_subprocess_error(weekly):
+            sources_failed.append(
+                {"source": "gcal-fetch:weekly", "error": weekly["__error__"]}
+            )
+        elif isinstance(weekly, dict):
             week_events = weekly.get("events", [])
 
     body = format_brief(daily_events, week_events, prep_lookup, now_pacific)
     _write_atomic(BRIEF_FILE, body)
 
     today_events, tomorrow_events = split_today_tomorrow(daily_events, now_pacific)
+    overall_status = "degraded" if sources_failed else "ok"
     _write_atomic(
         LAST_RUN_FILE,
         json.dumps(
             {
                 "timestamp": now_utc.isoformat(),
-                "status": "ok",
+                "status": overall_status,
                 "today_count": len(today_events),
                 "tomorrow_count": len(tomorrow_events),
                 "prep_count": len(prep_lookup),
                 "weekly_overview_included": week_events is not None,
-                "daily_source_ok": daily is not None,
+                "daily_source_ok": True,
+                "sources_failed": sources_failed,
             },
             indent=2,
         ),
     )
 
     return {
-        "status": "ok",
+        "status": overall_status,
         "brief_path": str(BRIEF_FILE),
         "today_count": len(today_events),
         "tomorrow_count": len(tomorrow_events),
         "prep_count": len(prep_lookup),
         "weekly_overview_included": week_events is not None,
-        "daily_source_ok": daily is not None,
+        "daily_source_ok": True,
+        "sources_failed": sources_failed,
     }
 
 

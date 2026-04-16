@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import traceback
 from datetime import datetime, timezone
@@ -33,6 +32,10 @@ for _p in Path(__file__).resolve().parents:
         break
 
 from agents.shared.llm import infer as llm_infer  # noqa: E402
+from agents.shared.subprocess_helpers import (  # noqa: E402
+    is_subprocess_error,
+    run_json_script,
+)
 from agents.shared.telegram_api import resolve_credentials, send_message  # noqa: E402
 
 
@@ -71,37 +74,10 @@ Body:
 
 
 def _run_script(script_name: str, *args: str, timeout: int = SUBPROCESS_TIMEOUT_S):
-    """Returns parsed JSON on success, or {'__error__': ...} on any
-    failure. Callers must check for __error__ and propagate to
-    status=error — the 'None on failure' shape collapsed auth failures
-    into empty-result success on 2026-04-15."""
-    cmd = [sys.executable, str(SCRIPTS_DIR / script_name)] + list(args)
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, check=False,
-        )
-    except subprocess.TimeoutExpired:
-        return {"__error__": f"{script_name} timed out after {timeout}s"}
-    except (FileNotFoundError, OSError) as exc:
-        return {"__error__": f"{script_name} spawn failed: {exc}"}
-    if result.returncode != 0:
-        stderr_tail = (result.stderr or "").strip().splitlines()[-1:] or [""]
-        return {"__error__": f"{script_name} exit {result.returncode}: {stderr_tail[0][:200]}"}
-    stdout = (result.stdout or "").strip()
-    if not stdout:
-        return {"__error__": f"{script_name} produced empty stdout"}
-    try:
-        return json.loads(stdout)
-    except json.JSONDecodeError:
-        pass
-    try:
-        return json.loads(stdout.splitlines()[-1])
-    except (json.JSONDecodeError, IndexError):
-        return {"__error__": f"{script_name} stdout not JSON: {stdout[:200]}"}
-
-
-def _is_subprocess_error(result) -> bool:
-    return isinstance(result, dict) and "__error__" in result
+    """Shim over agents.shared.subprocess_helpers.run_json_script so existing
+    call sites keep working. Returns parsed JSON on success or
+    {'__error__': ...} on any subprocess-level failure."""
+    return run_json_script(str(SCRIPTS_DIR / script_name), *args, timeout=timeout)
 
 
 def _strip_markdown_fence(text: str) -> str:
@@ -177,7 +153,7 @@ def run() -> dict:
     emails = _run_script("activity-email-check.py")
 
     # Propagate check-script failures instead of masking as 'no emails'.
-    if _is_subprocess_error(emails):
+    if is_subprocess_error(emails):
         error_msg = emails["__error__"]
         _write_atomic(
             LAST_RUN_FILE,

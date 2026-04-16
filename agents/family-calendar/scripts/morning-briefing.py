@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import traceback
 from datetime import datetime, timezone
@@ -36,6 +35,11 @@ for _p in Path(__file__).resolve().parents:
             sys.path.insert(0, str(_p))
         break
 
+from agents.shared.subprocess_helpers import (  # noqa: E402
+    is_subprocess_error,
+    run_json_script,
+)
+
 
 WORKSPACE = Path(os.path.expanduser("~/.clawford/family-calendar-workspace"))
 CACHE_DIR = WORKSPACE / "cache"
@@ -48,35 +52,10 @@ SUBPROCESS_TIMEOUT_S = 90
 
 
 def _run_script(script_name: str, *args: str, timeout: int = SUBPROCESS_TIMEOUT_S):
-    """Run a workspace script and return its parsed JSON output.
-
-    Returns None on failure. Tries full-stdout parse first, falls back
-    to last line (same pattern as shopping/delivery-digest._run_script).
-    """
-    cmd = [sys.executable, str(SCRIPTS_DIR / script_name)] + list(args)
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        return None
-    if result.returncode != 0:
-        return None
-    stdout = (result.stdout or "").strip()
-    if not stdout:
-        return None
-    try:
-        return json.loads(stdout)
-    except json.JSONDecodeError:
-        pass
-    try:
-        return json.loads(stdout.splitlines()[-1])
-    except (json.JSONDecodeError, IndexError):
-        return None
+    """Shim over agents.shared.subprocess_helpers.run_json_script so existing
+    call sites keep working. Returns parsed JSON on success or
+    {'__error__': ...} on any subprocess-level failure."""
+    return run_json_script(str(SCRIPTS_DIR / script_name), *args, timeout=timeout)
 
 
 def _parse_event_dt(iso_str: str) -> datetime | None:
@@ -287,14 +266,46 @@ def run() -> dict:
     now_utc = datetime.now(timezone.utc)
     now_pacific = now_utc.astimezone(PACIFIC)
 
-    # 2-day fetch covers today + tomorrow. Always run.
-    daily = _run_script("gcal-fetch.py", "--days", "2", "--skip-meetings")
-    daily_events = (daily or {}).get("events", []) if isinstance(daily, dict) else []
+    sources_failed: list[dict] = []
 
+    # 2-day fetch covers today + tomorrow. This is the primary data
+    # source — without it, the brief is meaningless. Propagate subprocess
+    # failures as top-level errors so the script-contract wrapper fires
+    # a fix-it alert instead of silently writing an empty brief.
+    daily = _run_script("gcal-fetch.py", "--days", "2", "--skip-meetings")
+    if is_subprocess_error(daily):
+        error_msg = daily["__error__"]
+        _write_atomic(
+            LAST_RUN_FILE,
+            json.dumps(
+                {
+                    "timestamp": now_utc.isoformat(),
+                    "status": "error",
+                    "error": error_msg,
+                    "summary": f"gcal-fetch (daily) failed: {error_msg[:120]}",
+                },
+                indent=2,
+            ),
+        )
+        return {
+            "status": "error",
+            "error": error_msg,
+            "alert": f"🐭 morning-briefing failed: {error_msg[:200]}",
+        }
+
+    daily_events = daily.get("events", []) if isinstance(daily, dict) else []
+
+    # Weekly overview is optional — only folded in on Mondays. Track any
+    # failure in sources_failed and keep going; today+tomorrow are still
+    # useful without the week-ahead section.
     week_events: list | None = None
     if now_pacific.weekday() == 0:
         weekly = _run_script("gcal-fetch.py", "--days", "7", "--skip-meetings")
-        if isinstance(weekly, dict):
+        if is_subprocess_error(weekly):
+            sources_failed.append(
+                {"source": "gcal-fetch:weekly", "error": weekly["__error__"]}
+            )
+        elif isinstance(weekly, dict):
             week_events = weekly.get("events", [])
 
     body = format_brief(daily_events, week_events, now_pacific)
@@ -302,16 +313,19 @@ def run() -> dict:
 
     today_events, tomorrow_events = split_today_tomorrow(daily_events, now_pacific)
 
+    overall_status = "degraded" if sources_failed else "ok"
+
     _write_atomic(
         LAST_RUN_FILE,
         json.dumps(
             {
                 "timestamp": now_utc.isoformat(),
-                "status": "ok",
+                "status": overall_status,
                 "today_count": len(today_events),
                 "tomorrow_count": len(tomorrow_events),
                 "weekly_overview_included": week_events is not None,
-                "daily_source_ok": daily is not None,
+                "daily_source_ok": True,
+                "sources_failed": sources_failed,
                 "summary": f"{len(today_events)} event(s) today",
             },
             indent=2,
@@ -319,12 +333,13 @@ def run() -> dict:
     )
 
     return {
-        "status": "ok",
+        "status": overall_status,
         "brief_path": str(BRIEF_FILE),
         "today_count": len(today_events),
         "tomorrow_count": len(tomorrow_events),
         "weekly_overview_included": week_events is not None,
-        "daily_source_ok": daily is not None,
+        "daily_source_ok": True,
+        "sources_failed": sources_failed,
     }
 
 

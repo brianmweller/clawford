@@ -272,10 +272,15 @@ def test_load_gmessages_signals_missing_file_returns_empty(tmp_path, dr):
     assert dr._load_gmessages_signals(tmp_path / "nope.json") == {}
 
 
-def test_load_gmessages_signals_tolerates_malformed_json(tmp_path, dr):
+def test_load_gmessages_signals_raises_on_malformed_json(tmp_path, dr):
+    """2026-04-15: the old swallow-to-empty behavior hid connector
+    gmessages corruption for days. The loader now propagates the parse
+    error so daily-refresh.py's sources_failed tracking catches it and
+    flips overall status to 'degraded'."""
     cache = tmp_path / "mined-gmessages.json"
     cache.write_text("not json at all {")
-    assert dr._load_gmessages_signals(cache) == {}
+    with pytest.raises(json.JSONDecodeError):
+        dr._load_gmessages_signals(cache)
 
 
 def test_load_gmessages_by_name_strips_parenthetical_suffix(tmp_path, dr):

@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import traceback
 from datetime import datetime, timezone
@@ -30,6 +29,11 @@ for _p in Path(__file__).resolve().parents:
             sys.path.insert(0, str(_p))
         break
 
+from agents.shared.subprocess_helpers import (  # noqa: E402
+    is_subprocess_error,
+    run_json_script,
+)
+
 
 WORKSPACE = Path(os.path.expanduser("~/.clawford/connector-workspace"))
 CACHE_DIR = WORKSPACE / "cache"
@@ -42,26 +46,10 @@ SUBPROCESS_TIMEOUT_S = 120
 
 
 def _run_script(script_name: str, *args: str, timeout: int = SUBPROCESS_TIMEOUT_S):
-    cmd = [sys.executable, str(SCRIPTS_DIR / script_name)] + list(args)
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, check=False,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        return None
-    if result.returncode != 0:
-        return None
-    stdout = (result.stdout or "").strip()
-    if not stdout:
-        return None
-    try:
-        return json.loads(stdout)
-    except json.JSONDecodeError:
-        pass
-    try:
-        return json.loads(stdout.splitlines()[-1])
-    except (json.JSONDecodeError, IndexError):
-        return None
+    """Shim over agents.shared.subprocess_helpers.run_json_script so existing
+    call sites keep working. Returns parsed JSON on success or
+    {'__error__': ...} on any subprocess-level failure."""
+    return run_json_script(str(SCRIPTS_DIR / script_name), *args, timeout=timeout)
 
 
 def _fmt_overdue_line(entry: dict) -> str:
@@ -152,10 +140,39 @@ def run() -> dict:
     now_pacific = now_utc.astimezone(PACIFIC)
 
     scan = _run_script("people-scan.py")
+
+    # people-scan.py is the only data source for the nudge. Propagate
+    # subprocess failures instead of masking them as a "no overdue
+    # check-ins" brief (the 2026-04-15 silent-outage class).
+    if is_subprocess_error(scan):
+        error_msg = scan["__error__"]
+        body = (
+            f"\U0001f431\U0001f91d Couldn't check the address book this "
+            f"morning — people-scan failed: {error_msg[:120]}.\n"
+        )
+        _write_atomic(BRIEF_FILE, body)
+        _write_atomic(
+            LAST_RUN_FILE,
+            json.dumps(
+                {
+                    "timestamp": now_utc.isoformat(),
+                    "status": "error",
+                    "error": error_msg,
+                    "summary": f"people-scan failed: {error_msg[:120]}",
+                },
+                indent=2,
+            ),
+        )
+        return {
+            "status": "error",
+            "error": error_msg,
+            "alert": f"\U0001f431\U0001f91d morning-relationship-nudge failed: {error_msg[:200]}",
+        }
+
     if not isinstance(scan, dict):
         body = (
             f"\U0001f431\U0001f91d Couldn't check the address book this "
-            f"morning — people-scan failed.\n"
+            f"morning — people-scan returned no usable output.\n"
         )
         _write_atomic(BRIEF_FILE, body)
         _write_atomic(

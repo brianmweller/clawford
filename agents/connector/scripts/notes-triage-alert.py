@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import traceback
 from datetime import datetime, timezone
@@ -31,6 +30,10 @@ for _p in Path(__file__).resolve().parents:
         break
 
 from agents.shared.llm import infer as llm_infer  # noqa: E402
+from agents.shared.subprocess_helpers import (  # noqa: E402
+    is_subprocess_error,
+    run_json_script,
+)
 from agents.shared.telegram_api import resolve_credentials, send_message  # noqa: E402
 
 
@@ -71,26 +74,10 @@ Note to categorize:
 
 
 def _run_script(script_name: str, *args: str, timeout: int = SUBPROCESS_TIMEOUT_S):
-    cmd = [sys.executable, str(SCRIPTS_DIR / script_name)] + list(args)
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, check=False,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        return None
-    if result.returncode != 0:
-        return None
-    stdout = (result.stdout or "").strip()
-    if not stdout:
-        return None
-    try:
-        return json.loads(stdout)
-    except json.JSONDecodeError:
-        pass
-    try:
-        return json.loads(stdout.splitlines()[-1])
-    except (json.JSONDecodeError, IndexError):
-        return None
+    """Shim over agents.shared.subprocess_helpers.run_json_script so existing
+    call sites keep working. Returns parsed JSON on success or
+    {'__error__': ...} on any subprocess-level failure."""
+    return run_json_script(str(SCRIPTS_DIR / script_name), *args, timeout=timeout)
 
 
 def _strip_markdown_fence(text: str) -> str:
@@ -212,6 +199,29 @@ def run() -> dict:
     now_utc = datetime.now(timezone.utc)
 
     payload = _run_script("notes-triage.py")
+
+    # notes-triage.py is the only data source. Propagate subprocess
+    # failures instead of masking them as "no new notes".
+    if is_subprocess_error(payload):
+        error_msg = payload["__error__"]
+        _write_atomic(
+            LAST_RUN_FILE,
+            json.dumps(
+                {
+                    "timestamp": now_utc.isoformat(),
+                    "status": "error",
+                    "error": error_msg,
+                    "summary": f"notes-triage failed: {error_msg[:120]}",
+                },
+                indent=2,
+            ),
+        )
+        return {
+            "status": "error",
+            "error": error_msg,
+            "alert": f"🐱 notes-triage-alert failed: {error_msg[:200]}",
+        }
+
     untriaged: list = []
     if isinstance(payload, dict):
         untriaged = payload.get("untriaged") or []
