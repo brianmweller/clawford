@@ -129,6 +129,10 @@ def bwrap_command(
 
     # Brain — read-only at the root, RW for the agent's own per-agent
     # subdir so MEMORY.md writes (via memory_writer.py) still land.
+    # Also RW-bind the per-agent <agent_id>.status.md file: it lives
+    # as a SIBLING of the per-agent dir under brain/agents/ (not
+    # inside the dir), and heartbeat_base writes it on every cron
+    # tick.
     if brain_root is not None:
         brain = Path(_expand(str(brain_root))).resolve()
         if brain.exists():
@@ -136,6 +140,9 @@ def bwrap_command(
             agent_brain = brain / "agents" / agent_id
             if agent_brain.exists():
                 cmd += ["--bind", str(agent_brain), str(agent_brain)]
+            status_file = brain / "agents" / f"{agent_id}.status.md"
+            if status_file.exists():
+                cmd += ["--bind", str(status_file), str(status_file)]
 
     # Workspace — read-write.
     if workspace.exists():

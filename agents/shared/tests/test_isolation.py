@@ -172,6 +172,25 @@ def test_bwrap_command_own_brain_subdir_is_read_write(tmp_path: Path) -> None:
     assert _has_triple(cmd, "--bind", str(agent_brain), str(agent_brain))
 
 
+def test_bwrap_command_per_agent_status_file_is_read_write(tmp_path: Path) -> None:
+    """The per-agent .status.md file lives as a sibling of the per-
+    agent dir (under brain/agents/<id>.status.md, not inside the
+    <id>/ subdir). heartbeat_base writes it every cron tick — needs
+    RW. Found via a 2026-04-16 smoke test that crashed `news-digest
+    heartbeat` with EROFS on the first bwrap run."""
+    brain = tmp_path / "brain"
+    agents_dir = brain / "agents"
+    agents_dir.mkdir(parents=True)
+    status_file = agents_dir / "shopping.status.md"
+    status_file.write_text("# status\n", encoding="utf-8")
+    workspace = tmp_path / "shopping-workspace"
+    workspace.mkdir()
+    cmd = isolation.bwrap_command(
+        agent_id="shopping", workspace=workspace, brain_root=brain,
+    )
+    assert _has_triple(cmd, "--bind", str(status_file), str(status_file))
+
+
 def test_bwrap_command_repo_root_is_read_only(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()

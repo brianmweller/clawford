@@ -42,4 +42,21 @@ apt-get update -qq
 echo "[host-system-deps] installing: ${PACKAGES[*]}"
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${PACKAGES[@]}"
 
+# P1.2 — Ubuntu 24.04 ships with apparmor_restrict_unprivileged_userns=1
+# by default, which blocks bwrap from setting up its uid map. Disable
+# the restriction so unprivileged user namespaces work for the
+# bubblewrap-wrapped agent crons. Persisted via /etc/sysctl.d so it
+# survives reboot.
+SYSCTL_FILE="/etc/sysctl.d/99-clawford-bwrap.conf"
+if [[ ! -f "$SYSCTL_FILE" ]]; then
+  echo "[host-system-deps] writing $SYSCTL_FILE for bwrap userns..."
+  cat > "$SYSCTL_FILE" <<EOF
+# Required by bubblewrap (P1.2 inter-agent isolation). Ubuntu 24.04
+# defaults to restricting unprivileged user namespaces under AppArmor;
+# bwrap fails with "setting up uid map: Permission denied" otherwise.
+kernel.apparmor_restrict_unprivileged_userns=0
+EOF
+  sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+fi
+
 echo "[host-system-deps] ok — apt prerequisites in place"
