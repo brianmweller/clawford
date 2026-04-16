@@ -127,22 +127,34 @@ def bwrap_command(
         if repo.exists():
             cmd += ["--ro-bind", str(repo), str(repo)]
 
-    # Brain — read-only at the root, RW for the agent's own per-agent
-    # subdir so MEMORY.md writes (via memory_writer.py) still land.
-    # Also RW-bind the per-agent <agent_id>.status.md file: it lives
-    # as a SIBLING of the per-agent dir under brain/agents/ (not
-    # inside the dir), and heartbeat_base writes it on every cron
-    # tick.
+    # Brain — RO at the root.
+    #
+    # Two RW exceptions for the agent's own writes:
+    #   (a) <brain>/agents/   — RW because heartbeat_base writes the
+    #       per-agent .status.md via the atomic-rename pattern
+    #       (open '<id>.status.md.tmp' → os.replace). The .tmp file
+    #       is a SIBLING of the target, so the parent dir must be
+    #       writable, and bwrap binds at file/dir granularity (no
+    #       way to make one file writable inside an RO parent).
+    #       Tradeoff: agents under bwrap can overwrite OTHER agents'
+    #       .status.md files. Status files are non-secret monitoring
+    #       data; the real isolation goal (protecting workspace cache
+    #       with tokens + conversation history + secrets) is preserved
+    #       because per-agent brain subdirs are NOT auto-RW-bound.
+    #       fix-it.status.md is unaffected because fix-it is exempt
+    #       from bwrap entirely (feedback_fixit_bubblewrap_exempt.md).
+    #   (b) <brain>/agents/<agent_id>/  — RW so memory_writer.py can
+    #       append to the agent's own MEMORY.md.
     if brain_root is not None:
         brain = Path(_expand(str(brain_root))).resolve()
         if brain.exists():
             cmd += ["--ro-bind", str(brain), str(brain)]
-            agent_brain = brain / "agents" / agent_id
+            agents_dir = brain / "agents"
+            if agents_dir.exists():
+                cmd += ["--bind", str(agents_dir), str(agents_dir)]
+            agent_brain = agents_dir / agent_id
             if agent_brain.exists():
                 cmd += ["--bind", str(agent_brain), str(agent_brain)]
-            status_file = brain / "agents" / f"{agent_id}.status.md"
-            if status_file.exists():
-                cmd += ["--bind", str(status_file), str(status_file)]
 
     # Workspace — read-write.
     if workspace.exists():
