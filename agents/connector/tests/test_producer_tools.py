@@ -69,3 +69,67 @@ def test_snooze_default_7_days(tools_mod):
 def test_mark_checkin_and_snooze_in_executors(tools_mod):
     assert "mark_checkin" in tools_mod.EXECUTORS
     assert "snooze_reminder" in tools_mod.EXECUTORS
+
+
+# ── handle_nudge_action (Phase C button callbacks) ───────────────────
+
+
+@pytest.fixture
+def nudge_tools(tools_mod, tmp_path, monkeypatch):
+    """Same as tools_mod, plus SNOOZES_PATH redirected to tmp_path."""
+    monkeypatch.setattr(
+        tools_mod, "SNOOZES_PATH",
+        str(Path(tools_mod.WORKSPACE) / "snoozes.json"),
+    )
+    return tools_mod
+
+
+def test_handle_nudge_action_done_writes_snoozes_file(nudge_tools):
+    result = nudge_tools.handle_nudge_action(slug="alice-smith", action="done")
+    assert result["status"] == "ok"
+    assert result["slug"] == "alice-smith"
+    assert result["action"] == "done"
+    with open(nudge_tools.SNOOZES_PATH, encoding="utf-8") as f:
+        data = json.load(f)
+    assert "alice-smith" in data
+    assert data["alice-smith"]["status"] == "done"
+    # Until is a YYYY-MM-DD string.
+    import re as _re
+    assert _re.match(r"^\d{4}-\d{2}-\d{2}$", data["alice-smith"]["until"])
+
+
+def test_handle_nudge_action_snoozed_uses_30_day_window(nudge_tools):
+    from datetime import date, timedelta
+    result = nudge_tools.handle_nudge_action(slug="bob", action="snoozed")
+    expected = (date.today() + timedelta(days=30)).isoformat()
+    assert result["until"] == expected
+
+
+def test_handle_nudge_action_ignored_uses_365_day_window(nudge_tools):
+    from datetime import date, timedelta
+    result = nudge_tools.handle_nudge_action(slug="carol", action="ignored")
+    expected = (date.today() + timedelta(days=365)).isoformat()
+    assert result["until"] == expected
+
+
+def test_handle_nudge_action_unknown_action_is_error(nudge_tools):
+    result = nudge_tools.handle_nudge_action(slug="x", action="yeet")
+    assert result["status"] == "error"
+
+
+def test_handle_nudge_action_empty_slug_is_error(nudge_tools):
+    result = nudge_tools.handle_nudge_action(slug="", action="done")
+    assert result["status"] == "error"
+
+
+def test_handle_nudge_action_preserves_other_slugs(nudge_tools):
+    """Writing a new entry must NOT wipe other slugs' snoozes."""
+    nudge_tools.handle_nudge_action(slug="alice", action="snoozed")
+    nudge_tools.handle_nudge_action(slug="bob", action="ignored")
+    with open(nudge_tools.SNOOZES_PATH, encoding="utf-8") as f:
+        data = json.load(f)
+    assert set(data.keys()) == {"alice", "bob"}
+
+
+def test_handle_nudge_action_in_executors(nudge_tools):
+    assert "handle_nudge_action" in nudge_tools.EXECUTORS

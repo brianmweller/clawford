@@ -32,6 +32,7 @@ from datetime import datetime, timezone
 BRAIN_PEOPLE = os.path.expanduser("~/Dropbox/openclaw-backup/people")
 CONFIG_FILE = os.path.expanduser("~/.clawford/connector-workspace/connector-config.json")
 UPCOMING_CACHE = os.path.expanduser("~/.clawford/connector-workspace/upcoming-meetings.json")
+SNOOZES_FILE = os.path.expanduser("~/.clawford/connector-workspace/snoozes.json")
 
 APPROACHING_WINDOW_DAYS = 7  # Flag people within 7 days of their cadence
 
@@ -86,6 +87,92 @@ def load_config():
         raise FileNotFoundError(f"Config not found: {CONFIG_FILE}")
     with open(CONFIG_FILE) as f:
         return json.load(f)
+
+
+def _load_snoozes_raw() -> dict:
+    """Read snoozes.json as a raw dict. Missing or malformed → {}."""
+    if not os.path.exists(SNOOZES_FILE):
+        return {}
+    try:
+        with open(SNOOZES_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_snoozes(data: dict) -> None:
+    """Atomic write of the snooze store."""
+    os.makedirs(os.path.dirname(SNOOZES_FILE), exist_ok=True)
+    tmp = SNOOZES_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, SNOOZES_FILE)
+
+
+def _apply_auto_snooze(today, auto_snooze_days: int = 14) -> None:
+    """If a last-shown-<yesterday>.json file exists, auto-snooze any
+    slug in it that doesn't already have an entry in snoozes.json.
+
+    Rationale: the morning nudge shouldn't repeat yesterday's entries
+    when the operator silent-ignores them — pressing no button should mean
+    'not now, hide for two weeks'.
+    """
+    from datetime import timedelta as _td
+    yesterday = (today - _td(days=1)).isoformat()
+    workspace_dir = os.path.dirname(SNOOZES_FILE) or "."
+    last_shown_path = os.path.join(workspace_dir, f"last-shown-{yesterday}.json")
+    if not os.path.exists(last_shown_path):
+        return
+    try:
+        with open(last_shown_path, encoding="utf-8") as f:
+            payload = json.load(f)
+    except (OSError, ValueError):
+        return
+
+    slugs = payload.get("slugs") if isinstance(payload, dict) else None
+    if not isinstance(slugs, list):
+        return
+
+    snoozes = _load_snoozes_raw()
+    changed = False
+    until = (today + _td(days=auto_snooze_days)).isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for slug in slugs:
+        if not isinstance(slug, str) or not slug:
+            continue
+        if slug in snoozes:
+            # the operator took action on this one yesterday — preserve it.
+            continue
+        snoozes[slug] = {
+            "status": "auto_snoozed",
+            "until": until,
+            "set_at": now_iso,
+        }
+        changed = True
+
+    if changed:
+        _write_snoozes(snoozes)
+
+
+def _load_active_snoozes(today):
+    """Return the set of slugs whose until-date is >= today (i.e.
+    still actively snoozed)."""
+    data = _load_snoozes_raw()
+    active = set()
+    for slug, entry in data.items():
+        if not isinstance(entry, dict):
+            continue
+        until_str = entry.get("until")
+        if not until_str:
+            continue
+        try:
+            until_date = datetime.strptime(until_str, "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            continue
+        if until_date >= today:
+            active.add(slug)
+    return active
 
 
 def _load_upcoming_meeting_emails() -> set:
@@ -178,6 +265,11 @@ def run() -> dict:
     demoted_upcoming = []
     skipped = 0
     today = datetime.now(timezone.utc).date()
+    # Roll yesterday's unactioned nudges into an auto-snooze so they
+    # don't re-appear today. Must run BEFORE _load_active_snoozes so
+    # the freshly written entries are in the filter set.
+    _apply_auto_snooze(today)
+    active_snoozes = _load_active_snoozes(today)
 
     for filepath in sorted(files):
         basename = os.path.basename(filepath)
@@ -189,6 +281,13 @@ def run() -> dict:
 
         # Filter by person if specified
         if person_filter and slug != person_filter:
+            continue
+
+        # Snooze filter — hide people with active snooze/done/ignore.
+        # the operator's nudge buttons write into SNOOZES_FILE; expired
+        # entries automatically resurface the person in the next scan.
+        if slug in active_snoozes:
+            skipped += 1
             continue
 
         # Filter by circle if specified

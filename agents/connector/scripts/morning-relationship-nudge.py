@@ -39,6 +39,9 @@ WORKSPACE = Path(os.path.expanduser("~/.clawford/connector-workspace"))
 CACHE_DIR = WORKSPACE / "cache"
 SCRIPTS_DIR = WORKSPACE / "scripts"
 BRIEF_FILE = CACHE_DIR / "morning-brief-ready.txt"
+# morning-fleet-deliver.py reads items from this file and renders
+# each as a separate Telegram message with per-person nudge buttons.
+ITEMS_FILE = CACHE_DIR / "morning-items.json"
 LAST_RUN_FILE = CACHE_DIR / "last-morning-nudge.json"
 
 PACIFIC = ZoneInfo("America/Los_Angeles")
@@ -68,6 +71,76 @@ _GROUP_LABELS = {
     "friends": "\U0001f91d FRIENDS",
     "colleagues": "\U0001f454 COLLEAGUES",
 }
+
+
+def build_nudge_items(scan: dict, now_pacific: datetime) -> list[dict]:
+    """Build the structured items list for morning-fleet-deliver.
+
+    Each item becomes its own Telegram message. Shapes:
+      {"type": "overview",     "text": "..."}            — no buttons
+      {"type": "group_header", "text": "👪 FAMILY (5)"} — no buttons
+      {"type": "person",       "slug": "...",
+                                "text": "Kai Rivera — 64 days · WhatsApp"}
+        — renders with [\u2705 done] [\U0001f515 snooze 30d] [\U0001f648 ignore]
+
+    Returns a flat list so fleet-delivery can iterate once.
+    """
+    weekday = now_pacific.strftime("%A")
+    month = now_pacific.strftime("%B")
+    day = now_pacific.day
+    overdue_by_group = scan.get("overdue_by_group") or {}
+    overdue_total = scan.get("overdue_total", 0)
+    summary = scan.get("summary") or {}
+    tracked_total = summary.get("total", 0)
+
+    grouped_counts = {g: len(items) for g, items in overdue_by_group.items()}
+    non_empty_groups = [g for g, c in grouped_counts.items() if c > 0]
+    total_shown = sum(grouped_counts.values())
+
+    if total_shown == 0:
+        return [{
+            "type": "overview",
+            "text": (
+                f"\U0001f431\U0001f91d Relationship Check — {weekday}, {month} {day}\n"
+                f"Everyone's accounted for. No overdue check-ins today.\n\n"
+                f"{tracked_total} tracked"
+            ),
+        }]
+
+    items: list[dict] = [{
+        "type": "overview",
+        "text": (
+            f"\U0001f431\U0001f91d Relationship Check — {weekday}, {month} {day}\n"
+            f"{overdue_total} overdue across {len(non_empty_groups)} "
+            f"circle{'s' if len(non_empty_groups) != 1 else ''} · "
+            f"{tracked_total} tracked"
+        ),
+    }]
+
+    for group_key in ("family", "friends", "colleagues"):
+        entries = overdue_by_group.get(group_key) or []
+        if not entries:
+            continue
+        label = _GROUP_LABELS.get(group_key, group_key.upper())
+        items.append({
+            "type": "group_header",
+            "group": group_key,
+            "text": f"{label} ({len(entries)})",
+        })
+        for entry in entries:
+            name = entry.get("name") or entry.get("slug") or "?"
+            days_since = entry.get("days_since")
+            channel = (entry.get("preferred_channel") or "").strip()
+            days_part = f"{days_since} days" if days_since is not None else "never"
+            channel_part = f" · {channel}" if channel else ""
+            items.append({
+                "type": "person",
+                "slug": entry.get("slug", ""),
+                "group": group_key,
+                "text": f"{name} — {days_part}{channel_part}",
+            })
+
+    return items
 
 
 def format_nudge(scan: dict, now_pacific: datetime) -> str:
@@ -194,6 +267,30 @@ def run() -> dict:
 
     body = format_nudge(scan, now_pacific)
     _write_atomic(BRIEF_FILE, body)
+
+    # Also emit the structured items file for morning-fleet-deliver.py.
+    # This is what lets the operator see grouped sections + per-person buttons
+    # instead of the fallback plain-text chunked delivery.
+    try:
+        nudge_items = build_nudge_items(scan, now_pacific)
+        _write_atomic(ITEMS_FILE, json.dumps(nudge_items, ensure_ascii=False, indent=2))
+
+        # Record which slugs are about to be delivered so tomorrow's
+        # people-scan can auto-snooze any that the operator didn't action.
+        shown_slugs = [
+            it.get("slug") for it in nudge_items
+            if it.get("type") == "person" and it.get("slug")
+        ]
+        today_pacific = now_pacific.date().isoformat()
+        last_shown_path = WORKSPACE / f"last-shown-{today_pacific}.json"
+        _write_atomic(
+            last_shown_path,
+            json.dumps({"slugs": shown_slugs, "delivered_at": now_utc.isoformat()}),
+        )
+    except Exception as exc:
+        # Items-file is optional; plain-text BRIEF_FILE still works as
+        # a fallback. Log but don't fail the whole cron.
+        print(f"build_nudge_items failed: {exc}", file=sys.stderr)
 
     summary = scan.get("summary") or {}
     is_monday = now_pacific.weekday() == 0

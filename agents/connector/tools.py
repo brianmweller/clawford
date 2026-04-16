@@ -23,6 +23,12 @@ UPCOMING_MEETINGS_PATH = os.path.join(WORKSPACE, "upcoming-meetings.json")
 CHECKIN_LOG_PATH = os.path.join(WORKSPACE, "checkin-log.json")
 MORNING_NUDGE_PATH = os.path.join(CACHE, "morning-nudge.txt")
 LAST_NUDGE_PATH = os.path.join(CACHE, "last-morning-nudge.json")
+SNOOZES_PATH = os.path.join(WORKSPACE, "snoozes.json")
+
+# Default durations (days) for the three nudge button actions. done
+# and snooze map to explicit durations; ignore is a long default so
+# the person resurfaces only if they remain overdue for a year.
+NUDGE_ACTION_DAYS = {"done": 30, "snoozed": 30, "ignored": 365}
 
 
 def _read_json(path: str, default=None):
@@ -258,6 +264,50 @@ TOOLS: list[dict] = [
 ]
 
 
+def handle_nudge_action(slug: str, action: str) -> dict:
+    """Record a button press from the morning Relationship Check.
+
+    action ∈ {done, snoozed, ignored}. Writes/updates snoozes.json —
+    people-scan.py reads this file and skips any slug whose until
+    date is still in the future.
+
+    Returns a short summary dict suitable for the Telegram toast.
+    """
+    from datetime import date
+
+    action = (action or "").strip().lower()
+    if action not in NUDGE_ACTION_DAYS:
+        return {"status": "error", "error": f"unknown action: {action!r}"}
+
+    slug = (slug or "").strip()
+    if not slug:
+        return {"status": "error", "error": "empty slug"}
+
+    data = _read_json(SNOOZES_PATH, default={}) or {}
+    if not isinstance(data, dict):
+        data = {}
+
+    days = NUDGE_ACTION_DAYS[action]
+    today = date.today()
+    until = (today + timedelta(days=days)).isoformat()
+    data[slug] = {
+        "status": action,
+        "until": until,
+        "set_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    # Atomic write so concurrent presses don't truncate the file.
+    tmp = SNOOZES_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, SNOOZES_PATH)
+
+    return {
+        "status": "ok", "slug": slug, "action": action,
+        "until": until, "days": days,
+    }
+
+
 EXECUTORS: dict = {
     "get_morning_nudge": get_morning_nudge,
     "get_upcoming_meetings": get_upcoming_meetings,
@@ -268,4 +318,5 @@ EXECUTORS: dict = {
     "snooze_reminder": snooze_reminder,
     "propose_remember": propose_remember,
     "confirm_remember": confirm_remember,
+    "handle_nudge_action": handle_nudge_action,
 }

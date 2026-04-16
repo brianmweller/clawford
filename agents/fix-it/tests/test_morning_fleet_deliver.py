@@ -465,6 +465,80 @@ def test_format_item_message_suppresses_category_when_show_category_false(fake_f
     assert "TSMC" in text
 
 
+NUDGE_ITEMS = [
+    {"type": "overview", "text": "🐱🤝 Relationship Check\n7 overdue · 179 tracked"},
+    {"type": "group_header", "group": "family", "text": "👪 FAMILY (2)"},
+    {"type": "person", "slug": "kai-rivera", "group": "family",
+     "text": "Kai Rivera — 64 days · WhatsApp"},
+    {"type": "person", "slug": "robin-rivera", "group": "family",
+     "text": "Robin Rivera — 64 days · email"},
+    {"type": "group_header", "group": "friends", "text": "🤝 FRIENDS (1)"},
+    {"type": "person", "slug": "alice-hyun", "group": "friends",
+     "text": "Alice Hyun — 50 days · iMessage"},
+]
+
+
+def test_deliver_nudge_sends_one_message_per_item(fake_fleet):
+    sent_args = []
+    def fake_send(bot_token, chat_id, text, silent=False, reply_markup=None):
+        sent_args.append({"text": text, "reply_markup": reply_markup})
+        return True
+    with patch.object(fake_fleet["mod"], "send_telegram", side_effect=fake_send):
+        sent, failed = fake_fleet["mod"].deliver_nudge_items_with_buttons(
+            "FAKE_TOKEN", "CHAT", NUDGE_ITEMS, footer_text=None,
+        )
+    assert failed == 0
+    assert sent == len(NUDGE_ITEMS)
+    # Overview and group headers have NO buttons
+    assert sent_args[0]["reply_markup"] is None  # overview
+    assert sent_args[1]["reply_markup"] is None  # family header
+    # Person messages have nudge buttons
+    assert sent_args[2]["reply_markup"] is not None  # Arnold
+    assert sent_args[3]["reply_markup"] is not None  # Robin
+    assert sent_args[4]["reply_markup"] is None  # friends header
+    assert sent_args[5]["reply_markup"] is not None  # Alice
+
+
+def test_deliver_nudge_person_buttons_use_nudge_callback_data(fake_fleet):
+    sent_args = []
+    def fake_send(bot_token, chat_id, text, silent=False, reply_markup=None):
+        sent_args.append(reply_markup)
+        return True
+    with patch.object(fake_fleet["mod"], "send_telegram", side_effect=fake_send):
+        fake_fleet["mod"].deliver_nudge_items_with_buttons(
+            "FAKE_TOKEN", "CHAT",
+            [{"type": "person", "slug": "kai-rivera", "text": "..."}],
+            footer_text=None,
+        )
+    markup = sent_args[0]
+    assert markup is not None
+    row = markup["inline_keyboard"][0]
+    cbs = {b["callback_data"] for b in row}
+    assert cbs == {
+        "nudge_done:kai-rivera",
+        "nudge_snooze:kai-rivera",
+        "nudge_ignore:kai-rivera",
+    }
+
+
+def test_deliver_nudge_skips_items_with_empty_text(fake_fleet):
+    sent_args = []
+    def fake_send(bot_token, chat_id, text, silent=False, reply_markup=None):
+        sent_args.append(text)
+        return True
+    items = [
+        {"type": "overview", "text": "real overview"},
+        {"type": "group_header", "text": ""},  # empty — skipped
+        {"type": "person", "slug": "x", "text": "Xavier — 30 days"},
+    ]
+    with patch.object(fake_fleet["mod"], "send_telegram", side_effect=fake_send):
+        sent, failed = fake_fleet["mod"].deliver_nudge_items_with_buttons(
+            "FAKE_TOKEN", "CHAT", items, footer_text=None,
+        )
+    assert sent == 2  # overview + person, header skipped
+    assert sent_args == ["real overview", "Xavier — 30 days"]
+
+
 def test_deliver_items_shows_category_only_on_section_transition(fake_fleet):
     """Items 1 and 2 share category '🤖 AI & Tech'; item 3 switches
     to '💰 Economics'. The delivery loop must print the category

@@ -59,6 +59,9 @@ FRESHNESS_SECONDS = 2 * 60 * 60  # 2 hours
 # chunks.
 ITEMS_FILENAME = "cache/morning-items.json"
 NEWS_DIGEST_AGENT_ID = "news-digest"
+# Connector (Huckle Cat) uses the same morning-items.json path but
+# a different item schema — see deliver_nudge_items_with_buttons.
+CONNECTOR_AGENT_ID = "connector"
 
 # Target delivery hour. The cron is scheduled a few minutes early (55 11 * * *)
 # to buffer against fix-it queue serialization; the script holds until this
@@ -154,6 +157,77 @@ def _format_item_message(item: dict, show_category: bool = True) -> str:
     if url:
         lines.append(url)
     return "\n".join(lines)
+
+
+def _nudge_buttons_for_slug(slug: str) -> dict:
+    """Inline keyboard for a Relationship Check person message.
+
+    callback_data is parsed by agents/shared/dispatcher.py's
+    _try_callback_shortcut → _handle_nudge_callback, which forwards to
+    connector's handle_nudge_action executor and updates snoozes.json.
+    """
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "\u2705 done",        "callback_data": f"nudge_done:{slug}"},
+                {"text": "\U0001f515 snooze 30d", "callback_data": f"nudge_snooze:{slug}"},
+                {"text": "\U0001f648 ignore",  "callback_data": f"nudge_ignore:{slug}"},
+            ],
+        ]
+    }
+
+
+def deliver_nudge_items_with_buttons(
+    bot_token: str,
+    chat_id: str,
+    items: list[dict],
+    footer_text: str | None = None,
+) -> tuple[int, int]:
+    """Deliver connector's Relationship Check as a sequence of Telegram
+    messages.
+
+    Item shapes:
+      {"type": "overview", "text": "..."}       — standalone message, no buttons
+      {"type": "group_header", "text": "..."}   — section header, no buttons
+      {"type": "person", "slug": "...", "text": "..."} — message with
+                                                inline nudge buttons
+
+    All but the last send are silent so the operator gets one audible ding.
+    """
+    sent = 0
+    failed = 0
+    n = len(items)
+    for i, item in enumerate(items):
+        is_last = (i == n - 1) and not footer_text
+        text = (item.get("text") or "").strip()
+        if not text:
+            continue
+        item_type = item.get("type", "")
+        reply_markup = None
+        if item_type == "person":
+            slug = item.get("slug", "")
+            if slug:
+                reply_markup = _nudge_buttons_for_slug(slug)
+        ok = send_telegram(
+            bot_token, chat_id, text,
+            silent=not is_last,
+            reply_markup=reply_markup,
+        )
+        if ok:
+            sent += 1
+        else:
+            failed += 1
+        if not is_last:
+            time.sleep(0.3)
+
+    if footer_text:
+        ok = send_telegram(bot_token, chat_id, footer_text, silent=False)
+        if ok:
+            sent += 1
+        else:
+            failed += 1
+
+    return sent, failed
 
 
 def _buttons_for_item(num: int) -> dict:
@@ -469,10 +543,11 @@ def main() -> int:
     briefs: list[tuple[str, str, str, str, object]] = []  # (agent_id, token_env, display, kind, payload)
     skipped: list[tuple[str, str]] = []
     for agent_id, token_env, display in FLEET:
-        if agent_id == NEWS_DIGEST_AGENT_ID:
+        if agent_id in (NEWS_DIGEST_AGENT_ID, CONNECTOR_AGENT_ID):
             items, items_status = read_items(agent_id)
             if items_status == "ok" and items:
-                briefs.append((agent_id, token_env, display, "items", items))
+                kind = "nudge_items" if agent_id == CONNECTOR_AGENT_ID else "items"
+                briefs.append((agent_id, token_env, display, kind, items))
                 continue
             # Fall through to plain-text brief if items file is missing
             # or stale — backwards compatibility while the morning-edition
@@ -511,6 +586,18 @@ def main() -> int:
                 all_ok = False
                 failed.append(
                     (agent_id, f"{fail_n}/{len(items)+1} item sends failed")
+                )
+        elif kind == "nudge_items":
+            # connector: Relationship Check grouped by circle with
+            # per-person ✅/🔕/🙈 buttons that write to snoozes.json.
+            items: list[dict] = payload  # type: ignore[assignment]
+            sent_n, fail_n = deliver_nudge_items_with_buttons(
+                bot_token, chat_id, items, footer_text=None,
+            )
+            if fail_n > 0:
+                all_ok = False
+                failed.append(
+                    (agent_id, f"{fail_n}/{len(items)} nudge sends failed")
                 )
         else:
             # Plain text brief — chunk at paragraph boundaries and send

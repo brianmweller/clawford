@@ -87,6 +87,7 @@ def stub_brain(tmp_path, monkeypatch):
     monkeypatch.setattr(ps, "BRAIN_PEOPLE", str(people))
     monkeypatch.setattr(ps, "CONFIG_FILE", str(workspace / "connector-config.json"))
     monkeypatch.setattr(ps, "UPCOMING_CACHE", str(workspace / "upcoming-meetings.json"))
+    monkeypatch.setattr(ps, "SNOOZES_FILE", str(workspace / "snoozes.json"))
 
     return type("Stub", (), {
         "ps": ps,
@@ -347,3 +348,147 @@ def test_run_group_entries_carry_display_group_field(stub_brain):
     result = stub_brain.ps.run()
     entry = next(p for p in result["overdue"] if p["slug"] == "aunt-marta")
     assert entry.get("display_group") == "family"
+
+
+# ── snooze state filter (Phase B) ─────────────────────────────────
+
+
+def _write_snoozes(workspace: Path, snoozes: dict):
+    (workspace / "snoozes.json").write_text(json.dumps(snoozes), encoding="utf-8")
+
+
+def test_run_skips_person_with_active_snooze(stub_brain):
+    """A person in snoozes.json with until-date in the future MUST
+    NOT appear in overdue/approaching/healthy — they're deferred."""
+    _write_person(stub_brain.people, "snoozed-friend", email="s@x.com",
+                  last_interaction=_days_ago_iso(50),
+                  circles="friends-close")
+    # 30-day snooze starting today
+    future = (datetime.now(timezone.utc).date() + timedelta(days=30)).isoformat()
+    _write_snoozes(stub_brain.workspace, {
+        "snoozed-friend": {
+            "status": "snoozed",
+            "until": future,
+            "set_at": datetime.now(timezone.utc).isoformat(),
+        },
+    })
+    result = stub_brain.ps.run()
+    assert not any(p["slug"] == "snoozed-friend" for p in result["overdue"])
+    assert not any(p["slug"] == "snoozed-friend" for p in result["approaching"])
+    assert not any(p["slug"] == "snoozed-friend" for p in result["healthy"])
+
+
+def test_run_includes_person_with_expired_snooze(stub_brain):
+    """Once the snooze until-date has passed, the person resurfaces
+    in overdue (so the operator isn't perma-hidden)."""
+    _write_person(stub_brain.people, "expired-snooze-friend", email="e@x.com",
+                  last_interaction=_days_ago_iso(50),
+                  circles="friends-close")
+    past = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+    _write_snoozes(stub_brain.workspace, {
+        "expired-snooze-friend": {
+            "status": "snoozed",
+            "until": past,
+            "set_at": datetime.now(timezone.utc).isoformat(),
+        },
+    })
+    result = stub_brain.ps.run()
+    assert any(p["slug"] == "expired-snooze-friend" for p in result["overdue"])
+
+
+def test_run_snoozes_file_missing_is_fine(stub_brain):
+    """Backwards compat: if snoozes.json doesn't exist, behavior
+    matches pre-Phase-B (no filtering)."""
+    _write_person(stub_brain.people, "normal-friend", email="n@x.com",
+                  last_interaction=_days_ago_iso(50),
+                  circles="friends-close")
+    result = stub_brain.ps.run()
+    assert any(p["slug"] == "normal-friend" for p in result["overdue"])
+
+
+def test_run_tolerates_malformed_snoozes_file(stub_brain):
+    """A corrupt snoozes.json should NOT crash the scan — fall back
+    to no-filter behavior and continue."""
+    _write_person(stub_brain.people, "normal-friend", email="n@x.com",
+                  last_interaction=_days_ago_iso(50),
+                  circles="friends-close")
+    (stub_brain.workspace / "snoozes.json").write_text("not json {",
+                                                        encoding="utf-8")
+    result = stub_brain.ps.run()
+    assert result["status"] == "ok"
+    assert any(p["slug"] == "normal-friend" for p in result["overdue"])
+
+
+# ── auto-snooze on silence (Phase D) ──────────────────────────────
+
+
+def test_run_auto_snoozes_slugs_shown_yesterday_without_action(stub_brain):
+    """Any slug listed in last-shown-<yesterday>.json that has NO
+    entry in snoozes.json gets auto-snoozed 14 days forward. This
+    prevents the same list resurfacing every morning when the operator
+    doesn't press any button."""
+    _write_person(stub_brain.people, "unactioned-friend", email="u@x.com",
+                  last_interaction=_days_ago_iso(50),
+                  circles="friends-close")
+    yesterday = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+    (stub_brain.workspace / f"last-shown-{yesterday}.json").write_text(
+        json.dumps({"slugs": ["unactioned-friend"]}),
+        encoding="utf-8",
+    )
+    # snoozes.json does NOT yet contain unactioned-friend.
+
+    result = stub_brain.ps.run()
+
+    # unactioned-friend is now auto-snoozed and absent from overdue.
+    assert not any(p["slug"] == "unactioned-friend" for p in result["overdue"])
+    # snoozes.json now contains an entry for unactioned-friend.
+    with open(stub_brain.workspace / "snoozes.json", encoding="utf-8") as f:
+        snoozes = json.load(f)
+    assert "unactioned-friend" in snoozes
+    assert snoozes["unactioned-friend"]["status"] == "auto_snoozed"
+    # Until-date is ~14 days in the future.
+    expected = (datetime.now(timezone.utc).date() + timedelta(days=14)).isoformat()
+    assert snoozes["unactioned-friend"]["until"] == expected
+
+
+def test_run_does_not_auto_snooze_slugs_brian_already_actioned(stub_brain):
+    """If the operator pressed done/snooze/ignore yesterday, his action
+    must NOT be overwritten by the auto-snooze pass."""
+    _write_person(stub_brain.people, "actioned-friend", email="a@x.com",
+                  last_interaction=_days_ago_iso(50),
+                  circles="friends-close")
+    yesterday = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+    (stub_brain.workspace / f"last-shown-{yesterday}.json").write_text(
+        json.dumps({"slugs": ["actioned-friend"]}),
+        encoding="utf-8",
+    )
+    # the operator already pressed "ignore" 365 days out yesterday.
+    existing_until = (
+        datetime.now(timezone.utc).date() + timedelta(days=364)
+    ).isoformat()
+    _write_snoozes(stub_brain.workspace, {
+        "actioned-friend": {
+            "status": "ignored",
+            "until": existing_until,
+            "set_at": datetime.now(timezone.utc).isoformat(),
+        },
+    })
+
+    stub_brain.ps.run()
+
+    with open(stub_brain.workspace / "snoozes.json", encoding="utf-8") as f:
+        snoozes = json.load(f)
+    # Status preserved (not overwritten to auto_snoozed).
+    assert snoozes["actioned-friend"]["status"] == "ignored"
+    assert snoozes["actioned-friend"]["until"] == existing_until
+
+
+def test_run_no_last_shown_file_is_fine(stub_brain):
+    """If no last-shown-<yesterday>.json exists (first day running or
+    cron skipped), behavior falls back to no-auto-snooze."""
+    _write_person(stub_brain.people, "friend", email="f@x.com",
+                  last_interaction=_days_ago_iso(50),
+                  circles="friends-close")
+    result = stub_brain.ps.run()
+    assert result["status"] == "ok"
+    # No crash; no snoozes.json was created because no slugs to snooze.

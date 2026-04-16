@@ -474,6 +474,41 @@ def _handle_engagement(
         log.warning("engagement executor failed: %s", exc)
 
 
+# nudge_{done,snoozed,ignored}:<slug> → handle_nudge_action(slug, action)
+# "snooze" is the button/user-facing word; we normalize to the status
+# value people-scan.py / snoozes.json use ("snoozed").
+_NUDGE_CALLBACK_PREFIXES = {
+    "nudge_done": "done",
+    "nudge_snooze": "snoozed",
+    "nudge_ignore": "ignored",
+}
+
+_NUDGE_TOAST = {
+    "done": "\u2705 Marked done",
+    "snoozed": "\U0001f515 Snoozed",
+    "ignored": "\U0001f648 Ignored",
+}
+
+
+def _handle_nudge_callback(
+    cfg: AgentConfig, chat_id: str,
+    action: str, slug: str, cbq_id: str,
+) -> None:
+    """Route a Relationship-Check button press to the agent's
+    handle_nudge_action executor, which writes to snoozes.json."""
+    telegram_api.answer_callback_query(
+        cfg.token, cbq_id, text=_NUDGE_TOAST.get(action, "Noted"),
+    )
+    executor = cfg.executors.get("handle_nudge_action")
+    if executor is None:
+        log.warning("no handle_nudge_action executor on %s", cfg.agent_id)
+        return
+    try:
+        executor(slug=slug, action=action)
+    except Exception as exc:
+        log.warning("handle_nudge_action failed: %s", exc)
+
+
 def _try_callback_shortcut(
     cfg: AgentConfig, agent_id: str, chat_id: str, update: dict,
 ) -> bool:
@@ -510,6 +545,14 @@ def _try_callback_shortcut(
         if data.startswith(prefix + ":"):
             article_id = data[len(prefix) + 1:]
             _handle_engagement(cfg, chat_id, action_type, article_id, cbq_id)
+            return True
+
+    # Relationship-Check nudge callbacks: nudge_done:<slug>,
+    # nudge_snooze:<slug>, nudge_ignore:<slug>
+    for prefix, action in _NUDGE_CALLBACK_PREFIXES.items():
+        if data.startswith(prefix + ":"):
+            slug = data[len(prefix) + 1:]
+            _handle_nudge_callback(cfg, chat_id, action, slug, cbq_id)
             return True
 
     return False
