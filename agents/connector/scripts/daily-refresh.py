@@ -98,12 +98,15 @@ def build_phone_index(people_dir: Path) -> dict[str, tuple[Path, str | None]]:
 
 
 def _read_gmessages_cache(cache_path: Path) -> list[dict]:
+    """Read the gmessages cache. Returns empty list if the file doesn't
+    exist (normal first-run state). Propagates OSError / JSONDecodeError
+    so the caller's sources_failed tracking catches the failure — the
+    old 'return [] on parse error' shape silently dropped corruption
+    into empty-signal success, which is how connector gmessages
+    mining could silently degrade for days."""
     if not cache_path.exists():
         return []
-    try:
-        data = json.loads(cache_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return []
+    data = json.loads(cache_path.read_text(encoding="utf-8"))
     return [e for e in (data.get("contacts") or []) if isinstance(e, dict)]
 
 
@@ -594,7 +597,11 @@ def run() -> dict:
     # Name-match fallback: Google Messages displays the contact's saved
     # name for every chat that has one in the operator's Android contacts. Match
     # against the person-file H1 when phone mining didn't find them.
-    gmessages_by_name = _load_gmessages_by_name(GMESSAGES_CACHE)
+    try:
+        gmessages_by_name = _load_gmessages_by_name(GMESSAGES_CACHE)
+    except Exception as e:
+        gmessages_by_name = {}
+        sources_failed.append({"source": "gmessages_by_name", "error": str(e)})
     name_idx = build_name_index(BRAIN_PEOPLE)
     for name, date in gmessages_by_name.items():
         entry = name_idx.get(name)

@@ -48,16 +48,17 @@ def _user_today() -> date:
 
 def _run_gcal_fetch(start_date: str, days: int) -> dict:
     """Invoke the existing gcal-fetch.py script as subprocess and parse
-    its JSON stdout. This is the canonical source of truth — avoids
-    the cache-file-shape mismatch where the daemon tools used to read
-    events-YYYY-MM-DD.json keyed by query date, but gcal-fetch writes
-    them keyed by start_date with multi-day windows inside."""
+    its JSON stdout. Passes --skip-meetings so Mistress Mouse's view
+    EXCLUDES anything linked to Sergeant Murphy's Workflowy prep notes
+    — the Mouse↔Murphy boundary is enforced at fetch time, not by
+    the LLM. Events without a Workflowy link stay in, events with one
+    get routed to Murphy only."""
     if not os.path.exists(GCAL_FETCH_SCRIPT):
         return {"error": f"gcal-fetch.py not found at {GCAL_FETCH_SCRIPT}"}
     try:
         proc = subprocess.run(
             ["/usr/bin/python3", GCAL_FETCH_SCRIPT,
-             "--date", start_date, "--days", str(days)],
+             "--date", start_date, "--days", str(days), "--skip-meetings"],
             capture_output=True, text=True, timeout=45, cwd=WORKSPACE,
         )
     except subprocess.TimeoutExpired:

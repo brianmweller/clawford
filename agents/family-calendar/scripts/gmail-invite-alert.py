@@ -42,18 +42,27 @@ SUBPROCESS_TIMEOUT_S = 90
 
 
 def _run_script(script_name: str, *args: str, timeout: int = SUBPROCESS_TIMEOUT_S):
+    """Invoke a sibling check script and parse its JSON stdout. Returns
+    either the parsed data on success or a dict
+    {'__error__': '...reason...'} on any failure. The old 'return None
+    on failure' shape collapsed auth failures into empty-result success
+    — 2026-04-15 silent-outage class. Callers must check for __error__
+    and surface it to the script-contract wrapper so fix-it alerts."""
     cmd = [sys.executable, str(SCRIPTS_DIR / script_name)] + list(args)
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout, check=False,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        return None
+    except subprocess.TimeoutExpired:
+        return {"__error__": f"{script_name} timed out after {timeout}s"}
+    except (FileNotFoundError, OSError) as exc:
+        return {"__error__": f"{script_name} spawn failed: {exc}"}
     if result.returncode != 0:
-        return None
+        stderr_tail = (result.stderr or "").strip().splitlines()[-1:] or [""]
+        return {"__error__": f"{script_name} exit {result.returncode}: {stderr_tail[0][:200]}"}
     stdout = (result.stdout or "").strip()
     if not stdout:
-        return None
+        return {"__error__": f"{script_name} produced empty stdout"}
     try:
         return json.loads(stdout)
     except json.JSONDecodeError:
@@ -61,7 +70,11 @@ def _run_script(script_name: str, *args: str, timeout: int = SUBPROCESS_TIMEOUT_
     try:
         return json.loads(stdout.splitlines()[-1])
     except (json.JSONDecodeError, IndexError):
-        return None
+        return {"__error__": f"{script_name} stdout is not JSON: {stdout[:200]}"}
+
+
+def _is_subprocess_error(result) -> bool:
+    return isinstance(result, dict) and "__error__" in result
 
 
 def _fmt_date(iso_str: str) -> str:
@@ -114,6 +127,30 @@ def run() -> dict:
     now_utc = datetime.now(timezone.utc)
 
     invites = _run_script("gmail-invite-check.py")
+
+    # Propagate underlying check-script failures instead of masking as
+    # 'no invites'. A Gmail OAuth revocation or API outage must surface
+    # here so the script-contract wrapper fires a Telegram alert.
+    if _is_subprocess_error(invites):
+        error_msg = invites["__error__"]
+        _write_atomic(
+            LAST_RUN_FILE,
+            json.dumps(
+                {
+                    "timestamp": now_utc.isoformat(),
+                    "status": "error",
+                    "error": error_msg,
+                    "summary": f"gmail-invite-check failed: {error_msg[:120]}",
+                },
+                indent=2,
+            ),
+        )
+        return {
+            "status": "error",
+            "error": error_msg,
+            "alert": f"🐭 gmail-invite-check failed: {error_msg[:200]}",
+        }
+
     if invites is None:
         invites = []
 

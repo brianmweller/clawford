@@ -77,13 +77,22 @@ def _summarize_event(ev: dict) -> dict:
         "start": ev.get("start"),
         "end": ev.get("end"),
         "attendees": [
-            a.get("email") if isinstance(a, dict) else str(a)
+            (a.get("name") or a.get("email")) if isinstance(a, dict) else str(a)
             for a in (ev.get("attendees") or [])[:10]
         ],
-        "has_video": bool(ev.get("hangoutLink") or ev.get("video")),
+        "has_video": bool(ev.get("conference_link") or ev.get("hangoutLink")),
         "location": ev.get("location", ""),
         "workflowy_node": ev.get("workflowy_node"),
     }
+
+
+def _filter_real_meetings(events: list) -> list:
+    """Sergeant Murphy's domain = real meetings only. Defined as events
+    where gcal-fetch.py tagged is_real_meeting=True (attendees or video,
+    not on the skip_titles list). The Mouse/Murphy boundary is enforced
+    here at the tool level, not by the LLM, so the operator never sees 'Pick
+    up meds' bleeding into a meetings reply."""
+    return [ev for ev in events if ev.get("is_real_meeting") is True]
 
 
 def _filter_events_on_date(events: list, target: date) -> list:
@@ -106,11 +115,12 @@ def get_meetings_for_day(day: str = "today") -> dict:
 
     data = _run_gcal_fetch(target.isoformat(), 1)
     if data.get("error"):
-        return {"date": target.isoformat(), "events": [], "error": data["error"]}
+        return {"date": target.isoformat(), "meetings": [], "error": data["error"]}
+    real = _filter_real_meetings(data.get("events", []))
     return {
         "date": target.isoformat(),
         "status": data.get("status"),
-        "events": [_summarize_event(e) for e in data.get("events", [])],
+        "meetings": [_summarize_event(e) for e in real],
         "errors": data.get("errors", []),
     }
 
@@ -123,7 +133,7 @@ def get_week_meetings() -> dict:
     if data.get("error"):
         return {"start": start.isoformat(), "days": [], "error": data["error"]}
 
-    raw = data.get("events", [])
+    raw = _filter_real_meetings(data.get("events", []))
     days = []
     for i in range(5):
         d = start + timedelta(days=i)
@@ -131,7 +141,7 @@ def get_week_meetings() -> dict:
         days.append({
             "date": d.isoformat(),
             "count": len(day_events),
-            "events": [_summarize_event(e) for e in day_events],
+            "meetings": [_summarize_event(e) for e in day_events],
         })
     return {
         "start": start.isoformat(),
@@ -179,9 +189,12 @@ TOOLS: list[dict] = [
         "type": "function",
         "name": "get_meetings_for_day",
         "description": (
-            "Return the work meetings for a given day. Pass 'today', "
-            "'tomorrow', or a 'YYYY-MM-DD' date. Call for 'what's on "
-            "my schedule', 'what meetings today'."
+            "Return real work meetings for a given day — events with "
+            "attendees or a video link, not task blocks / appointments / "
+            "reminders. Pass 'today', 'tomorrow', or a 'YYYY-MM-DD' "
+            "date. Call for 'what's on my schedule', 'what meetings "
+            "today'. Non-meeting events (dentist, errands, focus time) "
+            "live in Mistress Mouse's domain — don't report them here."
         ),
         "parameters": {
             "type": "object",

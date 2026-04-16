@@ -71,18 +71,25 @@ Body:
 
 
 def _run_script(script_name: str, *args: str, timeout: int = SUBPROCESS_TIMEOUT_S):
+    """Returns parsed JSON on success, or {'__error__': ...} on any
+    failure. Callers must check for __error__ and propagate to
+    status=error — the 'None on failure' shape collapsed auth failures
+    into empty-result success on 2026-04-15."""
     cmd = [sys.executable, str(SCRIPTS_DIR / script_name)] + list(args)
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout, check=False,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        return None
+    except subprocess.TimeoutExpired:
+        return {"__error__": f"{script_name} timed out after {timeout}s"}
+    except (FileNotFoundError, OSError) as exc:
+        return {"__error__": f"{script_name} spawn failed: {exc}"}
     if result.returncode != 0:
-        return None
+        stderr_tail = (result.stderr or "").strip().splitlines()[-1:] or [""]
+        return {"__error__": f"{script_name} exit {result.returncode}: {stderr_tail[0][:200]}"}
     stdout = (result.stdout or "").strip()
     if not stdout:
-        return None
+        return {"__error__": f"{script_name} produced empty stdout"}
     try:
         return json.loads(stdout)
     except json.JSONDecodeError:
@@ -90,7 +97,11 @@ def _run_script(script_name: str, *args: str, timeout: int = SUBPROCESS_TIMEOUT_
     try:
         return json.loads(stdout.splitlines()[-1])
     except (json.JSONDecodeError, IndexError):
-        return None
+        return {"__error__": f"{script_name} stdout not JSON: {stdout[:200]}"}
+
+
+def _is_subprocess_error(result) -> bool:
+    return isinstance(result, dict) and "__error__" in result
 
 
 def _strip_markdown_fence(text: str) -> str:
@@ -164,6 +175,28 @@ def run() -> dict:
     now_utc = datetime.now(timezone.utc)
 
     emails = _run_script("activity-email-check.py")
+
+    # Propagate check-script failures instead of masking as 'no emails'.
+    if _is_subprocess_error(emails):
+        error_msg = emails["__error__"]
+        _write_atomic(
+            LAST_RUN_FILE,
+            json.dumps(
+                {
+                    "timestamp": now_utc.isoformat(),
+                    "status": "error",
+                    "error": error_msg,
+                    "summary": f"activity-email-check failed: {error_msg[:120]}",
+                },
+                indent=2,
+            ),
+        )
+        return {
+            "status": "error",
+            "error": error_msg,
+            "alert": f"🐭 activity-email-check failed: {error_msg[:200]}",
+        }
+
     if not isinstance(emails, list):
         emails = []
 

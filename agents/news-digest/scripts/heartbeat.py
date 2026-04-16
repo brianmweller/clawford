@@ -97,7 +97,11 @@ class NewsDigestProbe(HeartbeatProbe):
                 count = len(items) if isinstance(items, list) else 0
                 return "ok", count
             except Exception:
-                return "ok", 0
+                # File exists but is unreadable / malformed — this is a
+                # real degraded state, not a clean "0 items" day. The
+                # old 'return ok, 0' hid morning-edition corruption
+                # behind a clean heartbeat.
+                return "degraded", 0
 
         now = _utcnow()
         if now.hour < MORNING_EDITION_DEADLINE_UTC_HOUR:
@@ -141,6 +145,8 @@ class NewsDigestProbe(HeartbeatProbe):
             errors.append(f"linkedin_profile: {linkedin_profile}")
         if morning_edition == "missing":
             errors.append("morning_edition: ranked-today not produced")
+        elif morning_edition == "degraded":
+            errors.append("morning_edition: ranked-today file is malformed")
 
         status = "degraded" if errors else "ok"
 
