@@ -38,6 +38,16 @@ import re
 import subprocess
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+# --- shared library sys.path shim (pattern from pre-meeting-alert.py) ---
+for _p in Path(__file__).resolve().parents:
+    if (_p / "agents" / "shared").is_dir():
+        if str(_p) not in sys.path:
+            sys.path.insert(0, str(_p))
+        break
+
+from agents.shared.scan_fields import scan_fields  # noqa: E402
 
 WORKSPACE = os.path.expanduser("~/.clawford/meetings-coach-workspace")
 CACHE_DIR = os.path.join(WORKSPACE, "cache")
@@ -245,11 +255,39 @@ def prep_meeting(event, force=False):
         with open(cache_path) as f:
             return json.load(f)
 
-    # Assemble context for each attendee
+    # P0.4: Scan externally-sourced calendar fields before they enter
+    # any downstream prompt or agent context. Calendar invites are the
+    # canonical "Invitation Is All You Need" attack vector — a malicious
+    # invite can carry an injection in its description or title that
+    # the agent would otherwise read verbatim during a chat session.
+    # Default mode is `warn` (observation-only), flip to `enforce` via
+    # CLAWFORD_INBOUND_SCANNER_MODE once the warn stream stabilizes.
+    raw_attendees = event.get("attendees", []) or []
+    scan_input: dict[str, str | None] = {
+        "title": event.get("summary", ""),
+        "description": (event.get("description") or "")[:500],
+    }
+    for i, att in enumerate(raw_attendees):
+        if isinstance(att, dict):
+            scan_input[f"attendee_{i}_name"] = att.get("name", "")
+            scan_input[f"attendee_{i}_email"] = att.get("email", "")
+
+    sanitized_fields, scan_warnings = scan_fields(
+        fields=scan_input,
+        source_type="calendar",
+        source_id=event_id,
+        workspace=Path(WORKSPACE),
+    )
+
+    # Assemble context for each attendee — use sanitized name/email so
+    # downstream agent context never sees a blocked value in enforce
+    # mode. In warn mode the values are pass-through.
     attendee_contexts = []
-    for att in event.get("attendees", []):
-        email = att.get("email", "")
-        name = att.get("name", "")
+    for i, att in enumerate(raw_attendees):
+        if not isinstance(att, dict):
+            continue
+        email = sanitized_fields.get(f"attendee_{i}_email", att.get("email", ""))
+        name = sanitized_fields.get(f"attendee_{i}_name", att.get("name", ""))
 
         att_context = {"email": email, "name": name}
 
@@ -270,10 +308,13 @@ def prep_meeting(event, force=False):
     # Read Workflowy agenda
     agenda_items = read_workflowy_agenda(event_id)
 
-    # Build result — context only, agent does the reasoning
+    # Build result — context only, agent does the reasoning. Calendar-
+    # sourced fields (title, description) flow through scan_fields()
+    # output so downstream LLM consumers see sanitized text in enforce
+    # mode and the warnings show up under `scan_warnings` in both modes.
     result = {
         "meeting_id": event_id,
-        "title": event.get("summary", ""),
+        "title": sanitized_fields.get("title", event.get("summary", "")),
         "start": event.get("start", ""),
         "end": event.get("end", ""),
         "attendees": [],
@@ -281,9 +322,10 @@ def prep_meeting(event, force=False):
             "facts": [],
             "commitments": [],
             "agenda_items": agenda_items,
-            "description": event.get("description", "")[:500] if event.get("description") else "",
+            "description": sanitized_fields.get("description", ""),
         },
         "context_sources": [],
+        "scan_warnings": scan_warnings,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
