@@ -50,3 +50,9 @@ beautifulsoup4
 lxml
 python-dateutil
 pytz
+
+# P1.1 supply-chain gate — Safeguard 12 in deploy.py runs `pip-audit`
+# against the installed packages on every deploy and refuses on HIGH/
+# CRITICAL CVE in enforce mode. Baked in here so the gate is active
+# from the first deploy on a fresh host.
+pip-audit

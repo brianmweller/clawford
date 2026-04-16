@@ -56,6 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     "mcp>=1.27" \
     httpx-sse \
     httpx \
+    pip-audit \
   && fc-cache -f \
   && rm -rf /var/lib/apt/lists/*
 

@@ -616,6 +616,21 @@ def _parse_pip_audit_json(stdout: str) -> list[dict]:
     return findings
 
 
+def _resolve_pip_audit_binary() -> str | None:
+    """Find pip-audit on disk. Tries PATH first, then common --user
+    install locations the host-deps script uses."""
+    found = shutil.which("pip-audit")
+    if found:
+        return found
+    for candidate in (
+        Path.home() / ".local" / "bin" / "pip-audit",
+        Path("/usr/local/bin/pip-audit"),
+    ):
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
 def check_pip_audit(
     requirements_path=None,
     *,
@@ -628,7 +643,8 @@ def check_pip_audit(
     so the caller can decide to log-and-skip vs hard-fail. The runner
     parameter is injectable for tests.
     """
-    cmd = ["pip-audit", "--format", "json"]
+    binary = _resolve_pip_audit_binary() or "pip-audit"
+    cmd = [binary, "--format", "json"]
     if requirements_path is not None:
         cmd += ["-r", str(requirements_path)]
     runner = runner or (lambda c: subprocess.run(c, capture_output=True, text=True, timeout=120))
