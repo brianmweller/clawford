@@ -23,7 +23,7 @@
 | 07-2b | [Lowly Worm — social 🐛📰](07-2b-lowly-worm-social.md) | **drafted** (Phase 7d) |
 | 07-3 | [Mistress Mouse 🐭📅](07-3-mistress-mouse.md) | **drafted** (Phase 7d) |
 | 07-4 | [Sergeant Murphy 🐷🔍](07-4-sergeant-murphy.md) | **drafted** (Phase 7d) |
-| 07-5 | Huckle Cat 🐱🤝 *(net-new in v3)* | pending |
+| 07-5 | [Huckle Cat 🐱🤝](07-5-huckle-cat.md) | **drafted** (Phase 7d) |
 | 07-6 | [Hilda Hippo 🦛🛒](07-6-hilda-hippo.md) | **drafted** (Phase 7d) |
 | 07-7 | Auth architectures *(net-new in v3)* | pending |
 | 08 | Security and hardening *(net-new in v3)* | pending |
