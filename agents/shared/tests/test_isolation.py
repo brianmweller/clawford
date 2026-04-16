@@ -193,6 +193,23 @@ def test_bwrap_command_agents_dir_is_read_write(tmp_path: Path) -> None:
     assert _has_triple(cmd, "--bind", str(agents_dir), str(agents_dir))
 
 
+def test_bwrap_command_includes_user_local_bin(tmp_path: Path) -> None:
+    """install-host-deps.sh installs pip packages to ~/.local/ via
+    `pip install --user --break-system-packages`. The default profile
+    RO-binds it so google-auth, pip-audit, camoufox, and every other
+    user-installed dep resolves inside the namespace. Regression
+    cover for a 2026-04-16 smoke test that crashed gcal-fetch with
+    'google-auth not installed' even though it was installed on the
+    host."""
+    workspace = tmp_path / "shopping-workspace"
+    workspace.mkdir()
+    cmd = isolation.bwrap_command(agent_id="shopping", workspace=workspace)
+    user_local = str(Path.home() / ".local")
+    if not Path(user_local).is_dir():
+        pytest.skip(f"{user_local} not present on this machine")
+    assert _has_triple(cmd, "--ro-bind", user_local, user_local)
+
+
 def test_bwrap_command_repo_root_is_read_only(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()

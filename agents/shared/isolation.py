@@ -120,6 +120,16 @@ def bwrap_command(
         if Path(ro).is_dir() or Path(ro).is_symlink():
             cmd += ["--ro-bind-try", ro, ro]
 
+    # Operator's --user pip install dir (~/.local/) — RO-bound so
+    # user-installed Python packages and CLI tools (pip-audit,
+    # google-auth, camoufox, etc.) resolve inside the namespace.
+    # install-host-deps.sh installs with `pip install --user
+    # --break-system-packages`, so this is where every fleet
+    # dependency actually lives.
+    user_local = Path.home() / ".local"
+    if user_local.is_dir():
+        cmd += ["--ro-bind", str(user_local), str(user_local)]
+
     # Repo (shared-lib code, prompts, fixtures). RO so a runaway agent
     # can't accidentally mutate source.
     if repo_root is not None:
