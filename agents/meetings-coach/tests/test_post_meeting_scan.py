@@ -776,6 +776,85 @@ def test_run_happy_path_sends_debrief_and_coaching(
     assert ids == ["evt-alexis-420"]
 
 
+def test_compose_coaching_retries_once_on_transient_llm_failure(
+    mod, pending_alexis, metrics_alexis, meeting_config, monkeypatch,
+):
+    """The coaching LLM occasionally returns ok=False on transient
+    auth/broker/network blips. One silent failure today (2026-04-16
+    19:45 UTC) meant the operator got no coaching on a 25-min meeting. Retry
+    once before giving up — a single retry buys resilience against the
+    vast majority of transient errors without inflating cron cost."""
+    growth_areas = meeting_config["coaching"]["growth_areas"]
+    attempts: list = []
+    sleep_calls: list = []
+
+    def fake_infer(prompt, **kw):
+        attempts.append(prompt)
+        if len(attempts) == 1:
+            return SimpleNamespace(
+                ok=False, text="", error="broker timeout",
+                input_tokens=0, output_tokens=0, model="fake",
+            )
+        return _fake_infer(_coaching_llm_reply())
+
+    monkeypatch.setattr(mod, "llm_infer", fake_infer)
+    monkeypatch.setattr(mod.time, "sleep", lambda s: sleep_calls.append(s))
+
+    result = mod._compose_coaching_message(pending_alexis, metrics_alexis, growth_areas)
+    assert result is not None
+    assert len(attempts) == 2
+    assert sleep_calls  # inter-attempt backoff was observed
+
+
+def test_compose_coaching_retries_once_on_json_parse_failure(
+    mod, pending_alexis, metrics_alexis, meeting_config, monkeypatch,
+):
+    """Malformed LLM output (non-JSON or truncated) should also trigger
+    one retry. Symptom today was a swallowed JSONDecodeError → None."""
+    growth_areas = meeting_config["coaching"]["growth_areas"]
+    attempts: list = []
+
+    def fake_infer(prompt, **kw):
+        attempts.append(prompt)
+        if len(attempts) == 1:
+            return SimpleNamespace(
+                ok=True, text="<<not json at all>>", error=None,
+                input_tokens=0, output_tokens=0, model="fake",
+            )
+        return _fake_infer(_coaching_llm_reply())
+
+    monkeypatch.setattr(mod, "llm_infer", fake_infer)
+    monkeypatch.setattr(mod.time, "sleep", lambda s: None)
+
+    result = mod._compose_coaching_message(pending_alexis, metrics_alexis, growth_areas)
+    assert result is not None
+    assert len(attempts) == 2
+
+
+def test_compose_coaching_returns_none_after_both_attempts_fail(
+    mod, pending_alexis, metrics_alexis, meeting_config, monkeypatch,
+):
+    """When retry also fails, return None and let the caller count it
+    as a failure. Don't retry more than once — we're on a cron budget."""
+    growth_areas = meeting_config["coaching"]["growth_areas"]
+    attempts: list = []
+
+    def fake_infer(prompt, **kw):
+        attempts.append(prompt)
+        return SimpleNamespace(
+            ok=False, text="", error="still down",
+            input_tokens=0, output_tokens=0, model="fake",
+        )
+
+    monkeypatch.setattr(mod, "llm_infer", fake_infer)
+    monkeypatch.setattr(mod.time, "sleep", lambda s: None)
+
+    result = mod._compose_coaching_message(pending_alexis, metrics_alexis, growth_areas)
+    assert result is None
+    # Exactly one retry — not a retry storm.
+    assert len(attempts) == 2
+
+
 def test_run_skips_coaching_on_metrics_too_short_without_llm_call(
     mod, scan_one_new, pending_alexis, meeting_config, tmp_path, monkeypatch
 ):

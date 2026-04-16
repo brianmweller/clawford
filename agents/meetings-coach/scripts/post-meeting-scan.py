@@ -64,6 +64,7 @@ ACTIVE_COMMITMENTS_FILE = Path(
 BOT_TOKEN_ENV = "MEETINGS_BOT_TOKEN"
 SUBPROCESS_TIMEOUT_S = 120
 LLM_TIMEOUT_S = 60
+LLM_RETRY_BACKOFF_S = 3
 KRISP_ALERT_RATE_LIMIT_S = 90 * 60  # 90 min
 
 _COACHING_PROMPT_TEMPLATE = """You coach the operator on meeting communication
@@ -642,13 +643,23 @@ def _compose_coaching_message(
         transcript=transcript,
     )
 
-    result = llm_infer(prompt, json_mode=True, timeout=LLM_TIMEOUT_S)
-    if not getattr(result, "ok", False):
-        return None
-
-    try:
-        data = json.loads(_strip_markdown_fence(result.text or ""))
-    except (json.JSONDecodeError, TypeError):
+    # Retry once on transient broker/auth/parse failures. A single
+    # retry catches the vast majority of flakes without inflating cron
+    # cost. Regression: 2026-04-16 19:45 UTC Meet & Greet the operator/Steve
+    # coaching silently dropped on a transient LLM ok=False.
+    data = None
+    for attempt in range(2):
+        if attempt > 0:
+            time.sleep(LLM_RETRY_BACKOFF_S)
+        result = llm_infer(prompt, json_mode=True, timeout=LLM_TIMEOUT_S)
+        if not getattr(result, "ok", False):
+            continue
+        try:
+            data = json.loads(_strip_markdown_fence(result.text or ""))
+            break
+        except (json.JSONDecodeError, TypeError):
+            continue
+    if data is None:
         return None
 
     lines: list[str] = [
