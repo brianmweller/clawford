@@ -41,7 +41,7 @@ The dispatcher's flow, in order:
    
    The key design decision: **callback shortcuts bypass the LLM.** Tapping "Confirm" on a reorder button should not require a 2-second model round-trip to figure out what to do. The button's callback data contains everything the dispatcher needs.
 
-3. **Agent config loading.** Import the agent's `tools.py` module dynamically. Read the agent's five conversational docs — `SOUL.md` (values/principles), `IDENTITY.md` (persona/voice, filesystem-immutable), `USER.md` (who the operator is), `AGENTS.md` (fleet map for cross-agent routing, filesystem-immutable), and `MEMORY.md` (learned rules, appendable via the `remember` tool) — from the repo to assemble the system prompt. Inject the current user-local time (not VPS UTC) so the LLM doesn't mislabel "today" and "tomorrow." Operational docs (`HEARTBEAT.md` / `CRONS.md` / `TOOLS.md`) were retired in favor of the code being the source of truth — the `TOOLS` manifest is generated dynamically from `tools.py`, scheduled work lives in `fleet-manifest.json` + `ops/scripts/*-host.sh`, and heartbeat logic lives in `scripts/heartbeat.py`.
+3. **Agent config loading.** Import the agent's `tools.py` module dynamically. Read the agent's five conversational docs — `SOUL.md` (values/principles, filesystem-immutable), `IDENTITY.md` (persona/voice, filesystem-immutable), `USER.md` (who the operator is), `AGENTS.md` (fleet map for cross-agent routing, filesystem-immutable), and `MEMORY.md` (learned rules, appendable via the `remember` tool) — from the **Dropbox brain** at `~/Dropbox/openclaw-backup/agents/<agent-id>/` to assemble the system prompt. Brain-sourced content is live-synced to the laptop and redundant to Dropbox cloud, so persistent memory survives a VPS disk loss. Inject the current user-local time (not VPS UTC) so the LLM doesn't mislabel "today" and "tomorrow." Operational docs (`HEARTBEAT.md` / `CRONS.md` / `TOOLS.md`) were retired in favor of the code being the source of truth — the `TOOLS` manifest is generated dynamically from `tools.py`, scheduled work lives in `fleet-manifest.json` + `ops/scripts/*-host.sh`, and heartbeat logic lives in `scripts/heartbeat.py`.
 
 4. **Typing indicator.** Fire `sendChatAction(typing)` so the operator sees the Telegram typing bubble while the LLM thinks.
 
@@ -116,14 +116,16 @@ The confirm executor is the piece that makes the pending-action flow safe. The L
 
 | Agent | Read tools | Producer tools | Confirm executors |
 |-------|-----------|---------------|-------------------|
-| [Mr Fixit 🦊🔧](07-1-mr-fixit.md) | `get_fleet_health`, `get_morning_status`, `get_known_issues` | — | — |
-| [Lowly Worm 🐛📰](07-2a-lowly-worm-newsfeed.md) | `get_todays_digest`, `get_topic_weights`, `recent_engagements` | `record_engagement` (also via like/dislike/more buttons) | — |
-| [Mistress Mouse 🐭📅](07-3-mistress-mouse.md) | `get_events_for_day`, `get_week`, `get_configured_calendars`, `get_recent_reminders_sent` | `propose_event_add`, `propose_event_move`, `propose_event_cancel` | `confirm_calendar_add`, `confirm_calendar_move`, `confirm_calendar_cancel` |
-| [Sergeant Murphy 🐷🔍](07-4-sergeant-murphy.md) | `get_meetings_for_day`, `get_week_meetings`, `get_commitment_status`, `get_coaching_config`, `get_recent_coaching_entries` | `list_pending_action_items`, `confirm_action_item`, `dismiss_action_item` | — |
-| [Huckle Cat 🐱🤝](07-5-huckle-cat.md) | `get_morning_nudge`, `get_upcoming_meetings`, `get_pending_triage`, `get_checkin_log`, `get_config_summary` | `mark_checkin`, `snooze_reminder` | — |
-| [Hilda Hippo 🦛🛒](07-6-hilda-hippo.md) | `get_delivery_digest`, `get_recent_orders`, `get_grocery_list`, `get_pending_actions`, `find_amazon_item`, `find_costco_item` | `propose_reorder`, `add_to_grocery`, `remove_from_grocery` | `confirm_reorder` |
+| [Mr Fixit 🦊🔧](07-1-mr-fixit.md) | `get_fleet_health`, `get_morning_status`, `get_known_issues` | `propose_remember` | `confirm_remember` |
+| [Lowly Worm 🐛📰](07-2a-lowly-worm-newsfeed.md) | `get_todays_digest`, `get_topic_weights`, `recent_engagements` | `record_engagement` (also via like/dislike/more buttons), `propose_remember` | `confirm_remember` |
+| [Mistress Mouse 🐭📅](07-3-mistress-mouse.md) | `get_events_for_day`, `get_week`, `get_configured_calendars`, `get_recent_reminders_sent` | `propose_event_add`, `propose_event_move`, `propose_event_cancel`, `propose_remember` | `confirm_calendar_add`, `confirm_calendar_move`, `confirm_calendar_cancel`, `confirm_remember` |
+| [Sergeant Murphy 🐷🔍](07-4-sergeant-murphy.md) | `get_meetings_for_day`, `get_week_meetings`, `get_commitment_status`, `get_coaching_config`, `get_recent_coaching_entries` | `list_pending_action_items`, `confirm_action_item`, `dismiss_action_item`, `propose_remember` | `confirm_remember` |
+| [Huckle Cat 🐱🤝](07-5-huckle-cat.md) | `get_morning_nudge`, `get_upcoming_meetings`, `get_pending_triage`, `get_checkin_log`, `get_config_summary` | `mark_checkin`, `snooze_reminder`, `propose_remember` | `confirm_remember` |
+| [Hilda Hippo 🦛🛒](07-6-hilda-hippo.md) | `get_delivery_digest`, `get_recent_orders`, `get_grocery_list`, `get_pending_actions`, `find_amazon_item`, `find_costco_item` | `propose_reorder`, `add_to_grocery`, `remove_from_grocery`, `propose_remember` | `confirm_reorder`, `confirm_remember` |
 
-Mr Fixit is read-only — the fleet monitor does not mutate state conversationally. Hilda Hippo has the richest tool surface — nine LLM-callable tools plus one confirm executor.
+Every agent has `propose_remember` / `confirm_remember` — the self-learning memory surface added in the 2026-04 brain migration. Saying "from now on X" to any agent stages the rule with `[💾 Remember] [Skip]` inline buttons; tapping Remember appends to that agent's `MEMORY.md` (Dropbox-brain-synced), which is then loaded into every future system prompt.
+
+Mr Fixit is otherwise read-only on its domain (no fleet-mutation tools yet — that's a future addition). Hilda Hippo has the richest tool surface — ten LLM-callable tools plus two confirm executors.
 
 ## The inline button UX
 

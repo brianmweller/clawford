@@ -20,14 +20,13 @@ Before the hardening, name the threats. Getting this wrong is how security engin
 
 ## Defense layer 1 — OS-level immutability
 
-Every file in every agent workspace that encodes the agent's *identity* is protected by `chattr +i` on the VPS filesystem. That means:
+Every file in every agent's Dropbox-brain directory (`~/Dropbox/openclaw-backup/agents/<agent-id>/`) that encodes the agent's *identity* is protected by `chattr +i` on the VPS filesystem. That means:
 
 - `SOUL.md` — the agent's core identity doc. What the agent is, what it does, what boundaries it respects.
 - `IDENTITY.md` — operator-facing identity. Who the agent is to the operator.
-- `TOOLS.md` — the complete tool inventory. What scripts the agent can run, what each does, what each requires.
-- `AGENTS.md` — the agent-interaction surface. How the agent talks to other agents in the fleet.
+- `AGENTS.md` — the fleet map + cross-agent operating rules. How each agent's domain bounds against the others.
 
-These four files are the parts of an agent that should never change without explicit operator intervention. `chattr +i` (Linux's "immutable" attribute) makes the file unwritable even by root. A new deploy that wants to update `SOUL.md` has to first `chattr -i` the file, write the new content, and then `chattr +i` it again. The deploy tool does this automatically; random agent code cannot.
+These three files are the parts of an agent that should never change without explicit operator intervention. `TOOLS.md` was retired in the 2026-04 brain migration — the LLM-callable tool surface is now generated dynamically from each agent's `tools.py` manifest, so there's no separate doc to protect. `chattr +i` (Linux's "immutable" attribute) makes the file unwritable even by root. A new deploy that wants to update `SOUL.md` has to first `chattr -i` the file, write the new content, and then `chattr +i` it again. The deploy tool does this automatically; random agent code cannot.
 
 **Why `chattr +i` and not file permissions.** File permissions (`chmod 444`) protect against accidental writes by non-root users, but root on the VPS — which is what every cron runs as, effectively — can write anyway. `chattr +i` blocks root too. The only path to writing the file is `chattr -i` first, which is a deliberate act that shows up in audit logs and is never something an LLM-driven code path would do on its own.
 
