@@ -47,6 +47,9 @@ token.json
 # to scaffold the real files from their .example siblings. .md files get
 # a CLAWFORD_BOOTSTRAP_UNEDITED sentinel comment that deploy.py refuses
 # until you replace the dummy values and delete the sentinel line.
+# SOUL.md / IDENTITY.md / USER.md / AGENTS.md / MEMORY.md moved from
+# agents/<agent>/ to ~/Dropbox/openclaw-backup/agents/<agent>/ in 2026-04.
+# Still gitignored as a safety net in case stray copies appear.
 agents/*/AGENTS.md
 agents/*/IDENTITY.md
 agents/*/MEMORY.md
