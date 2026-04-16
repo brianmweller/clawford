@@ -31,7 +31,7 @@ import re
 import sys
 import time
 import traceback
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 # --- shared library sys.path shim ---
@@ -241,8 +241,167 @@ def format_debrief(pending: dict) -> str:
             lines.append(f"\u2022 {point}")
         lines.append("")
 
-    lines.append("/confirm to save to brain \u00b7 /dismiss N to skip item N")
     return "\n".join(lines).rstrip() + "\n"
+
+
+# ─── inline keyboard ─────────────────────────────────────────────────
+
+
+def build_debrief_keyboard(pending: dict) -> dict | None:
+    """Build the inline keyboard attached to a debrief message.
+    One button set per debrief: Save / Dismiss / Modify. Returns None
+    when the pending has no event_id — the callbacks would be unable
+    to resolve the source file."""
+    event_id = (pending.get("event_id") or "").strip()
+    if not event_id:
+        return None
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "\u2705 Save",
+                 "callback_data": f"debrief_save:{event_id}"},
+                {"text": "\u274c Dismiss",
+                 "callback_data": f"debrief_dismiss:{event_id}"},
+                {"text": "\u270f\ufe0f Modify",
+                 "callback_data": f"debrief_modify:{event_id}"},
+            ]
+        ]
+    }
+
+
+# ─── save/dismiss executors (button handlers) ────────────────────────
+
+
+_COMMITMENT_ID_RE = re.compile(r"meetings-coach-(\d{4}-\d{2}-\d{2})-(\d{3})\b")
+
+
+def _next_commitment_sequence(active_md: Path, date_str: str) -> int:
+    """Return the next sequence number for today's commitments, scanning
+    existing ids in ``active.md``. Starts at 1."""
+    if not active_md.exists():
+        return 1
+    try:
+        content = active_md.read_text(encoding="utf-8")
+    except OSError:
+        return 1
+    max_seq = 0
+    for d, seq in _COMMITMENT_ID_RE.findall(content):
+        if d == date_str:
+            try:
+                max_seq = max(max_seq, int(seq))
+            except ValueError:
+                continue
+    return max_seq + 1
+
+
+def _event_already_in_active(active_md: Path, event_id: str) -> bool:
+    if not event_id or not active_md.exists():
+        return False
+    try:
+        content = active_md.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return f"event_id: {event_id}" in content
+
+
+def _delete_pending(event_id: str) -> None:
+    path = CACHE_DIR / f"pending-debrief-{event_id}.json"
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
+
+
+def save_debrief_to_brain(event_id: str) -> dict:
+    """Append non-dismissed action items from a staged debrief to
+    ``commitments/active.md`` using the canonical schema, then delete
+    the pending file. Idempotent — if the event_id is already present
+    in active.md, returns ``already_saved`` without rewriting."""
+    pending = _load_pending(event_id)
+    if pending is None:
+        return {
+            "status": "error",
+            "error": f"pending-debrief not found for event_id={event_id}",
+        }
+
+    active_md = ACTIVE_COMMITMENTS_FILE
+    if _event_already_in_active(active_md, event_id):
+        _delete_pending(event_id)
+        return {
+            "status": "ok",
+            "already_saved": True,
+            "written": 0,
+            "event_id": event_id,
+        }
+
+    speakers = pending.get("krisp_speakers") or []
+    items = pending.get("krisp_action_items") or []
+    dismissed = set(pending.get("dismissed_items") or [])
+    meeting_title = (pending.get("meeting_title") or "").strip()
+    meeting_start = (pending.get("meeting_start") or "").strip()
+
+    today_str = date.today().isoformat()
+    seq = _next_commitment_sequence(active_md, today_str)
+
+    blocks: list[str] = []
+    for idx, item in enumerate(items):
+        if idx in dismissed:
+            continue
+        who, what, by_when = _extract_action_item(item, speakers=speakers)
+        if not what:
+            continue
+        entry_id = f"meetings-coach-{today_str}-{seq:03d}"
+        seq += 1
+        created_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        lines = [
+            f"## {entry_id}",
+            f"- who: {who or 'Unassigned'}",
+            "- to_whom: the operator",
+            f"- what: {what}",
+        ]
+        if by_when:
+            lines.append(f"- by_when: {by_when}")
+        lines.extend([
+            "- status: open",
+            f"- source_detail: {meeting_title} debrief "
+            f"(event_id: {event_id}, meeting_start: {meeting_start})",
+            "- source_agent: meetings-coach",
+            f"- created_at: {created_at}",
+        ])
+        blocks.append("\n".join(lines) + "\n")
+
+    if blocks:
+        active_md.parent.mkdir(parents=True, exist_ok=True)
+        if not active_md.exists():
+            active_md.write_text(
+                "# Commitments — Active\n\n", encoding="utf-8"
+            )
+        with active_md.open("a", encoding="utf-8") as f:
+            for block in blocks:
+                f.write("\n" + block)
+
+    _delete_pending(event_id)
+    return {
+        "status": "ok",
+        "written": len(blocks),
+        "event_id": event_id,
+    }
+
+
+def dismiss_debrief(event_id: str) -> dict:
+    """Skip this debrief entirely. Never writes to active.md — just
+    deletes the pending file so the cleanup pass has nothing to do."""
+    pending_path = CACHE_DIR / f"pending-debrief-{event_id}.json"
+    existed = pending_path.exists()
+    _delete_pending(event_id)
+    return {
+        "status": "ok",
+        "dismissed": True,
+        "existed": existed,
+        "event_id": event_id,
+    }
 
 
 # ─── coaching history ────────────────────────────────────────────────
@@ -573,7 +732,11 @@ def run() -> dict:
             continue
 
         debrief_msg = format_debrief(pending)
-        if send_message(token, chat_id, debrief_msg, silent=False):
+        keyboard = build_debrief_keyboard(pending)
+        if send_message(
+            token, chat_id, debrief_msg,
+            silent=False, reply_markup=keyboard,
+        ):
             debriefs_sent += 1
 
         # Coaching (dedup via coaching-history.json)

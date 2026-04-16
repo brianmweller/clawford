@@ -130,8 +130,230 @@ def test_format_debrief_includes_title_and_sections(mod, pending_alexis):
     assert "DECISIONS" in msg or "KEY POINTS" in msg
     assert "Q2 roadmap draft" in msg
     assert "hiring pipeline" in msg
-    assert "/confirm" in msg
-    assert "/dismiss" in msg
+
+
+def test_format_debrief_drops_text_command_footer(mod, pending_alexis):
+    """The text-command footer ('/confirm to save...') is replaced by
+    an inline keyboard (build_debrief_keyboard). Leaving the footer in
+    place would be confusing now that buttons are the interaction
+    surface, and the '/dismiss N' phrasing misleads on single-item
+    debriefs where N makes no sense."""
+    msg = mod.format_debrief(pending_alexis)
+    assert "/confirm" not in msg
+    assert "/dismiss" not in msg
+    assert "item N" not in msg
+
+
+# ─── build_debrief_keyboard ──────────────────────────────────────────
+
+
+def test_build_debrief_keyboard_has_three_buttons(mod):
+    """One button set per debrief: Save / Dismiss / Modify. Each carries
+    the event_id so the dispatcher can resolve the pending file."""
+    pending = {"event_id": "evt-abc-123", "meeting_title": "X"}
+    markup = mod.build_debrief_keyboard(pending)
+    assert isinstance(markup, dict)
+    rows = markup.get("inline_keyboard")
+    assert rows and len(rows) == 1
+    buttons = rows[0]
+    assert len(buttons) == 3
+    texts = [b["text"] for b in buttons]
+    assert any("Save" in t for t in texts)
+    assert any("Dismiss" in t for t in texts)
+    assert any("Modify" in t for t in texts)
+    callback_data = [b["callback_data"] for b in buttons]
+    assert "debrief_save:evt-abc-123" in callback_data
+    assert "debrief_dismiss:evt-abc-123" in callback_data
+    assert "debrief_modify:evt-abc-123" in callback_data
+
+
+def test_build_debrief_keyboard_returns_none_without_event_id(mod):
+    """Without an event_id the callbacks can't resolve anything, so
+    no buttons are worth showing."""
+    assert mod.build_debrief_keyboard({"meeting_title": "X"}) is None
+    assert mod.build_debrief_keyboard({"event_id": ""}) is None
+
+
+# ─── save_debrief_to_brain ───────────────────────────────────────────
+
+
+def _stage_pending(cache_dir, event_id, items, **extra):
+    """Write a pending-debrief-{event_id}.json with the given action
+    items and optional extra fields."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    data = {
+        "event_id": event_id,
+        "meeting_title": extra.get("meeting_title", "Test Meeting"),
+        "meeting_start": extra.get(
+            "meeting_start", "2026-04-16T12:00:00-07:00"
+        ),
+        "krisp_action_items": items,
+        "krisp_key_points": extra.get("krisp_key_points", []),
+        "krisp_speakers": extra.get(
+            "krisp_speakers", ["Sam Smith", "Steve Shadman"]
+        ),
+        "status": "pending_review",
+    }
+    for k, v in extra.items():
+        if k not in data:
+            data[k] = v
+    (cache_dir / f"pending-debrief-{event_id}.json").write_text(
+        json.dumps(data), encoding="utf-8"
+    )
+    return data
+
+
+def test_save_debrief_appends_to_active_md_with_schema(mod, tmp_path, monkeypatch):
+    cache = tmp_path / "cache"
+    active = tmp_path / "active.md"
+    active.write_text("# Commitments — Active\n\n---\n", encoding="utf-8")
+    monkeypatch.setattr(mod, "CACHE_DIR", cache)
+    monkeypatch.setattr(mod, "ACTIVE_COMMITMENTS_FILE", active)
+
+    _stage_pending(
+        cache,
+        "evt-save-1",
+        [
+            {
+                "title": "{{Speaker_2}} to talk to recruiting about the operator's pipeline.",
+                "assignee": None,
+            }
+        ],
+    )
+
+    result = mod.save_debrief_to_brain("evt-save-1")
+    assert result["status"] == "ok"
+    assert result["written"] == 1
+
+    content = active.read_text(encoding="utf-8")
+    # Schema fields must all land in the entry.
+    assert "## meetings-coach-" in content
+    assert "- who: Steve" in content
+    assert "- to_whom: the operator" in content
+    assert "- what: " in content
+    assert "recruiting" in content
+    assert "- status: open" in content
+    assert "event_id: evt-save-1" in content
+    assert "- source_agent: meetings-coach" in content
+    assert "- created_at: " in content
+
+
+def test_save_debrief_is_idempotent_on_duplicate_event_id(mod, tmp_path, monkeypatch):
+    cache = tmp_path / "cache"
+    active = tmp_path / "active.md"
+    active.write_text(
+        "# Commitments — Active\n\n## meetings-coach-2026-04-16-001\n"
+        "- who: Steve\n- to_whom: the operator\n- what: previously saved.\n"
+        "- status: open\n- source_detail: x (event_id: evt-dup, meeting_start: y)\n"
+        "- source_agent: meetings-coach\n- created_at: 2026-04-16T00:00:00Z\n\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mod, "CACHE_DIR", cache)
+    monkeypatch.setattr(mod, "ACTIVE_COMMITMENTS_FILE", active)
+
+    _stage_pending(
+        cache, "evt-dup",
+        [{"title": "Steve to do something new.", "assignee": None}],
+    )
+    before = active.read_text(encoding="utf-8")
+    result = mod.save_debrief_to_brain("evt-dup")
+    assert result["status"] == "ok"
+    assert result.get("already_saved") is True
+    assert result["written"] == 0
+    assert active.read_text(encoding="utf-8") == before
+
+
+def test_save_debrief_skips_dismissed_indices(mod, tmp_path, monkeypatch):
+    cache = tmp_path / "cache"
+    active = tmp_path / "active.md"
+    active.write_text("# Commitments — Active\n\n", encoding="utf-8")
+    monkeypatch.setattr(mod, "CACHE_DIR", cache)
+    monkeypatch.setattr(mod, "ACTIVE_COMMITMENTS_FILE", active)
+
+    _stage_pending(
+        cache,
+        "evt-skip",
+        [
+            {"title": "Steve to do thing A.", "assignee": None},
+            {"title": "Steve to do thing B.", "assignee": None},
+            {"title": "Steve to do thing C.", "assignee": None},
+        ],
+        dismissed_items=[1],  # skip index 1 (thing B)
+    )
+    result = mod.save_debrief_to_brain("evt-skip")
+    assert result["status"] == "ok"
+    assert result["written"] == 2
+    content = active.read_text(encoding="utf-8")
+    assert "thing A" in content
+    assert "thing B" not in content
+    assert "thing C" in content
+
+
+def test_save_debrief_deletes_pending_file_on_success(
+    mod, tmp_path, monkeypatch
+):
+    cache = tmp_path / "cache"
+    active = tmp_path / "active.md"
+    active.write_text("# Commitments — Active\n\n", encoding="utf-8")
+    monkeypatch.setattr(mod, "CACHE_DIR", cache)
+    monkeypatch.setattr(mod, "ACTIVE_COMMITMENTS_FILE", active)
+
+    _stage_pending(
+        cache, "evt-del",
+        [{"title": "Steve to do it.", "assignee": None}],
+    )
+    pending_path = cache / "pending-debrief-evt-del.json"
+    assert pending_path.exists()
+
+    result = mod.save_debrief_to_brain("evt-del")
+    assert result["status"] == "ok"
+    assert not pending_path.exists()
+
+
+def test_save_debrief_with_no_items_is_graceful(mod, tmp_path, monkeypatch):
+    cache = tmp_path / "cache"
+    active = tmp_path / "active.md"
+    active.write_text("# Commitments — Active\n\n", encoding="utf-8")
+    monkeypatch.setattr(mod, "CACHE_DIR", cache)
+    monkeypatch.setattr(mod, "ACTIVE_COMMITMENTS_FILE", active)
+
+    _stage_pending(cache, "evt-empty", [])
+    result = mod.save_debrief_to_brain("evt-empty")
+    assert result["status"] == "ok"
+    assert result["written"] == 0
+    # Pending file should still be deleted on save with no items —
+    # pressing Save communicates "I'm done with this debrief".
+    assert not (cache / "pending-debrief-evt-empty.json").exists()
+
+
+def test_save_debrief_missing_pending_returns_error(mod, tmp_path, monkeypatch):
+    monkeypatch.setattr(mod, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(mod, "ACTIVE_COMMITMENTS_FILE", tmp_path / "active.md")
+    result = mod.save_debrief_to_brain("evt-missing")
+    assert result["status"] == "error"
+
+
+# ─── dismiss_debrief ─────────────────────────────────────────────────
+
+
+def test_dismiss_debrief_deletes_pending_file(mod, tmp_path, monkeypatch):
+    cache = tmp_path / "cache"
+    active = tmp_path / "active.md"
+    active.write_text("# Commitments — Active\n\n", encoding="utf-8")
+    monkeypatch.setattr(mod, "CACHE_DIR", cache)
+    monkeypatch.setattr(mod, "ACTIVE_COMMITMENTS_FILE", active)
+
+    _stage_pending(
+        cache, "evt-dismiss",
+        [{"title": "Steve to do it.", "assignee": None}],
+    )
+    pending_path = cache / "pending-debrief-evt-dismiss.json"
+
+    result = mod.dismiss_debrief("evt-dismiss")
+    assert result["status"] == "ok"
+    assert not pending_path.exists()
+    # Dismiss must not write to active.md.
+    assert "evt-dismiss" not in active.read_text(encoding="utf-8")
 
 
 def test_format_debrief_handles_krisp_native_action_item_shape(mod):

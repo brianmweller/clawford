@@ -338,6 +338,77 @@ def test_engagement_more_routes_to_executor(disp):
         record_engagement.assert_called_once_with(article_id="5", action="more")
 
 
+# ── debrief callbacks (Sergeant Murphy) ──────────────────────────
+
+
+def test_debrief_save_routes_to_save_executor(disp, monkeypatch):
+    monkeypatch.setenv("MEETINGS_BOT_TOKEN", "FAKE_MEETINGS_TOKEN")
+    (Path(disp.__file__).resolve().parent.parent / "meetings-coach-workspace").mkdir(
+        exist_ok=True
+    )
+    save_exec = MagicMock(return_value={"status": "ok", "written": 2})
+    cfg = _mock_config(
+        agent_id="meetings-coach", token="FAKE_MEETINGS_TOKEN",
+        executors={"save_debrief": save_exec},
+    )
+
+    with patch.object(disp, "telegram_api") as mock_tg, \
+         patch.object(disp, "load_agent_config", return_value=cfg), \
+         patch.object(disp, "tool_use") as mock_tu:
+        disp.dispatch(
+            "meetings-coach", _callback_update("debrief_save:evt-xyz"),
+        )
+        mock_tu.run.assert_not_called()
+        save_exec.assert_called_once_with(event_id="evt-xyz")
+        mock_tg.answer_callback_query.assert_called_once()
+
+
+def test_debrief_dismiss_routes_to_dismiss_executor(disp, monkeypatch):
+    monkeypatch.setenv("MEETINGS_BOT_TOKEN", "FAKE_MEETINGS_TOKEN")
+    dismiss_exec = MagicMock(return_value={"status": "ok", "dismissed": True})
+    cfg = _mock_config(
+        agent_id="meetings-coach", token="FAKE_MEETINGS_TOKEN",
+        executors={"dismiss_debrief": dismiss_exec},
+    )
+
+    with patch.object(disp, "telegram_api") as mock_tg, \
+         patch.object(disp, "load_agent_config", return_value=cfg), \
+         patch.object(disp, "tool_use") as mock_tu:
+        disp.dispatch(
+            "meetings-coach", _callback_update("debrief_dismiss:evt-xyz"),
+        )
+        mock_tu.run.assert_not_called()
+        dismiss_exec.assert_called_once_with(event_id="evt-xyz")
+
+
+def test_debrief_modify_routes_to_modify_executor(disp, monkeypatch):
+    """Modify doesn't write state — it replies with the prompt string
+    the executor returns so the operator knows to send his correction."""
+    monkeypatch.setenv("MEETINGS_BOT_TOKEN", "FAKE_MEETINGS_TOKEN")
+    modify_exec = MagicMock(return_value={
+        "status": "ok", "event_id": "evt-xyz",
+        "prompt": "What would you like to change?",
+    })
+    cfg = _mock_config(
+        agent_id="meetings-coach", token="FAKE_MEETINGS_TOKEN",
+        executors={"modify_debrief": modify_exec},
+    )
+
+    with patch.object(disp, "telegram_api") as mock_tg, \
+         patch.object(disp, "load_agent_config", return_value=cfg), \
+         patch.object(disp, "tool_use") as mock_tu:
+        disp.dispatch(
+            "meetings-coach", _callback_update("debrief_modify:evt-xyz"),
+        )
+        mock_tu.run.assert_not_called()
+        modify_exec.assert_called_once_with(event_id="evt-xyz")
+        # The prompt text should be sent back to the operator as a message.
+        sent_texts = [
+            c.args[2] for c in mock_tg.send_message.call_args_list
+        ]
+        assert any("What would you like to change?" in t for t in sent_texts)
+
+
 # ── unknown callback falls through to LLM ────────────────────────
 
 

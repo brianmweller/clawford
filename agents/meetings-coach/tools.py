@@ -6,6 +6,7 @@ Phase C: list/confirm/dismiss pending action items from post-meeting debriefs.
 from __future__ import annotations
 
 import glob as glob_mod
+import importlib.util
 import json
 import os
 import subprocess
@@ -14,6 +15,64 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import memory_writer  # type: ignore
+
+
+def _load_post_meeting_scan():
+    """Import post-meeting-scan.py as a module so its save/dismiss
+    helpers can back the debrief button executors. The script is
+    SCRIPT_CONTRACT-guarded (no top-level side effects), so importing
+    is safe."""
+    script = os.path.join(
+        os.path.expanduser("~/.clawford/meetings-coach-workspace"),
+        "scripts", "post-meeting-scan.py",
+    )
+    if not os.path.exists(script):
+        script = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "scripts", "post-meeting-scan.py",
+        )
+    spec = importlib.util.spec_from_file_location("pms", script)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_pms = None
+
+
+def _pms_mod():
+    global _pms
+    if _pms is None:
+        _pms = _load_post_meeting_scan()
+    return _pms
+
+
+def save_debrief(event_id: str) -> dict:
+    """Button executor: Save. Append action items to active.md and
+    delete the pending file."""
+    return _pms_mod().save_debrief_to_brain(event_id)
+
+
+def dismiss_debrief(event_id: str) -> dict:
+    """Button executor: Dismiss. Delete the pending file without
+    writing to active.md."""
+    return _pms_mod().dismiss_debrief(event_id)
+
+
+def modify_debrief(event_id: str) -> dict:
+    """Button executor: Modify. Returns a prompt asking what to change;
+    the dispatcher relays it back to the operator. The next inbound text
+    message flows to the LLM, which edits the pending debrief and
+    re-delivers it."""
+    return {
+        "status": "ok",
+        "event_id": event_id,
+        "prompt": (
+            "What would you like to change? Reply with the corrected "
+            "action item(s) and I'll save those instead — one per line, "
+            "e.g. 'Steve: Talk to recruiting about the operator's pipeline.'"
+        ),
+    }
 
 AGENT_ID = "meetings-coach"
 
@@ -418,4 +477,7 @@ EXECUTORS: dict = {
     "dismiss_action_item": dismiss_action_item,
     "propose_remember": propose_remember,
     "confirm_remember": confirm_remember,
+    "save_debrief": save_debrief,
+    "dismiss_debrief": dismiss_debrief,
+    "modify_debrief": modify_debrief,
 }

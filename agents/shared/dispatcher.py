@@ -509,6 +509,76 @@ def _handle_nudge_callback(
         log.warning("handle_nudge_action failed: %s", exc)
 
 
+# debrief_{save,dismiss,modify}:<event_id> — Sergeant Murphy post-meeting
+# buttons. Save appends action items to commitments/active.md; Dismiss
+# deletes the pending file; Modify prompts the operator for a correction and
+# the next inbound text goes through the LLM path.
+_DEBRIEF_CALLBACK_PREFIXES = {
+    "debrief_save": ("save_debrief", "\u2705 Saving..."),
+    "debrief_dismiss": ("dismiss_debrief", "\u274c Dismissed"),
+    "debrief_modify": ("modify_debrief", "\u270f\ufe0f Modify"),
+}
+
+
+def _handle_debrief_callback(
+    cfg: AgentConfig, chat_id: str,
+    prefix: str, event_id: str, cbq_id: str,
+) -> None:
+    executor_name, toast = _DEBRIEF_CALLBACK_PREFIXES[prefix]
+    telegram_api.answer_callback_query(cfg.token, cbq_id, text=toast)
+
+    executor = cfg.executors.get(executor_name)
+    if executor is None:
+        log.warning("no %s executor on %s", executor_name, cfg.agent_id)
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            f"No handler for {prefix}.",
+            skip_review=True,
+        )
+        return
+
+    try:
+        result = executor(event_id=event_id)
+    except Exception as exc:
+        log.warning("%s failed: %s", executor_name, exc)
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            f"Failed: {exc}",
+            skip_review=True,
+        )
+        return
+
+    if not isinstance(result, dict):
+        return
+
+    status = result.get("status", "ok")
+    if status != "ok":
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            f"Failed: {result.get('error', 'unknown')}",
+            skip_review=True,
+        )
+        return
+
+    if prefix == "debrief_save":
+        if result.get("already_saved"):
+            msg = "Already saved earlier — no changes written."
+        elif result.get("written"):
+            n = result["written"]
+            msg = f"\u2705 Saved {n} item{'s' if n != 1 else ''} to commitments."
+        else:
+            msg = "Nothing to save — pending cleared."
+        telegram_api.send_message(cfg.token, chat_id, msg, skip_review=True)
+    elif prefix == "debrief_dismiss":
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            "\u274c Debrief dismissed.", skip_review=True,
+        )
+    elif prefix == "debrief_modify":
+        prompt = result.get("prompt") or "What would you like to change?"
+        telegram_api.send_message(cfg.token, chat_id, prompt, skip_review=True)
+
+
 def _try_callback_shortcut(
     cfg: AgentConfig, agent_id: str, chat_id: str, update: dict,
 ) -> bool:
@@ -553,6 +623,13 @@ def _try_callback_shortcut(
         if data.startswith(prefix + ":"):
             slug = data[len(prefix) + 1:]
             _handle_nudge_callback(cfg, chat_id, action, slug, cbq_id)
+            return True
+
+    # Debrief buttons (Sergeant Murphy): debrief_{save,dismiss,modify}:<event_id>
+    for prefix in _DEBRIEF_CALLBACK_PREFIXES:
+        if data.startswith(prefix + ":"):
+            event_id = data[len(prefix) + 1:]
+            _handle_debrief_callback(cfg, chat_id, prefix, event_id, cbq_id)
             return True
 
     return False
