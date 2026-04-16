@@ -127,34 +127,82 @@ def _strip_markdown_fence(text: str) -> str:
 # ─── format_debrief ──────────────────────────────────────────────────
 
 
-_SPEAKER_PLACEHOLDER_RE = re.compile(r"\{\{\s*Speaker_\d+\s*\}\}\s*")
+_SPEAKER_PLACEHOLDER_RE = re.compile(r"\{\{\s*Speaker_(\d+)\s*\}\}")
+_OWNER_PROSE_RE = re.compile(
+    r"^(?P<who>[A-Z][a-zA-Z\-']+(?:\s+[A-Z][a-zA-Z\-']+)?)"
+    r"\s+(?P<verb>to|will|should|shall|must|needs to|has to|is going to)"
+    r"\b\s+(?P<what>.+)$",
+    re.DOTALL,
+)
 
 
-def _extract_action_item(item) -> tuple[str, str, str]:
-    """Pull (who, what, by_when) from a Krisp-shaped or canonical action
-    item. Krisp MCP emits {"title", "assignee", "completed"} where
-    ``title`` often contains an unresolved ``{{Speaker_N}}`` token and
-    ``assignee`` is frequently ``None``. Callers should drop items whose
-    ``what`` comes back empty."""
+def _first_name(full: str) -> str:
+    return (full or "").strip().split(" ", 1)[0]
+
+
+def _resolve_speaker_placeholders(text: str, speakers: list) -> str:
+    """Replace {{Speaker_N}} tokens with speakers[N-1] (first name).
+    Strip unresolvable tokens. Krisp emits placeholders in this shape
+    because it stores transcripts before the speaker→name mapping is
+    confirmed; the mapping rides on the meeting's ordered ``speakers``
+    array, which we persist as ``krisp_speakers`` on the pending file."""
+    def repl(match):
+        n = int(match.group(1))
+        if 1 <= n <= len(speakers):
+            return _first_name(speakers[n - 1])
+        return ""
+    text = _SPEAKER_PLACEHOLDER_RE.sub(repl, text or "")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _extract_action_item(item, speakers=None) -> tuple[str, str, str]:
+    """Resolve a Krisp-shaped or canonical action item into
+    ``(who, what, by_when)``. Every item is guaranteed to carry a
+    ``who`` if any content is available: try assignee → prose-leading
+    name → first speaker (meeting host) → 'Unassigned'."""
+    speakers = speakers or []
     if not isinstance(item, dict):
-        return "", str(item or "").strip(), ""
-    what = (
+        raw = str(item or "").strip()
+        if not raw:
+            return "", "", ""
+        who = _first_name(speakers[0]) if speakers else "Unassigned"
+        return who, raw, ""
+
+    raw = (
         item.get("what")
         or item.get("title")
         or item.get("text")
         or item.get("task")
         or ""
     )
-    what = _SPEAKER_PLACEHOLDER_RE.sub("", str(what)).strip()
-    who = (item.get("who") or item.get("assignee") or item.get("owner") or "") or ""
-    who = str(who).strip()
+    raw = _resolve_speaker_placeholders(str(raw), speakers)
+    if not raw:
+        return "", "", ""
+
+    assignee = (
+        item.get("who") or item.get("assignee") or item.get("owner") or ""
+    ) or ""
+    assignee = str(assignee).strip()
+
     by_when = (
-        item.get("by_when")
-        or item.get("due")
-        or item.get("due_date")
-        or ""
+        item.get("by_when") or item.get("due") or item.get("due_date") or ""
     ) or ""
     by_when = str(by_when).strip()
+
+    if assignee:
+        who = _first_name(assignee)
+        what = raw
+    else:
+        m = _OWNER_PROSE_RE.match(raw)
+        if m:
+            who = _first_name(m.group("who"))
+            what = f"{m.group('verb')} {m.group('what')}".strip()
+        else:
+            who = _first_name(speakers[0]) if speakers else "Unassigned"
+            what = raw
+
+    if what:
+        what = what[0].upper() + what[1:] if len(what) > 1 else what.upper()
     return who, what, by_when
 
 
@@ -164,6 +212,7 @@ def format_debrief(pending: dict) -> str:
     title = (pending.get("meeting_title") or "(untitled)").strip()
     action_items = pending.get("krisp_action_items") or []
     key_points = pending.get("krisp_key_points") or []
+    speakers = pending.get("krisp_speakers") or []
 
     lines: list[str] = [
         f"\U0001f437\U0001f50d Debrief ready — {title}",
@@ -172,7 +221,7 @@ def format_debrief(pending: dict) -> str:
 
     rendered_items: list[str] = []
     for item in action_items:
-        who, what, by_when = _extract_action_item(item)
+        who, what, by_when = _extract_action_item(item, speakers=speakers)
         if not what:
             continue
         segment = f"{who}: {what}" if who else what

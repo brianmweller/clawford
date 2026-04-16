@@ -137,9 +137,9 @@ def test_format_debrief_includes_title_and_sections(mod, pending_alexis):
 def test_format_debrief_handles_krisp_native_action_item_shape(mod):
     """Krisp MCP returns action_items as {title, assignee, completed},
     not {who, what, by_when}. The renderer must extract content from
-    Krisp's native keys rather than silently dropping the item as '1. '.
-    Regression: 2026-04-16 Meet & Greet the operator/Steve debrief delivered
-    as '1. ' with no content."""
+    Krisp's native keys AND surface an owner, even when the owner is
+    embedded in the prose. Regression: 2026-04-16 Meet & Greet
+    the operator/Steve debrief delivered as '1. ' with no content."""
     pending = {
         "event_id": "e1",
         "meeting_title": "Meet & Greet: Sam Smith | Steve Shadman",
@@ -151,23 +151,24 @@ def test_format_debrief_handles_krisp_native_action_item_shape(mod):
             }
         ],
         "krisp_key_points": [],
-        "participants": ["the operator", "Steve"],
+        "participants": ["Sam Smith", "Steve Shadman"],
+        "krisp_speakers": ["Sam Smith", "Steve Shadman"],
     }
     msg = mod.format_debrief(pending)
     assert "ACTION ITEMS" in msg
     assert "recruiting team" in msg
-    # The line must not collapse to a bare "1. "
-    assert "1. " in msg
+    # Every rendered item must carry an owner prefix.
     for line in msg.splitlines():
         if line.startswith("1. "):
-            assert line.strip() != "1."
-            assert len(line) > len("1. ")
+            assert ":" in line, f"no owner prefix: {line!r}"
+            assert line.split(":", 1)[0].replace("1. ", "").strip(), \
+                f"empty owner in: {line!r}"
 
 
-def test_format_debrief_strips_speaker_placeholder(mod):
-    """Krisp leaves {{Speaker_N}} template tokens in action item titles.
-    These are opaque to the operator on Telegram; strip them rather than
-    leaking the template through to the rendered message."""
+def test_format_debrief_resolves_speaker_placeholder_via_krisp_speakers(mod):
+    """Krisp emits {{Speaker_N}} placeholders in action item titles;
+    the resolver must replace them with krisp_speakers[N-1]. The
+    placeholder must NOT leak through to the rendered message."""
     pending = {
         "event_id": "e2",
         "meeting_title": "Meet & Greet",
@@ -179,12 +180,57 @@ def test_format_debrief_strips_speaker_placeholder(mod):
             }
         ],
         "krisp_key_points": [],
-        "participants": ["the operator", "Steve"],
+        "krisp_speakers": ["Sam Smith", "Steve Shadman"],
     }
     msg = mod.format_debrief(pending)
     assert "{{Speaker_2}}" not in msg
     assert "Speaker_2" not in msg
     assert "recruiting team" in msg
+    # Resolved owner should be Steve (first name from speakers[1]).
+    assert "Steve" in msg
+
+
+def test_format_debrief_extracts_owner_from_prose_when_assignee_null(mod):
+    """When assignee is null but the title starts with 'NAME to/will/should...'
+    pattern, extract NAME as the owner and strip the verb-phrase from
+    the task so we render '1. NAME: <capitalized task>'."""
+    pending = {
+        "event_id": "e3",
+        "meeting_title": "1:1 with Alexis",
+        "krisp_action_items": [
+            {
+                "title": "Alexis will share hiring pipeline data by Friday.",
+                "completed": False,
+                "assignee": None,
+            }
+        ],
+        "krisp_key_points": [],
+    }
+    msg = mod.format_debrief(pending)
+    assert "1. Alexis: " in msg
+    assert "hiring pipeline" in msg
+
+
+def test_format_debrief_every_item_has_owner(mod):
+    """Hard invariant — every rendered action item carries a who: prefix.
+    Even when owner resolution fails, we fall back to 'Unassigned' rather
+    than rendering a bare task."""
+    pending = {
+        "event_id": "e4",
+        "meeting_title": "Standup",
+        "krisp_action_items": [
+            {"title": "Review the new onboarding deck.", "assignee": None},
+            {"title": "{{Speaker_1}} to merge the PR.", "assignee": None},
+        ],
+        "krisp_speakers": ["Sam Smith"],
+        "krisp_key_points": [],
+    }
+    msg = mod.format_debrief(pending)
+    for line in msg.splitlines():
+        if line.startswith(("1. ", "2. ")):
+            prefix = line.split(":", 1)[0]
+            owner = prefix.split(". ", 1)[-1].strip()
+            assert owner, f"no owner before colon in: {line!r}"
 
 
 def test_format_debrief_skips_empty_action_items(mod):
@@ -223,6 +269,27 @@ def test_format_debrief_uses_assignee_when_present(mod):
     }
     msg = mod.format_debrief(pending)
     assert "the operator: Send updated Q2 roadmap draft" in msg
+
+
+def test_format_debrief_assignee_beats_prose_extraction(mod):
+    """Explicit assignee should win over prose-based extraction so we
+    don't mis-assign when Krisp resolves the owner but the title still
+    begins with a speaker name (e.g., paraphrase)."""
+    pending = {
+        "event_id": "e5",
+        "meeting_title": "Planning",
+        "krisp_action_items": [
+            {
+                "title": "Alexis to draft the Q3 OKRs.",
+                "assignee": "the operator",
+                "completed": False,
+            }
+        ],
+        "krisp_key_points": [],
+    }
+    msg = mod.format_debrief(pending)
+    assert "the operator: " in msg
+    assert "Alexis: " not in msg
 
 
 # ─── coaching history ───────────────────────────────────────────────

@@ -279,6 +279,10 @@ async def fetch_krisp_transcripts_mcp(days_back=1):
                         meeting.get("speakers", [])
                         + meeting.get("attendees", [])
                     )),
+                    # ORDERED speakers list — required to resolve
+                    # {{Speaker_N}} placeholders in action_items. Keep
+                    # separate from ``participants`` (deduped combined).
+                    "speakers": list(meeting.get("speakers", []) or []),
                     "key_points": (meeting.get("meeting_notes") or {}).get("key_points", []),
                     "action_items": (meeting.get("meeting_notes") or {}).get("action_items", []),
                     "text": "",
@@ -595,6 +599,7 @@ def build_transcript_data(transcript):
     return {
         "krisp_key_points": transcript.get("key_points", []),
         "krisp_action_items": transcript.get("action_items", []),
+        "krisp_speakers": list(transcript.get("speakers", []) or []),
         "transcript_text": (transcript.get("text", "") or "")[:8000],
         "participants": transcript.get("participants", []),
     }
@@ -614,6 +619,7 @@ def stage_debrief(event_id, event, transcript, transcript_data):
         "transcript_source": transcript.get("source", ""),
         "krisp_key_points": transcript_data.get("krisp_key_points", []),
         "krisp_action_items": transcript_data.get("krisp_action_items", []),
+        "krisp_speakers": transcript_data.get("krisp_speakers", []),
         "transcript_text": transcript_data.get("transcript_text", ""),
         "participants": transcript_data.get("participants", []),
         "staged_at": datetime.now(timezone.utc).isoformat(),
