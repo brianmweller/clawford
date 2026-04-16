@@ -545,6 +545,129 @@ CRON_MESSAGE_FORBIDDEN_PATTERNS: list[str] = [
 ]
 
 
+# ────────────────────────────────────────────────────────────────────────
+# pip-audit gate (Safeguard 12) — supply-chain vulnerability check
+# ────────────────────────────────────────────────────────────────────────
+
+
+PIP_AUDIT_MODE_ENV_VAR = "CLAWFORD_PIP_AUDIT_MODE"
+PIP_AUDIT_DEFAULT_MODE = "warn"
+PIP_AUDIT_ALLOWED_MODES = ("warn", "enforce", "skip")
+# By default we only block on HIGH/CRITICAL CVEs — informational and
+# medium-severity findings clutter the log and almost never need
+# emergency action. Override via CLAWFORD_PIP_AUDIT_SEVERITY=low.
+PIP_AUDIT_BLOCKING_SEVERITY_ENV_VAR = "CLAWFORD_PIP_AUDIT_SEVERITY"
+PIP_AUDIT_DEFAULT_BLOCKING_SEVERITY = "high"
+_SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
+def _pip_audit_mode() -> str:
+    raw = (os.environ.get(PIP_AUDIT_MODE_ENV_VAR) or PIP_AUDIT_DEFAULT_MODE).strip().lower()
+    if raw not in PIP_AUDIT_ALLOWED_MODES:
+        return PIP_AUDIT_DEFAULT_MODE
+    return raw
+
+
+def _pip_audit_blocking_severity_threshold() -> int:
+    raw = (
+        os.environ.get(PIP_AUDIT_BLOCKING_SEVERITY_ENV_VAR)
+        or PIP_AUDIT_DEFAULT_BLOCKING_SEVERITY
+    ).strip().lower()
+    return _SEVERITY_RANK.get(raw, _SEVERITY_RANK[PIP_AUDIT_DEFAULT_BLOCKING_SEVERITY])
+
+
+def _parse_pip_audit_json(stdout: str) -> list[dict]:
+    """Normalize pip-audit's JSON output to a flat list of vulnerability
+    dicts: [{name, version, cve, severity, fix_versions, description}, ...].
+
+    pip-audit's output shape varies slightly between versions; this
+    handles both the {"dependencies": [...]} envelope and the bare list
+    form. Unknown shapes return [] so the caller treats it as 'no
+    findings' rather than crashing.
+    """
+    try:
+        body = json.loads(stdout)
+    except json.JSONDecodeError:
+        return []
+    if isinstance(body, dict):
+        deps = body.get("dependencies") or []
+    elif isinstance(body, list):
+        deps = body
+    else:
+        return []
+
+    findings: list[dict] = []
+    for dep in deps:
+        if not isinstance(dep, dict):
+            continue
+        name = dep.get("name") or dep.get("package") or "?"
+        version = dep.get("version") or "?"
+        for v in dep.get("vulns") or []:
+            if not isinstance(v, dict):
+                continue
+            findings.append({
+                "name": name,
+                "version": version,
+                "cve": v.get("id") or v.get("aliases", ["?"])[0] if v.get("aliases") else (v.get("id") or "?"),
+                "severity": (v.get("severity") or "unknown").lower(),
+                "fix_versions": v.get("fix_versions") or [],
+                "description": (v.get("description") or "")[:200],
+            })
+    return findings
+
+
+def check_pip_audit(
+    requirements_path=None,
+    *,
+    runner=None,
+):
+    """Run `pip-audit` against the given requirements file (or current
+    environment if omitted). Returns (findings, error_message).
+
+    If pip-audit isn't installed, returns ([], "pip-audit not available")
+    so the caller can decide to log-and-skip vs hard-fail. The runner
+    parameter is injectable for tests.
+    """
+    cmd = ["pip-audit", "--format", "json"]
+    if requirements_path is not None:
+        cmd += ["-r", str(requirements_path)]
+    runner = runner or (lambda c: subprocess.run(c, capture_output=True, text=True, timeout=120))
+    try:
+        proc = runner(cmd)
+    except FileNotFoundError:
+        return [], "pip-audit not installed (pip install pip-audit)"
+    except subprocess.TimeoutExpired:
+        return [], "pip-audit timed out after 120s"
+    except Exception as e:  # pragma: no cover — defensive
+        return [], f"pip-audit failed to launch: {e}"
+
+    # pip-audit exits 1 when vulnerabilities are found — that's expected
+    # and not an error. Other non-zero codes (missing requirements file,
+    # malformed JSON output) ARE errors.
+    stdout = (proc.stdout or "").strip()
+    if proc.returncode not in (0, 1):
+        stderr_tail = (proc.stderr or "").strip()[-300:]
+        return [], f"pip-audit exit {proc.returncode}: {stderr_tail or 'no stderr'}"
+
+    findings = _parse_pip_audit_json(stdout)
+    return findings, None
+
+
+def filter_blocking_findings(
+    findings: list[dict], threshold_rank: int,
+) -> list[dict]:
+    """Keep only findings whose severity is >= threshold_rank.
+
+    Findings with severity 'unknown' fall through as non-blocking —
+    pip-audit can't always grade GHSA records, and a non-blocking
+    advisory still appears in the deploy log for operator review.
+    """
+    return [
+        f for f in findings
+        if _SEVERITY_RANK.get(f.get("severity", "unknown"), 0) >= threshold_rank
+    ]
+
+
 def check_cron_message_hygiene(manifest: "Manifest") -> list[str]:
     """Return a list of hygiene errors across the manifest's cron messages.
 
@@ -1517,6 +1640,13 @@ def main() -> int:
             "in structural manifest changes. Does not run a deploy."
         ),
     )
+    ap.add_argument(
+        "--skip-pip-audit", action="store_true",
+        help=(
+            "Skip Safeguard 12 (pip-audit supply-chain check). Emergency "
+            "override; CLAWFORD_PIP_AUDIT_MODE=skip is the env-var equivalent."
+        ),
+    )
     args = ap.parse_args()
 
     _DRY = args.dry_run
@@ -1578,6 +1708,16 @@ def main() -> int:
             return 2
         return _sync_one(args.agent_id)
 
+    # Safeguard 12: pip-audit supply-chain check. Runs ONCE per deploy
+    # invocation (system-wide check; same answer for every agent) and
+    # short-circuits before any backup or workspace write happens.
+    # Mode resolution: CLI flag > env var > default ("warn"). Default is
+    # warn so the gate gathers data without blocking the operator's
+    # routine deploys; flip to enforce after the first round of advisory
+    # review.
+    if not _run_pip_audit_safeguard(args):
+        return 9
+
     if args.all:
         agents_dir = REPO_ROOT / "agents"
         targets = []
@@ -1600,6 +1740,70 @@ def main() -> int:
         ap.print_usage()
         return 2
     return deploy_one(args.agent_id, args)
+
+
+def _run_pip_audit_safeguard(args) -> bool:
+    """Run Safeguard 12. Returns True to proceed, False to abort.
+
+    Decision matrix:
+      mode == skip OR --skip-pip-audit  → skip the check, log it, return True
+      pip-audit not installed           → log warning, return True
+      no findings at-or-above threshold → log clean, return True
+      findings, mode == warn            → log them, return True (don't block)
+      findings, mode == enforce         → log them, return False (block)
+    """
+    if getattr(args, "skip_pip_audit", False):
+        note("Safeguard 12 (pip-audit) — SKIPPED via --skip-pip-audit")
+        return True
+    mode = _pip_audit_mode()
+    if mode == "skip":
+        note("Safeguard 12 (pip-audit) — SKIPPED via CLAWFORD_PIP_AUDIT_MODE=skip")
+        return True
+
+    note("Safeguard 12 (pip-audit)")
+    findings, err = check_pip_audit()
+    if err:
+        log(f"pip-audit unavailable — {err}; continuing without supply-chain check", "warn")
+        return True
+
+    threshold = _pip_audit_blocking_severity_threshold()
+    blocking = filter_blocking_findings(findings, threshold)
+
+    if not blocking:
+        if findings:
+            log(
+                f"pip-audit: {len(findings)} advisory(ies) below severity "
+                f"threshold; deploy proceeds",
+                "ok",
+            )
+        else:
+            log("pip-audit: no advisories", "ok")
+        return True
+
+    log(
+        f"pip-audit: {len(blocking)} blocking advisory(ies) "
+        f"(severity >= rank {threshold}):",
+        "err" if mode == "enforce" else "warn",
+    )
+    for f in blocking:
+        fixes = ",".join(f["fix_versions"]) if f["fix_versions"] else "(no fix)"
+        log(
+            f"  {f['name']}=={f['version']} {f['cve']} "
+            f"severity={f['severity']} fix={fixes}",
+            "err" if mode == "enforce" else "warn",
+        )
+        if f.get("description"):
+            log(f"    {f['description']}", "warn")
+    if mode == "enforce":
+        log(
+            "Refusing deploy. Either upgrade the affected packages, "
+            "rerun with --skip-pip-audit, or set "
+            "CLAWFORD_PIP_AUDIT_MODE=warn / CLAWFORD_PIP_AUDIT_SEVERITY=critical.",
+            "err",
+        )
+        return False
+    log("warn mode: deploy proceeds despite advisories", "warn")
+    return True
 
 
 if __name__ == "__main__":
