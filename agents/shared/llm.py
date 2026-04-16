@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -74,6 +75,12 @@ DEFAULT_TIMEOUT_S = 90
 
 CLAWFORD_VERSION = "0.1.0"
 CLAWFORD_USER_AGENT = f"clawford/{CLAWFORD_VERSION}"
+
+# P0.3: Forensics. When scripts are invoked via contract_wrap.py, the
+# wrapper sets CLAWFORD_TRACE_ID in the subprocess env so every LLM call
+# inside the script tags its stderr log with the same id the envelope
+# will carry. Callers can also pass trace_id= directly.
+TRACE_ID_ENV_VAR = "CLAWFORD_TRACE_ID"
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +114,7 @@ class InferResult:
     error: str | None = None
     function_call: dict | None = None
     response_id: str = ""
+    trace_id: str = ""
 
     @property
     def ok(self) -> bool:
@@ -127,6 +135,7 @@ def infer(
     timeout: int = DEFAULT_TIMEOUT_S,
     tools: list[dict] | None = None,
     input_items: list[dict] | None = None,
+    trace_id: str | None = None,
 ) -> InferResult:
     """Run an LLM inference call through the ChatGPT-subscription codex
     responses endpoint.
@@ -150,10 +159,47 @@ def infer(
             (prior user turns, assistant replies, function_call items,
             function_call_output items). Mutually exclusive with prompt.
             Used by tool_use.py to chain calls.
+        trace_id: Forensic tag propagated from contract_wrap.py via the
+            CLAWFORD_TRACE_ID env var. If not passed, falls back to the
+            env var; if neither is set, the call is untagged (empty
+            string on the returned InferResult). Every call emits one
+            stderr log line tagged with this id so the full chain of
+            "which LLM call produced which action" can be reconstructed
+            via grep.
 
     Returns:
         InferResult. Always returned, never raises — check .ok.
     """
+    effective_trace_id = trace_id if trace_id is not None else os.environ.get(
+        TRACE_ID_ENV_VAR, ""
+    )
+
+    result = _infer_impl(
+        prompt=prompt,
+        instructions=instructions,
+        model=model,
+        json_mode=json_mode,
+        timeout=timeout,
+        tools=tools,
+        input_items=input_items,
+    )
+    result.trace_id = effective_trace_id
+    _emit_forensic_log(result)
+    return result
+
+
+def _infer_impl(
+    *,
+    prompt: str | None,
+    instructions: str,
+    model: str,
+    json_mode: bool,
+    timeout: int,
+    tools: list[dict] | None,
+    input_items: list[dict] | None,
+) -> InferResult:
+    """Actual network + parsing. Pure function of its inputs; trace_id
+    tagging and forensic logging live in the outer infer() wrapper."""
     if prompt is not None and input_items is not None:
         return InferResult(
             returncode=22,
@@ -236,6 +282,27 @@ def infer(
             response.close()
         except Exception:
             pass
+
+
+def _emit_forensic_log(result: InferResult) -> None:
+    """Print one structured line to stderr summarizing this LLM call.
+
+    Format is parseable by simple grep / awk: `trace=<id>` always
+    appears first so forensic reconstruction like
+    `grep 'trace=abc-123' /var/log/clawford-*.log` pulls the whole
+    chain of a single cron invocation (wrapper envelope + every LLM
+    call inside the script).
+    """
+    parts = [
+        f"trace={result.trace_id}",
+        f"ok={1 if result.ok else 0}",
+        f"model={result.model or '-'}",
+        f"in={result.input_tokens}",
+        f"out={result.output_tokens}",
+    ]
+    if result.error:
+        parts.append(f"error={result.error[:120]!r}")
+    print(f"[llm {' '.join(parts)}]", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------

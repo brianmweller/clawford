@@ -64,13 +64,76 @@ Target raised an import error:
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 DEFAULT_TIMEOUT_S = 300
 TAIL_BYTES = 1500
+
+TRACE_ID_ENV_VAR = "CLAWFORD_TRACE_ID"
+
+
+def parameters_hash(payload: dict) -> str:
+    """SHA-256 of canonical-JSON of `payload`, as lowercase hex.
+
+    Stable across key orderings — `{"a":1,"b":2}` and `{"b":2,"a":1}`
+    produce the same hash. Used by scripts to compute a reproducible
+    identifier for any mutation payload (Telegram send, Gmail send,
+    Calendar write, …) so the rate limiter (P1.3) can spot duplicates
+    and the Doctor Agent (P0.2) can ask "same tool_name with the same
+    parameters_hash more than N times in 24h?".
+    """
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _derive_agent_id(target_path: Path) -> str:
+    """Infer the agent id from the script's path.
+
+    Canonical layout: `.../agents/<agent>/scripts/<script>.py` → `<agent>`.
+    Falls back to the script's parent-of-scripts directory name for
+    non-canonical layouts (tests with fabricated dirs).
+    """
+    parts = target_path.resolve().parts
+    for i, p in enumerate(parts):
+        if p == "agents" and i + 1 < len(parts):
+            return parts[i + 1]
+    parent = target_path.parent
+    if parent.name == "scripts":
+        return parent.parent.name
+    return parent.name
+
+
+def _derive_tool_name(target_path: Path) -> str:
+    """Script stem, e.g. `costco-orders.py` → `costco-orders`."""
+    return target_path.stem
+
+
+def _new_trace_id() -> str:
+    return str(uuid.uuid4())
+
+
+def _inject_forensic_fields(
+    envelope: dict, target_path: Path, trace_id: str
+) -> dict:
+    """Ensure the envelope carries trace_id, agent_id, tool_name.
+
+    Target-supplied values win over wrapper-derived ones so a caller
+    can override (e.g. a parent cron that wants to propagate its own
+    trace_id, or an agent whose directory name doesn't match its
+    operator-facing identity).
+    """
+    envelope.setdefault("trace_id", trace_id)
+    envelope.setdefault("agent_id", _derive_agent_id(target_path))
+    envelope.setdefault("tool_name", _derive_tool_name(target_path))
+    return envelope
 
 
 def _parse_argv(argv: list[str]) -> tuple[int, str, list[str]]:
@@ -141,12 +204,22 @@ def run(argv: list[str]) -> dict:
     if not target_path.is_absolute():
         target_path = Path.cwd() / target_path
 
+    # Forensic envelope fields. trace_id propagates to the subprocess via
+    # env var so LLM calls made inside the script can tag their own
+    # stderr logs with the same id and the whole invocation threads.
+    trace_id = os.environ.get(TRACE_ID_ENV_VAR) or _new_trace_id()
+    subprocess_env = os.environ.copy()
+    subprocess_env[TRACE_ID_ENV_VAR] = trace_id
+
+    def _finish(envelope: dict) -> dict:
+        return _inject_forensic_fields(envelope, target_path, trace_id)
+
     if not target_path.exists():
-        return {
+        return _finish({
             "status": "error",
             "error": f"target not found: {target_path}",
             "wrapped": {"exit_code": -1},
-        }
+        })
 
     try:
         proc = subprocess.run(
@@ -155,9 +228,10 @@ def run(argv: list[str]) -> dict:
             text=True,
             timeout=timeout,
             cwd=str(target_path.parent),
+            env=subprocess_env,
         )
     except subprocess.TimeoutExpired as e:
-        return {
+        return _finish({
             "status": "error",
             "error": f"timeout after {timeout}s",
             "wrapped": {
@@ -165,13 +239,13 @@ def run(argv: list[str]) -> dict:
                 "stdout_tail": _tail(e.stdout or ""),
                 "stderr_tail": _tail(e.stderr or ""),
             },
-        }
+        })
     except Exception as e:
-        return {
+        return _finish({
             "status": "error",
             "error": f"subprocess launch failed: {e}",
             "wrapped": {"exit_code": -2},
-        }
+        })
 
     stdout = proc.stdout or ""
     stderr = proc.stderr or ""
@@ -188,25 +262,25 @@ def run(argv: list[str]) -> dict:
             },
         }
         if target_json:
-            return _merge_target_json(base, target_json)
-        return base
+            return _finish(_merge_target_json(base, target_json))
+        return _finish(base)
 
     # Exit 0 — prefer the target's JSON if it was compliant.
     if target_json and target_json.get("status") in ("ok", "error", "degraded"):
-        return _merge_target_json(
+        return _finish(_merge_target_json(
             {"status": target_json["status"], "wrapped": {"exit_code": 0}},
             target_json,
-        )
+        ))
 
     # Exit 0 but no compliant JSON — manufacture one.
-    return {
+    return _finish({
         "status": "ok",
         "wrapped": {
             "exit_code": 0,
             "stdout_tail": _tail(stdout),
             "stderr_tail": _tail(stderr),
         },
-    }
+    })
 
 
 def main() -> int:

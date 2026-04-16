@@ -60,6 +60,77 @@ When `status` is `error` or `degraded`, the JSON SHOULD also include:
 
 All other fields are script-specific. Use snake_case keys.
 
+### 2a. Forensic envelope fields (added in P0.3, 2026-04-15)
+
+When a script is invoked via `contract_wrap.py` (the canonical path for
+every cron), the wrapper auto-injects three forensic fields into the
+output envelope:
+
+```json
+{"trace_id": "a2b6-...-uuid",
+ "agent_id": "shopping",
+ "tool_name": "costco-orders"}
+```
+
+- **`trace_id`** — UUID per cron invocation. Propagates to the
+  subprocess as the `CLAWFORD_TRACE_ID` env var so every LLM call
+  inside the script tags its stderr log with the same id. `grep
+  trace=<id>` across cron logs reconstructs the full chain of a
+  single invocation (envelope + every `infer()` call inside it).
+  If the wrapper itself is invoked with `CLAWFORD_TRACE_ID` already
+  set in its env, it preserves that value — letting a parent cron
+  thread its id through child scripts.
+- **`agent_id`** — derived from the script's path
+  (`.../agents/<agent>/scripts/…`). A target script can override by
+  emitting its own `agent_id` field in its JSON.
+- **`tool_name`** — the script's stem (e.g., `costco-orders.py` →
+  `costco-orders`). A target script can override by emitting its own
+  `tool_name` field in its JSON.
+
+A script that does not use the wrapper (the "native compliance" path
+in the test suite) is not required to emit these fields — the
+wrapper is the enforcement point. Scripts written after 2026-04-15
+that want to be useful for the rate limiter (P1.3) and Doctor Agent
+(P0.2) SHOULD attach one additional optional field when they perform
+mutations:
+
+```json
+{"status": "ok",
+ "actions": [
+   {"kind": "telegram_send",
+    "target": "@operator",
+    "parameters_hash": "3f1c8b...sha256hex"}
+ ]}
+```
+
+Each action's `parameters_hash` is the SHA-256 of the canonical JSON
+of whatever identifies that action (Telegram recipient + body,
+Gmail message-id + recipient list, Calendar event id + changed
+fields, etc.). Use the `parameters_hash` helper exported from
+`contract_wrap.py`:
+
+```python
+from agents.shared.contract_wrap import parameters_hash
+h = parameters_hash({"to": "@operator", "body": message})
+```
+
+The helper canonicalizes key ordering so `{"a":1,"b":2}` and
+`{"b":2,"a":1}` hash identically.
+
+### 2b. LLM call logs
+
+`agents.shared.llm.infer()` reads `CLAWFORD_TRACE_ID` from the
+environment (or accepts a `trace_id=` kwarg) and emits one structured
+stderr line per call:
+
+```
+[llm trace=<id> ok=1 model=gpt-5.4 in=123 out=45]
+```
+
+This is not part of the stdout contract — it lands in stderr, which
+the wrapper captures and surfaces on error as `stderr_tail`. The
+format is grep-friendly on purpose.
+
 ### 3. Exit code
 
 Scripts MUST always exit 0 from their main entry point. NEVER use
