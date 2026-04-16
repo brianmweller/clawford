@@ -41,6 +41,7 @@ import conversation  # type: ignore
 import pending_actions  # type: ignore
 import telegram_api  # type: ignore
 import tool_use  # type: ignore
+from scan_fields import scan_fields  # type: ignore
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +49,19 @@ CHAT_ID_ENV = "TELEGRAM_CHAT_ID"
 USER_TZ_ENV = "CLAWFORD_USER_TZ"
 DEFAULT_USER_TZ = "America/Los_Angeles"
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# P0.4: inbound-scan wire-in. Telegram text is authenticated to the operator's
+# chat ID, but the operator regularly pastes / forwards content from external
+# sources (emails, LinkedIn DMs, news leads) into agent chats. That
+# pasted content can carry prompt injection aimed at the agent's LLM.
+# We scan every inbound text and attach warnings; in enforce mode,
+# blocked text is replaced with a placeholder before reaching the LLM.
+# the operator's direct typing almost never trips the regexes — the scanner's
+# bias toward SAFE + the explicit false-positive corpus in
+# test_inbound_scanner.py keep normal chat unaffected.
+INBOX_QUARANTINE_ROOT = Path(
+    os.path.expanduser("~/.clawford/inbox-quarantine")
+)
 
 
 def _current_user_context() -> str:
@@ -243,6 +257,49 @@ def _extract_user_text(update: dict) -> str | None:
         if data:
             return f"[callback: {data}]"
     return None
+
+
+def _is_forwarded(update: dict) -> bool:
+    """Telegram marks forwarded messages with forward_* fields. the operator's
+    direct typing never has those; forwarded content (from unknown
+    senders, groups, or channels) always does."""
+    msg = update.get("message") or {}
+    return bool(
+        msg.get("forward_date")
+        or msg.get("forward_from")
+        or msg.get("forward_from_chat")
+        or msg.get("forward_sender_name")
+    )
+
+
+def _scan_inbound_text(
+    text: str, agent_id: str, update: dict
+) -> tuple[str, list[dict]]:
+    """Scan the inbound Telegram text and return (possibly-sanitized
+    text, warnings). Warnings are logged to the per-agent workspace
+    quarantine dir regardless of outcome so weekly operator review
+    has the full forensic trail.
+
+    Callback synthesis ('[callback: ...]') is not scanned — the text
+    is produced by our own code, not the user.
+    """
+    if text.startswith("[callback:") and text.endswith("]"):
+        return text, []
+    msg_id = str(
+        (update.get("message") or {}).get("message_id", "")
+    ) or "unknown"
+    # Put the quarantine dir under a dispatcher-owned root so no
+    # individual agent workspace has to exist for this wire-in (and
+    # so cross-agent review is one grep away).
+    workspace = INBOX_QUARANTINE_ROOT / agent_id
+    sanitized, warnings = scan_fields(
+        fields={"text": text},
+        source_type=f"telegram-inbox-forwarded" if _is_forwarded(update)
+        else "telegram-inbox",
+        source_id=msg_id,
+        workspace=workspace,
+    )
+    return sanitized["text"], warnings
 
 
 # ---------------------------------------------------------------------------
@@ -534,6 +591,17 @@ def dispatch(agent_id: str, update: dict) -> None:
     text = _extract_user_text(update)
     if not text:
         return
+
+    # P0.4: scan before the text enters the LLM prompt. Warnings are
+    # logged to the per-agent quarantine dir; in enforce mode blocked
+    # text is already replaced with a placeholder when it returns
+    # from _scan_inbound_text.
+    text, inbound_scan_warnings = _scan_inbound_text(text, agent_id, update)
+    if inbound_scan_warnings:
+        log.warning(
+            "dispatcher.inbound_scan: agent=%s warnings=%s",
+            agent_id, inbound_scan_warnings,
+        )
 
     # Typing indicator — cosmetic, best-effort, keep going on failure.
     telegram_api.send_chat_action(cfg.token, chat_id, "typing")
