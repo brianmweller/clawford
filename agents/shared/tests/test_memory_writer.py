@@ -22,11 +22,14 @@ sys.path.insert(0, str(SHARED_DIR))
 
 @pytest.fixture
 def mw(tmp_path, monkeypatch):
-    """Fresh memory_writer module pointed at tmp_path as REPO_ROOT."""
-    monkeypatch.setenv("CLAWFORD_REPO_ROOT", str(tmp_path))
-    (tmp_path / "agents" / "shopping").mkdir(parents=True)
+    """Fresh memory_writer module pointed at tmp_path as Dropbox brain root."""
+    monkeypatch.setenv(
+        "CLAWFORD_BRAIN_DROPBOX_ROOT",
+        str(tmp_path / "dropbox" / "openclaw-backup"),
+    )
+    (tmp_path / "dropbox" / "openclaw-backup" / "agents" / "shopping").mkdir(parents=True)
     for mod in list(sys.modules):
-        if mod == "memory_writer":
+        if mod in ("memory_writer", "brain"):
             del sys.modules[mod]
     import memory_writer
     return memory_writer
@@ -39,7 +42,7 @@ def test_append_rule_creates_file_if_missing(mw, tmp_path):
     result = mw.append_rule("shopping", "Always get 2 gallons of milk", "Grocery Defaults")
     assert result["status"] == "ok"
 
-    memory_path = tmp_path / "agents" / "shopping" / "MEMORY.md"
+    memory_path = tmp_path / "dropbox" / "openclaw-backup" / "agents" / "shopping" / "MEMORY.md"
     assert memory_path.exists()
     content = memory_path.read_text(encoding="utf-8")
     assert "## Grocery Defaults" in content
@@ -47,7 +50,7 @@ def test_append_rule_creates_file_if_missing(mw, tmp_path):
 
 
 def test_append_rule_preserves_existing_file(mw, tmp_path):
-    memory_path = tmp_path / "agents" / "shopping" / "MEMORY.md"
+    memory_path = tmp_path / "dropbox" / "openclaw-backup" / "agents" / "shopping" / "MEMORY.md"
     memory_path.write_text(
         "# MEMORY.md — Hilda\n\n## Existing Category\n\n- Existing rule\n",
         encoding="utf-8",
@@ -63,7 +66,7 @@ def test_append_rule_preserves_existing_file(mw, tmp_path):
 
 
 def test_append_rule_adds_new_category(mw, tmp_path):
-    memory_path = tmp_path / "agents" / "shopping" / "MEMORY.md"
+    memory_path = tmp_path / "dropbox" / "openclaw-backup" / "agents" / "shopping" / "MEMORY.md"
     memory_path.write_text(
         "# MEMORY.md\n\n## Existing\n\n- Rule A\n",
         encoding="utf-8",
@@ -80,7 +83,7 @@ def test_append_rule_adds_new_category(mw, tmp_path):
 
 def test_append_rule_includes_timestamp(mw, tmp_path):
     mw.append_rule("shopping", "Rule with timestamp", "Test")
-    content = (tmp_path / "agents" / "shopping" / "MEMORY.md").read_text(encoding="utf-8")
+    content = (tmp_path / "dropbox" / "openclaw-backup" / "agents" / "shopping" / "MEMORY.md").read_text(encoding="utf-8")
     # Should have ISO timestamp or date marker
     import re
     assert re.search(r"\d{4}-\d{2}-\d{2}", content), "no date in output"
@@ -100,7 +103,7 @@ def test_append_rule_unknown_agent_creates_dir(mw, tmp_path):
     """Even if the agent dir doesn't exist, append_rule should create it
     and the MEMORY.md. The dispatcher only reads known agents, so this
     doesn't create phantom agents — it's defensive."""
-    (tmp_path / "agents" / "newagent").mkdir(parents=True)
+    (tmp_path / "dropbox" / "openclaw-backup" / "agents" / "newagent").mkdir(parents=True)
     result = mw.append_rule("newagent", "Rule", "Cat")
     assert result["status"] == "ok"
 
@@ -108,7 +111,7 @@ def test_append_rule_unknown_agent_creates_dir(mw, tmp_path):
 def test_append_rule_respects_chattr_immutable(mw, tmp_path):
     """Can't test real chattr without root, but we can test that a
     PermissionError from the filesystem is caught and reported."""
-    memory_path = tmp_path / "agents" / "shopping" / "MEMORY.md"
+    memory_path = tmp_path / "dropbox" / "openclaw-backup" / "agents" / "shopping" / "MEMORY.md"
     memory_path.write_text("# MEMORY\n", encoding="utf-8")
     # Simulate immutability by making dir read-only (on Windows this
     # behaves differently; the test just confirms error path works)

@@ -67,7 +67,7 @@ def test_drift_blocks_on_workspace_mutation_between_deploys(
     assert rc1 == 0
 
     # Simulate direct VPS-side editing
-    rogue = fake_workspace / "SOUL.md"
+    rogue = fake_workspace / "scripts" / "hello.py"
     rogue.write_text("# testagent soul ROGUE EDIT ON VPS\n", encoding="utf-8")
 
     capsys.readouterr()
@@ -86,10 +86,10 @@ def test_drift_allows_accept_drift_flag(
     rc1 = deploy_module.deploy_one("testagent", _make_args())
     assert rc1 == 0
 
-    rogue = fake_workspace / "SOUL.md"
+    rogue = fake_workspace / "scripts" / "hello.py"
     rogue.write_text("# testagent soul ROGUE\n", encoding="utf-8")
 
     rc2 = deploy_module.deploy_one("testagent", _make_args(accept_drift=True))
     assert rc2 == 0
     # After applying with accept-drift, the source content should be back
-    assert "# testagent soul\n" == (fake_workspace / "SOUL.md").read_text(encoding="utf-8")
+    assert "print('hello v1')\n" == (fake_workspace / "scripts" / "hello.py").read_text(encoding="utf-8")

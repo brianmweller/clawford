@@ -40,17 +40,17 @@ def test_deploy_refuses_on_dirty_modified_source(
 ):
     """Modify a source file without committing; deploy.py must refuse."""
     monkeypatch.setattr(deploy_module, "BACKUPS_ROOT", tmp_path / "backups", raising=False)
-    # Dirty the SOUL.md in the agent directory — uncommitted modification.
-    soul = fake_source_repo / "agents" / "testagent" / "SOUL.md"
+    # Dirty the hello.py in the agent directory — uncommitted modification.
+    soul = fake_source_repo / "agents" / "testagent" / "scripts" / "hello.py"
     soul.write_text(soul.read_text(encoding="utf-8") + "\nUNCOMMITTED EDIT\n", encoding="utf-8")
     # Verify git sees it dirty
     r = _run(["git", "status", "--porcelain"], cwd=fake_source_repo)
-    assert "M agents/testagent/SOUL.md" in r.stdout or " M agents/testagent/SOUL.md" in r.stdout
+    assert "M agents/testagent/scripts/hello.py" in r.stdout or " M agents/testagent/scripts/hello.py" in r.stdout
 
     rc = deploy_module.deploy_one("testagent", _make_args())
     assert rc != 0, "deploy should refuse dirty source"
     # Workspace should be untouched (or contain only what was there before)
-    assert not any(fake_workspace.iterdir()) or (fake_workspace / "SOUL.md").read_text(
+    assert not any(fake_workspace.iterdir()) or (fake_workspace / "scripts" / "hello.py").read_text(
         encoding="utf-8"
     ) != soul.read_text(encoding="utf-8"), "workspace must not have the uncommitted edit"
 
@@ -79,7 +79,7 @@ def test_deploy_proceeds_when_source_clean(
     rc = deploy_module.deploy_one("testagent", _make_args())
     assert rc == 0, "clean source should deploy successfully"
     # Verify a file actually landed
-    assert (fake_workspace / "SOUL.md").exists()
+    assert (fake_workspace / "scripts" / "hello.py").exists()
 
 
 def test_deploy_proceeds_with_allow_dirty(
@@ -87,9 +87,9 @@ def test_deploy_proceeds_with_allow_dirty(
 ):
     """--allow-dirty overrides the gate (escape hatch for emergencies)."""
     monkeypatch.setattr(deploy_module, "BACKUPS_ROOT", tmp_path / "backups", raising=False)
-    soul = fake_source_repo / "agents" / "testagent" / "SOUL.md"
+    soul = fake_source_repo / "agents" / "testagent" / "scripts" / "hello.py"
     soul.write_text("dirty content\n", encoding="utf-8")
 
     rc = deploy_module.deploy_one("testagent", _make_args(allow_dirty=True))
     assert rc == 0, "--allow-dirty should permit a dirty-source deploy"
-    assert (fake_workspace / "SOUL.md").read_text(encoding="utf-8") == "dirty content\n"
+    assert (fake_workspace / "scripts" / "hello.py").read_text(encoding="utf-8") == "dirty content\n"

@@ -7,25 +7,7 @@
     "account": "murphy",
     "bot_token_env": "MEETINGS_BOT_TOKEN"
   },
-  "config_files": [
-    {
-      "src": "SOUL.md",
-      "immutable": true
-    },
-    {
-      "src": "IDENTITY.md",
-      "immutable": true
-    },
-    {
-      "src": "AGENTS.md"
-    },
-    {
-      "src": "USER.md"
-    },
-    {
-      "src": "MEMORY.md"
-    }
-  ],
+  "config_files": [],
   "scripts": [
     "scripts/gcal-fetch.py",
     "scripts/gcal-auth.py",

@@ -7,25 +7,7 @@
     "account": "huckle",
     "bot_token_env": "CONNECTOR_BOT_TOKEN"
   },
-  "config_files": [
-    {
-      "src": "SOUL.md",
-      "immutable": true
-    },
-    {
-      "src": "IDENTITY.md",
-      "immutable": true
-    },
-    {
-      "src": "AGENTS.md"
-    },
-    {
-      "src": "USER.md"
-    },
-    {
-      "src": "MEMORY.md"
-    }
-  ],
+  "config_files": [],
   "scripts": [
     "scripts/people-scan.py",
     "scripts/notes-triage.py",

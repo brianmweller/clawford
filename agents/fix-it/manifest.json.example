@@ -13,20 +13,6 @@
   },
   "config_files": [
     {
-      "src": "SOUL.md",
-      "immutable": true
-    },
-    {
-      "src": "IDENTITY.md",
-      "immutable": true
-    },
-    {
-      "src": "AGENTS.md"
-    },
-    {
-      "src": "USER.md"
-    },
-    {
       "src": "probation.md"
     }
   ],

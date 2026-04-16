@@ -49,28 +49,32 @@ def _run(cmd, cwd):
 
 
 @pytest.fixture
-def source_repo_with_state_file(tmp_path: Path) -> Path:
-    """A source repo whose manifest declares a state file."""
+def source_repo_with_state_file(tmp_path: Path, monkeypatch) -> Path:
+    """A source repo + Dropbox brain whose manifest declares a state file."""
     repo = tmp_path / "source-repo"
     agent_dir = repo / "agents" / "stateagent"
     (agent_dir / "scripts").mkdir(parents=True)
-    (agent_dir / "SOUL.md").write_text("# stateagent soul\n", encoding="utf-8")
-    (agent_dir / "IDENTITY.md").write_text("# stateagent identity\n", encoding="utf-8")
     (agent_dir / "scripts" / "hello.py").write_text("print('hi')\n", encoding="utf-8")
     (agent_dir / "scripts" / "heartbeat.py").write_text(
         "print('{\"status\": \"ok\"}')\n", encoding="utf-8"
     )
 
+    # Dropbox brain setup — SOUL.md, IDENTITY.md, manifest.json all live here.
+    brain_root = tmp_path / "fake-brain"
+    brain_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(brain_root))
+    brain_agent_dir = brain_root / "agents" / "stateagent"
+    brain_agent_dir.mkdir(parents=True)
+    (brain_agent_dir / "SOUL.md").write_text("# stateagent soul\n", encoding="utf-8")
+    (brain_agent_dir / "IDENTITY.md").write_text("# stateagent identity\n", encoding="utf-8")
+
     manifest = {
         "agent_id": "stateagent",
         "display_name": "State Agent",
         "workspace": str(tmp_path / "state-workspace"),
-        "status_file": str(tmp_path / "fake-brain" / "stateagent.status.md"),
+        "status_file": str(brain_root / "stateagent.status.md"),
         "telegram": {"account": "stateagent", "bot_token_env": "TEST_BOT_TOKEN"},
-        "config_files": [
-            {"src": "SOUL.md", "immutable": True},
-            {"src": "IDENTITY.md", "immutable": True},
-        ],
+        "config_files": [],
         "scripts": ["scripts/hello.py", "scripts/heartbeat.py"],
         "state_files": [
             {
@@ -81,6 +85,7 @@ def source_repo_with_state_file(tmp_path: Path) -> Path:
         "approvals": {"allowlist": []},
         "crons": [],
     }
+    # manifest.json stays in the repo.
     (agent_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2), encoding="utf-8"
     )
@@ -178,7 +183,6 @@ def test_check_drift_ignores_state_files_in_legacy_manifest(
         "agent_id": "stateagent",
         "deploy_ts": "2026-04-01T00:00:00Z",
         "files": {
-            "SOUL.md": deploy_module_stateagent._sha256(mf.expanded_workspace / "SOUL.md"),
             "scripts/hello.py": deploy_module_stateagent._sha256(mf.expanded_workspace / "scripts/hello.py"),
             # Legacy entry: a state file with a stale hash from the past.
             "pending-actions.json": "deadbeef" * 8,

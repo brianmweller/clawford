@@ -307,12 +307,10 @@ def validate_manifest(mf: Manifest, expected_agent_id: str = "") -> list[str]:
             f"agent_id mismatch: manifest says {mf.agent_id!r}, deploy target is {expected_agent_id!r}"
         )
 
-    cf_srcs = {cf.src for cf in mf.config_files}
-    for required_cf in ("SOUL.md", "IDENTITY.md"):
-        if required_cf not in cf_srcs:
-            errors.append(
-                f"config_files missing required entry: {required_cf}"
-            )
+    # SOUL.md / IDENTITY.md / AGENTS.md / MEMORY.md / USER.md live in the
+    # Dropbox brain now — they're no longer tracked by the manifest's
+    # config_files list. Existence is validated at the dispatcher / read
+    # path, not at deploy time.
 
     if not mf.scripts:
         errors.append("scripts list is empty")
@@ -1052,6 +1050,11 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
 )
 
 
+def _manifest_path(agent_id: str) -> Path:
+    """manifest.json lives at the repo-side per-agent directory."""
+    return REPO_ROOT / "agents" / agent_id / "manifest.json"
+
+
 # Fields that flow from manifest.json.example → manifest.json on sync.
 # These are STRUCTURAL (same across all operators of this agent).
 # Fields NOT in this list are operator-private (crons with PII, approvals,
@@ -1281,7 +1284,7 @@ def bootstrap_configs(agent_id: str) -> int:
 
 
 def deploy_one(agent_id: str, args: argparse.Namespace) -> int:
-    manifest_path = REPO_ROOT / "agents" / agent_id / "manifest.json"
+    manifest_path = _manifest_path(agent_id)
     if not manifest_path.exists():
         log(f"no manifest at {manifest_path}", "err")
         return 2

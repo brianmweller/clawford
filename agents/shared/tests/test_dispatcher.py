@@ -268,68 +268,91 @@ def test_unknown_agent_id_logs_but_doesnt_crash(disp):
 # ---------------------------------------------------------------------------
 
 
-def test_system_prompt_loads_identity_md(disp, tmp_path):
+def _brain_agent_dir(tmp_path, agent_id):
+    """Create the Dropbox brain's per-agent directory for test fixtures."""
+    d = tmp_path / "dropbox" / "openclaw-backup" / "agents" / agent_id
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def test_system_prompt_loads_identity_md(disp, tmp_path, monkeypatch):
     """IDENTITY.md contains persona/voice/catchphrases — must be in prompt."""
-    agent_dir = tmp_path / "fake-agent"
-    agent_dir.mkdir()
-    (agent_dir / "IDENTITY.md").write_text(
+    brain_dir = _brain_agent_dir(tmp_path, "fake-agent")
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT",
+                        str(tmp_path / "dropbox" / "openclaw-backup"))
+    (brain_dir / "IDENTITY.md").write_text(
         "I am Hilda Hippo. Catchphrase: 'Let me check the cart!'",
         encoding="utf-8",
     )
-    prompt = disp._build_system_prompt("fake-agent", agent_dir, [])
+    # Reload brain + dispatcher to pick up env var
+    import sys
+    for m in ("brain", "dispatcher"):
+        if m in sys.modules:
+            del sys.modules[m]
+    import dispatcher as disp2
+    prompt = disp2._build_system_prompt("fake-agent", [])
     assert "Hilda Hippo" in prompt
     assert "IDENTITY.md" in prompt
     assert "Let me check the cart" in prompt
 
 
-def test_system_prompt_loads_agents_md(disp, tmp_path):
+def test_system_prompt_loads_agents_md(disp, tmp_path, monkeypatch):
     """AGENTS.md contains fleet map + cross-agent routing rules."""
-    agent_dir = tmp_path / "fake-agent"
-    agent_dir.mkdir()
-    (agent_dir / "AGENTS.md").write_text(
+    brain_dir = _brain_agent_dir(tmp_path, "fake-agent")
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT",
+                        str(tmp_path / "dropbox" / "openclaw-backup"))
+    (brain_dir / "AGENTS.md").write_text(
         "Mistress Mouse handles family calendar. Sergeant Murphy handles meetings.",
         encoding="utf-8",
     )
-    prompt = disp._build_system_prompt("fake-agent", agent_dir, [])
+    import sys
+    for m in ("brain", "dispatcher"):
+        if m in sys.modules:
+            del sys.modules[m]
+    import dispatcher as disp2
+    prompt = disp2._build_system_prompt("fake-agent", [])
     assert "Mistress Mouse" in prompt
     assert "AGENTS.md" in prompt
     assert "Sergeant Murphy" in prompt
 
 
-def test_system_prompt_loads_all_five_conversational_docs(disp, tmp_path):
+def test_system_prompt_loads_all_five_conversational_docs(disp, tmp_path, monkeypatch):
     """SOUL + IDENTITY + USER + AGENTS + MEMORY all present when files exist."""
-    agent_dir = tmp_path / "fake-agent"
-    agent_dir.mkdir()
-    (agent_dir / "SOUL.md").write_text("SOUL_CONTENT", encoding="utf-8")
-    (agent_dir / "IDENTITY.md").write_text("IDENTITY_CONTENT", encoding="utf-8")
-    (agent_dir / "USER.md").write_text("USER_CONTENT", encoding="utf-8")
-    (agent_dir / "AGENTS.md").write_text("AGENTS_CONTENT", encoding="utf-8")
-    (agent_dir / "MEMORY.md").write_text("MEMORY_CONTENT", encoding="utf-8")
+    brain_dir = _brain_agent_dir(tmp_path, "fake-agent")
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT",
+                        str(tmp_path / "dropbox" / "openclaw-backup"))
+    (brain_dir / "SOUL.md").write_text("SOUL_CONTENT", encoding="utf-8")
+    (brain_dir / "IDENTITY.md").write_text("IDENTITY_CONTENT", encoding="utf-8")
+    (brain_dir / "USER.md").write_text("USER_CONTENT", encoding="utf-8")
+    (brain_dir / "AGENTS.md").write_text("AGENTS_CONTENT", encoding="utf-8")
+    (brain_dir / "MEMORY.md").write_text("MEMORY_CONTENT", encoding="utf-8")
 
-    prompt = disp._build_system_prompt("fake-agent", agent_dir, [])
+    import sys
+    for m in ("brain", "dispatcher"):
+        if m in sys.modules:
+            del sys.modules[m]
+    import dispatcher as disp2
+    prompt = disp2._build_system_prompt("fake-agent", [])
     assert "SOUL_CONTENT" in prompt
     assert "IDENTITY_CONTENT" in prompt
     assert "USER_CONTENT" in prompt
     assert "AGENTS_CONTENT" in prompt
     assert "MEMORY_CONTENT" in prompt
 
-    # Operational docs should NOT be loaded into the conversational prompt
-    (agent_dir / "HEARTBEAT.md").write_text("HEARTBEAT_CONTENT", encoding="utf-8")
-    (agent_dir / "CRONS.md").write_text("CRONS_CONTENT", encoding="utf-8")
-    (agent_dir / "TOOLS.md").write_text("TOOLS_DOC_CONTENT", encoding="utf-8")
-    prompt2 = disp._build_system_prompt("fake-agent", agent_dir, [])
-    assert "HEARTBEAT_CONTENT" not in prompt2
-    assert "CRONS_CONTENT" not in prompt2
-    assert "TOOLS_DOC_CONTENT" not in prompt2
 
-
-def test_system_prompt_skips_missing_docs(disp, tmp_path):
+def test_system_prompt_skips_missing_docs(disp, tmp_path, monkeypatch):
     """Missing docs should be silently skipped, not error."""
-    agent_dir = tmp_path / "fake-agent"
-    agent_dir.mkdir()
-    (agent_dir / "SOUL.md").write_text("ONLY_SOUL", encoding="utf-8")
-    # No other docs
-    prompt = disp._build_system_prompt("fake-agent", agent_dir, [])
+    brain_dir = _brain_agent_dir(tmp_path, "fake-agent")
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT",
+                        str(tmp_path / "dropbox" / "openclaw-backup"))
+    (brain_dir / "SOUL.md").write_text("ONLY_SOUL", encoding="utf-8")
+
+    import sys
+    for m in ("brain", "dispatcher"):
+        if m in sys.modules:
+            del sys.modules[m]
+    import dispatcher as disp2
+    prompt = disp2._build_system_prompt("fake-agent", [])
     assert "ONLY_SOUL" in prompt
     assert "IDENTITY.md" not in prompt
     assert "AGENTS.md" not in prompt

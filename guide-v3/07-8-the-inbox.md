@@ -41,7 +41,7 @@ The dispatcher's flow, in order:
    
    The key design decision: **callback shortcuts bypass the LLM.** Tapping "Confirm" on a reorder button should not require a 2-second model round-trip to figure out what to do. The button's callback data contains everything the dispatcher needs.
 
-3. **Agent config loading.** Import the agent's `tools.py` module dynamically. Read the agent's `SOUL.md`, `USER.md`, and `MEMORY.md` from the workspace to assemble the system prompt. Inject the current user-local time (not VPS UTC) so the LLM doesn't mislabel "today" and "tomorrow."
+3. **Agent config loading.** Import the agent's `tools.py` module dynamically. Read the agent's five conversational docs — `SOUL.md` (values/principles), `IDENTITY.md` (persona/voice, filesystem-immutable), `USER.md` (who the operator is), `AGENTS.md` (fleet map for cross-agent routing, filesystem-immutable), and `MEMORY.md` (learned rules, appendable via the `remember` tool) — from the repo to assemble the system prompt. Inject the current user-local time (not VPS UTC) so the LLM doesn't mislabel "today" and "tomorrow." Operational docs (`HEARTBEAT.md` / `CRONS.md` / `TOOLS.md`) were retired in favor of the code being the source of truth — the `TOOLS` manifest is generated dynamically from `tools.py`, scheduled work lives in `fleet-manifest.json` + `ops/scripts/*-host.sh`, and heartbeat logic lives in `scripts/heartbeat.py`.
 
 4. **Typing indicator.** Fire `sendChatAction(typing)` so the operator sees the Telegram typing bubble while the LLM thinks.
 

@@ -160,6 +160,7 @@ def test_validate_manifest_duplicate_cron_name(deploy_module):
     assert any("morning" in e and "duplicate" in e.lower() for e in errors), errors
 
 
+@pytest.mark.skip(reason="post-2026-04 Dropbox brain migration: config docs no longer in deploy.py config_files")
 def test_validate_manifest_missing_soul_md(deploy_module):
     """config_files must include SOUL.md (the agent's identity anchor)."""
     mf = deploy_module.load_manifest_from_dict(
@@ -169,6 +170,7 @@ def test_validate_manifest_missing_soul_md(deploy_module):
     assert any("SOUL.md" in e for e in errors), errors
 
 
+@pytest.mark.skip(reason="post-2026-04 Dropbox brain migration: config docs no longer in deploy.py config_files")
 def test_validate_manifest_missing_identity_md(deploy_module):
     """config_files must include IDENTITY.md (deploy-time PII placeholder gate)."""
     mf = deploy_module.load_manifest_from_dict(

@@ -33,30 +33,38 @@ def _run(cmd, cwd):
 
 
 @pytest.fixture
-def fake_source_repo(tmp_path: Path) -> Path:
-    """A tiny git repo that looks like the Clawford layout, with one agent.
+def fake_brain_root(tmp_path: Path, monkeypatch) -> Path:
+    """Set up a fake Dropbox brain and point modules at it via
+    CLAWFORD_BRAIN_DROPBOX_ROOT. Returns the brain root path."""
+    brain_root = tmp_path / "fake-brain"
+    brain_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(brain_root))
+    return brain_root
+
+
+@pytest.fixture
+def fake_source_repo(tmp_path: Path, fake_brain_root: Path) -> Path:
+    """A tiny git repo that looks like the Clawford layout.
+
+    manifest.json still lives repo-side (hasn't been migrated).
+    Config docs (SOUL/IDENTITY/etc.) live in fake_brain_root.
 
     Structure:
         <tmp>/source-repo/
           .git/
-          agents/
-            testagent/
-              SOUL.md
-              TOOLS.md
-              scripts/
-                hello.py
-              manifest.json
+          agents/testagent/
+            manifest.json
+            scripts/hello.py
+            scripts/heartbeat.py
 
-    The repo has exactly one commit so HEAD is defined and `git status`
-    reports clean.
+        <tmp>/fake-brain/agents/testagent/
+          SOUL.md
+          IDENTITY.md
     """
     repo = tmp_path / "source-repo"
     agent_dir = repo / "agents" / "testagent"
     (agent_dir / "scripts").mkdir(parents=True)
 
-    (agent_dir / "SOUL.md").write_text("# testagent soul\n", encoding="utf-8")
-    (agent_dir / "IDENTITY.md").write_text("# testagent identity\n", encoding="utf-8")
-    (agent_dir / "TOOLS.md").write_text("# testagent tools\n", encoding="utf-8")
     (agent_dir / "scripts" / "hello.py").write_text(
         "print('hello v1')\n", encoding="utf-8"
     )
@@ -64,17 +72,19 @@ def fake_source_repo(tmp_path: Path) -> Path:
         "print('{\"status\": \"ok\"}')\n", encoding="utf-8"
     )
 
+    # Dropbox brain: config docs
+    brain_agent_dir = fake_brain_root / "agents" / "testagent"
+    brain_agent_dir.mkdir(parents=True)
+    (brain_agent_dir / "SOUL.md").write_text("# testagent soul\n", encoding="utf-8")
+    (brain_agent_dir / "IDENTITY.md").write_text("# testagent identity\n", encoding="utf-8")
+
     manifest = {
         "agent_id": "testagent",
         "display_name": "Test Agent",
         "workspace": str(tmp_path / "fake-workspace"),
-        "status_file": str(tmp_path / "fake-brain" / "testagent.status.md"),
+        "status_file": str(fake_brain_root / "testagent.status.md"),
         "telegram": {"account": "testagent", "bot_token_env": "TEST_BOT_TOKEN"},
-        "config_files": [
-            {"src": "SOUL.md", "immutable": True},
-            {"src": "IDENTITY.md", "immutable": True},
-            {"src": "TOOLS.md"},
-        ],
+        "config_files": [],
         "scripts": ["scripts/hello.py", "scripts/heartbeat.py"],
         "state_files": [],
         "approvals": {"allowlist": []},

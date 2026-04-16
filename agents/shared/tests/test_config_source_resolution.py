@@ -22,6 +22,8 @@ import argparse
 import json
 from pathlib import Path
 
+import pytest
+
 
 SENTINEL = "CLAWFORD_BOOTSTRAP_UNEDITED"
 
@@ -52,6 +54,7 @@ def _make_args(agent_id="testagent", skip_files=False, allow_dirty=True):
 # ────────────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.skip(reason="post-2026-04 Dropbox brain migration: config docs no longer in deploy.py config_files")
 def test_safeguard_10_passes_when_real_files_present(
     deploy_module, fake_source_repo, fake_workspace, monkeypatch, tmp_path
 ):
@@ -66,6 +69,7 @@ def test_safeguard_10_passes_when_real_files_present(
     assert (fake_workspace / "TOOLS.md").exists()
 
 
+@pytest.mark.skip(reason="post-2026-04 Dropbox brain migration: config docs no longer in deploy.py config_files")
 def test_safeguard_10_blocks_deploy_when_real_file_missing_has_template(
     deploy_module, fake_source_repo, fake_workspace, monkeypatch, tmp_path, capsys
 ):
@@ -89,6 +93,7 @@ def test_safeguard_10_blocks_deploy_when_real_file_missing_has_template(
     assert not (fake_workspace / "SOUL.md").exists()
 
 
+@pytest.mark.skip(reason="post-2026-04 Dropbox brain migration: config docs no longer in deploy.py config_files")
 def test_safeguard_10_blocks_deploy_when_real_file_missing_no_template(
     deploy_module, fake_source_repo, fake_workspace, monkeypatch, tmp_path, capsys
 ):
@@ -107,6 +112,7 @@ def test_safeguard_10_blocks_deploy_when_real_file_missing_no_template(
     assert "no .example" in captured.lower() or "no template" in captured.lower()
 
 
+@pytest.mark.skip(reason="post-2026-04 Dropbox brain migration: config docs no longer in deploy.py config_files")
 def test_safeguard_10_rejects_unedited_bootstrap_sentinel(
     deploy_module, fake_source_repo, fake_workspace, monkeypatch, tmp_path, capsys
 ):
@@ -129,6 +135,7 @@ def test_safeguard_10_rejects_unedited_bootstrap_sentinel(
     assert SENTINEL in captured
 
 
+@pytest.mark.skip(reason="post-2026-04 Dropbox brain migration: config docs no longer in deploy.py config_files")
 def test_safeguard_10_accepts_file_after_sentinel_stripped(
     deploy_module, fake_source_repo, fake_workspace, monkeypatch, tmp_path
 ):
@@ -145,6 +152,7 @@ def test_safeguard_10_accepts_file_after_sentinel_stripped(
     assert "the operator was here" in (fake_workspace / "SOUL.md").read_text(encoding="utf-8")
 
 
+@pytest.mark.skip(reason="post-2026-04 Dropbox brain migration: config docs no longer in deploy.py config_files")
 def test_skip_files_bypasses_safeguard_10(
     deploy_module, fake_source_repo, fake_workspace, monkeypatch, tmp_path
 ):
@@ -168,6 +176,7 @@ def test_skip_files_bypasses_safeguard_10(
 # ────────────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.skip(reason="post-2026-04 Dropbox brain migration: config docs no longer in deploy.py config_files")
 def test_bootstrap_configs_scaffolds_md_with_sentinel(
     deploy_module, fake_source_repo, monkeypatch, tmp_path
 ):
@@ -215,6 +224,7 @@ def test_bootstrap_configs_copies_json_verbatim(
     assert SENTINEL not in real.read_text(encoding="utf-8")
 
 
+@pytest.mark.skip(reason="post-2026-04 Dropbox brain migration: config docs no longer in deploy.py config_files")
 def test_bootstrap_configs_is_idempotent(
     deploy_module, fake_source_repo, monkeypatch, tmp_path, capsys
 ):

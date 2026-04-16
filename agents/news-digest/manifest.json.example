@@ -7,16 +7,7 @@
     "account": "newsdigest",
     "bot_token_env": "NEWSDIGEST_BOT_TOKEN"
   },
-  "config_files": [
-    {
-      "src": "SOUL.md",
-      "immutable": true
-    },
-    {
-      "src": "IDENTITY.md",
-      "immutable": true
-    }
-  ],
+  "config_files": [],
   "scripts": [
     "scripts/fetch-and-rank.py",
     "scripts/morning-edition.py",

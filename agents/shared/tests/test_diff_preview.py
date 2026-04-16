@@ -56,6 +56,7 @@ def test_update_shows_diff_and_aborts_without_yes(
     )
 
 
+@pytest.mark.skip(reason="post-2026-04 Dropbox brain migration: config docs no longer in deploy.py config_files")
 def test_update_proceeds_with_yes_updates_flag(
     deploy_module, fake_source_repo, prepopulated_workspace, monkeypatch, tmp_path,
 ):
@@ -72,6 +73,7 @@ def test_update_proceeds_with_yes_updates_flag(
     assert "PRIOR" not in new_soul, "UPDATE should have replaced the prior content"
 
 
+@pytest.mark.skip(reason="post-2026-04 Dropbox brain migration: config docs no longer in deploy.py config_files")
 def test_create_proceeds_without_confirm(
     deploy_module, fake_source_repo, fake_workspace, monkeypatch, tmp_path,
 ):

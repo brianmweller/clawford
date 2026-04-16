@@ -198,6 +198,28 @@ def test_agent_status_path_returns_per_agent_dir(sandboxed_brain):
     assert path == sandboxed_brain["dropbox"] / "agents" / "news-digest"
 
 
+def test_agent_config_path_returns_per_file_path(sandboxed_brain):
+    brain = _reload_brain()
+    soul = brain.agent_config_path("shopping", "SOUL.md")
+    assert soul == sandboxed_brain["dropbox"] / "agents" / "shopping" / "SOUL.md"
+    mem = brain.agent_config_path("fix-it", "MEMORY.md")
+    assert mem == sandboxed_brain["dropbox"] / "agents" / "fix-it" / "MEMORY.md"
+    mf = brain.agent_config_path("connector", "manifest.json")
+    assert mf == sandboxed_brain["dropbox"] / "agents" / "connector" / "manifest.json"
+
+
+def test_agent_config_path_rejects_path_traversal(sandboxed_brain):
+    """Defense against tool-supplied filename with ../ segments."""
+    brain = _reload_brain()
+    import pytest
+    with pytest.raises(ValueError):
+        brain.agent_config_path("shopping", "../../etc/passwd")
+    with pytest.raises(ValueError):
+        brain.agent_config_path("shopping", "sub/dir/SOUL.md")
+    with pytest.raises(ValueError):
+        brain.agent_config_path("../other", "SOUL.md")
+
+
 # ---------------------------------------------------------------------------
 # Git-side reads
 # ---------------------------------------------------------------------------

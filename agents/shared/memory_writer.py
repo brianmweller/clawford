@@ -19,21 +19,19 @@ so a prompt injection can't silently poison memory.
 """
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-
-def _repo_root() -> Path:
-    override = os.environ.get("CLAWFORD_REPO_ROOT")
-    if override:
-        return Path(override)
-    # Fallback: this file is at agents/shared/, so parents[2] = repo root
-    return Path(__file__).resolve().parents[2]
+import brain  # type: ignore
 
 
 def _memory_path(agent_id: str) -> Path:
-    return _repo_root() / "agents" / agent_id / "MEMORY.md"
+    """Canonical MEMORY.md location: Dropbox brain.
+
+    Live-synced across laptop + VPS + Dropbox cloud. Writes from
+    confirm_remember are immediately available on both machines.
+    """
+    return brain.agent_config_path(agent_id, "MEMORY.md")
 
 
 def _timestamp() -> str:

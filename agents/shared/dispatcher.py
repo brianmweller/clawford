@@ -36,6 +36,7 @@ try:
 except ImportError:  # pragma: no cover — py<3.9
     ZoneInfo = None  # type: ignore
 
+import brain  # type: ignore
 import conversation  # type: ignore
 import pending_actions  # type: ignore
 import telegram_api  # type: ignore
@@ -107,9 +108,17 @@ def _resolve_token(agent_id: str) -> str:
     return ""
 
 
-def _read_agent_doc(agent_dir: Path, name: str) -> str:
-    """Read SOUL.md / USER.md / MEMORY.md if present. Returns '' on miss."""
-    path = agent_dir / name
+def _read_agent_doc(agent_id: str, name: str) -> str:
+    """Read a conversational doc from the Dropbox brain.
+
+    Canonical location for SOUL/IDENTITY/USER/AGENTS/MEMORY since the
+    migration to ~/Dropbox/openclaw-backup/agents/<agent_id>/. Returns
+    '' if the file is missing so missing docs degrade gracefully.
+    """
+    try:
+        path = brain.agent_config_path(agent_id, name)
+    except ValueError:
+        return ""
     if not path.exists():
         return ""
     try:
@@ -118,27 +127,27 @@ def _read_agent_doc(agent_dir: Path, name: str) -> str:
         return ""
 
 
-def _build_system_prompt(agent_id: str, agent_dir: Path, tools: list[dict]) -> str:
+def _build_system_prompt(agent_id: str, tools: list[dict]) -> str:
     """Concatenate the 5 conversational docs + tool manifest + context.
 
-    Loaded: SOUL (principles), IDENTITY (persona/voice), USER (who the operator is),
-    AGENTS (fleet map for cross-agent routing), MEMORY (learned rules).
-    Not loaded: TOOLS/HEARTBEAT/CRONS (operational docs, redundant with code).
+    Loaded from Dropbox brain: SOUL (principles), IDENTITY (persona/voice),
+    USER (who the operator is), AGENTS (fleet map for cross-agent routing),
+    MEMORY (learned rules, writable via the remember tool).
     """
     parts = []
-    soul = _read_agent_doc(agent_dir, "SOUL.md")
+    soul = _read_agent_doc(agent_id, "SOUL.md")
     if soul:
         parts.append("# Your identity (SOUL.md)\n\n" + soul.strip())
-    identity = _read_agent_doc(agent_dir, "IDENTITY.md")
+    identity = _read_agent_doc(agent_id, "IDENTITY.md")
     if identity:
         parts.append("# Your persona (IDENTITY.md)\n\n" + identity.strip())
-    user = _read_agent_doc(agent_dir, "USER.md")
+    user = _read_agent_doc(agent_id, "USER.md")
     if user:
         parts.append("# The user you serve (USER.md)\n\n" + user.strip())
-    agents_doc = _read_agent_doc(agent_dir, "AGENTS.md")
+    agents_doc = _read_agent_doc(agent_id, "AGENTS.md")
     if agents_doc:
         parts.append("# The fleet (AGENTS.md)\n\n" + agents_doc.strip())
-    memory = _read_agent_doc(agent_dir, "MEMORY.md")
+    memory = _read_agent_doc(agent_id, "MEMORY.md")
     if memory:
         parts.append("# Your persistent memory (MEMORY.md)\n\n" + memory.strip())
 
@@ -191,7 +200,7 @@ def load_agent_config(agent_id: str) -> AgentConfig:
         except Exception as exc:
             log.warning("failed to load %s tools.py: %s", agent_id, exc)
 
-    system_prompt = _build_system_prompt(agent_id, agent_dir, tools)
+    system_prompt = _build_system_prompt(agent_id, tools)
     return AgentConfig(
         agent_id=agent_id,
         token=token,

@@ -158,6 +158,23 @@ def agent_status_path(agent_id: str) -> Path:
     return dropbox_brain_root() / "agents" / agent_id
 
 
+def agent_config_path(agent_id: str, filename: str) -> Path:
+    """Return the full path to a specific agent config file in the
+    Dropbox brain. Canonical location for SOUL.md, IDENTITY.md,
+    AGENTS.md, MEMORY.md, and manifest.json since the liberation-era
+    migration from repo-side to Dropbox-synced.
+
+    Rejects path traversal — filename must be a single component,
+    agent_id must be a simple identifier. Agents pass operator-
+    unsanitized inputs sometimes; this guards against injection.
+    """
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise ValueError(f"filename must be a single path component: {filename!r}")
+    if "/" in agent_id or "\\" in agent_id or ".." in agent_id:
+        raise ValueError(f"agent_id must be a simple identifier: {agent_id!r}")
+    return dropbox_brain_root() / "agents" / agent_id / filename
+
+
 # ---------------------------------------------------------------------------
 # Git-side reads  (no writes — deploy handles those through normal file I/O)
 # ---------------------------------------------------------------------------
