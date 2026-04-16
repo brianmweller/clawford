@@ -1,0 +1,24 @@
+# Force LF line endings for files that get executed on the Linux VPS,
+# regardless of operator core.autocrlf setting. Per
+# feedback_windows_autocrlf_ssh_scp.md: bash chokes on \r, and a
+# Windows-side commit that lands as CRLF in the index breaks every
+# downstream cron and SSH-piped script.
+
+# Shell scripts — bash refuses \r in shebang/anywhere.
+*.sh        text eol=lf
+
+# Python — tokenizer accepts CRLF but the contract_wrap subprocess
+# launcher has thrown weird errors with mixed line endings before.
+# Keep LF everywhere for consistency.
+*.py        text eol=lf
+
+# JSON / Markdown / config — text formats that travel to the VPS.
+*.json      text eol=lf
+*.md        text eol=lf
+*.txt       text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.toml      text eol=lf
+
+# Crontab fragments and host-cron wrappers — same hazard as .sh.
+*.cron      text eol=lf
