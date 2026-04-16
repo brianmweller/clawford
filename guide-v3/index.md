@@ -28,7 +28,7 @@
 | 07-7 | [Auth architectures](07-7-auth-architectures.md) | **drafted** (Phase 7d) |
 | 08 | [Security and hardening](08-security-and-hardening.md) | **drafted** (Phase 7d) |
 | 09 | [Scripts and configs reference](09-scripts-and-configs.md) | **drafted** (Phase 7d) |
-| 10 | Glossary *(renumbered from Ch 11)* | pending |
+| 10 | [Glossary](10-glossary.md) *(renumbered from Ch 11)* | **drafted** (Phase 7d) |
 | 99 | [Unsorted operator lessons](99-unsorted-lessons.md) | **holding pen** — raw lessons awaiting triage into their natural chapters |
 
 See [`docs/v2-to-v3-migration.md`](../docs/v2-to-v3-migration.md) for the per-chapter migration checklist and status.
