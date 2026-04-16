@@ -120,6 +120,14 @@ def bwrap_command(
         if Path(ro).is_dir() or Path(ro).is_symlink():
             cmd += ["--ro-bind-try", ro, ro]
 
+    # /run — read-only. /etc/resolv.conf on Ubuntu 24.04 is a symlink
+    # to /run/systemd/resolve/stub-resolv.conf; without binding /run
+    # the symlink resolves to a missing file inside the namespace and
+    # every DNS lookup fails ("Unable to find the server at
+    # www.googleapis.com" was the regression on the first live test).
+    if Path("/run").is_dir():
+        cmd += ["--ro-bind-try", "/run", "/run"]
+
     # Operator's --user pip install dir (~/.local/) — RO-bound so
     # user-installed Python packages and CLI tools (pip-audit,
     # google-auth, camoufox, etc.) resolve inside the namespace.
