@@ -14,6 +14,8 @@
 
 **Busytown.** The Richard Scarry book series that provides the naming theme for the fleet. Every agent is a Busytown character (Mr Fixit the fox mechanic, Lowly Worm the worm, Mistress Mouse the mouse, Sergeant Murphy the pig detective, Huckle Cat the cat kid, Hilda Hippo the hippo). Choosing names from a consistent fictional universe makes the agents memorable and distinguishable in logs, chats, and documentation.
 
+**Callback shortcut.** A dispatcher fast-path that handles inline-button taps without invoking the LLM. When the operator taps a `[Confirm]` or `[Cancel]` button, the dispatcher parses the `callback_data` prefix (`confirm:`, `cancel:`, `confirm_all:`, `cancel_all:`, `like:`, `dislike:`, `more:`), routes directly to the appropriate executor or pending-action removal, and replies. The LLM is never called. See [Ch 07-8 — The inbox](07-8-the-inbox.md#2-the-dispatcher-dispatcherpy).
+
 **Cache-is-not-a-queue rule.** The design rule that came out of [§ The 5x resend incident](07-4-sergeant-murphy.md#the-5x-resend-incident): delivery decisions are made from the current run's script output, never from iterating a cache directory. Staging files are a workbench for human confirmation, not a delivery queue. Applies to every cron-based staging-and-confirm flow in the fleet.
 
 **Camoufox.** Hardened Firefox build with anti-fingerprinting patches. The Tier-3 browser in the shared library, used by [Hilda Hippo](07-6-hilda-hippo.md) for Costco and Amazon login flows and by [Huckle Cat](07-5-huckle-cat.md) for the Google Messages Web pairing flow. Wrapped by `agents/shared/camoufox_proxy.py`. See [Ch 07-7 Shape 5](07-7-auth-architectures.md#shape-5--camoufox--residential-proxy--auto-mfa).
@@ -26,13 +28,19 @@
 
 **Commitment.** A durable, human-confirmed action item with a `by_when` date. Lives in `commitments/active.md` in the shared brain, tagged with the source agent. Written exclusively by agents after the operator `/confirm`-s the staged version via Telegram. Read by [Sergeant Murphy's commitment-follow-up cron](07-4-sergeant-murphy.md) and by the coaching side of the post-meeting scan.
 
+**Confirm executor.** A tool executor that lives in `EXECUTORS` but **not** in `TOOLS` — meaning the LLM cannot call it directly. The only path to a confirm executor is the operator tapping a Confirm button on a staged pending action. Examples: `confirm_reorder` (Hilda Hippo), `confirm_calendar_add` (Mistress Mouse). See [Ch 07-8 § The tools.py pattern](07-8-the-inbox.md#the-toolspy-pattern).
+
 **Compose/deliver split.** The pattern where an expensive LLM composition runs in one cron (typically at `30 10 UTC`) and a cheap aggregation+delivery step runs in a later cron (typically at `0 12 UTC`), gated by a cache file (`cache/morning-brief-ready.txt`). Introduced during Phase 3 of the Clawford liberation to work around the retired 600-second LLM cron timeout; preserved post-liberation because it also maps cleanly onto the [5 AM PT fleet delivery path](#fleet-delivery-path).
 
 **Contract.** Shorthand for [the script contract](#script-contract).
 
+**Conversation window.** Per-agent sliding window of the last 20 input items, persisted as JSONL at `~/.clawford/inbox/{agent-id}.jsonl`. A 1-hour inactivity timeout drops older items so stale context does not leak into a new session. Implemented by `agents/shared/conversation.py`. See [Ch 07-8 § Conversation window](07-8-the-inbox.md#4-the-conversation-window-conversationpy).
+
 **`contract_wrap.py`.** The helper in `agents/shared/` that wraps every cron-invoked script to enforce [the script contract](#script-contract). Every `main()` entry point in every agent script goes through `contract_wrap.contract_main(probe_fn)`.
 
 **CRONS.md.** The per-agent authoritative spec for every host cron the agent registers. Lives at `agents/{agent}/CRONS.md`. The source of truth that `install-host-cron.sh` is validated against. Operator-editable.
+
+**Dispatcher (`dispatcher.py`).** The stateless request handler for inbound Telegram messages. Routes each update to the right agent by bot-token resolution, applies the chat_id gate, handles callback shortcuts without invoking the LLM, and drives the tool-use loop for conversational queries. ~565 lines. See [Ch 07-8 § The dispatcher](07-8-the-inbox.md#2-the-dispatcher-dispatcherpy).
 
 **`deploy.py`.** The single path code takes from the repo into a live agent workspace on the VPS. Runs 9 active safeguards before touching the VPS. Invoked as `python3 agents/shared/deploy.py <agent>` on the VPS, after a `git pull --ff-only`. See [Ch 07 — Intro to agents](07-intro-to-agents.md).
 
@@ -52,9 +60,13 @@
 
 **Host cron.** A crontab entry on the VPS that fires a Python script directly, with no gateway container, no skill runtime, and no exec-approvals allowlist. The default runtime in a Clawford fleet post-liberation. Managed by `install-host-cron.sh`. See [Ch 06 — Infra setup](06-infra-setup.md).
 
+**Inbox daemon (`telegram_inbox.py`).** A single async Python process that long-polls all six Telegram bots concurrently, routing each inbound message to the dispatcher. Per-agent offset persistence, per-update error isolation, kill-switch file for dev-vs-VPS toggle. Deployed as a systemd user unit (`clawford-inbox.service`). See [Ch 07-8 — The inbox](07-8-the-inbox.md).
+
 **`IDENTITY.md`.** Operator-facing identity file in every agent workspace. Populated from `IDENTITY.md.example` during deploy and `chattr +i`-ed. Describes who the agent is to the operator (name, emoji, voice, bounded scope).
 
 **Immutability.** See [`chattr +i`](#a%E2%80%93z).
+
+**Kill-switch file.** `~/.clawford/inbox-disabled`. When this file exists, the inbox daemon exits cleanly at startup and the systemd unit's `ExecStartPre` check prevents restarts. Used to park the VPS daemon while the operator runs the inbox locally for development. See [Ch 07-8 § Deployment walkthrough](07-8-the-inbox.md#deployment-walkthrough).
 
 **`install-host-cron.sh`.** The single source of truth for the VPS crontab. Drift-detects the current `crontab -l` against the `CONTRACT_ENTRIES` block embedded in the script, evicts drift, rewrites idempotently. Every cron in every agent lives in this file's CONTRACT_ENTRIES block.
 
@@ -70,6 +82,8 @@
 
 **Morning brief / morning briefing.** The 5 AM PT composite Telegram message aggregated from every agent's morning output. Each agent writes its contribution to `cache/morning-brief-ready.txt`; the fleet-deliver cron at `0 12 UTC` assembles and sends. See [Fleet delivery path](#fleet-delivery-path-5-am-pt).
 
+**Pending action.** A staged mutation awaiting the operator's Confirm/Cancel button tap. Stored per-agent at `~/.clawford/{agent-id}-workspace/pending-actions.json` with a unique ID, a TTL (default 4 hours), and customizable button labels. Managed by `agents/shared/pending_actions.py`. See [Ch 07-8 § The pending-actions store](07-8-the-inbox.md#5-the-pending-actions-store-pending_actionspy).
+
 **OpenClaw.** Retired. The pre-Clawford gateway platform the fleet ran on until 2026-04-15. Referenced in historical context (in commit messages, in retired-file tombstones, in the pre-liberation guide-v2) but not part of the live runtime. See [§ Retired terms](#retired-terms).
 
 **Operator.** The human running the fleet. A Clawford fleet is a single-operator system — every agent is tuned to one operator's preferences, one operator's calendar, one operator's relationships. "The operator" is the guide's standard way to refer to the person the fleet exists to serve, without naming them.
@@ -80,11 +94,15 @@
 
 **PKCE.** Proof Key for Code Exchange, the OAuth 2.0/2.1 extension that lets public clients use the auth-code flow without a client secret. Used by [Hilda Hippo's](07-6-hilda-hippo.md) Costco integration to get refresh tokens from the Azure B2C public-client endpoint. See [Ch 07-7 Shape 5](07-7-auth-architectures.md#shape-5--camoufox--residential-proxy--auto-mfa).
 
+**Producer tool.** A tool in the `TOOLS` manifest that stages a [pending action](#a%E2%80%93z) instead of executing a mutation directly. The tool calls `pending_actions.stage()` and returns a `__pending_action__` marker that the dispatcher uses to auto-attach inline buttons. Examples: `propose_reorder` (Hilda Hippo), `propose_event_add` (Mistress Mouse). See [Ch 07-8 § The tools.py pattern](07-8-the-inbox.md#the-toolspy-pattern).
+
 **Post-liberation.** The state of the fleet after Phase 7 of the Clawford liberation completed (2026-04-15). Synonymous with "the live runtime" in most contexts. Contrast with [pre-liberation](#pre-liberation).
 
 **Pre-liberation.** The state of the fleet before the Clawford liberation started (before 2026-04-02). Characterized by the OpenClaw gateway container, the exec-approvals allowlist, and the 600-second LLM cron timeout. Referenced in historical context only.
 
 **Residential proxy.** A proxy service that routes traffic through residential IP addresses rather than datacenter IPs, to avoid vendor-side bot detection. Used by [Hilda Hippo](07-6-hilda-hippo.md) for Costco and Amazon. Sticky-port variant (port 10000 in the fleet's setup) holds the same residential IP for the duration of a session.
+
+**Read tool.** A tool in the `TOOLS` manifest that has no side effects — it reads cached state and returns structured data for the LLM to use in composing a response. Examples: `get_fleet_health` (Mr Fixit), `get_events_for_day` (Mistress Mouse), `get_delivery_digest` (Hilda Hippo). See [Ch 07-8 § The tools.py pattern](07-8-the-inbox.md#the-toolspy-pattern).
 
 **Review-before-finalize.** The pattern where a pipeline generates a tiered review markdown and the operator reviews + edits before a `--finalize` flag commits anything durable. Used by [Huckle Cat's](07-5-huckle-cat.md#the-mining-pipeline) mining pipeline. Prevents bad-quality automated output from landing in the shared brain.
 
@@ -107,6 +125,10 @@
 **T-10 slack.** The 30-minute gap between a composition cron (`30 10 UTC`) and a delivery cron (`0 12 UTC`), or between `daily-refresh` (`0 10 UTC`) and `morning-relationship-nudge` (`30 10 UTC`). Slack for the composition run to finish before the downstream consumer fires. Do not eliminate the slack to "simplify" the schedule — the gap is load-bearing.
 
 **TOTP.** Time-based One-Time Password. The 6-digit 2FA code generated from a seed secret, used by [Hilda Hippo's](07-6-hilda-hippo.md) auto-MFA path on Amazon. Seed lives in `.env` as `{VENDOR}_TOTP_SECRET`, computed by `pyotp` at login time.
+
+**`tools.py`.** Per-agent conversational tool manifest at `agents/{agent-id}/tools.py`. Exports two dicts: `TOOLS` (the LLM-visible function schemas) and `EXECUTORS` (the Python callables that implement each tool, including confirm executors that are not in `TOOLS`). See [Ch 07-8 § The tools.py pattern](07-8-the-inbox.md#the-toolspy-pattern).
+
+**Tool-use loop (`tool_use.py`).** A sync two-turn loop that calls the LLM with a tool manifest, executes any function call the LLM picks, feeds the result back, and repeats until the LLM produces a text reply or the iteration cap (6) is hit. 90-second timeout per `infer()` call. Arguments echoed as JSON strings (empirical finding against the Codex backend). See [Ch 07-8 § The tool-use loop](07-8-the-inbox.md#3-the-tool-use-loop-tool_usepy).
 
 **Tier 1 / Tier 2 / Tier 3.** The three tiers of the shared library, named for how hostile the target is. Tier 1 is clean APIs. Tier 2 is stock Playwright behind a persistent profile. Tier 3 is hardened Camoufox behind a residential proxy. Every agent consumer picks the lowest tier that works for its target. See [Ch 06 — Infra setup](06-infra-setup.md).
 
