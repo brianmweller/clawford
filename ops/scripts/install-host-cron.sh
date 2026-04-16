@@ -132,6 +132,12 @@ CONTRACT_ENTRIES=(
   "30 3 * * *|fix-it-workspace-snapshot-check|/home/openclaw/.clawford/fix-it-workspace/scripts/workspace-snapshot-check.py|TELEGRAM_BOT_TOKEN|600"
   "0 3 1 * *|fix-it-monthly-archival|/home/openclaw/.clawford/fix-it-workspace/scripts/monthly-archival.py|TELEGRAM_BOT_TOKEN|600"
   "0 16 25 4 *|fix-it-probation-end-reminder|/home/openclaw/.clawford/fix-it-workspace/scripts/probation-end-reminder.py|TELEGRAM_BOT_TOKEN|60"
+  # P0.2 — Doctor Agent / cognitive heartbeat. Every 30 min, scans
+  # every agent's SOUL + MEMORY + fleet-health probe block for drift
+  # signals; appends to ~/Dropbox/openclaw-backup/fix-it/drift-audit.md.
+  # Default mode --report-only (no Telegram); flip the script's
+  # main() default to --alert after the warn-stream stabilizes.
+  "*/30 * * * *|fix-it-doctor-audit|/home/openclaw/.clawford/fix-it-workspace/scripts/doctor-audit.py|TELEGRAM_BOT_TOKEN|240"
 )
 
 # Markers for old entries to REMOVE on next install run. Used by the

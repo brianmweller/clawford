@@ -59,7 +59,26 @@ if [[ -f "$ENV_FILE" ]]; then
   set +a
 fi
 
-OUTPUT=$(timeout "$TIMEOUT_S" /usr/bin/python3 "$SCRIPT" 2>&1)
+# P1.2 bwrap opt-in: only set CLAWFORD_ISOLATION_MODE=bwrap when this
+# specific cron's $LOGNAME appears in the per-host allowlist. File-
+# based opt-in (per feedback_file_opt_out_pattern.md) so flipping a
+# cron in/out of bwrap is one line edit + nothing to redeploy.
+# Browser-driven crons stay OFF the allowlist by default — Camoufox/
+# Firefox crash under the default profile (SysV shared memory).
+BWRAP_ALLOWLIST="${BWRAP_ALLOWLIST_FILE:-/home/openclaw/.clawford/bwrap-allowlist.txt}"
+if [[ -f "$BWRAP_ALLOWLIST" ]] && grep -Fxq "$LOGNAME" "$BWRAP_ALLOWLIST"; then
+  export CLAWFORD_ISOLATION_MODE=bwrap
+fi
+
+# Invoke via contract_wrap.py (P0.3): gives every cron the forensic
+# envelope (trace_id auto-injection, agent_id resolution, exit-code
+# normalization) AND the bwrap wrapping when the env var is set.
+# Pre-2026-04-16 we ran scripts bare; contract_wrap is now the
+# canonical path so a SHARED_RUNTIME_MODULES regression (the kind
+# that bit activity-email-check after the P0.4 wire-in) is caught
+# at envelope-construction time, not at runtime import.
+CONTRACT_WRAP="/home/openclaw/repo/agents/shared/contract_wrap.py"
+OUTPUT=$(timeout "$TIMEOUT_S" /usr/bin/python3 "$CONTRACT_WRAP" --timeout "$TIMEOUT_S" "$SCRIPT" 2>&1)
 EXIT_CODE=$?
 
 {
