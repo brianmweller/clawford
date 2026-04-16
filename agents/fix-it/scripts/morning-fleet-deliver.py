@@ -134,12 +134,11 @@ def _format_item_message(item: dict, show_category: bool = True) -> str:
     Format:
         {category_emoji} {Category}     (only when show_category=True)
 
-        {num}. {extended_headline}
-        {url}
+        {num}. {extended_headline} — {source_label}
 
-    The caller (deliver_items_with_buttons) passes show_category=True
-    only for the first item of each category run, avoiding repetitive
-    section headers on consecutive same-category messages.
+    The URL is carried by the `\U0001f4d6 more` inline button instead of
+    being embedded in the text — keeps the message tight and lets
+    Telegram handle link-out natively.
     """
     lines: list[str] = []
     category = (item.get("category") or "").strip()
@@ -153,9 +152,6 @@ def _format_item_message(item: dict, show_category: bool = True) -> str:
     if source_label:
         head = f"{head} — {source_label}"
     lines.append(head)
-    url = (item.get("url") or item.get("link") or "").strip()
-    if url:
-        lines.append(url)
     return "\n".join(lines)
 
 
@@ -230,23 +226,25 @@ def deliver_nudge_items_with_buttons(
     return sent, failed
 
 
-def _buttons_for_item(num: int) -> dict:
+def _buttons_for_item(num: int, url: str = "") -> dict:
     """Build the inline keyboard for a single digest item's reactions.
 
-    callback_data uses the `like:N` / `dislike:N` / `more:N` form that
-    engagement-poller.py's extract_engagement() parses out of the
-    openclaw session transcript (openclaw forwards callback_data into
-    the agent's session as text).
+    like/dislike use `callback_data` routed through dispatcher's
+    ENGAGEMENT_MAP to news-digest's record_engagement executor.
+
+    The 'more' button uses Telegram's native `url` field — tapping it
+    opens the source article directly. Telegram rejects buttons that
+    carry both ``url`` and ``callback_data``, so these must not coexist.
+    When no URL is available, the button is omitted entirely.
     """
-    return {
-        "inline_keyboard": [
-            [
-                {"text": "👍 like",    "callback_data": f"like:{num}"},
-                {"text": "👎 dislike", "callback_data": f"dislike:{num}"},
-                {"text": "📖 more",    "callback_data": f"more:{num}"},
-            ]
-        ]
-    }
+    row = [
+        {"text": "\U0001f44d like",    "callback_data": f"like:{num}"},
+        {"text": "\U0001f44e dislike", "callback_data": f"dislike:{num}"},
+    ]
+    url = (url or "").strip()
+    if url:
+        row.append({"text": "\U0001f4d6 more", "url": url})
+    return {"inline_keyboard": [row]}
 
 
 def deliver_items_with_buttons(
@@ -274,7 +272,8 @@ def deliver_items_with_buttons(
         text = _format_item_message(item, show_category=show_category)
         prev_category = current_category
         num = item.get("num")
-        buttons = _buttons_for_item(num) if num is not None else None
+        url = (item.get("url") or item.get("link") or "").strip()
+        buttons = _buttons_for_item(num, url=url) if num is not None else None
         ok = send_telegram(
             bot_token, chat_id, text,
             silent=not is_last,

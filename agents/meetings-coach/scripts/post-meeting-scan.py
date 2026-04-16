@@ -404,6 +404,94 @@ def dismiss_debrief(event_id: str) -> dict:
     }
 
 
+def _parse_replacement_item(raw: str) -> tuple[str, str]:
+    """Best-effort parse of a free-form the operator-typed line like
+    'Steve: Talk to recruiting about X' or 'Steve to talk to...'.
+    Returns (who, what). Never raises — falls back to ("", raw)."""
+    line = (raw or "").strip()
+    if not line:
+        return "", ""
+    if ":" in line:
+        head, _, tail = line.partition(":")
+        head = head.strip()
+        tail = tail.strip()
+        if head and tail and " " not in head.strip().rstrip("."):
+            return _first_name(head), tail
+    m = _OWNER_PROSE_RE.match(line)
+    if m:
+        return _first_name(m.group("who")), f"{m.group('verb')} {m.group('what')}".strip()
+    return "", line
+
+
+def replace_action_items(event_id: str, items: list) -> dict:
+    """Wholesale replace the action items on a staged debrief with the
+    list the operator typed after pressing Modify. Each entry is parsed for
+    ``who``/``what`` and written to ``commitments/active.md`` using the
+    same canonical schema as ``save_debrief_to_brain``. The pending file
+    is deleted whether or not any items land."""
+    pending = _load_pending(event_id)
+    if pending is None:
+        return {
+            "status": "error",
+            "error": f"pending-debrief not found for event_id={event_id}",
+        }
+
+    speakers = pending.get("krisp_speakers") or []
+    meeting_title = (pending.get("meeting_title") or "").strip()
+    meeting_start = (pending.get("meeting_start") or "").strip()
+    active_md = ACTIVE_COMMITMENTS_FILE
+
+    today_str = date.today().isoformat()
+    seq = _next_commitment_sequence(active_md, today_str)
+
+    fallback_owner = _first_name(speakers[0]) if speakers else "the operator"
+
+    blocks: list[str] = []
+    for raw in items or []:
+        if isinstance(raw, dict):
+            who, what, by_when = _extract_action_item(raw, speakers=speakers)
+        else:
+            who, what = _parse_replacement_item(str(raw))
+            by_when = ""
+            if what:
+                what = what[0].upper() + what[1:] if len(what) > 1 else what.upper()
+        if not what:
+            continue
+        who = who or fallback_owner
+        entry_id = f"meetings-coach-{today_str}-{seq:03d}"
+        seq += 1
+        created_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        lines = [
+            f"## {entry_id}",
+            f"- who: {who}",
+            "- to_whom: the operator",
+            f"- what: {what}",
+        ]
+        if by_when:
+            lines.append(f"- by_when: {by_when}")
+        lines.extend([
+            "- status: open",
+            f"- source_detail: {meeting_title} debrief "
+            f"(event_id: {event_id}, meeting_start: {meeting_start})",
+            "- source_agent: meetings-coach",
+            f"- created_at: {created_at}",
+        ])
+        blocks.append("\n".join(lines) + "\n")
+
+    if blocks:
+        active_md.parent.mkdir(parents=True, exist_ok=True)
+        if not active_md.exists():
+            active_md.write_text(
+                "# Commitments — Active\n\n", encoding="utf-8"
+            )
+        with active_md.open("a", encoding="utf-8") as f:
+            for block in blocks:
+                f.write("\n" + block)
+
+    _delete_pending(event_id)
+    return {"status": "ok", "written": len(blocks), "event_id": event_id}
+
+
 # ─── coaching history ────────────────────────────────────────────────
 
 
@@ -751,6 +839,14 @@ def run() -> dict:
             metrics = _run_script("transcript-metrics.py", "--event-id", event_id)
             if is_subprocess_error(metrics) or metrics is None:
                 coaching_llm_failures += 1
+                continue
+            # transcript-metrics emits {status: 'too_short'} for transcripts
+            # below min_transcript_length (short meet-and-greets, etc.).
+            # That's a legitimate skip, not a failure — don't call the LLM
+            # with an empty metrics block, and don't count it as an error.
+            # Regression: 2026-04-16 the operator/Steve 5-min Meet & Greet, where
+            # this gate silently swallowed coaching while the debrief rendered.
+            if isinstance(metrics, dict) and metrics.get("status") != "ok":
                 continue
             coaching_msg = _compose_coaching_message(pending, metrics, growth_areas)
             if coaching_msg is None:

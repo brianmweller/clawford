@@ -356,6 +356,100 @@ def test_dismiss_debrief_deletes_pending_file(mod, tmp_path, monkeypatch):
     assert "evt-dismiss" not in active.read_text(encoding="utf-8")
 
 
+# ─── replace_action_items ────────────────────────────────────────────
+
+
+def test_replace_action_items_writes_given_items(mod, tmp_path, monkeypatch):
+    """After the Modify button, the operator types his corrected list. The
+    LLM calls replace_action_items(event_id, items=[...]) with one
+    string per item; they should be saved to active.md one-for-one
+    and the pending file deleted."""
+    cache = tmp_path / "cache"
+    active = tmp_path / "active.md"
+    active.write_text("# Commitments — Active\n\n", encoding="utf-8")
+    monkeypatch.setattr(mod, "CACHE_DIR", cache)
+    monkeypatch.setattr(mod, "ACTIVE_COMMITMENTS_FILE", active)
+
+    _stage_pending(
+        cache, "evt-modify",
+        [{"title": "stale original item", "assignee": None}],
+        meeting_title="Meet & Greet",
+    )
+
+    result = mod.replace_action_items(
+        "evt-modify",
+        [
+            "Steve: Talk to recruiting about the operator's pipeline.",
+            "the operator: Send Steve the role description by Friday.",
+        ],
+    )
+    assert result["status"] == "ok"
+    assert result["written"] == 2
+    content = active.read_text(encoding="utf-8")
+    assert "- who: Steve" in content
+    assert "Talk to recruiting about the operator's pipeline." in content
+    assert "- who: the operator" in content
+    assert "Send Steve the role description by Friday." in content
+    # Pending file gone.
+    assert not (cache / "pending-debrief-evt-modify.json").exists()
+    # Stale original item should NOT be in active.md.
+    assert "stale original item" not in content
+
+
+def test_replace_action_items_accepts_plain_strings(mod, tmp_path, monkeypatch):
+    """Items without a 'Who: what' colon should still be saved; owner
+    falls back to the first speaker / 'the operator' so the invariant that
+    every committed item has a `who` holds."""
+    cache = tmp_path / "cache"
+    active = tmp_path / "active.md"
+    active.write_text("# Commitments — Active\n\n", encoding="utf-8")
+    monkeypatch.setattr(mod, "CACHE_DIR", cache)
+    monkeypatch.setattr(mod, "ACTIVE_COMMITMENTS_FILE", active)
+
+    _stage_pending(
+        cache, "evt-strs",
+        [],
+        krisp_speakers=["Sam Smith", "Steve Shadman"],
+    )
+    result = mod.replace_action_items(
+        "evt-strs",
+        ["Draft the Q3 OKRs deck.", "Steve to review the offer template."],
+    )
+    assert result["status"] == "ok"
+    assert result["written"] == 2
+    content = active.read_text(encoding="utf-8")
+    assert "Draft the Q3 OKRs deck." in content
+    assert "review the offer template." in content
+    # Second item extracts owner from prose.
+    assert "- who: Steve" in content
+
+
+def test_replace_action_items_with_empty_list_clears(mod, tmp_path, monkeypatch):
+    """An empty list after Modify means 'no action items worth tracking'.
+    Don't write anything to active.md, just clear the pending file."""
+    cache = tmp_path / "cache"
+    active = tmp_path / "active.md"
+    active.write_text("# Commitments — Active\n\n", encoding="utf-8")
+    monkeypatch.setattr(mod, "CACHE_DIR", cache)
+    monkeypatch.setattr(mod, "ACTIVE_COMMITMENTS_FILE", active)
+
+    _stage_pending(cache, "evt-clear", [{"title": "old", "assignee": None}])
+    result = mod.replace_action_items("evt-clear", [])
+    assert result["status"] == "ok"
+    assert result["written"] == 0
+    assert not (cache / "pending-debrief-evt-clear.json").exists()
+    assert "evt-clear" not in active.read_text(encoding="utf-8")
+
+
+def test_replace_action_items_missing_pending_returns_error(
+    mod, tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(mod, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(mod, "ACTIVE_COMMITMENTS_FILE", tmp_path / "active.md")
+    result = mod.replace_action_items("evt-missing", ["the operator: do it."])
+    assert result["status"] == "error"
+
+
 def test_format_debrief_handles_krisp_native_action_item_shape(mod):
     """Krisp MCP returns action_items as {title, assignee, completed},
     not {who, what, by_when}. The renderer must extract content from
@@ -680,6 +774,63 @@ def test_run_happy_path_sends_debrief_and_coaching(
     data = json.loads(history.read_text(encoding="utf-8"))
     ids = [e["event_id"] for e in data]
     assert ids == ["evt-alexis-420"]
+
+
+def test_run_skips_coaching_on_metrics_too_short_without_llm_call(
+    mod, scan_one_new, pending_alexis, meeting_config, tmp_path, monkeypatch
+):
+    """INVARIANT: transcript-metrics.py emits {status: 'too_short'} for
+    transcripts below the min_transcript_length threshold (see
+    meeting-config.json). The coaching gate must recognize this and
+    skip compose — otherwise _compose_coaching_message receives a dict
+    without 'metrics', the LLM is called with n/a-filled prompt, returns
+    junk, and coaching_llm_failures quietly ticks up while the operator sees
+    NO coaching message and no warning. 2026-04-16 regression (Meet &
+    Greet the operator/Steve, 5-min transcript)."""
+    too_short = {
+        "status": "too_short",
+        "event_id": "evt-alexis-420",
+        "transcript_length": 120,
+        "min_length": 500,
+        "message": "Transcript too short for meaningful coaching",
+    }
+    workspace, history = _patch_common(
+        mod, tmp_path, monkeypatch,
+        scan=scan_one_new,
+        pending_fixture=pending_alexis,
+        metrics=too_short,
+        meeting_cfg=meeting_config,
+    )
+
+    sent: list[str] = []
+    llm_calls: list = []
+    monkeypatch.setattr(mod, "resolve_credentials", lambda env: ("tok", "chat"))
+    monkeypatch.setattr(
+        mod, "send_message", lambda tok, chat, text, **kw: sent.append(text) or True
+    )
+    monkeypatch.setattr(
+        mod, "llm_infer",
+        lambda p, **kw: (llm_calls.append(p), _fake_infer(_coaching_llm_reply()))[1],
+    )
+
+    class _Dt(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 4, 16, 20, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(mod, "datetime", _Dt)
+
+    result = mod.run()
+    # Debrief still sends even when transcript is too short for coaching.
+    assert result["status"] == "ok"
+    assert result["debriefs_sent"] == 1
+    assert result["coaching_sent"] == 0
+    # Must NOT count as an LLM failure — it's a legitimate skip, not an error.
+    assert result["coaching_llm_failures"] == 0
+    # No LLM prompt was composed for coaching — silent skip.
+    assert llm_calls == []
+    # No coaching message went out; only the debrief did.
+    assert len(sent) == 1
+    assert "Debrief ready" in sent[0]
 
 
 def test_run_empty_processed_is_silent(

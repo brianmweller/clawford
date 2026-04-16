@@ -69,10 +69,22 @@ def modify_debrief(event_id: str) -> dict:
         "event_id": event_id,
         "prompt": (
             "What would you like to change? Reply with the corrected "
-            "action item(s) and I'll save those instead — one per line, "
-            "e.g. 'Steve: Talk to recruiting about the operator's pipeline.'"
+            "action item(s) — one per line, e.g. 'Steve: Talk to "
+            "recruiting about the operator's pipeline.' Then I'll save those "
+            "to the brain instead of the originals.\n\n"
+            f"(event_id: {event_id})"
         ),
     }
+
+
+def replace_action_items(event_id: str, items: list) -> dict:
+    """LLM tool: wholesale replace the action items on a pending
+    debrief with the operator's corrected list, then write them to
+    ``commitments/active.md``. Call this after the Modify button was
+    pressed and the operator has typed his corrections — parse his reply into
+    a list of strings (one per item) and pass here along with the
+    event_id he was modifying (it's in the Modify prompt)."""
+    return _pms_mod().replace_action_items(event_id, items or [])
 
 AGENT_ID = "meetings-coach"
 
@@ -446,6 +458,42 @@ TOOLS: list[dict] = [
     },
     {
         "type": "function",
+        "name": "replace_action_items",
+        "description": (
+            "Wholesale REPLACE the action items on a pending debrief with "
+            "the operator's corrected list after the Modify button. Use when the "
+            "most recent Modify prompt is in the conversation (it includes "
+            "'event_id: <X>') and the operator has typed his corrections. Parse "
+            "his reply into one item per line — each item should read "
+            "like 'Who: Task description' or 'Who to do the task'. Call "
+            "this tool with the event_id from the Modify prompt and the "
+            "list of item strings. The tool writes directly to the brain "
+            "and deletes the staged debrief; no further confirmation is "
+            "needed. If the operator's reply says 'nothing to save' or similar, "
+            "pass an empty list."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "event_id": {
+                    "type": "string",
+                    "description":
+                        "The event_id from the Modify prompt (e.g. "
+                        "'16oq5cfaici98moknajrdutb94')",
+                },
+                "items": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description":
+                        "One string per action item. Format 'Who: Task' "
+                        "or 'Who to do X'. Empty array clears everything.",
+                },
+            },
+            "required": ["event_id", "items"],
+        },
+    },
+    {
+        "type": "function",
         "name": "propose_remember",
         "description": (
             "Stage a rule for the operator's confirmation, to be added to your "
@@ -480,4 +528,5 @@ EXECUTORS: dict = {
     "save_debrief": save_debrief,
     "dismiss_debrief": dismiss_debrief,
     "modify_debrief": modify_debrief,
+    "replace_action_items": replace_action_items,
 }

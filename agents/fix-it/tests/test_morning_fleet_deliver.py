@@ -445,11 +445,14 @@ def test_read_items_malformed_json(fake_fleet):
     assert status == "error"
 
 
-def test_format_item_message_includes_num_and_url(fake_fleet):
+def test_format_item_message_drops_url_from_text(fake_fleet):
+    """The URL now rides on the More button (as a native Telegram URL
+    link button), not in the message text. Inline URLs clutter the
+    digest and duplicate what the button provides."""
     text = fake_fleet["mod"]._format_item_message(SAMPLE_ITEMS[0])
     assert "1." in text
     assert "Hospitals roll out chatbots" in text
-    assert "https://statnews.com/hospitals" in text
+    assert "https://statnews.com/hospitals" not in text
     assert "🤖 AI & Tech" in text
     assert "STAT" in text
 
@@ -460,9 +463,10 @@ def test_format_item_message_suppresses_category_when_show_category_false(fake_f
     '🤖 AI & Tech' header on every consecutive AI-category message."""
     text = fake_fleet["mod"]._format_item_message(SAMPLE_ITEMS[1], show_category=False)
     assert "🤖 AI & Tech" not in text
-    # Headline + num + url + source_label still render.
+    # Headline + num + source_label still render; URL lives on the button.
     assert "2." in text
     assert "TSMC" in text
+    assert "https://" not in text
 
 
 NUDGE_ITEMS = [
@@ -559,17 +563,41 @@ def test_deliver_items_shows_category_only_on_section_transition(fake_fleet):
     assert "💰 Economics" in sent_texts[2]
 
 
-def test_buttons_for_item_uses_callback_data_format(fake_fleet):
-    buttons = fake_fleet["mod"]._buttons_for_item(5)
-    assert "inline_keyboard" in buttons
+def test_buttons_for_item_more_is_url_link(fake_fleet):
+    """The 'more' button now navigates to the article URL via Telegram's
+    native URL-button (no callback round-trip). like/dislike stay as
+    callback_data buttons routed to record_engagement as before."""
+    buttons = fake_fleet["mod"]._buttons_for_item(
+        5, url="https://example.com/article"
+    )
     row = buttons["inline_keyboard"][0]
-    cbs = {b["callback_data"] for b in row}
-    assert cbs == {"like:5", "dislike:5", "more:5"}
-    # Button labels are human-readable, not command syntax
-    labels = [b["text"] for b in row]
-    assert any("like" in l.lower() for l in labels)
-    assert any("dislike" in l.lower() for l in labels)
-    assert any("more" in l.lower() for l in labels)
+    by_label = {b["text"]: b for b in row}
+
+    like_btn = next(b for b in row if "like" in b["text"].lower() and "dislike" not in b["text"].lower())
+    assert like_btn.get("callback_data") == "like:5"
+    assert "url" not in like_btn
+
+    dislike_btn = next(b for b in row if "dislike" in b["text"].lower())
+    assert dislike_btn.get("callback_data") == "dislike:5"
+    assert "url" not in dislike_btn
+
+    more_btn = next(b for b in row if "more" in b["text"].lower())
+    assert more_btn.get("url") == "https://example.com/article"
+    # The 'more' button must NOT carry a callback_data anymore —
+    # Telegram rejects buttons that have both url and callback_data.
+    assert "callback_data" not in more_btn
+
+
+def test_buttons_for_item_omits_more_when_no_url(fake_fleet):
+    """Without a URL there's nothing for 'more' to open, so omit it
+    rather than emitting a broken button."""
+    buttons = fake_fleet["mod"]._buttons_for_item(5, url="")
+    row = buttons["inline_keyboard"][0]
+    labels = [b["text"].lower() for b in row]
+    assert any("like" in l and "dislike" not in l for l in labels)
+    assert any("dislike" in l for l in labels)
+    assert not any("more" in l for l in labels)
+    assert len(row) == 2
 
 
 def test_deliver_items_sends_one_call_per_item_with_buttons(fake_fleet):
