@@ -26,7 +26,7 @@
 | 07-5 | [Huckle Cat 🐱🤝](07-5-huckle-cat.md) | **drafted** (Phase 7d) |
 | 07-6 | [Hilda Hippo 🦛🛒](07-6-hilda-hippo.md) | **drafted** (Phase 7d) |
 | 07-7 | [Auth architectures](07-7-auth-architectures.md) | **drafted** (Phase 7d) |
-| 08 | Security and hardening *(net-new in v3)* | pending |
+| 08 | [Security and hardening](08-security-and-hardening.md) | **drafted** (Phase 7d) |
 | 09 | Scripts and configs reference | pending |
 | 10 | CLI reference | pending |
 | 11 | Glossary | pending |
