@@ -10,6 +10,7 @@ import os
 import subprocess
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 WORKSPACE = os.path.expanduser("~/.clawford/meetings-coach-workspace")
 CACHE = os.path.join(WORKSPACE, "cache")
@@ -18,6 +19,8 @@ LAST_COMMITMENT_PATH = os.path.join(CACHE, "last-commitment.json")
 COACHING_HISTORY_PATH = os.path.join(CACHE, "coaching-history.json")
 GCAL_FETCH_SCRIPT = os.path.join(WORKSPACE, "scripts", "gcal-fetch.py")
 
+DEFAULT_TZ = "America/Los_Angeles"
+
 
 def _read_json(path: str, default=None):
     try:
@@ -25,6 +28,21 @@ def _read_json(path: str, default=None):
             return json.load(f)
     except (OSError, json.JSONDecodeError):
         return default
+
+
+def _user_timezone() -> ZoneInfo:
+    """VPS runs UTC, the operator lives in PT. Resolve his wall-clock TZ from
+    meeting-config.json so 'today' means the operator's today."""
+    config = _read_json(CONFIG_PATH, default={})
+    tz = (config or {}).get("timezone") or DEFAULT_TZ
+    try:
+        return ZoneInfo(tz)
+    except Exception:
+        return ZoneInfo(DEFAULT_TZ)
+
+
+def _user_today() -> date:
+    return datetime.now(_user_timezone()).date()
 
 
 def _run_gcal_fetch(start_date: str, days: int) -> dict:
@@ -77,9 +95,9 @@ def get_meetings_for_day(day: str = "today") -> dict:
     """Return work meetings for a given day. `day` is 'today',
     'tomorrow', or an ISO date."""
     if day == "today":
-        target = date.today()
+        target = _user_today()
     elif day == "tomorrow":
-        target = date.today() + timedelta(days=1)
+        target = _user_today() + timedelta(days=1)
     else:
         try:
             target = date.fromisoformat(day)
@@ -100,7 +118,7 @@ def get_meetings_for_day(day: str = "today") -> dict:
 def get_week_meetings() -> dict:
     """Return meetings for today + the next 4 workdays via one live
     gcal-fetch --days 5 call, then grouped by date."""
-    start = date.today()
+    start = _user_today()
     data = _run_gcal_fetch(start.isoformat(), 5)
     if data.get("error"):
         return {"start": start.isoformat(), "days": [], "error": data["error"]}

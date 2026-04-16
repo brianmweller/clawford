@@ -302,3 +302,65 @@ def test_launch_persistent_profile_uses_xvfb_display_when_requested(
         pass
 
     assert calls == [99]
+
+
+# ─── executable_path resolution ─────────────────────────────────────
+
+
+def _capture_launch_kwargs(monkeypatch):
+    captured = {}
+
+    class FakePW:
+        class chromium:
+            @staticmethod
+            def launch_persistent_context(**kwargs):
+                captured["kwargs"] = kwargs
+                return MagicMock()
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            pass
+
+    monkeypatch.setattr(playwright_profile, "_sync_playwright", lambda: FakePW())
+    return captured
+
+
+def test_launch_omits_executable_path_when_caller_passes_none(monkeypatch, tmp_path):
+    """Regression guard for the 2026-04-15 incident: the default
+    '/usr/bin/chromium' path doesn't exist on the VPS — Playwright
+    bundles its own chromium at ~/.cache/ms-playwright/... Passing
+    executable_path=None means 'use Playwright's bundled chromium',
+    and playwright_profile must NOT override that with its own hard-
+    coded default."""
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    captured = _capture_launch_kwargs(monkeypatch)
+
+    with playwright_profile.launch_persistent_profile(profile, headless=True) as _:
+        pass
+
+    kwargs = captured["kwargs"]
+    # Either the key is absent, or it's explicitly None — both mean
+    # 'let Playwright pick the bundled chromium'. What we must NOT see
+    # is the literal string '/usr/bin/chromium'.
+    exe = kwargs.get("executable_path")
+    assert exe is None, (
+        f"expected executable_path to be None/absent so Playwright uses "
+        f"its bundled chromium; got {exe!r}"
+    )
+
+
+def test_launch_uses_caller_supplied_executable_path(monkeypatch, tmp_path):
+    """When the caller explicitly passes an executable_path (e.g. to
+    pin a specific chromium build for reproducibility), that path must
+    be forwarded verbatim."""
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    captured = _capture_launch_kwargs(monkeypatch)
+
+    with playwright_profile.launch_persistent_profile(
+        profile, executable_path="/opt/chromium/bin/chrome"
+    ) as _:
+        pass
+
+    assert captured["kwargs"]["executable_path"] == "/opt/chromium/bin/chrome"

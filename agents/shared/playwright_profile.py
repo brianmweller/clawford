@@ -46,7 +46,6 @@ from typing import Any, Iterator
 
 
 _LOCK_FILES = ("SingletonLock", "SingletonCookie", "SingletonSocket")
-_DEFAULT_CHROMIUM = "/usr/bin/chromium"
 _DEFAULT_ARGS = ("--no-sandbox", "--disable-gpu")
 
 
@@ -159,14 +158,20 @@ def launch_persistent_profile(
         ensure_xvfb(display_num=xvfb_display)
 
     launch_args = list(args) if args is not None else list(_DEFAULT_ARGS)
-    exe = executable_path or _DEFAULT_CHROMIUM
 
     launch_kwargs: dict[str, Any] = dict(
         user_data_dir=str(profile),
         headless=headless,
         args=launch_args,
-        executable_path=exe,
     )
+    # Only forward executable_path when the caller explicitly supplied
+    # one. Passing None here would override Playwright's own default
+    # resolution (which points at the bundled chromium under
+    # ~/.cache/ms-playwright/). The old '/usr/bin/chromium' default
+    # broke every consumer on any host that didn't have the system
+    # package installed — which was the 2026-04-15 LinkedIn outage.
+    if executable_path is not None:
+        launch_kwargs["executable_path"] = executable_path
     if ignore_default_args is not None:
         launch_kwargs["ignore_default_args"] = list(ignore_default_args)
 

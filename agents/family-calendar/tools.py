@@ -11,12 +11,15 @@ import os
 import subprocess
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
 CACHE = os.path.join(WORKSPACE, "cache")
 CONFIG_PATH = os.path.join(WORKSPACE, "calendar-config.json")
 SENT_REMINDERS_PATH = os.path.join(WORKSPACE, "sent-reminders.json")
 GCAL_FETCH_SCRIPT = os.path.join(WORKSPACE, "scripts", "gcal-fetch.py")
+
+DEFAULT_TZ = "America/Los_Angeles"
 
 
 def _read_json(path: str, default=None):
@@ -25,6 +28,22 @@ def _read_json(path: str, default=None):
             return json.load(f)
     except (OSError, json.JSONDecodeError):
         return default
+
+
+def _user_timezone() -> ZoneInfo:
+    """Resolve the user's timezone from calendar-config.json. Falls
+    back to Pacific. The VPS runs UTC but the operator lives in PT, so date
+    arithmetic like 'today' must be in the operator's wall clock, not UTC."""
+    config = _read_json(CONFIG_PATH, default={})
+    tz = (config or {}).get("timezone") or DEFAULT_TZ
+    try:
+        return ZoneInfo(tz)
+    except Exception:
+        return ZoneInfo(DEFAULT_TZ)
+
+
+def _user_today() -> date:
+    return datetime.now(_user_timezone()).date()
 
 
 def _run_gcal_fetch(start_date: str, days: int) -> dict:
@@ -87,9 +106,9 @@ def get_events_for_day(day: str = "today") -> dict:
     """Return the events for a given day via live gcal-fetch subprocess.
     `day` is 'today', 'tomorrow', or an ISO 'YYYY-MM-DD' date."""
     if day == "today":
-        target = date.today()
+        target = _user_today()
     elif day == "tomorrow":
-        target = date.today() + timedelta(days=1)
+        target = _user_today() + timedelta(days=1)
     else:
         try:
             target = date.fromisoformat(day)
@@ -112,7 +131,7 @@ def get_events_for_day(day: str = "today") -> dict:
 def get_week() -> dict:
     """Return events for today + the next 6 days via one live gcal-fetch
     call with --days 7. Groups events by date."""
-    start = date.today()
+    start = _user_today()
     data = _run_gcal_fetch(start.isoformat(), 7)
     if data.get("error"):
         return {"start": start.isoformat(), "days": [], "error": data["error"]}

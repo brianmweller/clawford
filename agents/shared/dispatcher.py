@@ -22,8 +22,14 @@ import logging
 import os
 import traceback
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover — py<3.9
+    ZoneInfo = None  # type: ignore
 
 import conversation  # type: ignore
 import telegram_api  # type: ignore
@@ -32,7 +38,32 @@ import tool_use  # type: ignore
 log = logging.getLogger(__name__)
 
 CHAT_ID_ENV = "TELEGRAM_CHAT_ID"
+USER_TZ_ENV = "CLAWFORD_USER_TZ"
+DEFAULT_USER_TZ = "America/Los_Angeles"
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _current_user_context() -> str:
+    """Render a short 'current time in user's timezone' block to
+    inject into the system prompt. The VPS runs UTC but the user is
+    in Pacific — without this the LLM mislabels 'today'/'tomorrow'
+    and fights the tool results that are already in PT."""
+    tz_name = os.environ.get(USER_TZ_ENV, DEFAULT_USER_TZ)
+    if ZoneInfo is None:
+        now = datetime.now()
+        return f"Current time: {now.strftime('%Y-%m-%d %H:%M %A')} (timezone unknown)"
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo(DEFAULT_USER_TZ)
+        tz_name = DEFAULT_USER_TZ
+    now = datetime.now(tz)
+    return (
+        f"Current time in user's timezone: "
+        f"{now.strftime('%Y-%m-%d %H:%M %Z')} "
+        f"({now.strftime('%A')})\n"
+        f"User timezone: {tz_name}"
+    )
 
 
 @dataclass
@@ -101,6 +132,8 @@ def _build_system_prompt(agent_id: str, agent_dir: Path, tools: list[dict]) -> s
             desc = t.get("description", "")
             tool_lines.append(f"- `{name}`: {desc}")
         parts.append("\n".join(tool_lines))
+
+    parts.append("# Current context\n\n" + _current_user_context())
 
     parts.append(
         "# Response style\n\n"
