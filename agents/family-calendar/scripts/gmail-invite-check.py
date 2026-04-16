@@ -32,6 +32,16 @@ import sys
 from datetime import datetime, timedelta, timezone
 from email import policy
 from email.parser import BytesParser
+from pathlib import Path
+
+# --- shared library sys.path shim (P0.4 wire-in) ---
+for _p in Path(__file__).resolve().parents:
+    if (_p / "agents" / "shared").is_dir():
+        if str(_p) not in sys.path:
+            sys.path.insert(0, str(_p))
+        break
+
+from agents.shared.scan_fields import scan_fields  # noqa: E402
 
 WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
 TOKEN_PATH = os.environ.get(
@@ -94,6 +104,34 @@ def save_seen(seen):
     seen_list = list(seen)[-500:]
     with open(SEEN_PATH, "w") as f:
         json.dump(seen_list, f)
+
+
+def scan_invite_fields(invite: dict) -> dict:
+    """Run inbound-scanner over attacker-controlled invite fields.
+
+    The subject, location, and organizer fields originate from whoever
+    sent the invite — a malicious ICS file can put prompt injection in
+    any of them. Returns a copy of `invite` with sanitized fields plus
+    a `scan_warnings` list reporting anything flagged.
+    """
+    scan_input = {
+        "subject": invite.get("subject", ""),
+        "location": invite.get("location", ""),
+        "organizer": invite.get("organizer", ""),
+    }
+    sanitized, warnings = scan_fields(
+        fields=scan_input,
+        source_type="gmail-invite",
+        source_id=invite.get("message_id", ""),
+        workspace=Path(WORKSPACE),
+    )
+    result = dict(invite)
+    for k, v in sanitized.items():
+        # Only overwrite if the scan actually produced a sanitized
+        # version (warn mode pass-through leaves the value unchanged).
+        result[k] = v
+    result["scan_warnings"] = warnings
+    return result
 
 
 def parse_ics_basic(ics_text):
@@ -233,6 +271,7 @@ def main():
                 "received_at": date_str,
             }
             invite.update(parsed)
+            invite = scan_invite_fields(invite)
 
             invites.append(invite)
             seen.add(msg_id)

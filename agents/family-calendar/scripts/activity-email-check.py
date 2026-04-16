@@ -32,6 +32,16 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+# --- shared library sys.path shim (P0.4 wire-in) ---
+for _p in Path(__file__).resolve().parents:
+    if (_p / "agents" / "shared").is_dir():
+        if str(_p) not in sys.path:
+            sys.path.insert(0, str(_p))
+        break
+
+from agents.shared.scan_fields import scan_fields  # noqa: E402
 
 WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
 TOKEN_PATH = os.environ.get(
@@ -147,6 +157,31 @@ def _decode_body(part):
     return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
 
 
+def scan_activity_email_fields(item: dict) -> dict:
+    """Run inbound-scanner over activity-email subject and body.
+
+    The agent's LLM parses these bodies looking for action items,
+    closures, cancellations — exactly the surface a malicious sender
+    would target with indirect prompt injection. Returns a copy of
+    `item` with sanitized fields plus a `scan_warnings` list.
+    """
+    scan_input = {
+        "subject": item.get("subject", ""),
+        "body": item.get("body", ""),
+    }
+    sanitized, warnings = scan_fields(
+        fields=scan_input,
+        source_type="activity-email",
+        source_id=item.get("message_id", ""),
+        workspace=Path(WORKSPACE),
+    )
+    result = dict(item)
+    for k, v in sanitized.items():
+        result[k] = v
+    result["scan_warnings"] = warnings
+    return result
+
+
 def get_email_body(msg):
     """Extract readable body text from a Gmail message.
 
@@ -219,14 +254,15 @@ def main():
                     seen.add(msg_id)
                     continue
 
-                results.append({
+                raw_item = {
                     "source": provider["name"],
                     "subject": subject,
                     "from": from_addr,
                     "date": date_str,
                     "body": body[:3000],
                     "message_id": msg_id,
-                })
+                }
+                results.append(scan_activity_email_fields(raw_item))
 
                 seen.add(msg_id)
 
