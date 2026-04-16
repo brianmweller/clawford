@@ -208,5 +208,4 @@ For when you know the name but not the category.
 - [Ch 07 — Intro to agents](07-intro-to-agents.md) — the deploy path and the safeguard story
 - [Ch 07-0 — Your first agent](07-0-your-first-agent.md) — the walkthrough that uses these scripts end-to-end
 - [Ch 08 — Security and hardening](08-security-and-hardening.md) — the three defense layers, including the script contract + deploy safeguards
-- [Ch 10 — CLI reference](10-cli-reference.md) *(pending)*
-- [Ch 11 — Glossary](11-glossary.md) *(pending)*
+- [Ch 10 — Glossary](10-glossary.md) *(pending)*
