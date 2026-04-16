@@ -26,6 +26,19 @@ import json
 import os
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+# --- shared library sys.path shim (P0.1 wire-in) ---
+for _p in Path(__file__).resolve().parents:
+    if (_p / "agents" / "shared").is_dir():
+        if str(_p) not in sys.path:
+            sys.path.insert(0, str(_p))
+        break
+
+from agents.shared.reviewer import (  # noqa: E402
+    review_action,
+    role_summary_for,
+)
 
 WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
 TOKEN_PATH = os.environ.get(
@@ -180,6 +193,41 @@ def error(msg):
     sys.exit(1)
 
 
+def review_calendar_write(action: str, payload: dict) -> None:
+    """P0.1 outbound review for calendar mutations.
+
+    Calendar writes are high-impact (visible to family, harder to
+    revoke than a Telegram message). The reviewer asks "is this
+    write consistent with Mistress Mouse's role?". On a DENY +
+    enforce, the script exits with status=degraded and the operator
+    sees why; in warn mode every verdict is logged but the write
+    proceeds.
+    """
+    verdict = review_action(
+        agent_id="family-calendar",
+        action_kind=f"calendar_{action}",
+        payload=payload,
+        role_summary=role_summary_for("family-calendar"),
+    )
+    if verdict.verdict in ("warn", "deny"):
+        print(
+            f"[reviewer] {verdict.verdict.upper()} mode={verdict.mode} "
+            f"action=calendar_{action}: {verdict.reason}",
+            file=sys.stderr,
+        )
+    if verdict.blocking:
+        result = {
+            "status": "degraded",
+            "alert": (
+                f"calendar {action} blocked by outbound reviewer: "
+                f"{verdict.reason or 'no reason given'}"
+            ),
+            "review": verdict.as_dict(),
+        }
+        print(json.dumps(result))
+        sys.exit(0)
+
+
 def main():
     args = parse_args()
 
@@ -247,6 +295,14 @@ def main():
         if args["location"]:
             event_body["location"] = args["location"]
 
+        review_calendar_write("create", {
+            "calendar": cal_label,
+            "summary": args["summary"],
+            "start": event_body["start"]["dateTime"],
+            "end": event_body["end"]["dateTime"],
+            "location": args.get("location") or "",
+        })
+
         event = service.events().insert(calendarId=cal_id, body=event_body).execute()
 
         result = {
@@ -275,6 +331,14 @@ def main():
         if args["new_end"]:
             event["end"]["dateTime"] = normalize_datetime(args["new_end"], tz_name)
 
+        review_calendar_write("move", {
+            "calendar": cal_label,
+            "event_id": args["event_id"],
+            "summary": event.get("summary", ""),
+            "old_start": old_start,
+            "new_start": event["start"]["dateTime"],
+        })
+
         updated = service.events().update(
             calendarId=cal_id, eventId=args["event_id"], body=event
         ).execute()
@@ -298,6 +362,12 @@ def main():
         # Get event details before deleting (for logging)
         event = service.events().get(calendarId=cal_id, eventId=args["event_id"]).execute()
         summary = event.get("summary", "(No title)")
+
+        review_calendar_write("remove", {
+            "calendar": cal_label,
+            "event_id": args["event_id"],
+            "summary": summary,
+        })
 
         service.events().delete(calendarId=cal_id, eventId=args["event_id"]).execute()
 
