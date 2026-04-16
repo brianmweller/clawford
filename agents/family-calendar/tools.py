@@ -6,9 +6,9 @@ confirmation) come in Phase C.
 """
 from __future__ import annotations
 
-import glob
 import json
 import os
+import subprocess
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -16,6 +16,7 @@ WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
 CACHE = os.path.join(WORKSPACE, "cache")
 CONFIG_PATH = os.path.join(WORKSPACE, "calendar-config.json")
 SENT_REMINDERS_PATH = os.path.join(WORKSPACE, "sent-reminders.json")
+GCAL_FETCH_SCRIPT = os.path.join(WORKSPACE, "scripts", "gcal-fetch.py")
 
 
 def _read_json(path: str, default=None):
@@ -26,14 +27,65 @@ def _read_json(path: str, default=None):
         return default
 
 
-def _events_path_for(d: date) -> str:
-    return os.path.join(CACHE, f"events-{d.isoformat()}.json")
+def _run_gcal_fetch(start_date: str, days: int) -> dict:
+    """Invoke the existing gcal-fetch.py script as subprocess and parse
+    its JSON stdout. This is the canonical source of truth — avoids
+    the cache-file-shape mismatch where the daemon tools used to read
+    events-YYYY-MM-DD.json keyed by query date, but gcal-fetch writes
+    them keyed by start_date with multi-day windows inside."""
+    if not os.path.exists(GCAL_FETCH_SCRIPT):
+        return {"error": f"gcal-fetch.py not found at {GCAL_FETCH_SCRIPT}"}
+    try:
+        proc = subprocess.run(
+            ["/usr/bin/python3", GCAL_FETCH_SCRIPT,
+             "--date", start_date, "--days", str(days)],
+            capture_output=True, text=True, timeout=45, cwd=WORKSPACE,
+        )
+    except subprocess.TimeoutExpired:
+        return {"error": "gcal-fetch timed out after 45s"}
+    except Exception as exc:
+        return {"error": f"gcal-fetch subprocess failed: {exc}"}
+
+    if proc.returncode != 0 and not proc.stdout:
+        return {"error": proc.stderr.strip() or f"gcal-fetch exit {proc.returncode}"}
+
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return {"error": "gcal-fetch produced non-JSON output", "stdout": proc.stdout[:500]}
+
+
+def _summarize_events(events: list) -> list:
+    return [
+        {
+            "summary": ev.get("summary"),
+            "start": ev.get("start"),
+            "end": ev.get("end"),
+            "all_day": ev.get("all_day", False),
+            "location": ev.get("location", ""),
+            "calendar": ev.get("calendar_label"),
+            "status": ev.get("status"),
+        }
+        for ev in events
+    ]
+
+
+def _filter_events_on_date(events: list, target: date) -> list:
+    """Filter events whose start date equals target (local day)."""
+    result = []
+    target_iso = target.isoformat()
+    for ev in events:
+        start = ev.get("start") or ""
+        # Event starts can be date-only (all-day) or datetime with tz.
+        # Compare the date portion.
+        if start.startswith(target_iso):
+            result.append(ev)
+    return result
 
 
 def get_events_for_day(day: str = "today") -> dict:
-    """Return the events for a given day. `day` can be 'today',
-    'tomorrow', or an ISO date string 'YYYY-MM-DD'. Reads the cached
-    events-YYYY-MM-DD.json files the gcal-fetch cron writes."""
+    """Return the events for a given day via live gcal-fetch subprocess.
+    `day` is 'today', 'tomorrow', or an ISO 'YYYY-MM-DD' date."""
     if day == "today":
         target = date.today()
     elif day == "tomorrow":
@@ -44,45 +96,43 @@ def get_events_for_day(day: str = "today") -> dict:
         except ValueError:
             return {"error": f"unrecognized day: {day!r}. Use 'today', 'tomorrow', or YYYY-MM-DD."}
 
-    data = _read_json(_events_path_for(target))
-    if not data:
-        return {"date": target.isoformat(), "events": [], "note": "no cache for that day"}
+    data = _run_gcal_fetch(target.isoformat(), 1)
+    if data.get("error"):
+        return {"date": target.isoformat(), "events": [], "error": data["error"]}
+
+    raw_events = data.get("events", [])
     return {
-        "date": data.get("date"),
-        "events": [
-            {
-                "summary": ev.get("summary"),
-                "start": ev.get("start"),
-                "end": ev.get("end"),
-                "all_day": ev.get("all_day", False),
-                "location": ev.get("location", ""),
-                "calendar": ev.get("calendar_label"),
-                "status": ev.get("status"),
-            }
-            for ev in data.get("events", [])
-        ],
+        "date": target.isoformat(),
+        "status": data.get("status"),
+        "events": _summarize_events(raw_events),
+        "errors": data.get("errors", []),
     }
 
 
 def get_week() -> dict:
-    """Return events for today + the next 6 days. Read the most
-    recent 7 cached events-YYYY-MM-DD.json files that match."""
+    """Return events for today + the next 6 days via one live gcal-fetch
+    call with --days 7. Groups events by date."""
     start = date.today()
+    data = _run_gcal_fetch(start.isoformat(), 7)
+    if data.get("error"):
+        return {"start": start.isoformat(), "days": [], "error": data["error"]}
+
+    raw_events = data.get("events", [])
     days = []
     for i in range(7):
         d = start + timedelta(days=i)
-        data = _read_json(_events_path_for(d)) or {}
+        day_events = _filter_events_on_date(raw_events, d)
         days.append({
             "date": d.isoformat(),
-            "count": len(data.get("events", [])),
-            "events": [
-                {"summary": ev.get("summary"), "start": ev.get("start"),
-                 "all_day": ev.get("all_day", False),
-                 "calendar": ev.get("calendar_label")}
-                for ev in data.get("events", [])
-            ],
+            "count": len(day_events),
+            "events": _summarize_events(day_events),
         })
-    return {"start": start.isoformat(), "days": days}
+    return {
+        "start": start.isoformat(),
+        "status": data.get("status"),
+        "days": days,
+        "errors": data.get("errors", []),
+    }
 
 
 def get_configured_calendars() -> dict:

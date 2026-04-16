@@ -5,9 +5,9 @@ confirm_action_item / dismiss_action_item producer tools.
 """
 from __future__ import annotations
 
-import glob
 import json
 import os
+import subprocess
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -16,6 +16,7 @@ CACHE = os.path.join(WORKSPACE, "cache")
 CONFIG_PATH = os.path.join(WORKSPACE, "meeting-config.json")
 LAST_COMMITMENT_PATH = os.path.join(CACHE, "last-commitment.json")
 COACHING_HISTORY_PATH = os.path.join(CACHE, "coaching-history.json")
+GCAL_FETCH_SCRIPT = os.path.join(WORKSPACE, "scripts", "gcal-fetch.py")
 
 
 def _read_json(path: str, default=None):
@@ -26,8 +27,30 @@ def _read_json(path: str, default=None):
         return default
 
 
-def _events_path_for(d: date) -> str:
-    return os.path.join(CACHE, f"events-{d.isoformat()}.json")
+def _run_gcal_fetch(start_date: str, days: int) -> dict:
+    """Live gcal-fetch subprocess. See family-calendar/tools.py for why
+    we don't trust the per-day cache files directly — they're keyed
+    by fetch start date with multi-day windows inside, which mismatches
+    the 'query by day' shape the LLM tools want."""
+    if not os.path.exists(GCAL_FETCH_SCRIPT):
+        return {"error": f"gcal-fetch.py not found at {GCAL_FETCH_SCRIPT}"}
+    try:
+        proc = subprocess.run(
+            ["/usr/bin/python3", GCAL_FETCH_SCRIPT,
+             "--date", start_date, "--days", str(days)],
+            capture_output=True, text=True, timeout=45, cwd=WORKSPACE,
+        )
+    except subprocess.TimeoutExpired:
+        return {"error": "gcal-fetch timed out after 45s"}
+    except Exception as exc:
+        return {"error": f"gcal-fetch subprocess failed: {exc}"}
+
+    if proc.returncode != 0 and not proc.stdout:
+        return {"error": proc.stderr.strip() or f"gcal-fetch exit {proc.returncode}"}
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return {"error": "gcal-fetch non-JSON output", "stdout": proc.stdout[:500]}
 
 
 def _summarize_event(ev: dict) -> dict:
@@ -45,6 +68,11 @@ def _summarize_event(ev: dict) -> dict:
     }
 
 
+def _filter_events_on_date(events: list, target: date) -> list:
+    target_iso = target.isoformat()
+    return [ev for ev in events if (ev.get("start") or "").startswith(target_iso)]
+
+
 def get_meetings_for_day(day: str = "today") -> dict:
     """Return work meetings for a given day. `day` is 'today',
     'tomorrow', or an ISO date."""
@@ -58,11 +86,11 @@ def get_meetings_for_day(day: str = "today") -> dict:
         except ValueError:
             return {"error": f"unrecognized day: {day!r}"}
 
-    data = _read_json(_events_path_for(target))
-    if not data:
-        return {"date": target.isoformat(), "events": [], "note": "no cache"}
+    data = _run_gcal_fetch(target.isoformat(), 1)
+    if data.get("error"):
+        return {"date": target.isoformat(), "events": [], "error": data["error"]}
     return {
-        "date": data.get("date"),
+        "date": target.isoformat(),
         "status": data.get("status"),
         "events": [_summarize_event(e) for e in data.get("events", [])],
         "errors": data.get("errors", []),
@@ -70,18 +98,29 @@ def get_meetings_for_day(day: str = "today") -> dict:
 
 
 def get_week_meetings() -> dict:
-    """Return meetings for today + the next 4 workdays."""
+    """Return meetings for today + the next 4 workdays via one live
+    gcal-fetch --days 5 call, then grouped by date."""
     start = date.today()
+    data = _run_gcal_fetch(start.isoformat(), 5)
+    if data.get("error"):
+        return {"start": start.isoformat(), "days": [], "error": data["error"]}
+
+    raw = data.get("events", [])
     days = []
     for i in range(5):
         d = start + timedelta(days=i)
-        data = _read_json(_events_path_for(d)) or {}
+        day_events = _filter_events_on_date(raw, d)
         days.append({
             "date": d.isoformat(),
-            "count": len(data.get("events", [])),
-            "events": [_summarize_event(e) for e in data.get("events", [])],
+            "count": len(day_events),
+            "events": [_summarize_event(e) for e in day_events],
         })
-    return {"start": start.isoformat(), "days": days}
+    return {
+        "start": start.isoformat(),
+        "status": data.get("status"),
+        "days": days,
+        "errors": data.get("errors", []),
+    }
 
 
 def get_commitment_status() -> dict:

@@ -36,7 +36,13 @@ for _p in Path(__file__).resolve().parents:
         break
 
 from agents.shared.heartbeat_base import HeartbeatProbe  # noqa: E402
+from agents.shared.google_oauth import get_credentials  # noqa: E402
 
+
+GOOGLE_SCOPES = [
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/gmail.readonly",
+]
 
 WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
 BRAIN = os.path.expanduser("~/Dropbox/openclaw-backup")
@@ -68,20 +74,34 @@ def _required_files() -> dict:
 
 
 def _check_google_auth() -> str:
-    """Return 'ok' | 'stale' | 'missing'.
+    """Return 'ok' | 'missing' | 'revoked' | 'error'.
 
-    Does NOT decode the token or probe Google — just mtime-based
-    freshness, which is cheap and deterministic. The actual token
-    refresh happens elsewhere (on every gcal-fetch.py invocation).
+    Actually exercises the OAuth credentials by invoking the shared
+    get_credentials() helper, which reads token.json, constructs a
+    Credentials object, and calls creds.refresh() if expired.
+
+    Replaces the old mtime-only check that silently passed while the
+    refresh_token was revoked by Google (2026-04-13 → 2026-04-15, 2.5
+    days of blind flight). Detecting 'invalid_grant' in the refresh
+    error message is the specific signal that distinguishes a
+    credentials-are-revoked failure from a transient network failure.
     """
     if not os.path.exists(TOKEN_FILE):
         return "missing"
+
+    creds_path = os.path.join(WORKSPACE, "credentials.json")
     try:
-        mtime = os.path.getmtime(TOKEN_FILE)
-    except OSError:
+        creds = get_credentials(creds_path, TOKEN_FILE, GOOGLE_SCOPES)
+    except FileNotFoundError:
         return "missing"
-    age_days = (time.time() - mtime) / 86400
-    return "ok" if age_days <= TOKEN_STALE_DAYS else "stale"
+    except Exception as exc:
+        if "invalid_grant" in str(exc):
+            return "revoked"
+        return "error"
+
+    if creds is None:
+        return "missing"
+    return "ok"
 
 
 def _count_calendars() -> int:

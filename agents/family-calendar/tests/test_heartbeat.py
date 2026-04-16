@@ -108,29 +108,61 @@ def test_probe_returns_degraded_when_sent_reminders_missing(stub_workspace):
 # ─── google_auth probe ──────────────────────────────────────────────
 
 
-def test_probe_google_auth_stale_when_token_missing(stub_workspace):
+def test_probe_google_auth_missing_when_token_file_absent(stub_workspace):
     stub_workspace.token_file.unlink()
     result = stub_workspace.hb.probe()
     assert result["google_auth"] == "missing"
     assert result["status"] == "degraded"
 
 
-def test_probe_google_auth_stale_when_token_mtime_old(stub_workspace):
-    """Token mtime >30 days → google_auth=stale. The refresh flow
-    should touch token.json on every gcal-fetch.py call; an ancient
-    mtime means the flow is broken."""
-    old_ts = time.time() - (40 * 86400)
-    os.utime(str(stub_workspace.token_file), (old_ts, old_ts))
+def test_probe_google_auth_ok_when_credentials_refresh_successfully(stub_workspace, monkeypatch):
+    """A live refresh round-trip succeeds → google_auth='ok'.
+
+    Regression guard for the 2026-04-15 discovery: the old mtime-only
+    check reported 'ok' even though the refresh_token had been revoked
+    by Google 2.5 days earlier. The new check must actually exercise
+    the credentials."""
+    def fake_get_credentials(creds_path, token_path, scopes):
+        return types.SimpleNamespace(valid=True, refresh_token="ok")
+
+    monkeypatch.setattr(stub_workspace.hb, "get_credentials", fake_get_credentials)
+
     result = stub_workspace.hb.probe()
-    assert result["google_auth"] == "stale"
+    assert result["google_auth"] == "ok"
+    assert result["status"] == "ok"
+
+
+def test_probe_google_auth_revoked_when_refresh_raises_invalid_grant(stub_workspace, monkeypatch):
+    """This is the 2026-04-15 failure mode: refresh_token was revoked
+    by Google (or expired after 6 months of inactivity), creds.refresh()
+    raises RefreshError('invalid_grant'), and the fleet went blind for
+    2.5 days because the probe only checked mtime. The new check must
+    trip into 'revoked' and mark the agent degraded so fix-it fires
+    an alert within one heartbeat cycle, not 2.5 days."""
+    def failing_get_credentials(creds_path, token_path, scopes):
+        raise RuntimeError(
+            "('invalid_grant: Token has been expired or revoked.', "
+            "{'error': 'invalid_grant', 'error_description': 'Token has been expired or revoked.'})"
+        )
+
+    monkeypatch.setattr(stub_workspace.hb, "get_credentials", failing_get_credentials)
+
+    result = stub_workspace.hb.probe()
+    assert result["google_auth"] == "revoked"
     assert result["status"] == "degraded"
 
 
-def test_probe_google_auth_ok_when_token_fresh(stub_workspace):
-    """Token updated within the last 30 days → ok."""
-    # Default fixture already writes a fresh token
+def test_probe_google_auth_error_on_unexpected_exception(stub_workspace, monkeypatch):
+    """Any other exception from get_credentials must surface as
+    'error' (not silently pass as 'ok')."""
+    def boom(creds_path, token_path, scopes):
+        raise OSError("network down")
+
+    monkeypatch.setattr(stub_workspace.hb, "get_credentials", boom)
+
     result = stub_workspace.hb.probe()
-    assert result["google_auth"] == "ok"
+    assert result["google_auth"] == "error"
+    assert result["status"] == "degraded"
 
 
 # ─── sent-reminders prune ────────────────────────────────────────────

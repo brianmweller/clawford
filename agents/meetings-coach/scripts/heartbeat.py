@@ -16,6 +16,21 @@ import sys
 import time
 import traceback
 from datetime import datetime, timezone
+from pathlib import Path
+
+# --- shared library sys.path shim ---
+for _p in Path(__file__).resolve().parents:
+    if (_p / "agents" / "shared").is_dir():
+        if str(_p) not in sys.path:
+            sys.path.insert(0, str(_p))
+        break
+
+from agents.shared.google_oauth import get_credentials  # noqa: E402
+
+GOOGLE_SCOPES = [
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/gmail.readonly",
+]
 
 WORKSPACE = os.path.expanduser("~/.clawford/meetings-coach-workspace")
 BRAIN = os.path.expanduser("~/Dropbox/openclaw-backup")
@@ -33,19 +48,27 @@ PREP_MAX_AGE_DAYS = 14
 
 
 def check_auth():
-    """Returns dict of auth field -> 'ok' or 'missing'."""
+    """Returns dict of auth field -> 'ok'|'missing'|'revoked'|'error'."""
     auth = {}
 
-    # Google
+    # Google — exercise the refresh round-trip, not just file existence.
+    # 2026-04-15: the old "token.json exists and is JSON" check reported
+    # 'ok' for 2.5 days while the refresh_token was revoked by Google.
     token_path = os.path.join(WORKSPACE, "token.json")
-    if os.path.exists(token_path):
-        try:
-            json.load(open(token_path))
-            auth["google_auth"] = "ok"
-        except Exception:
-            auth["google_auth"] = "missing"
-    else:
+    creds_path = os.path.join(WORKSPACE, "credentials.json")
+    if not os.path.exists(token_path):
         auth["google_auth"] = "missing"
+    else:
+        try:
+            creds = get_credentials(creds_path, token_path, GOOGLE_SCOPES)
+            auth["google_auth"] = "ok" if creds is not None else "missing"
+        except FileNotFoundError:
+            auth["google_auth"] = "missing"
+        except Exception as exc:
+            if "invalid_grant" in str(exc):
+                auth["google_auth"] = "revoked"
+            else:
+                auth["google_auth"] = "error"
 
     # Workflowy — mirror workflowy-sync.get_api_key()'s fallback chain.
     # Under host-native cron the env var isn't exported, so we also

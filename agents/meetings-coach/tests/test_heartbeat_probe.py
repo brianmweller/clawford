@@ -89,3 +89,50 @@ def test_run_writes_status_md_then_returns_probe_result(fake_workspace):
     assert "# Meetings Coach — Status" in text
     assert "- **status:**" in text
     assert result["status"] in ("ok", "degraded")
+
+
+# ─── google_auth: must actually test credentials, not just file-exists ─
+
+
+def test_google_auth_ok_when_credentials_refresh_successfully(fake_workspace, monkeypatch):
+    """check_auth() must exercise get_credentials() and only report
+    'ok' if the refresh round-trip succeeds. Regression guard for the
+    2026-04-15 2.5-day silent outage where token.json existed and was
+    valid JSON but the refresh_token had been revoked."""
+    mod, ws, brain = fake_workspace
+    import types as _t
+    monkeypatch.setattr(
+        mod, "get_credentials",
+        lambda creds_path, token_path, scopes:
+        _t.SimpleNamespace(valid=True, refresh_token="ok"),
+    )
+    result = mod.check_auth()
+    assert result["google_auth"] == "ok"
+
+
+def test_google_auth_revoked_on_invalid_grant(fake_workspace, monkeypatch):
+    mod, ws, brain = fake_workspace
+    def boom(creds_path, token_path, scopes):
+        raise RuntimeError(
+            "('invalid_grant: Token has been expired or revoked.', "
+            "{'error': 'invalid_grant'})"
+        )
+    monkeypatch.setattr(mod, "get_credentials", boom)
+    result = mod.check_auth()
+    assert result["google_auth"] == "revoked"
+
+
+def test_google_auth_error_on_other_exception(fake_workspace, monkeypatch):
+    mod, ws, brain = fake_workspace
+    def boom(creds_path, token_path, scopes):
+        raise OSError("network down")
+    monkeypatch.setattr(mod, "get_credentials", boom)
+    result = mod.check_auth()
+    assert result["google_auth"] == "error"
+
+
+def test_google_auth_missing_when_token_file_absent(fake_workspace):
+    mod, ws, brain = fake_workspace
+    (ws / "token.json").unlink()
+    result = mod.check_auth()
+    assert result["google_auth"] == "missing"
