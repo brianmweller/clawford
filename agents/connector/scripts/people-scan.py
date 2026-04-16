@@ -79,7 +79,7 @@ def _load_upcoming_meeting_emails() -> set:
 
 def parse_person_file(filepath):
     """Parse a person markdown file into a dict of fields."""
-    with open(filepath) as f:
+    with open(filepath, encoding="utf-8") as f:
         content = f.read()
 
     person = {}
@@ -180,6 +180,15 @@ def run() -> dict:
         cadence_days, cadence_circle = cadence_result if cadence_result != (None, None) else (None, None)
 
         if cadence_days is None:
+            skipped += 1
+            continue
+
+        # Person-ness filter: require at least one reachable contact
+        # method. Mining-pipeline entries for WhatsApp chat IDs (e.g.
+        # "Am147") and phone-number slugs (e.g. "1-818-3326560") have
+        # both email and phone as em-dash (parsed to None); they are
+        # not real people and must not show up in nudges.
+        if not person.get("email") and not person.get("phone"):
             skipped += 1
             continue
 

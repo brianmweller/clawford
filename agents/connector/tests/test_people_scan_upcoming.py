@@ -223,3 +223,64 @@ def test_run_upcoming_filter_does_not_affect_healthy_people(stub_brain):
     # Fresh person is in healthy, NOT demoted
     assert any(p["slug"] == "fresh-friend" for p in result["healthy"])
     assert not any(p["slug"] == "fresh-friend" for p in result["demoted_upcoming"])
+
+
+# ── person-ness filter (Am147 et al.) ─────────────────────────────
+
+
+def test_run_skips_entries_with_no_email_and_no_phone(stub_brain):
+    """Entries auto-created by the mining pipeline with no phone and
+    no email (em-dash in both fields → parsed to None) are chat IDs
+    or group placeholders, not people. They should NOT appear in
+    overdue/approaching/healthy regardless of how stale the
+    last_interaction is.
+
+    Regression: 'Am147 (family) — 64 days since last contact' showed
+    up in the OVERDUE list on 2026-04-16 even though Am147 is a
+    WhatsApp chat ID, not a person."""
+    (stub_brain.people / "am147.md").write_text(
+        "# Am147\n"
+        "- **slug:** am147\n"
+        "- **circles:** friends-close\n"
+        "- **preferred_channel:** WhatsApp\n"
+        "- **tone:** casual\n"
+        "- **email:** —\n"
+        "- **phone:** —\n"
+        "- **platforms:** whatsapp\n"
+        f"- **last_interaction:** {_days_ago_iso(64)}\n"
+        "- **notes:** Auto-created by mining pipeline on 2026-04-12.\n",
+        encoding="utf-8",
+    )
+    # A real person alongside to prove the filter is narrow.
+    _write_person(stub_brain.people, "real-friend",
+                  email="friend@x.com",
+                  last_interaction=_days_ago_iso(64))
+
+    result = stub_brain.ps.run()
+    assert not any(p["slug"] == "am147" for p in result["overdue"])
+    assert not any(p["slug"] == "am147" for p in result["approaching"])
+    assert not any(p["slug"] == "am147" for p in result["healthy"])
+    # Real person still classified normally.
+    assert any(p["slug"] == "real-friend" for p in result["overdue"])
+    # Skipped counter increments.
+    assert result["summary"]["skipped"] >= 1
+
+
+def test_run_keeps_phone_only_person(stub_brain):
+    """Person with a phone but no email (e.g. iMessage-only contacts)
+    MUST still be scanned. Only entries with BOTH missing are
+    filtered."""
+    (stub_brain.people / "phone-only.md").write_text(
+        "# Phone Only\n"
+        "- **slug:** phone-only\n"
+        "- **circles:** friends-close\n"
+        "- **preferred_channel:** iMessage\n"
+        "- **tone:** warm\n"
+        "- **email:** —\n"
+        "- **phone:** +1-555-0100\n"
+        "- **platforms:** sms\n"
+        f"- **last_interaction:** {_days_ago_iso(64)}\n",
+        encoding="utf-8",
+    )
+    result = stub_brain.ps.run()
+    assert any(p["slug"] == "phone-only" for p in result["overdue"])
