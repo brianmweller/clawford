@@ -18,10 +18,10 @@ echo "Unit reloaded and enabled."
 
 # Graceful cutover: stop any nohup-launched daemon first.
 # Two-step kill avoids the SSH self-pkill footgun (gotcha #1).
-PID=$(pgrep -f 'python3 agents/shared/telegram_inbox.py' || true)
-if [ -n "$PID" ]; then
-    echo "Killing nohup daemon (PID $PID)..."
-    kill "$PID" || true
+PIDS=$(pgrep -f 'python3 agents/shared/telegram_inbox.py' || true)
+if [ -n "$PIDS" ]; then
+    echo "Killing nohup daemon(s): $PIDS"
+    echo "$PIDS" | xargs -r kill || true
     sleep 2
 fi
 
