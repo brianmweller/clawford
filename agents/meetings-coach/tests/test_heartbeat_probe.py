@@ -40,18 +40,13 @@ def fake_workspace(tmp_path, monkeypatch):
     (ws / "sent-alerts.json").write_text("{}")
     monkeypatch.setenv("WORKFLOWY_API_KEY", "stub")
 
-    brain = tmp_path / "openclaw-backup"
-    (brain / "agents").mkdir(parents=True)
-
     mod = _load_heartbeat()
     monkeypatch.setattr(mod, "WORKSPACE", str(ws))
-    monkeypatch.setattr(mod, "BRAIN", str(brain))
-    monkeypatch.setattr(mod, "OUTPUT_FILE", str(brain / "agents" / "meetings-coach.status.md"))
-    return mod, ws, brain
+    return mod, ws
 
 
 def test_probe_returns_dict_with_status_and_auth(fake_workspace):
-    mod, ws, brain = fake_workspace
+    mod, ws = fake_workspace
     result = mod.probe()
     assert "status" in result
     assert result["status"] in ("ok", "degraded")
@@ -61,34 +56,13 @@ def test_probe_returns_dict_with_status_and_auth(fake_workspace):
     assert "krisp_auth" in result["auth"]
 
 
-def test_probe_does_not_write_status_md(fake_workspace):
-    mod, ws, brain = fake_workspace
-    sentinel = brain / "agents" / "meetings-coach.status.md"
-    assert not sentinel.exists()  # baseline
-    mod.probe()
-    assert not sentinel.exists(), "probe() must not write status.md"
-
-
 def test_probe_returns_degraded_when_required_file_missing(fake_workspace):
-    mod, ws, brain = fake_workspace
+    mod, ws = fake_workspace
     (ws / "meeting-config.json").unlink()
     result = mod.probe()
     assert result["status"] == "degraded"
     assert "meeting-config.json" in result["missing_files"]
     assert "alert" in result
-
-
-def test_run_writes_status_md_then_returns_probe_result(fake_workspace):
-    """run() = probe() + _write_status_md(). Verify the file IS written
-    and that the returned dict matches what probe() would return."""
-    mod, ws, brain = fake_workspace
-    sentinel = brain / "agents" / "meetings-coach.status.md"
-    result = mod.run()
-    assert sentinel.exists()
-    text = sentinel.read_text(encoding="utf-8")
-    assert "# Meetings Coach — Status" in text
-    assert "- **status:**" in text
-    assert result["status"] in ("ok", "degraded")
 
 
 # ─── google_auth: must actually test credentials, not just file-exists ─
@@ -99,7 +73,7 @@ def test_google_auth_ok_when_credentials_refresh_successfully(fake_workspace, mo
     'ok' if the refresh round-trip succeeds. Regression guard for the
     2026-04-15 2.5-day silent outage where token.json existed and was
     valid JSON but the refresh_token had been revoked."""
-    mod, ws, brain = fake_workspace
+    mod, ws = fake_workspace
     import types as _t
     monkeypatch.setattr(
         mod, "get_credentials",
@@ -111,7 +85,7 @@ def test_google_auth_ok_when_credentials_refresh_successfully(fake_workspace, mo
 
 
 def test_google_auth_revoked_on_invalid_grant(fake_workspace, monkeypatch):
-    mod, ws, brain = fake_workspace
+    mod, ws = fake_workspace
     def boom(creds_path, token_path, scopes):
         raise RuntimeError(
             "('invalid_grant: Token has been expired or revoked.', "
@@ -123,7 +97,7 @@ def test_google_auth_revoked_on_invalid_grant(fake_workspace, monkeypatch):
 
 
 def test_google_auth_error_on_other_exception(fake_workspace, monkeypatch):
-    mod, ws, brain = fake_workspace
+    mod, ws = fake_workspace
     def boom(creds_path, token_path, scopes):
         raise OSError("network down")
     monkeypatch.setattr(mod, "get_credentials", boom)
@@ -132,7 +106,7 @@ def test_google_auth_error_on_other_exception(fake_workspace, monkeypatch):
 
 
 def test_google_auth_missing_when_token_file_absent(fake_workspace):
-    mod, ws, brain = fake_workspace
+    mod, ws = fake_workspace
     (ws / "token.json").unlink()
     result = mod.check_auth()
     assert result["google_auth"] == "missing"

@@ -33,8 +33,6 @@ GOOGLE_SCOPES = [
 ]
 
 WORKSPACE = os.path.expanduser("~/.clawford/meetings-coach-workspace")
-BRAIN = os.path.expanduser("~/Dropbox/openclaw-backup")
-OUTPUT_FILE = os.path.join(BRAIN, "agents", "meetings-coach.status.md")
 
 CACHE_FILES = [
     ("last-morning-brief.json", "morning-brief"),
@@ -235,48 +233,9 @@ def probe() -> dict:
     return result
 
 
-def _write_status_md(probe_result: dict) -> None:
-    """Render the probe result as the meetings-coach.status.md schema."""
-    now = datetime.now(timezone.utc)
-    now_str = now.strftime("%Y-%m-%d %H:%M UTC")
-
-    auth = probe_result.get("auth", {})
-    status = probe_result.get("status", "ok")
-    last_cron_run = probe_result.get("last_cron_run") or now_str
-    last_cron_name = probe_result.get("last_cron_name") or "heartbeat"
-    last_cron_result = probe_result.get("last_cron_result") or "heartbeat ran"
-    error_log = probe_result.get("error_log", "none")
-
-    content = f"""# Meetings Coach — Status
-
-- **last_heartbeat:** {now_str}
-- **status:** {status}
-- **last_cron_run:** {last_cron_run} — {last_cron_name}
-- **last_cron_result:** {last_cron_result}
-- **google_auth:** {auth.get('google_auth', 'missing')}
-- **workflowy_auth:** {auth.get('workflowy_auth', 'missing')}
-- **krisp_auth:** {auth.get('krisp_auth', 'missing')}
-- **error_log:** {error_log}
-- **token_usage_today:** —
-"""
-    try:
-        os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
-        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-            f.write(content)
-    except Exception as e:
-        raise RuntimeError(f"status file write failed: {e}") from e
-
-
-def run() -> dict:
-    """Call probe() + write status.md (transition behavior)."""
-    result = probe()
-    _write_status_md(result)
-    return result
-
-
 def main() -> int:
     try:
-        result = run()
+        result = probe()
     except Exception as e:
         result = {
             "status": "error",

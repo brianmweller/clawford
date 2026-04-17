@@ -35,8 +35,6 @@ import traceback
 from datetime import datetime, timedelta, timezone
 
 BRAIN = os.path.expanduser("~/Dropbox/openclaw-backup")
-STATUS_DIR = os.path.join(BRAIN, "agents")
-OUTPUT_FILE = os.path.join(STATUS_DIR, "fix-it.status.md")
 FLEET_HEALTH_PATH = os.path.join(BRAIN, "fleet-health.json")
 
 # fleet-health.py runs every 15 min. 30 min ≈ 2 missed runs before we alarm.
@@ -146,44 +144,9 @@ def probe() -> dict:
     }
 
 
-def _write_status_md(probe_result: dict) -> None:
-    """Render the probe result as fix-it.status.md. Kept for
-    standalone invocation — fleet-health.py no longer triggers this
-    path (it calls probe() via probe-agent.py)."""
-    now = datetime.now(timezone.utc)
-    now_str = now.strftime("%Y-%m-%d %H:%M UTC")
-
-    status = probe_result.get("status", "ok")
-    human_status = "healthy" if status == "ok" else status
-    result_line = probe_result.get("last_cron_result", "")
-    error_line = probe_result.get("error_log", "none")
-
-    content = f"""# Fix-It — Status
-
-- **last_heartbeat:** {now_str}
-- **status:** {human_status}
-- **last_cron_run:** heartbeat-check at {now_str}
-- **last_cron_result:** {result_line}
-- **error_log:** {error_line}
-- **token_usage_today:** —
-"""
-    try:
-        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-            f.write(content)
-    except Exception as e:
-        raise RuntimeError(f"status file write failed: {e}") from e
-
-
-def run() -> dict:
-    """Call probe() + write status.md (standalone path)."""
-    result = probe()
-    _write_status_md(result)
-    return result
-
-
 def main() -> int:
     try:
-        result = run()
+        result = probe()
     except Exception as e:
         result = {
             "status": "error",

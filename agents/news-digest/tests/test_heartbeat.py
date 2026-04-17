@@ -1,11 +1,14 @@
 """Tests for news-digest/scripts/heartbeat.py.
 
-Verifies the NewsDigestProbe subclass of
-agents.shared.heartbeat_base.HeartbeatProbe: persistent LinkedIn
-profile dir, preferences/model.json, ranked-<today>.json freshness
-(gated by time-of-day — missing is only degraded after 11:00 UTC when
-morning-edition should have written it), status.md rendering, and
+Verifies the NewsDigestProbe subclass of HeartbeatProbe: persistent
+LinkedIn profile dir, preferences/model.json, ranked-<today>.json
+freshness (gated by time-of-day — missing is only degraded after
+11:00 UTC when morning-edition should have written it), and the
 SCRIPT_CONTRACT main() wrapper.
+
+The fleet-health.py orchestrator invokes probe() via probe-agent.py
+and writes the aggregated result to <brain>/fleet-health.json; per-agent
+status.md writes were retired.
 
 Run: cd agents/news-digest && python3 -m pytest tests/test_heartbeat.py -v
 """
@@ -40,9 +43,6 @@ def probe_setup(tmp_path):
     (workspace / "preferences").mkdir()
     (workspace / "linkedin-profile").mkdir()  # persistent Chromium profile dir
 
-    brain = tmp_path / "openclaw-backup"
-    (brain / "agents").mkdir(parents=True)
-
     # Required state files
     (workspace / "preferences" / "model.json").write_text(json.dumps({
         "topics": {},
@@ -50,16 +50,14 @@ def probe_setup(tmp_path):
     }))
 
     hb = _load_script("heartbeat.py")
-    instance = hb.NewsDigestProbe(workspace=str(workspace), brain_dir=str(brain))
+    instance = hb.NewsDigestProbe(workspace=str(workspace))
     return {
         "hb": hb,
         "instance": instance,
         "workspace": workspace,
-        "brain": brain,
         "profile_dir": workspace / "linkedin-profile",
         "model_file": workspace / "preferences" / "model.json",
         "cache_dir": workspace / "cache",
-        "status_file": brain / "agents" / "news-digest.status.md",
     }
 
 
@@ -130,29 +128,6 @@ def test_probe_morning_edition_ok_when_ranked_present_after_11am(probe_setup):
     assert result["items_count"] == 20
 
 
-# ─── status.md write ─────────────────────────────────────────────────
-
-
-def test_run_writes_status_md_with_core_fields(probe_setup):
-    _write_ranked_today(probe_setup["cache_dir"], num_items=15)
-    probe_setup["instance"].run()
-    text = probe_setup["status_file"].read_text(encoding="utf-8")
-    assert "# News Digest — Status" in text
-    assert "- **last_heartbeat:**" in text
-    assert "- **status:** ok" in text
-    assert "- **linkedin_profile:** ok" in text
-    assert "- **morning_edition:**" in text
-
-
-def test_run_marks_degraded_when_profile_missing(probe_setup):
-    import shutil
-    shutil.rmtree(probe_setup["profile_dir"])
-    probe_setup["instance"].run()
-    text = probe_setup["status_file"].read_text(encoding="utf-8")
-    assert "- **status:** degraded" in text
-    assert "- **linkedin_profile:** missing" in text
-
-
 # ─── main() wrapper ──────────────────────────────────────────────────
 
 
@@ -186,7 +161,6 @@ def test_main_emits_error_json_when_probe_crashes(probe_setup, capsys, monkeypat
 
 def test_module_level_probe_function_exists(probe_setup):
     """fleet-health.py / probe-agent.py calls `from heartbeat import probe;
-    probe()` via docker exec. That thin wrapper must exist."""
+    probe()`. That thin wrapper must exist."""
     hb = probe_setup["hb"]
     assert callable(hb.probe)
-    assert callable(hb.run)

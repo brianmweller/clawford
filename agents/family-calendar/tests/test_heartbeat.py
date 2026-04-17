@@ -1,13 +1,12 @@
 """Tests for family-calendar/scripts/heartbeat.py.
 
-Replaces the LLM-native heartbeat cron with a deterministic Python
-probe: verify calendar-config.json and sent-reminders.json exist,
-check google_auth (token.json mtime), prune stale reminders (>48h),
-write family-calendar.status.md, return SCRIPT_CONTRACT JSON.
+Deterministic probe: verify calendar-config.json and sent-reminders.json
+exist, check google_auth (live refresh round-trip), prune stale reminders
+(>48h), return SCRIPT_CONTRACT JSON.
 
-Two-layer design: probe() is pure, run() writes status.md, main()
-wraps run() in try/except per SCRIPT_CONTRACT. See
-agents/connector/tests/test_heartbeat.py for the template.
+`probe()` is pure; the fleet-health.py orchestrator invokes it via
+probe-agent.py and writes the aggregated result to
+<brain>/fleet-health.json. Per-agent status.md writes were retired.
 
 Run: cd agents/family-calendar && python3 -m pytest tests/test_heartbeat.py -v
 """
@@ -41,8 +40,6 @@ def _load_script(name: str):
 def stub_workspace(tmp_path, monkeypatch):
     workspace = tmp_path / "family-calendar-workspace"
     workspace.mkdir()
-    brain = tmp_path / "openclaw-backup"
-    (brain / "agents").mkdir(parents=True)
 
     # Required files
     (workspace / "calendar-config.json").write_text(json.dumps({
@@ -63,8 +60,6 @@ def stub_workspace(tmp_path, monkeypatch):
 
     hb = _load_script("heartbeat.py")
     monkeypatch.setattr(hb, "WORKSPACE", str(workspace))
-    monkeypatch.setattr(hb, "BRAIN", str(brain))
-    monkeypatch.setattr(hb, "OUTPUT_FILE", str(brain / "agents" / "family-calendar.status.md"))
     monkeypatch.setattr(hb, "CONFIG_FILE", str(workspace / "calendar-config.json"))
     monkeypatch.setattr(hb, "SENT_REMINDERS_FILE", str(workspace / "sent-reminders.json"))
     monkeypatch.setattr(hb, "TOKEN_FILE", str(workspace / "token.json"))
@@ -72,11 +67,9 @@ def stub_workspace(tmp_path, monkeypatch):
     return types.SimpleNamespace(
         hb=hb,
         workspace=workspace,
-        brain=brain,
         config_file=workspace / "calendar-config.json",
         sent_file=workspace / "sent-reminders.json",
         token_file=workspace / "token.json",
-        status_file=brain / "agents" / "family-calendar.status.md",
     )
 
 
@@ -206,28 +199,6 @@ def test_probe_pruned_reminders_zero_when_all_fresh(stub_workspace):
     assert result["pruned_reminders"] == 0
 
 
-# ─── status.md write ─────────────────────────────────────────────────
-
-
-def test_run_writes_status_md_with_core_fields(stub_workspace):
-    stub_workspace.hb.run()
-    text = stub_workspace.status_file.read_text(encoding="utf-8")
-    assert "# Family Calendar — Status" in text
-    assert "- **last_heartbeat:**" in text
-    assert "- **status:** ok" in text
-    assert "- **google_auth:** ok" in text
-    assert "- **calendars_configured:** 2" in text
-    assert "- **error_log:**" in text
-
-
-def test_run_marks_google_auth_in_status_md_when_missing(stub_workspace):
-    stub_workspace.token_file.unlink()
-    stub_workspace.hb.run()
-    text = stub_workspace.status_file.read_text(encoding="utf-8")
-    assert "- **google_auth:** missing" in text
-    assert "- **status:** degraded" in text
-
-
 # ─── main() wrapper ──────────────────────────────────────────────────
 
 
@@ -251,50 +222,18 @@ def test_main_emits_error_json_when_probe_crashes(stub_workspace, capsys, monkey
     assert "alert" in payload
 
 
-# ─── Phase 4: HeartbeatProbe subclass ────────────────────────────────
+# ─── HeartbeatProbe subclass ────────────────────────────────
 
 
 def test_family_calendar_probe_subclasses_heartbeat_probe(stub_workspace):
-    """Phase 4: family-calendar/heartbeat.py exposes a
-    FamilyCalendarProbe class that subclasses
-    agents.shared.heartbeat_base.HeartbeatProbe, matching the fleet
-    convention. The class carries AGENT_ID, TITLE, EMOJI identifiers
-    and delegates probe()/render_status_md() to per-agent logic."""
+    """Carries AGENT_ID/TITLE/EMOJI for fleet-health aggregation and
+    delegates probe() to the module-level function."""
     from agents.shared.heartbeat_base import HeartbeatProbe
 
     hb = stub_workspace.hb
-    assert hasattr(hb, "FamilyCalendarProbe"), (
-        "expected FamilyCalendarProbe class to exist after Phase 4 refactor"
-    )
+    assert hasattr(hb, "FamilyCalendarProbe")
     cls = hb.FamilyCalendarProbe
     assert issubclass(cls, HeartbeatProbe)
     assert cls.AGENT_ID == "family-calendar"
     assert cls.TITLE == "Family Calendar"
-    assert cls.EMOJI  # any non-empty emoji is acceptable
-
-
-def test_family_calendar_probe_render_status_md_shape(stub_workspace):
-    """render_status_md() returns the markdown body that was previously
-    inlined in _write_status_md. Must include the same fields."""
-    probe_result = {
-        "status": "ok",
-        "google_auth": "ok",
-        "calendars_configured": 2,
-        "pruned_reminders": 1,
-        "missing_files": [],
-        "last_cron_run": "2026-04-14T10:00:00Z",
-        "last_cron_name": "morning-briefing",
-        "last_cron_result": "14 events",
-    }
-    hb = stub_workspace.hb
-    instance = hb.FamilyCalendarProbe()
-    md = instance.render_status_md(probe_result)
-
-    assert "# Family Calendar — Status" in md
-    assert "**status:** ok" in md
-    assert "**google_auth:** ok" in md
-    assert "**calendars_configured:** 2" in md
-    assert "**pruned_reminders:** 1" in md
-    assert "**last_cron_run:** 2026-04-14T10:00:00Z — morning-briefing" in md
-    assert "**last_cron_result:** 14 events" in md
-    assert "**error_log:** none" in md
+    assert cls.EMOJI

@@ -1,14 +1,13 @@
 """Tests for connector/scripts/heartbeat.py.
 
-Replaces the LLM-native heartbeat cron with a deterministic Python
-probe: verify required workspace files exist, prune stale cache
-files (>14 days) and stale triage entries (>48h), write status.md
-in the existing markdown bullet format, return SCRIPT_CONTRACT JSON.
+Deterministic probe: verify required workspace files exist, prune
+stale cache files (>14 days) and stale triage entries (>48h), return
+SCRIPT_CONTRACT JSON.
 
-The `probe()` function is pure — reads state, returns dict, no side
-effects. `run()` calls probe() + writes status.md. This split is so
-the upcoming fleet-health.py orchestrator (R3) can call probe()
-directly via docker exec without touching the status file.
+`probe()` is pure — reads state, returns dict. The fleet-health.py
+orchestrator invokes it via probe-agent.py and aggregates into
+<brain>/fleet-health.json; per-agent <id>.status.md writes were
+retired along with `run()` / `_write_status_md()`.
 
 Run: cd agents/connector && python3 -m pytest tests/test_heartbeat.py -v
 """
@@ -47,21 +46,16 @@ def stub_workspace(tmp_path, monkeypatch):
     workspace.mkdir()
     (workspace / "cache").mkdir()
 
-    brain = tmp_path / "openclaw-backup"
-    (brain / "agents").mkdir(parents=True)
-
     # Write both required files by default — individual tests can
     # unlink one to simulate missing config.
     (workspace / "connector-config.json").write_text(json.dumps({"agent": "huckle"}))
     (workspace / "pending-triage.json").write_text(json.dumps([]))
 
     # Re-import heartbeat under the stubbed paths. We need to rewrite
-    # WORKSPACE / BRAIN / OUTPUT_FILE at the module level so any
-    # os.path.join results it computed at import time are regenerated.
+    # WORKSPACE at the module level so any os.path.join results it
+    # computed at import time are regenerated.
     hb = _load_script("heartbeat.py")
     monkeypatch.setattr(hb, "WORKSPACE", str(workspace))
-    monkeypatch.setattr(hb, "BRAIN", str(brain))
-    monkeypatch.setattr(hb, "OUTPUT_FILE", str(brain / "agents" / "connector.status.md"))
     monkeypatch.setattr(hb, "CONFIG_FILE", str(workspace / "connector-config.json"))
     monkeypatch.setattr(hb, "TRIAGE_FILE", str(workspace / "pending-triage.json"))
     monkeypatch.setattr(hb, "CACHE_DIR", str(workspace / "cache"))
@@ -69,11 +63,9 @@ def stub_workspace(tmp_path, monkeypatch):
     return types.SimpleNamespace(
         hb=hb,
         workspace=workspace,
-        brain=brain,
         config_file=workspace / "connector-config.json",
         triage_file=workspace / "pending-triage.json",
         cache_dir=workspace / "cache",
-        status_file=brain / "agents" / "connector.status.md",
     )
 
 
@@ -176,25 +168,6 @@ def test_probe_pruned_cache_zero_when_all_fresh(stub_workspace):
     (stub_workspace.cache_dir / "two.txt").write_text("hi")
     result = stub_workspace.hb.probe()
     assert result["pruned_cache"] == 0
-
-
-# ─── status.md write ─────────────────────────────────────────────────
-
-
-def test_run_writes_status_md_in_expected_format(stub_workspace):
-    stub_workspace.hb.run()
-    text = stub_workspace.status_file.read_text(encoding="utf-8")
-    assert "# Connector — Status" in text
-    assert "- **last_heartbeat:**" in text
-    assert "- **status:** ok" in text
-    assert "- **error_log:**" in text
-
-
-def test_run_marks_status_degraded_when_config_missing(stub_workspace):
-    stub_workspace.config_file.unlink()
-    stub_workspace.hb.run()
-    text = stub_workspace.status_file.read_text(encoding="utf-8")
-    assert "- **status:** degraded" in text
 
 
 # ─── main() SCRIPT_CONTRACT wrapper ──────────────────────────────────

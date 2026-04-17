@@ -45,8 +45,6 @@ GOOGLE_SCOPES = [
 ]
 
 WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
-BRAIN = os.path.expanduser("~/Dropbox/openclaw-backup")
-OUTPUT_FILE = os.path.join(BRAIN, "agents", "family-calendar.status.md")
 
 CONFIG_FILE = os.path.join(WORKSPACE, "calendar-config.json")
 SENT_REMINDERS_FILE = os.path.join(WORKSPACE, "sent-reminders.json")
@@ -218,59 +216,18 @@ def probe() -> dict:
 class FamilyCalendarProbe(HeartbeatProbe):
     """Family Calendar (Mistress Mouse) heartbeat probe.
 
-    Subclass of agents.shared.heartbeat_base.HeartbeatProbe. Delegates
-    probe() to the module-level function so the existing monkeypatched
-    globals (WORKSPACE, BRAIN, TOKEN_FILE, etc.) remain the single
-    source of truth for tests.
+    Thin HeartbeatProbe wrapper around the module-level probe(). Carries
+    AGENT_ID/TITLE/EMOJI for fleet-health aggregation; probe() remains
+    at module scope so the monkeypatched globals (WORKSPACE, TOKEN_FILE,
+    etc.) stay the single source of truth for tests.
     """
 
     AGENT_ID = "family-calendar"
     TITLE = "Family Calendar"
     EMOJI = "🐭"
 
-    @property
-    def output_file(self) -> str:
-        return OUTPUT_FILE
-
     def probe(self) -> dict:
         return probe()
-
-    def render_status_md(self, result: dict) -> str:
-        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
-        status = result.get("status", "ok")
-        last_cron_run = result.get("last_cron_run") or now_str
-        last_cron_name = result.get("last_cron_name") or "heartbeat"
-        last_cron_result = result.get("last_cron_result") or "heartbeat ran"
-        google_auth = result.get("google_auth", "ok")
-        calendars = result.get("calendars_configured", 0)
-
-        errors: list[str] = []
-        if result.get("missing_files"):
-            errors.append(f"missing: {', '.join(result['missing_files'])}")
-        if google_auth != "ok":
-            errors.append(f"google_auth: {google_auth}")
-        error_log = "; ".join(errors) if errors else "none"
-
-        return (
-            "# Family Calendar — Status\n\n"
-            f"- **last_heartbeat:** {now_str}\n"
-            f"- **status:** {status}\n"
-            f"- **last_cron_run:** {last_cron_run} — {last_cron_name}\n"
-            f"- **last_cron_result:** {last_cron_result}\n"
-            f"- **calendars_configured:** {calendars}\n"
-            f"- **google_auth:** {google_auth}\n"
-            f"- **pruned_reminders:** {result.get('pruned_reminders', 0)}\n"
-            f"- **error_log:** {error_log}\n"
-        )
-
-
-_default_instance = FamilyCalendarProbe()
-
-
-def run() -> dict:
-    """Call probe() + write family-calendar.status.md as side effect."""
-    return _default_instance.run()
 
 
 def main() -> int:

@@ -4,24 +4,15 @@
 Replaces the former LLM-native heartbeat cron message with a
 deterministic Python script. Verifies required workspace files,
 prunes stale cache files (>14 days) and stale triage entries (>48h),
-writes `connector.status.md` in the fleet-standard markdown bullet
-format, and emits SCRIPT_CONTRACT JSON on stdout.
+and emits SCRIPT_CONTRACT JSON on stdout.
 
-Two-layer design:
+  probe() -> dict    — pure: reads state, returns result dict.
+                       Invoked by `ops/scripts/probe-agent.py` during
+                       the */15 fleet-health tick; the aggregated
+                       report lands in <brain>/fleet-health.json,
+                       the single authoritative health source.
 
-  probe() -> dict    — pure: reads state, returns result dict,
-                       NO side effects on status.md. This is the
-                       entrypoint the fleet-health.py orchestrator
-                       (R3) will call via `docker exec` to collect
-                       per-agent probe results for the central
-                       fleet-health.json registry.
-
-  run()   -> dict    — calls probe(), THEN writes status.md as a
-                       side effect. Kept during the transition
-                       period so fix-it/morning-status can still
-                       scrape the Dropbox files. Retired in R6.
-
-  main()  -> int     — SCRIPT_CONTRACT wrapper: calls run() inside
+  main()  -> int     — SCRIPT_CONTRACT wrapper: calls probe() inside
                        try/except, prints exactly one JSON line,
                        always exits 0.
 
@@ -38,8 +29,6 @@ from datetime import datetime, timedelta, timezone
 
 
 WORKSPACE = os.path.expanduser("~/.clawford/connector-workspace")
-BRAIN = os.path.expanduser("~/Dropbox/openclaw-backup")
-OUTPUT_FILE = os.path.join(BRAIN, "agents", "connector.status.md")
 
 CONFIG_FILE = os.path.join(WORKSPACE, "connector-config.json")
 TRIAGE_FILE = os.path.join(WORKSPACE, "pending-triage.json")
@@ -174,59 +163,9 @@ def probe() -> dict:
     return result
 
 
-def run() -> dict:
-    """Call probe() and write connector.status.md as a side effect.
-
-    During the transition period (before R6 retires .status.md), this
-    function is the cron entrypoint. fix-it/morning-status still reads
-    the Dropbox files.
-    """
-    result = probe()
-    _write_status_md(result)
-    return result
-
-
-def _write_status_md(probe_result: dict) -> None:
-    """Render the probe result as a markdown bullet block matching
-    the existing fleet schema and write it atomically to OUTPUT_FILE."""
-    now = datetime.now(timezone.utc)
-    now_str = now.strftime("%Y-%m-%d %H:%M UTC")
-
-    status = probe_result.get("status", "ok")
-    last_cron_run = probe_result.get("last_cron_run") or now_str
-    last_cron_name = probe_result.get("last_cron_name") or "heartbeat"
-    last_cron_result = probe_result.get("last_cron_result") or "heartbeat ran"
-
-    errors: list[str] = []
-    if probe_result.get("missing_files"):
-        errors.append(
-            f"missing files: {', '.join(probe_result['missing_files'])}"
-        )
-    error_log = "; ".join(errors) if errors else "—"
-
-    content = f"""# Connector — Status
-
-- **last_heartbeat:** {now_str}
-- **status:** {status}
-- **last_cron_run:** {last_cron_run} — {last_cron_name}
-- **last_cron_result:** {last_cron_result}
-- **pruned_triage:** {probe_result.get("pruned_triage", 0)}
-- **pruned_cache:** {probe_result.get("pruned_cache", 0)}
-- **error_log:** {error_log}
-"""
-    try:
-        os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
-        tmp = OUTPUT_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.replace(tmp, OUTPUT_FILE)
-    except Exception as e:
-        raise RuntimeError(f"status file write failed: {e}") from e
-
-
 def main() -> int:
     try:
-        result = run()
+        result = probe()
     except Exception as e:
         result = {
             "status": "error",

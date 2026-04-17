@@ -58,12 +58,7 @@ class NewsDigestProbe(HeartbeatProbe):
     TITLE = "News Digest"
     EMOJI = "🐛"
 
-    def __init__(
-        self,
-        workspace: str | None = None,
-        brain_dir: str | None = None,
-    ) -> None:
-        super().__init__(brain_dir=brain_dir)
+    def __init__(self, workspace: str | None = None) -> None:
         self.workspace = workspace or os.path.expanduser(
             "~/.clawford/news-digest-workspace"
         )
@@ -164,38 +159,6 @@ class NewsDigestProbe(HeartbeatProbe):
             result["alert"] = f"{self.EMOJI} {self.AGENT_ID} degraded: {'; '.join(errors)}"
         return result
 
-    def render_status_md(self, result: dict) -> str:
-        now_str = _utcnow().strftime("%Y-%m-%d %H:%M UTC")
-
-        status = result.get("status", "ok")
-        last_cron_run = result.get("last_cron_run") or now_str
-        last_cron_name = result.get("last_cron_name") or "heartbeat"
-        last_cron_result = result.get("last_cron_result") or "heartbeat ran"
-        linkedin_profile = result.get("linkedin_profile", "ok")
-        morning_edition = result.get("morning_edition", "ok")
-        items_count = result.get("items_count", 0)
-
-        errors: list[str] = []
-        if result.get("missing_files"):
-            errors.append(f"missing: {', '.join(result['missing_files'])}")
-        if linkedin_profile != "ok":
-            errors.append(f"linkedin_profile: {linkedin_profile}")
-        if morning_edition == "missing":
-            errors.append("morning_edition: ranked-today not produced")
-        error_log = "; ".join(errors) if errors else "none"
-
-        return (
-            f"# {self.TITLE} — Status\n\n"
-            f"- **last_heartbeat:** {now_str}\n"
-            f"- **status:** {status}\n"
-            f"- **last_cron_run:** {last_cron_run} — {last_cron_name}\n"
-            f"- **last_cron_result:** {last_cron_result}\n"
-            f"- **linkedin_profile:** {linkedin_profile}\n"
-            f"- **morning_edition:** {morning_edition}\n"
-            f"- **items_count:** {items_count}\n"
-            f"- **error_log:** {error_log}\n"
-        )
-
 
 # Module-level convenience for fleet-health.py / probe-agent.py which
 # calls `from heartbeat import probe; print(json.dumps(probe()))`.
@@ -204,10 +167,6 @@ _default_instance = NewsDigestProbe()
 
 def probe() -> dict:
     return _default_instance.probe()
-
-
-def run() -> dict:
-    return _default_instance.run()
 
 
 def main() -> int:
