@@ -1,5 +1,3 @@
-![Clawford](../assets/Clawford2.png)
-
 # Your first agent
 
 *Last updated: 2026-04-15 · Reading time: ~15 min · Difficulty: moderate*

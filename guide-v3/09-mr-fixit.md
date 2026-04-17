@@ -1,5 +1,3 @@
-![Clawford](../assets/Clawford2.png)
-
 # Mr Fixit 🦊🔧
 
 *Last updated: 2026-04-15 · Reading time: ~25 min · Difficulty: hard*

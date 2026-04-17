@@ -1,5 +1,3 @@
-![Clawford](../assets/Clawford2.png)
-
 # Unsorted operator lessons
 
 *Last updated: 2026-04-15 (Phase 7d — holding pen fully drained) · Reading time: 2 min · Difficulty: none*

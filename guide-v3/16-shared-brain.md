@@ -1,5 +1,3 @@
-![Clawford](../assets/Clawford2.png)
-
 # Ch 16 — The shared brain
 
 *Last updated: 2026-04-16 · Reading time: ~12 min · Difficulty: moderate*

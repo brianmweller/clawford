@@ -1,5 +1,3 @@
-![Clawford](../assets/Clawford2.png)
-
 # Infra setup
 
 *Last updated: 2026-04-15 · Reading time: ~20 min · Difficulty: moderate*

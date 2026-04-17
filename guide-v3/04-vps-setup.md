@@ -1,5 +1,3 @@
-![Clawford](../assets/Clawford2.png)
-
 # VPS setup
 
 *Last updated: 2026-04-15 · Reading time: ~22 min · Difficulty: moderate*

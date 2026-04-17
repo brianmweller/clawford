@@ -1,5 +1,3 @@
-![Clawford](../assets/Clawford2.png)
-
 # What Isn't Clawford?
 
 *Last updated: 2026-04-14 · Reading time: ~20 min · Difficulty: moderate*

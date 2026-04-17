@@ -1,5 +1,3 @@
-![Clawford](../assets/Clawford2.png)
-
 # Intro to agents
 
 *Last updated: 2026-04-15 · Reading time: ~18 min · Difficulty: moderate*
