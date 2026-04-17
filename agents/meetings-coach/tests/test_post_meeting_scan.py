@@ -611,6 +611,50 @@ def test_format_debrief_assignee_beats_prose_extraction(mod):
 # ─── coaching history ───────────────────────────────────────────────
 
 
+def test_load_coaching_history_accepts_dict_with_history_key(mod, tmp_path, monkeypatch):
+    """Legacy LLM-cron wrote coaching-history.json as
+    ``{"history": [...]}`` while the Python orchestrator assumed a bare
+    list. The mismatch silently returned [] from _load, which meant
+    every _append_coaching_history wiped prior entries and
+    _already_coached always returned False — double-coaching any meeting
+    the operator got on the old cron. Loader must accept both shapes."""
+    history = tmp_path / "coaching-history.json"
+    history.write_text(
+        json.dumps({
+            "history": [
+                {"event_id": "legacy-1", "meeting_title": "Old meeting"},
+                {"event_id": "legacy-2", "meeting_title": "Older meeting"},
+            ],
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mod, "COACHING_HISTORY_FILE", history)
+    loaded = mod._load_coaching_history()
+    assert isinstance(loaded, list)
+    assert len(loaded) == 2
+    assert loaded[0]["event_id"] == "legacy-1"
+    assert mod._already_coached("legacy-1") is True
+    assert mod._already_coached("legacy-2") is True
+    assert mod._already_coached("new-event") is False
+
+
+def test_append_coaching_history_preserves_legacy_dict_shape_entries(mod, tmp_path, monkeypatch):
+    """Appending a new entry to a dict-shaped legacy file must preserve
+    the prior entries — it was silently wiping them before the loader
+    fix landed."""
+    history = tmp_path / "coaching-history.json"
+    history.write_text(
+        json.dumps({"history": [{"event_id": "legacy-1", "meeting_title": "x"}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mod, "COACHING_HISTORY_FILE", history)
+    mod._append_coaching_history({"event_id": "new-1", "meeting_title": "y"})
+    after = mod._load_coaching_history()
+    ids = [e.get("event_id") for e in after]
+    assert "legacy-1" in ids
+    assert "new-1" in ids
+
+
 def test_already_coached_true_when_event_id_present(mod, tmp_path, monkeypatch):
     history = tmp_path / "coaching-history.json"
     history.write_text(

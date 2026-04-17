@@ -500,6 +500,15 @@ def replace_action_items(event_id: str, items: list) -> dict:
 
 
 def _load_coaching_history() -> list:
+    """Return the coaching history as a flat list of entry dicts.
+
+    Accepts two on-disk shapes:
+      - ``[entry, entry, ...]`` — current Python format.
+      - ``{"history": [entry, ...]}`` — legacy LLM-cron format.
+
+    Until 2026-04-16 the loader silently returned [] for the dict
+    shape, and _append then wrote a bare list that wiped the prior
+    entries — which broke _already_coached dedup. Be tolerant here."""
     if not COACHING_HISTORY_FILE.exists():
         return []
     try:
@@ -507,9 +516,13 @@ def _load_coaching_history() -> list:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
         return []
-    if not isinstance(data, list):
-        return []
-    return data
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        inner = data.get("history")
+        if isinstance(inner, list):
+            return inner
+    return []
 
 
 def _already_coached(event_id: str) -> bool:
