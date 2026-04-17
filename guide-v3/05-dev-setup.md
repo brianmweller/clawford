@@ -23,7 +23,7 @@ I do nearly all of the work of building Clawford with Claude Code sitting betwee
 - **Monkey-patching vendored or third-party code.** When a Playwright helper misbehaves or a dependency has a subtle bug, asking Claude to locate and patch the issue in the vendored file is often faster than upstreaming a fix. See the note on logic inversion below for the patch style to insist on.
 - **Writing tests.** Especially the red half of red-green — describing the failure mode, writing a test that pins the bad behavior, confirming it fails for the right reason before the fix lands.
 - **Reading unfamiliar subsystems.** When something fails in a way that touches a corner of the repo I haven't looked at, a targeted "find where X happens and tell me what it does" is usually faster than `grep` by hand.
-- **Generating and checking cron messages.** Cron prompts are long, repetitive, and load-bearing. Claude drafts them from a template and catches the `; echo \$?` reflex (see below) before it ships.
+- **Generating and checking cron messages.** Cron prompts are long, repetitive, and load-bearing. Claude drafts them from a template and catches the `; echo $?` reflex (see below) before it ships.
 
 **What Claude Code is not for in this fleet:**
 
@@ -71,16 +71,16 @@ The rule I use now is: **one task, one session.** Start a fresh session for new 
 
 > 🔦 **Tip.** "Call it a night" is a symptom, not a suggestion. If Claude Code starts saying it, your context is degraded — save and restart, don't push through.
 
-### The reflexive `; echo \$?`
+### The reflexive `; echo $?`
 
-When Claude Code drafts a command that runs a Python script, it will reflexively append something like `; echo "EXIT:\$?"` or `; printf "rc=%s\n" \$?` to "also capture the exit code." This is a habit that made sense in a pre-Clawford world where commands returned meaningful exit codes and you had to extract them somehow.
+When Claude Code drafts a command that runs a Python script, it will reflexively append something like `; echo "EXIT:$?"` or `; printf "rc=%s\n" $?` to "also capture the exit code." This is a habit that made sense in a pre-Clawford world where commands returned meaningful exit codes and you had to extract them somehow.
 
-In Clawford this habit is a bug. An earlier platform version's exec preflight hard-rejected any `python3 <anything>` command containing shell operators, so the reflexive wrap turned a working command into a blocked one. The full story is in the opening scene of [Ch 02 — What Clawford Isn't](02-what-clawford-isnt.md). The durable fix is the script contract: scripts report their status via a JSON line on stdout (see [Ch 07](07-intro-to-agents.md)), the exit code isn't needed, it isn't available to the orchestrator, and trying to get it breaks the run. `deploy.py` Safeguard 9 statically grep-rejects the reflexive wrap patterns in every `crons[].message` field on every deploy.
+In Clawford this habit is a bug. An earlier platform version's exec preflight hard-rejected any `python3 <anything>` command containing shell operators, so the reflexive wrap turned a working command into a blocked one. The full story is in the opening scene of [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md). The durable fix is the script contract: scripts report their status via a JSON line on stdout (see [Ch 07](07-intro-to-agents.md)), the exit code isn't needed, it isn't available to the orchestrator, and trying to get it breaks the run. `deploy.py` Safeguard 9 statically grep-rejects the reflexive wrap patterns in every `crons[].message` field on every deploy.
 
 What to do about it:
 
 - Teach Claude in its session prompt (or in the repo's `CLAUDE.md` rules): *"never append shell operators to a `python3` invocation; scripts self-report status in JSON."*
-- When Claude drafts a cron `message` for you, skim for `\$?`, `; echo`, or `printf.*rc=` before you accept the output. Delete any you find.
+- When Claude drafts a cron `message` for you, skim for `$?`, `; echo`, or `printf.*rc=` before you accept the output. Delete any you find.
 - If a script you wrote doesn't follow the contract yet, fix the script, don't work around it at the caller.
 
 ### Logic inversion when monkey-patching
@@ -140,8 +140,8 @@ The reason TDD is mandatory specifically for infra is that I built the early ver
 Clawford has three distinct test layers, each with a clear boundary:
 
 - **Per-agent pytests at `agents/<agent>/tests/`.** The canonical per-agent suite. Unit tests for each script's parsing / classification / state-handling logic. Runs offline against tmp directories and monkey-patched subprocess calls, no VPS or live credentials needed. The family-calendar suite is 81 cases; connector is 113; news-digest is 63 (modulo xfails); shopping is 50; meetings-coach is 63. Run any one with `python3 -m pytest agents/<agent>/tests/ -q`.
-- **Deploy-tool + shared-library suite at `agents/shared/tests/`.** Exercises the ten-to-nine deploy safeguards (two retired in Phase 7), the script contract enforcement, cron-message hygiene, the config-source bootstrap flow, the diff-preview flow, environment loading, manifest validation, and the regression guard that asserts no `~/.openclaw/` paths have crept back in post-liberation. 425+ cases. Run with `python3 -m pytest agents/shared/tests/ -q`. If you're about to touch `deploy.py` or anything it imports, start here.
-- **Tests at repo root `tests/`.** A handful of offline parsing tests and a proper pytest suite for the obsidian-briefing subsystem. `tests/test-amazon-parsing.py`, `tests/test-costco-parsing.py`, `tests/test-grocery.py`, and `tests/obsidian-briefing/test_*.py` all run locally without VPS access. The pre-Phase-7 manual smoke-test harness that used to live alongside these (`T1` through `T13` shell scripts, setup scripts, e2e container tests) was retired in the liberation because it depended on the gateway container and the OpenClaw LLM cron runtime — both gone.
+- **Deploy-tool + shared-library suite at `agents/shared/tests/`.** Exercises the ten-to-nine deploy safeguards (two retired during the migration), the script contract enforcement, cron-message hygiene, the config-source bootstrap flow, the diff-preview flow, environment loading, manifest validation, and the regression guard that asserts no `~/.openclaw/` paths have crept back in post-liberation. 425+ cases. Run with `python3 -m pytest agents/shared/tests/ -q`. If you're about to touch `deploy.py` or anything it imports, start here.
+- **Tests at repo root `tests/`.** A handful of offline parsing tests and a proper pytest suite for the obsidian-briefing subsystem. `tests/test-amazon-parsing.py`, `tests/test-costco-parsing.py`, `tests/test-grocery.py`, and `tests/obsidian-briefing/test_*.py` all run locally without VPS access. The pre-migration manual smoke-test harness that used to live alongside these (`T1` through `T13` shell scripts, setup scripts, e2e container tests) was retired in the liberation because it depended on the gateway container and the OpenClaw LLM cron runtime — both gone.
 
 The red-green discipline applies at all three layers. The deploy-tool suite is where the discipline is most strict: every safeguard landed after a failing test for it existed first, and the regression guard for the `~/.openclaw/` → `~/.clawford/` rename was written before any of the ~180 path-string replacements went in. Infrastructure code that mutates shared state — the crontab, the filesystem, Dropbox state — is the one place where "add code, run it, see what breaks" is actively dangerous, because the blast radius is the whole fleet.
 
@@ -153,7 +153,7 @@ A short inventory of the security-hygiene rules that apply on the dev side, befo
 - **Dropbox is a backup channel, not a source.** The shared brain lives in Dropbox, but the agent *config* files and scripts live in local git. Dropbox is for stateful runtime data (facts, people, notes, status). See [Ch 06](06-infra-setup.md) for the brain-boundary map.
 - **`.env` never tracked.** Bot tokens, API keys, proxy credentials all live in `.env` files that are `.gitignore`d before they exist. Every new repo starts with that line in `.gitignore` before the first commit.
 - **`scripts/pre-push-check.sh` runs on every push.** It hard-fails on tracked secrets, `.env` files, unsuffixed per-agent config files (the gitignored ones), oversized binaries, and empty commit messages. Only Mr Fixit is allowed to push from the VPS anyway; everyone else commits locally and pushes from the dev box.
-- **The `*.example` template pattern** ([Ch 03](03-before-you-start.md)) is the hard boundary between what's in git and what's on disk. On a fresh clone, run `python3 agents/shared/deploy.py <agent-id> --bootstrap-configs` to scaffold each unsuffixed sibling from its template, then edit your real values into the unsuffixed copies and delete the `CLAWFORD_BOOTSTRAP_UNEDITED` sentinel comment from the top of every `.md` file before deploying. When you're editing, it's usually the unsuffixed sibling; when you're committing, it'd better be the `.example`. The full per-agent arc is [Ch 07-0](07-0-your-first-agent.md) step 2.
+- **The `*.example` template pattern** ([Ch 03](03-before-you-start.md)) is the hard boundary between what's in git and what's on disk. On a fresh clone, run `python3 agents/shared/deploy.py <agent-id> --bootstrap-configs` to scaffold each unsuffixed sibling from its template, then edit your real values into the unsuffixed copies and delete the `CLAWFORD_BOOTSTRAP_UNEDITED` sentinel comment from the top of every `.md` file before deploying. When you're editing, it's usually the unsuffixed sibling; when you're committing, it'd better be the `.example`. The full per-agent arc is [Ch 08](08-your-first-agent.md) step 2.
 
 ## Use the latest models
 
@@ -174,9 +174,9 @@ Claude Code has a particular habit of defaulting to whatever model ID it saw in 
 ## See also
 
 - [Ch 03 — Before you start](03-before-you-start.md) — the `*.example` template pattern that this chapter's security posture references.
-- [Ch 07 — Intro to agents](07-intro-to-agents.md) — the script contract, the canonical deploy path, and why `; echo \$?` is a bug.
-- [Ch 02 — What Clawford Isn't](02-what-clawford-isnt.md) — the full exec-preflight story that made the script contract load-bearing.
-- [Ch 08 — Security and hardening](08-security-and-hardening.md) — the full defense-in-depth story that "put rules in gates, not memory" hints at here.
+- [Ch 07 — Intro to agents](07-intro-to-agents.md) — the script contract, the canonical deploy path, and why `; echo $?` is a bug.
+- [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md) — the full exec-preflight story that made the script contract load-bearing.
+- [Ch 19 — Security and hardening](19-security-and-hardening.md) — the full defense-in-depth story that "put rules in gates, not memory" hints at here.
 - [DEPLOY.md](../DEPLOY.md) — the nine `deploy.py` safeguards in full, each with the scar-tissue motivation.
 - [AGENTS-PATTERN.md](../AGENTS-PATTERN.md) — the repo-level dev rules, including the "only Mr Fixit pushes" convention and the commit-to-your-own-directory rule.
 - [`agents/shared/tests/`](../agents/shared/tests/) — the deploy-tool test suite. Read a few before you touch `deploy.py`.

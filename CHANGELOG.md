@@ -12,7 +12,7 @@ because the runtime substrate changed underneath.
 
 - New `guide-v3/` directory scaffolded as the post-liberation field
   manual. Old `guide-v2/` frozen as historical record.
-- New chapter `guide-v3/02-what-clawford-isnt.md` drafted up front as
+- New chapter `guide-v3/02-what-isnt-clawford.md` drafted up front as
   a decision document.
 - Per-chapter migration tracker at `docs/v2-to-v3-migration.md`.
 

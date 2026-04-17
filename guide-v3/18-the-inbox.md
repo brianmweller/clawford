@@ -1,6 +1,6 @@
-# Ch 07-8 — The inbox: making agents conversational
+# Ch 18 — The inbox: making agents conversational
 
-*Guide v3 · net-new in v3 · last revised Phase 7d*
+*Last updated: 2026-04-16 · Reading time: ~15 min · Difficulty: moderate*
 
 > **TL;DR.** Every agent chapter up to this point describes **outbound** behavior — crons that fire, scripts that compose, Telegram messages that push to the operator. This chapter is the **inbound** side. A single inbox daemon long-polls all six Telegram bots concurrently, routes each incoming message to the right agent, hands it to an LLM with a tool manifest the agent defines, lets the LLM call read tools (no side effects) or producer tools (which stage a pending action with inline buttons), and waits for the operator to tap **Confirm** or **Cancel** before anything mutates state. The result is that every agent in the fleet is conversational — the operator can message Hilda Hippo and say "reorder the Kirkland water" and get a `[Add to cart]` `[Skip]` button pair without a single line of Hilda-specific dispatcher code. The architecture is ~1200 lines of shared Python, a `tools.py` file per agent, and a systemd user unit on the VPS. This chapter covers all five components, the tools.py pattern, the inline-button UX, the deployment story, and the pitfalls.
 
@@ -8,7 +8,7 @@
 
 Before this chapter's architecture existed, Clawford agents were outbound-only. Crons fired on a schedule, scripts composed output, Telegram messages pushed to the operator's chat. The operator could read but not reply. Asking "what's arriving today?" meant SSHing to the VPS and running a script by hand.
 
-The OpenClaw gateway used to fill this gap — it received Telegram updates, dispatched them to an LLM session, and routed the response back. The Clawford liberation deleted that gateway (see [Ch 02 — What Clawford Isn't](02-what-clawford-isnt.md)). The inbox daemon is its architectural successor — except it is ~1200 lines of plain Python instead of a container runtime, it uses native function-calling instead of prompt-based tool dispatch, and it stages every mutation behind a human-confirmation gate instead of executing directly.
+The OpenClaw gateway used to fill this gap — it received Telegram updates, dispatched them to an LLM session, and routed the response back. The Clawford liberation deleted that gateway (see [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md)). The inbox daemon is its architectural successor — except it is ~1200 lines of plain Python instead of a container runtime, it uses native function-calling instead of prompt-based tool dispatch, and it stages every mutation behind a human-confirmation gate instead of executing directly.
 
 ## The five components
 
@@ -30,14 +30,14 @@ The stateless request handler. Called once per inbound Telegram update, wrapped 
 
 The dispatcher's flow, in order:
 
-1. **Chat ID gate.** Drop any update not from the operator's configured `TELEGRAM_CHAT_ID`. This is the single-user security boundary — there is no multi-user support, no role-based access, no session partitioning. One operator, one chat ID, and everything else is silently ignored. See [Ch 08 — Security and hardening](08-security-and-hardening.md) for the threat model.
+1. **Chat ID gate.** Drop any update not from the operator's configured `TELEGRAM_CHAT_ID`. This is the single-user security boundary — there is no multi-user support, no role-based access, no session partitioning. One operator, one chat ID, and everything else is silently ignored. See [Ch 19 — Security and hardening](19-security-and-hardening.md) for the threat model.
 
 2. **Callback shortcut fast-path.** If the update is a `callback_query` (the operator tapped an inline button), the dispatcher parses the callback data and handles it without invoking the LLM at all:
    - `confirm:{action_id}` — load the pending action, call the agent's `confirm_{kind}` executor with the stored payload, remove the action on success, reply with the result.
    - `cancel:{action_id}` — load the pending action, discard it, reply "Cancelled: {summary}."
    - `confirm_all:{batch_id}` — confirm every action in the batch, aggregate the results.
    - `cancel_all:{batch_id}` — cancel every action in the batch.
-   - `like:{id}` / `dislike:{id}` / `more:{id}` — route directly to the agent's `record_engagement` executor (used by [Lowly Worm's](07-2a-lowly-worm-newsfeed.md) article feedback buttons).
+   - `like:{id}` / `dislike:{id}` / `more:{id}` — route directly to the agent's `record_engagement` executor (used by [Lowly Worm's](10-lowly-worm-newsfeed.md) article feedback buttons).
    
    The key design decision: **callback shortcuts bypass the LLM.** Tapping "Confirm" on a reorder button should not require a 2-second model round-trip to figure out what to do. The button's callback data contains everything the dispatcher needs.
 
@@ -116,12 +116,12 @@ The confirm executor is the piece that makes the pending-action flow safe. The L
 
 | Agent | Read tools | Producer tools | Confirm executors |
 |-------|-----------|---------------|-------------------|
-| [Mr Fixit 🦊🔧](07-1-mr-fixit.md) | `get_fleet_health`, `get_morning_status`, `get_known_issues` | `propose_remember` | `confirm_remember` |
-| [Lowly Worm 🐛📰](07-2a-lowly-worm-newsfeed.md) | `get_todays_digest`, `get_topic_weights`, `recent_engagements` | `record_engagement` (also via like/dislike/more buttons), `propose_remember` | `confirm_remember` |
-| [Mistress Mouse 🐭📅](07-3-mistress-mouse.md) | `get_events_for_day`, `get_week`, `get_configured_calendars`, `get_recent_reminders_sent` | `propose_event_add`, `propose_event_move`, `propose_event_cancel`, `propose_remember` | `confirm_calendar_add`, `confirm_calendar_move`, `confirm_calendar_cancel`, `confirm_remember` |
-| [Sergeant Murphy 🐷🔍](07-4-sergeant-murphy.md) | `get_meetings_for_day`, `get_week_meetings`, `get_commitment_status`, `get_coaching_config`, `get_recent_coaching_entries` | `list_pending_action_items`, `confirm_action_item`, `dismiss_action_item`, `propose_remember` | `confirm_remember` |
-| [Huckle Cat 🐱🤝](07-5-huckle-cat.md) | `get_morning_nudge`, `get_upcoming_meetings`, `get_pending_triage`, `get_checkin_log`, `get_config_summary` | `mark_checkin`, `snooze_reminder`, `propose_remember` | `confirm_remember` |
-| [Hilda Hippo 🦛🛒](07-6-hilda-hippo.md) | `get_delivery_digest`, `get_recent_orders`, `get_grocery_list`, `get_pending_actions`, `find_amazon_item`, `find_costco_item` | `propose_reorder`, `add_to_grocery`, `remove_from_grocery`, `propose_remember` | `confirm_reorder`, `confirm_remember` |
+| [Mr Fixit 🦊🔧](09-mr-fixit.md) | `get_fleet_health`, `get_morning_status`, `get_known_issues` | `propose_remember` | `confirm_remember` |
+| [Lowly Worm 🐛📰](10-lowly-worm-newsfeed.md) | `get_todays_digest`, `get_topic_weights`, `recent_engagements` | `record_engagement` (also via like/dislike/more buttons), `propose_remember` | `confirm_remember` |
+| [Mistress Mouse 🐭📅](12-mistress-mouse.md) | `get_events_for_day`, `get_week`, `get_configured_calendars`, `get_recent_reminders_sent` | `propose_event_add`, `propose_event_move`, `propose_event_cancel`, `propose_remember` | `confirm_calendar_add`, `confirm_calendar_move`, `confirm_calendar_cancel`, `confirm_remember` |
+| [Sergeant Murphy 🐷🔍](13-sergeant-murphy.md) | `get_meetings_for_day`, `get_week_meetings`, `get_commitment_status`, `get_coaching_config`, `get_recent_coaching_entries` | `list_pending_action_items`, `confirm_action_item`, `dismiss_action_item`, `propose_remember` | `confirm_remember` |
+| [Huckle Cat 🐱🤝](14-huckle-cat.md) | `get_morning_nudge`, `get_upcoming_meetings`, `get_pending_triage`, `get_checkin_log`, `get_config_summary` | `mark_checkin`, `snooze_reminder`, `propose_remember` | `confirm_remember` |
+| [Hilda Hippo 🦛🛒](15-hilda-hippo.md) | `get_delivery_digest`, `get_recent_orders`, `get_grocery_list`, `get_pending_actions`, `find_amazon_item`, `find_costco_item` | `propose_reorder`, `add_to_grocery`, `remove_from_grocery`, `propose_remember` | `confirm_reorder`, `confirm_remember` |
 
 Every agent has `propose_remember` / `confirm_remember` — the self-learning memory surface added in the 2026-04 brain migration. Saying "from now on X" to any agent stages the rule with `[💾 Remember] [Skip]` inline buttons; tapping Remember appends to that agent's `MEMORY.md` (Dropbox-brain-synced), which is then loaded into every future system prompt.
 
@@ -151,7 +151,7 @@ Mr Fixit is otherwise read-only on its domain (no fleet-mutation tools yet — t
 
 Per-item buttons use individual action IDs. Batch buttons use a shared `batch_id`. "Confirm all" iterates over every action in the batch and calls the per-kind confirm executor for each.
 
-**Engagement buttons.** [Lowly Worm's](07-2a-lowly-worm-newsfeed.md) morning edition articles can carry `[👍 Like]` `[👎 Dislike]` `[📖 More]` buttons. These are hardwired callback shortcuts (`like:{article_id}`, `dislike:{article_id}`, `more:{article_id}`) that route directly to the `record_engagement` executor without going through the pending-action store — they are instant feedback, not staged mutations.
+**Engagement buttons.** [Lowly Worm's](10-lowly-worm-newsfeed.md) morning edition articles can carry `[👍 Like]` `[👎 Dislike]` `[📖 More]` buttons. These are hardwired callback shortcuts (`like:{article_id}`, `dislike:{article_id}`, `more:{article_id}`) that route directly to the `record_engagement` executor without going through the pending-action store — they are instant feedback, not staged mutations.
 
 **Button label customization.** The `stage()` call accepts `confirm_label` and `cancel_label` parameters. Hilda's reorder tool uses `"🛒 Add to cart"` / `"Skip"`. Mistress Mouse's calendar tools use `"📅 Create event"` / `"Cancel"`. The default is `"✅ Confirm"` / `"❌ Cancel"`.
 
@@ -213,6 +213,6 @@ Nine architectural decisions that are load-bearing and documented here so future
 
 - [Ch 06 — Infra setup](06-infra-setup.md) — the host-cron runtime + shared library that the inbox daemon sits alongside
 - [Ch 07 — Intro to agents](07-intro-to-agents.md) — the outbound side of the agent story
-- [Ch 07-7 — Auth architectures](07-7-auth-architectures.md) — the bot token is Shape 3 (bearer token in `.env`)
-- [Ch 08 — Security and hardening](08-security-and-hardening.md) — the chat_id gate and the inbox daemon's attack surface
-- [Ch 09 — Scripts and configs](09-scripts-and-configs.md) — the file-level reference for the five shared modules
+- [Ch 17 — Auth architectures](17-auth-architectures.md) — the bot token is Shape 3 (bearer token in `.env`)
+- [Ch 19 — Security and hardening](19-security-and-hardening.md) — the chat_id gate and the inbox daemon's attack surface
+- [Ch 20 — Scripts and configs](20-scripts-and-configs.md) — the file-level reference for the five shared modules

@@ -56,7 +56,7 @@ BRAIN_PEOPLE = os.path.join(BRAIN, "people")
 BRAIN_FACTS = os.path.join(BRAIN, "facts")
 BRAIN_COMMITMENTS = os.path.join(BRAIN, "commitments/active.md")
 
-# Category half-lives in days (from shared-brain-schema.md)
+# Category half-lives in days (from ops/brain/README.md)
 HALF_LIVES = {
     "identity": float("inf"),
     "established": 365,

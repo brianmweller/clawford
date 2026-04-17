@@ -16,7 +16,7 @@
 
 Every morning at 5am, a fox named Mr Fixit checks that the lights are still on in Clawford and sends me a one-line status to Telegram. If the news agent has stopped fetching headlines, Mr Fixit tells me. If a Dropbox sync has conflicted, Mr Fixit tells me. If everything is fine — which, astonishingly, it sometimes is — he says nothing at all, which I have come to recognize as its own kind of love language.
 
-Clawford is what I call the thing that runs him, his five coworkers, and the small file-based shared memory they all write into. The animals themselves teleported in from [Richard Scarry's Busytown](https://www.richardscarry.com/characters-1) — I borrowed them wholesale and put them to work here, for reasons that will not become clearer. It lives on a \$30/month Hetzner box, stitched together with plain host crontab, `codex`, Dropbox, Telegram, some Python, and a great deal of hard-won regret.
+Clawford is what I call the thing that runs him, his five coworkers, and the small file-based shared memory they all write into. The animals themselves teleported in from [Richard Scarry's Busytown](https://www.richardscarry.com/characters-1) — I borrowed them wholesale and put them to work here, for reasons that will not become clearer. It lives on a $30/month Hetzner box, stitched together with plain host crontab, `codex`, Dropbox, Telegram, some Python, and a great deal of hard-won regret.
 
 ## What Clawford tries to do
 
@@ -67,7 +67,7 @@ It is not a general-purpose assistant. It does not replace humans, make autonomo
                                   └───────────────┘
 ```
 
-The shape is deliberately flat. Agent scripts are plain Python invoked from system crontab. LLM reasoning — ranking, composing, judgment calls — happens via `agents.shared.llm.infer()`, which wraps the `codex` CLI and rides a ChatGPT Plus subscription for every call. Deterministic work — scrapers, browser automation, fleet-health probes — runs as plain Python. There is no container runtime, no gateway service, no LLM cron scheduler with a 600-second ceiling. [Ch 07 — Intro to agents](07-intro-to-agents.md) draws the LLM-vs-deterministic line more carefully; [Ch 02 — What Clawford Isn't](02-what-clawford-isnt.md) explains why the shape looks like this and not like the platform Clawford grew out of.
+The shape is deliberately flat. Agent scripts are plain Python invoked from system crontab. LLM reasoning — ranking, composing, judgment calls — happens via `agents.shared.llm.infer()`, which wraps the `codex` CLI and rides a ChatGPT Plus subscription for every call. Deterministic work — scrapers, browser automation, fleet-health probes — runs as plain Python. There is no container runtime, no gateway service, no LLM cron scheduler with a 600-second ceiling. [Ch 07 — Intro to agents](07-intro-to-agents.md) draws the LLM-vs-deterministic line more carefully; [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md) explains why the shape looks like this and not like the platform Clawford grew out of.
 
 ## VPS or Mac mini?
 
@@ -90,7 +90,7 @@ A Mac mini is probably fine if your fleet is smaller, you already own the hardwa
 
 - **You just want one bot.** If all you need is a single agent to do one thing, Busytown is massive overkill. Clone a smaller scaffold.
 - **You want a turnkey product.** This is a field guide, not a product. There are places in it where the answer is "I gave up and wrote a memory file."
-- **You need a security-reviewed system.** I'm not a security expert. I'll tell you what I do and what I know I don't do (Ch 08), but audited it is not.
+- **You need a security-reviewed system.** I'm not a security expert. I'll tell you what I do and what I know I don't do (Ch 19), but audited it is not.
 
 ## If you read nothing else — quickstart
 
@@ -99,7 +99,7 @@ A Mac mini is probably fine if your fleet is smaller, you already own the hardwa
 3. Clone the repo and read [Ch 03 — Before you start](03-before-you-start.md) end-to-end *before* you provision anything.
 4. Follow [Ch 04 — VPS setup](04-vps-setup.md) to stand up a locked-down box.
 5. Walk [Ch 06 — Infra setup](06-infra-setup.md) to wire up the shared library, the shared brain, host crons, and the Dropbox daemon.
-6. Deploy Mr Fixit first, following [Ch 07-1](07-1-mr-fixit.md). He's the training-wheels agent and the canary for everyone after him.
+6. Deploy Mr Fixit first, following [Ch 09](09-mr-fixit.md). He's the training-wheels agent and the canary for everyone after him.
 7. Wait for your first 5am status message. When it arrives, pour yourself something, and then pick your second agent from Ch 07.
 
 ## Caveat emptor
@@ -110,8 +110,8 @@ If you find something here that's wrong, assume I'd like to know.
 
 ## See also
 
-- [index.md](index.md) — the full table of contents for this guide and the per-chapter migration status.
-- [Ch 02 — What Clawford Isn't](02-what-clawford-isnt.md) — the decision doc that explains why the runtime looks like this and not like the platform it used to sit on top of.
+- [index.md](index.md) — the full table of contents for this guide.
+- [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md) — the decision doc that explains why the runtime looks like this and not like the platform it used to sit on top of.
 - [docs/ballad-of-mr-fixit.md](../docs/ballad-of-mr-fixit.md) — a five-act tragedy covering just the first day of setup. A lot more has gone wrong since; the ballad is the overture, not the opera. Read it when you want the lore instead of the manual.
 - [README.md](../README.md) — the shorter elevator pitch.
 - [AGENTS-PATTERN.md](../AGENTS-PATTERN.md) — the shape of an agent in one file; useful as a cheat sheet once you start Ch 07.

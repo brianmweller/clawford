@@ -1,6 +1,6 @@
 ![Clawford](../assets/Clawford2.png)
 
-# What Clawford Isn't
+# What Isn't Clawford?
 
 *Last updated: 2026-04-14 · Reading time: ~20 min · Difficulty: moderate*
 
@@ -22,7 +22,7 @@ I hadn't touched the approvals policy. I hadn't deployed anything overnight. Not
 The problem wasn't the preflight in principle. The problem was that every cron session in my fleet had an LLM that would reflexively wrap commands like this:
 
 ```
-python3 /path/to/script.py; printf "EXIT:%s" \$?
+python3 /path/to/script.py; printf "EXIT:%s" $?
 ```
 
 It wrapped them because LLMs like to be thorough, and "also print the exit code" is the kind of thing a responsible-looking command wants to do. It had worked fine in 2026.4.10. In 2026.4.11 the preflight looked at the `;` and the `printf` and the `$?` and rejected the whole thing before it ran. Every cron. Every agent. Same morning.
@@ -134,7 +134,7 @@ This is the one I wish someone had told me at the start. Personal fleets reach o
 - **Tier 2 — stock headless Chromium.** Sites that work fine with a default Playwright browser, but need a *persistent profile* and *out-of-band* authentication. LinkedIn is the canonical example in this fleet — you authenticate once in a real browser, store the profile, and subsequent automated runs reuse the stored session. The shared infrastructure here is a profile-bootstrap helper, an Xvfb virtual-display wrapper, and a set of selectors that survive DOM rot (aria-labels, not hashed class names). In Clawford: [`agents/shared/playwright_profile.py`](../agents/shared/playwright_profile.py).
 - **Tier 3 — fingerprint-aware browsers through residential proxies.** Sites with serious anti-bot systems. In this fleet, that is Costco and Amazon. A stock Chromium fails immediately; you need Camoufox (a fingerprint-aware Firefox fork), a residential proxy with sticky-session support, auto-MFA through TOTP, and careful cookie lifecycle management. The shared infrastructure here is the hardest and most agent-specific, but consolidating the proxy-config parsing and retry-policy classifier pays off every time you touch it. In Clawford: [`agents/shared/camoufox_proxy.py`](../agents/shared/camoufox_proxy.py), [`agents/shared/retry_policy.py`](../agents/shared/retry_policy.py).
 
-OpenClaw offered nothing for any of these tiers. The browser automation work is entirely mine. The library I should have been building from day one is the library that makes these three tiers reusable across agents, not the library that glues skills together. See Ch 07-7 for the cross-cutting auth patterns.
+OpenClaw offered nothing for any of these tiers. The browser automation work is entirely mine. The library I should have been building from day one is the library that makes these three tiers reusable across agents, not the library that glues skills together. See Ch 17 for the cross-cutting auth patterns.
 
 ### 3. A durable shared brain
 
@@ -148,6 +148,8 @@ In Clawford, the brain is a directory tree split two ways:
 The split matters. Agents write to Dropbox-side state freely without flooding git history. Deploy and host-cron probes write to git-side state deliberately. Multiple agents can write to the same brain safely because the append-only patterns were designed for it.
 
 If you had asked me on day one whether the brain was part of OpenClaw or part of Clawford, I would have said OpenClaw. It is not. It is just files on disk, synced through Dropbox and git, with schemas I defined and helpers in [`agents/shared/brain.py`](../agents/shared/brain.py). It survives the migration untouched. It is probably the single most underrated piece of infrastructure in the whole fleet, and it exists entirely outside the OpenClaw dependency graph.
+
+[Ch 16 — The shared brain](16-shared-brain.md) is the full chapter on it.
 
 ### 4. Deployment and health
 
@@ -217,29 +219,27 @@ Running without it hasn't hurt. That is the honest answer.
 
 The plan called for "3-4 calendar weeks of evenings/weekends." The actual migration ran across **two calendar days** (2026-04-14 and 2026-04-15) and **~25 commits**. Total delta in the liberation arc: **+20,470 insertions, -4,364 deletions** — net positive because the new shared library is real code that replaces a black box. The shape that came out the other side is smaller, more legible, and self-contained.
 
-### Per-phase shape
+### Migration shape
 
-- **Phase 0+1** — 1 commit. Drafted this chapter as a decision doc, scaffolded `guide-v3/`, and wrote the first version of [`agents/shared/llm.py`](../agents/shared/llm.py) as a direct codex/responses HTTP broker. The original plan called for a dispatch shim that supported both `openclaw infer` and `codex`; the shim turned out to be unnecessary because every call site in the fleet flipped to the new broker before any back-compat path was needed.
-- **Phase 2** — 5 commits. Built the entire shared library before migrating any agent: `telegram.py`, `retry_policy.py`, `brain.py`, `heartbeat_base.py`, `google_oauth.py`, `playwright_profile.py`, `camoufox_proxy.py`. Each module came in with its own `tests/test_*.py` written first, watched red, implemented green. The full-library-first sequencing turned out to be the cheapest shape — every Phase 4 agent migration was a thin call-site flip rather than a code-write.
-- **Phase 3** — 9 commits. Pilot-migrated news-digest end-to-end. Wrapped two false starts (the morning-edition cron contract had a subtle stdout shape bug that took two follow-up fixes to nail) — both surfaced inside a day-in-the-life simulation, not in a long parallel soak. Hours, not days.
-- **Phase 4** — 5 main commits + ~10 follow-ups across the five remaining agents. Complexity-ascending order: shopping → family-calendar → connector → meetings-coach → fix-it. The 5 AM PT fleet-brief path emerged here as a load-bearing convention: every morning cron writes to `cache/morning-brief-ready.txt`, and a single `morning-fleet-deliver-host.sh` at `0 12 * * *` UTC aggregates and ships. The rule got documented in agent memory after one cron — shopping — was caught populating at the wrong time.
-- **Phase 5** — 2 commits. Rewrote `deploy.py`'s three OpenClaw-coupled Safeguards (6/7/8) and drafted [Ch 06 — Infra setup](06-infra-setup.md). Safeguard 8 (exec-approvals baseline drift) got retired with a tombstone comment because the OpenClaw approvals concept it guarded no longer existed.
-- **Phase 6** — 3 commits. Stopped the OpenClaw gateway container, made `deploy.py` live-run zero-OC (verified by a structural test that monkeypatches every helper to raise), and drafted [Ch 04 — VPS setup](04-vps-setup.md) and [Ch 07 — Intro to agents](07-intro-to-agents.md).
-- **Phase 7** — this commit + a few follow-ups. Deleted ~350 LoC of OpenClaw plumbing from `deploy.py` (`oc()`, `oc_json()`, the cron-reconciliation trio, the channel/binding/approvals trio, `check_compose_yml_drift`), removed the Safeguard 11 docker-compose drift check, deleted `ops/docker-compose.yml`, `agents/shared/deploy_wrapper.sh`, and `ops/exec-approvals-baseline.json`. Polished this chapter with the receipts you're reading now.
+The order that worked: scaffold the `guide-v3/` chapter first as a decision doc, then build the entire shared library — `telegram.py`, `retry_policy.py`, `brain.py`, `heartbeat_base.py`, `google_oauth.py`, `playwright_profile.py`, `camoufox_proxy.py`, plus a direct-HTTP `llm.py` broker — *before* migrating any agent off OpenClaw. Each module came in with its own `tests/test_*.py` written first, watched red, implemented green. The full-library-first sequencing turned out to be the cheapest shape; every subsequent agent migration was a thin call-site flip rather than a code-write.
+
+Then a pilot: migrate one agent end-to-end (news-digest) and shake out the cron-contract bugs against a day-in-the-life simulation, hours not days. Then the rest of the agents in complexity-ascending order: shopping → family-calendar → connector → meetings-coach → fix-it. The 5 AM PT fleet-brief path emerged as a load-bearing convention here: every morning cron writes to `cache/morning-brief-ready.txt`, and a single `morning-fleet-deliver-host.sh` at `0 12 * * *` UTC aggregates and ships. The rule got documented in agent memory after one cron — shopping — was caught populating at the wrong time.
+
+Finally, deletion: rewrite `deploy.py`'s OpenClaw-coupled safeguards, stop the gateway container, verify `deploy.py` runs zero-OC via a structural test that monkeypatches every helper to raise, and clean out ~350 LoC of OpenClaw plumbing — `oc()`, `oc_json()`, the cron-reconciliation trio, the channel/binding/approvals trio, the docker-compose drift check, and the deploy-wrapper shell script. The `~/.openclaw/` → `~/.clawford/` rename closed it out, with a regression guard test pinning the new path.
 
 ### Incidents avoided by discipline
 
 Two stand out from the migration window itself:
 
-- **2026-04-15 — post-meeting-scan idempotency.** Mid-Phase-4, the meetings-coach `post-meeting-scan` cron started double-confirming meeting debriefs because it didn't check whether a debrief was already in `~/Dropbox/openclaw-backup/commitments/active.md` before re-staging it. The fix landed as a 6-test-case unit suite (happy path, idempotent skip, Krisp 401 rate-limit, fresh alert, no-transcripts silence, partial confirm + dismiss) that pinned the state-machine semantics. Without TDD discipline — specifically writing the test cases against real `cache/pending-debrief-*.json` files and asserting the active-md grep — the bug would have re-surfaced silently the next time the cron got touched, and the symptom (3-5 duplicate Telegram messages per meeting) would have looked like a delivery layer issue rather than a state issue.
+- **2026-04-15 — post-meeting-scan idempotency.** Mid-migration, the meetings-coach `post-meeting-scan` cron started double-confirming meeting debriefs because it didn't check whether a debrief was already in `~/Dropbox/openclaw-backup/commitments/active.md` before re-staging it. The fix landed as a 6-test-case unit suite (happy path, idempotent skip, Krisp 401 rate-limit, fresh alert, no-transcripts silence, partial confirm + dismiss) that pinned the state-machine semantics. Without TDD discipline — specifically writing the test cases against real `cache/pending-debrief-*.json` files and asserting the active-md grep — the bug would have re-surfaced silently the next time the cron got touched, and the symptom (3-5 duplicate Telegram messages per meeting) would have looked like a delivery layer issue rather than a state issue.
 - **The 5 AM PT fleet-brief drift.** Shopping's first migration commit copied the OpenClaw cron's old schedule (`0 14 * * *` = 7 AM PT) into the host-cron registration without questioning it. The next morning the brief landed on time but the *digest* was missing — because the fleet-brief aggregator at 12:00 UTC was reading a `cache/morning-brief-ready.txt` file that hadn't been written yet. Cost: one extra commit and ~20 minutes of head-scratching. The recovery introduced the **5 AM PT fleet path** convention as a hard rule: every daily brief populates at `30 10 * * *` UTC and the fleet aggregator delivers at `0 12 * * *` UTC. That convention now lives in agent memory and will catch the next agent that tries to direct-send.
 
 ### Measurable wins
 
 - **~260x reduction in per-call LLM token overhead.** The codex CLI prepends ~8,100 tokens of agentic framing to every call. The direct-HTTP broker in [`agents/shared/llm.py`](../agents/shared/llm.py) sends ~25 tokens of system-prompt scaffolding. For a fleet that fires dozens of cron ticks a day, the difference is the gap between "subscription is fine" and "subscription is fine *and* I have headroom for new agents."
-- **~350 lines of `deploy.py` deleted in Phase 7 alone.** The whole Phase 7 sweep removed ~1,000 lines of test + production OpenClaw code paths. `deploy.py` is now a file-sync + validation tool — exactly the shape it should have always been.
+- **~350 lines of `deploy.py` deleted in the cleanup pass.** That sweep removed ~1,000 lines of test + production OpenClaw code paths. `deploy.py` is now a file-sync + validation tool — exactly the shape it should have always been.
 - **Zero-OC live-run invariant.** `deploy.py` no longer references the OpenClaw gateway anywhere. The structural guarantee is enforced by a test (`test_phase7_openclaw_helpers_deleted`) that fails loudly if any deleted symbol gets resurrected.
-- **Test count grew.** ~810 tests passing across the fleet at the end of Phase 7, up from the pre-liberation baseline. Not net additions (some OpenClaw-coupled tests got deleted alongside their subjects) but an honest expansion of what's covered. The TDD discipline carried throughout: every shared-library module landed with tests in the same commit or earlier, never later.
+- **Test count grew.** ~810 tests passing across the fleet at the end of the migration, up from the pre-liberation baseline. Not net additions (some OpenClaw-coupled tests got deleted alongside their subjects) but an honest expansion of what's covered. The TDD discipline carried throughout: every shared-library module landed with tests in the same commit or earlier, never later.
 
 ### What didn't change
 
@@ -247,7 +247,7 @@ The shared brain — git-tracked schemas under `ops/brain/*` plus Dropbox-synced
 
 ### The one thing I'd do differently
 
-If Phase 0 had written `agents/shared/llm.py` as a real direct-HTTP broker instead of a dispatch shim with two backends, the fleet would have reached this shape a day or two earlier. The reversed order was correct given uncertainty about whether codex would behave on the VPS, but the direct-HTTP shape turned out to be both simpler *and* faster *and* cheaper than a dispatch shim — once it was in front of me. Sometimes the right answer is to skip the bridge and just take the leap. The discipline that made it safe to do this — red/green TDD, day-in-the-life simulations, per-agent commits — held up everywhere it was applied.
+If the very first commit had written `agents/shared/llm.py` as a real direct-HTTP broker instead of a dispatch shim with two backends, the fleet would have reached this shape a day or two earlier. The reversed order was correct given uncertainty about whether codex would behave on the VPS, but the direct-HTTP shape turned out to be both simpler *and* faster *and* cheaper than a dispatch shim — once it was in front of me. Sometimes the right answer is to skip the bridge and just take the leap. The discipline that made it safe to do this — red/green TDD, day-in-the-life simulations, per-agent commits — held up everywhere it was applied.
 
 Red/green TDD throughout. Tests first, confirm red, implement, confirm green — no bottom-up implementations. The single hardest rule to follow turned out to be the most important one.
 
@@ -256,7 +256,6 @@ Red/green TDD throughout. Tests first, confirm red, implement, confirm green —
 - [Ch 01 — What Is Clawford?](index.md) *(pending migration from v2)* — the brief welcome, with the post-migration architecture diagram
 - [Ch 06 — Infra setup](06-infra-setup.md) *(pending rewrite)* — the shared library in detail, what each module does
 - [Ch 07 — Intro to agents](07-intro-to-agents.md) *(pending rewrite)* — the anatomy of an agent in the Clawford-native runtime
-- [Ch 07-7 — Auth architectures](07-7-auth-architectures.md) *(pending)* — the cross-cutting auth patterns (Google OAuth, persistent Chromium profile, Camoufox + residential proxy)
+- [Ch 17 — Auth architectures](17-auth-architectures.md) *(pending)* — the cross-cutting auth patterns (Google OAuth, persistent Chromium profile, Camoufox + residential proxy)
 - [`../guide-v2/06-intro-to-agents.md`](../guide-v2/06-intro-to-agents.md) — the OpenClaw-era version of the intro-to-agents chapter, frozen as historical. The 600-second LLM cron budget, the permissive exec-approvals rationale, and the `BOOTSTRAP.md` split-brain story are the specific incidents that became walls 1, 2, and part of 3 in this chapter. The script contract section is the direct scar from Wall 6.
 - [`../guide-v2/05-infra-setup.md`](../guide-v2/05-infra-setup.md) — the OpenClaw bot-commands clobber story that is the rest of Wall 3, plus Safeguard 8 drift-detection context for Wall 4.
-- [`../docs/v2-to-v3-migration.md`](../docs/v2-to-v3-migration.md) — the per-chapter migration checklist

@@ -65,39 +65,9 @@ Knowing which tier a new integration belongs in before writing a line of code is
 
 The shared brain is a first-class subsystem. It's the difference between a fleet of agents and a pile of scripts.
 
-Before the brain existed, every agent in the fleet was an amnesiac. Each cron fired a fresh LLM session, loaded its workspace files, reasoned from scratch, and wrote nothing another agent could read. When the news agent learned the household would be travelling next week, the fact lived in the news agent's cron output and nowhere else. When the shopping agent later wondered whether to hold a delivery that would arrive while the household was out of town, it had no way to know. Two agents, same user, no shared context — and the human got to play messenger between them.
+The short version: it's a directory of plain markdown files with a small structured schema on top, split into a **git-tracked half** (`ops/brain/*`, for canonical config and schemas) and a **Dropbox-synced half** (`~/Dropbox/clawford-backup/*`, for runtime state). Every agent reads and writes through [`agents/shared/brain.py`](../agents/shared/brain.py), which enforces the split structurally and refuses writes to the git-tracked side. All writes are appends.
 
-The brain solves that. It's a directory of plain markdown files with a small structured schema on top. Four core primitives — **facts** (knowledge that decays), **commitments** (promises that resolve), **tasks** (action items), and **notes** (raw inputs awaiting triage) — plus per-person profile files and per-agent status/rules files. No database, no vendor, no API. All agents share the same working memory. Everything is plain markdown, so the whole thing is browsable from any text editor.
-
-### The two halves
-
-The brain has two halves that live in different places and sync through different mechanisms.
-
-**The git-tracked half — `ops/brain/*` in the Clawford repo.** Configuration: the canonical schema `README.md`, the seed `_template.md` for new person files, per-agent rules scaffolds, validation scripts. Flows *one-way*: local git → VPS via `deploy.py`. An agent edit never writes back here. If the schema or a rules file needs updating, edit locally, commit, push, redeploy.
-
-**The Dropbox-synced half — `~/Dropbox/clawford-backup/` on the VPS.** Runtime state: live facts, live people files (whose structure came from `_template.md` but whose content is populated by the connector agent and the human), commitments, tasks, notes, per-agent status, `fleet-health.json`. Flows *bidirectionally*: agents write on the VPS, Dropbox syncs it off-VPS.
-
-> Paths in the repository still show `openclaw-backup` rather than `clawford-backup` at the time of writing. The rename is queued for Phase 7 of the liberation; chapter 02's receipts section will have the exact date. Treat the two names as interchangeable until then.
-
-**Don't cross the streams.** Writing agent config to the Dropbox half means it's not in git and can't be versioned, tested, or rolled back. Writing runtime state to the git half means it gets committed to history and potentially leaked. `deploy.py`'s drift check (Safeguard 4) enforces this boundary from one side and the pre-push hook catches the other.
-
-### The module that codifies the pattern
-
-Every agent used to touch the brain via raw filesystem I/O. That worked, but it meant the git/Dropbox split was enforced by convention — one careless `Path.write_text` in the wrong subdirectory could drop runtime state into a git-tracked location. [`agents/shared/brain.py`](../agents/shared/brain.py) is the module that makes the split structural:
-
-- `read_brain(relative_path) -> str | dict` — reads from either half based on the path prefix
-- `write_brain(relative_path, content, *, append=False)` — refuses to write to any path under `ops/brain/*`, because those are git-tracked config that only the deploy tool should ever touch
-- Helpers for common schemas: `fleet-health.json`, per-agent `status.md` files, append-only queue files
-
-Every agent that touches the brain today does so through this module.
-
-### The append-only rule
-
-The most important convention in the brain is that no agent overwrites another agent's entries. All writes are appends. This prevents collisions when two agents write to the same file simultaneously, and it makes the audit story trivial: every entry carries the agent ID and the timestamp, and the file is its own changelog. The only allowed in-place edits are resolving a commitment (source agent or human) and marking a task done (same rule). Everything else is `append >>`.
-
-IDs are globally unique. Format: `<agent-name>-<YYYY-MM-DD>-<seq>`, where `seq` is a zero-padded three-digit counter per agent per day. A single agent can write at most 999 entries per day, which has never come close to being a real limit.
-
-The full schema lives in [`ops/brain/README.md`](../ops/brain/README.md). Read it when you're about to write an agent that writes to the brain, not before — the schema only makes sense in the context of what an agent is trying to say.
+The full chapter is [Ch 16 — The shared brain](16-shared-brain.md): why the brain exists, the two halves and how they sync, the four primitives (facts, commitments, tasks, notes), the append-only rule, and the pitfalls. Read it before writing an agent that writes to the brain.
 
 ## The host-cron runtime
 
@@ -122,9 +92,9 @@ The fleet-path discipline matters because without it, five agents each send thei
 
 ### Retiring an agent — the file-based opt-out pattern
 
-`install-host-cron.sh` reads `\$HOME/.clawford/disabled-agents.txt` on every run. If an agent id appears in that file, the installer skips its `CONTRACT_ENTRY` lines on fresh installs *and* evicts any matching lines already in the live crontab. The file format is one entry per line, with `#` comments and blank lines ignored; missing file means no agents are disabled. Retiring an agent is two operator-facing steps — append the id to the file, re-run the installer — and reversal is one step: remove the line, re-run.
+`install-host-cron.sh` reads `$HOME/.clawford/disabled-agents.txt` on every run. If an agent id appears in that file, the installer skips its `CONTRACT_ENTRY` lines on fresh installs *and* evicts any matching lines already in the live crontab. The file format is one entry per line, with `#` comments and blank lines ignored; missing file means no agents are disabled. Retiring an agent is two operator-facing steps — append the id to the file, re-run the installer — and reversal is one step: remove the line, re-run.
 
-This is the canonical file-based opt-out pattern, and the rule generalises. When you need a persistent, reversible operator opt-out — "disable this check", "skip this cron", "turn this agent off" — use a single text file under `\$HOME/.clawford/` that the installer reads on every run. Avoid in-code flags (they need a redeploy to toggle), environment variables (they don't survive cron invocations), and manifest fields (they need a deploy cycle). A text file the operator can `cat`, `echo >>`, or `\$EDITOR` is auditable in seconds, scriptable from emergency flows, and survives git pulls and reboots. The path should be overridable via an env var (the `DISABLED_AGENTS_FILE` pattern) and the installer should wire any operator-facing helper — `retire.sh`, say — to *append* to the file, never overwrite, so multiple disabled things can coexist.
+This is the canonical file-based opt-out pattern, and the rule generalises. When you need a persistent, reversible operator opt-out — "disable this check", "skip this cron", "turn this agent off" — use a single text file under `$HOME/.clawford/` that the installer reads on every run. Avoid in-code flags (they need a redeploy to toggle), environment variables (they don't survive cron invocations), and manifest fields (they need a deploy cycle). A text file the operator can `cat`, `echo >>`, or `$EDITOR` is auditable in seconds, scriptable from emergency flows, and survives git pulls and reboots. The path should be overridable via an env var (the `DISABLED_AGENTS_FILE` pattern) and the installer should wire any operator-facing helper — `retire.sh`, say — to *append* to the file, never overwrite, so multiple disabled things can coexist.
 
 **Operator discipline caveat: spell out full agent ids.** The matcher inside `install-host-cron.sh` is prefix-with-hyphen-boundary, not exact. Writing `fix-it` into `disabled-agents.txt` disables `fix-it`, `fix-it-brain-validation`, `fix-it-conflict-scan`, and every other `fix-it-*` cron — which is exactly what retirement wants. But writing `fix` would silently nuke every `fix-it-*` cron too, because `fix-it-*` starts with `fix-`. The installer cannot tell `fix` from `fix-it`; it has no canonical agent list to disambiguate against. Always type the full canonical id: `fix-it`, not `fix`. The rule generalises — anywhere in the system an agent id gets matched against a string (cron markers, filter rules, deny-lists, grep patterns), type the whole thing. A typo at one character of prefix is a disable-the-whole-family outage waiting to happen.
 
@@ -146,7 +116,7 @@ It runs nine active safeguards (two earlier safeguards, 8 and 11, were retired d
 
 Safeguard 9 statically walks every manifest's `crons[].message` field and refuses to deploy if any of them contain a pattern from a blocklist. The blocklist has two distinct classes and the stories behind them are both worth remembering.
 
-**Class 1 — shell operators.** The original outage is the opening scene of [Ch 02 — What Clawford Isn't](02-what-clawford-isnt.md). A cron message said "run `python3 foo.py; printf 'EXIT:%s' \$?` and capture the exit code." An upstream preflight rejected any interpreter invocation combined with shell operators like `;`, `&&`, output redirects, `sh -lc`, or exit-code capture. The rejection cascaded into "approval required" alerts across the whole fleet overnight. The fix was the script contract: scripts print one JSON line with a `status` field on stdout, and cron messages invoke them bare. Safeguard 9 grep-matches every shell operator in the blocklist and refuses the deploy.
+**Class 1 — shell operators.** The original outage is the opening scene of [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md). A cron message said "run `python3 foo.py; printf 'EXIT:%s' $?` and capture the exit code." An upstream preflight rejected any interpreter invocation combined with shell operators like `;`, `&&`, output redirects, `sh -lc`, or exit-code capture. The rejection cascaded into "approval required" alerts across the whole fleet overnight. The fix was the script contract: scripts print one JSON line with a `status` field on stdout, and cron messages invoke them bare. Safeguard 9 grep-matches every shell operator in the blocklist and refuses the deploy.
 
 **Class 2 — legacy prose clauses.** An earlier version of every agent's cron prompts ended with some variant of "Update your status file." Post-migration, per-agent `*.status.md` files are legacy — `fleet-health.json` is the authoritative health surface and nothing reads the status files anymore. Keeping the prose in the prompts drifted agent LLMs into writing status files with whatever schema and header they invented on the day, which is how one agent's status file got committed with a subtly-wrong header and tripped `brain-validation`. The fix had three layers: retire the validator's header check, strip the "Update your status file" clause from every cron prompt in the fleet, and add that exact string to Safeguard 9's pattern list as a regression guard.
 
@@ -169,9 +139,9 @@ On a fresh clone, there are templates but no real files. Deploying in that state
 
 Earlier versions of the deploy tool shipped two safeguards that are now gone. Both existed for good reasons, both stopped classes of regressions from happening twice, and both were retired because the thing they guarded against ceased to exist during the liberation.
 
-**Safeguard 8 — exec-approvals baseline drift.** Checked the live `exec-approvals.json` against a committed baseline file (`ops/exec-approvals-baseline.json`) and refused to deploy if the two diverged. It existed because a platform upgrade had silently rewritten the live approvals file in a way that blocked every cron across the fleet overnight. The liberation retired both the platform and the approvals concept; Safeguard 8 and its baseline file are gone. Its call site in `deploy.py` is a one-line tombstone comment with the removal date. The historical story is in [Ch 02](02-what-clawford-isnt.md).
+**Safeguard 8 — exec-approvals baseline drift.** Checked the live `exec-approvals.json` against a committed baseline file (`ops/exec-approvals-baseline.json`) and refused to deploy if the two diverged. It existed because a platform upgrade had silently rewritten the live approvals file in a way that blocked every cron across the fleet overnight. The liberation retired both the platform and the approvals concept; Safeguard 8 and its baseline file are gone. Its call site in `deploy.py` is a one-line tombstone comment with the removal date. The historical story is in [Ch 02](02-what-isnt-clawford.md).
 
-**Safeguard 11 — docker-compose drift.** Compared the runtime `~/openclaw/docker-compose.yml` to the git-tracked `ops/docker-compose.yml` and refused to deploy if the two diverged, because a bind-mount edit had once lived on the VPS for hours before landing in the repo. The Phase 7 cleanup deleted the compose file from git (the gateway container was already stopped in Phase 6) and Safeguard 11 had nothing left to check. Retired with a tombstone comment on the same day as Safeguard 8.
+**Safeguard 11 — docker-compose drift.** Compared the runtime `~/openclaw/docker-compose.yml` to the git-tracked `ops/docker-compose.yml` and refused to deploy if the two diverged, because a bind-mount edit had once lived on the VPS for hours before landing in the repo. The cleanup deleted the compose file from git (the gateway container was already stopped earlier) and Safeguard 11 had nothing left to check. Retired with a tombstone comment on the same day as Safeguard 8.
 
 ### The other safeguards
 
@@ -322,7 +292,7 @@ What's *outside* the Clawford backup system:
 
 ## See also
 
-- [Ch 02 — What Clawford Isn't](02-what-clawford-isnt.md) — the decision doc that explains why the runtime looks like this and not like the platform it used to sit on top of.
+- [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md) — the decision doc that explains why the runtime looks like this and not like the platform it used to sit on top of.
 - [`ops/brain/README.md`](../ops/brain/README.md) — the canonical brain schema with full field tables, half-lives, and access matrix.
 - [`agents/shared/deploy.py`](../agents/shared/deploy.py) — the unified deploy tool. Start with the function it calls last, not the function it calls first.
 - [`DEPLOY.md`](../DEPLOY.md) — the full safeguard inventory with the outage story behind each.

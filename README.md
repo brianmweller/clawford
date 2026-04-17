@@ -10,7 +10,7 @@ bot, and shared memory it can read from and write to.
 > layer, the gateway container, the `~/.openclaw/` workspace root,
 > the `oc` / `oci` CLI wrappers — and Clawford is now a self-contained
 > system of plain Python scripts, host crons, and a `deploy.py`
-> built for purpose. The full story is in [`guide-v3/02-what-clawford-isnt.md`](guide-v3/02-what-clawford-isnt.md).
+> built for purpose. The full story is in [`guide-v3/02-what-isnt-clawford.md`](guide-v3/02-what-isnt-clawford.md).
 > The frozen pre-liberation guide is in [`guide-v2/`](guide-v2/index.md).
 
 ## The Agents
@@ -93,7 +93,7 @@ clawford/
 Start here: **[guide-v3/index.md](guide-v3/index.md)** — the live
 field manual. Covers VPS provisioning, codex auth, shared brain,
 Dropbox sync, agent deployment, host-cron runtime, testing, and
-hardening. Chapter 02 (`02-what-clawford-isnt.md`) explains the
+hardening. Chapter 02 (`02-what-isnt-clawford.md`) explains the
 liberation in detail.
 
 The pre-liberation guide is preserved in [`guide-v2/`](guide-v2/index.md)

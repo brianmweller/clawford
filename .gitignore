@@ -26,6 +26,10 @@ openclaw-docker-config/
 # Backups
 *.tar.gz
 
+# MkDocs build artifacts
+/site/
+/_site_src/
+
 # Python
 __pycache__/
 *.pyc

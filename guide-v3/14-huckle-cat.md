@@ -1,6 +1,6 @@
-# Ch 07-5 — Huckle Cat 🐱🤝 (the connector agent)
+# Ch 14 — Huckle Cat 🐱🤝 (the connector agent)
 
-*Guide v3 · net-new in v3 · last revised Phase 7d*
+*Last updated: 2026-04-16 · Reading time: ~25 min · Difficulty: hard*
 
 > **TL;DR.** Huckle Cat is the relationship agent — the one that inverts the usual shape of a Clawford agent. Instead of wrapping a single external API the way Mr Fixit wraps the fleet's own heartbeat or Hilda Hippo wraps two retailers, Huckle Cat is built **around the shared brain itself**. His input is seven disparate data sources (Gmail, Google Calendar, Google Contacts, Google Messages, WhatsApp, meeting transcripts, and Workflowy) and his output is a relationship intelligence layer: ~280 people files in the brain with names, emails, phones, circles, last-interaction timestamps, enriched context notes, and facts pulled from email signatures. He composes a morning relationship nudge at 5 AM PT (overdue / approaching / healthy), triages a shared notes inbox twice a day, and keeps `last_interaction` fresh via a daily re-mining pass. He was the last agent in the fleet to deploy, and he is the only one where the [mining pipeline](#the-mining-pipeline) runs **before** the first cron fires — by design.
 
@@ -20,7 +20,7 @@ The cleanest way to think about Huckle Cat is: **he is the only agent that reads
 
 - You have two or more years of relationship data scattered across Gmail, your calendar, your contacts app, a messaging app, and meeting transcripts, and no single app combines them.
 - You want a daily 5 AM PT brief that says "you haven't messaged X in three weeks and you usually message X every two" — not a CRM, just a relationship cadence nudge based on actual interaction history.
-- You want a shared brain that other agents can read from — a commitment written by [Sergeant Murphy](07-4-sergeant-murphy.md) can pick up the attendee's relationship context from Huckle Cat's people files, rather than re-computing it.
+- You want a shared brain that other agents can read from — a commitment written by [Sergeant Murphy](13-sergeant-murphy.md) can pick up the attendee's relationship context from Huckle Cat's people files, rather than re-computing it.
 - You want an inbox-triage pattern for the operator's own notes and for agent-generated observations, with confirmation-before-write semantics that mirror Sergeant Murphy's commitment flow.
 
 ## Why you might skip this one
@@ -44,7 +44,7 @@ Three things, in order of operational weight.
 
 The mining pipeline is Huckle Cat's step 0 — the thing that runs before the first cron fires, on the operator's local machine, with a human review pass in the middle, to produce the seed people directory that the rest of the agent depends on. It has three phases: **mine**, **aggregate + enrich**, and **review + finalize**.
 
-### Phase 1 — Mine
+### Step 1 — Mine
 
 Seven miners, each scoped to one data source, each producing a flat JSON output under `cache/` (gitignored):
 
@@ -60,7 +60,7 @@ Seven miners, each scoped to one data source, each producing a flat JSON output 
 
 The miners run in parallel where possible. Each has a sampling cap (e.g., gmail-mine caps at N messages per sender to keep the cost bounded) and writes its output to `cache/mined-{source}.json`.
 
-### Phase 2 — Aggregate + LLM-enrich
+### Step 2 — Aggregate + LLM-enrich
 
 The aggregator (`contact-aggregator.py`, ~1200 lines) does the hard part:
 
@@ -70,9 +70,9 @@ The aggregator (`contact-aggregator.py`, ~1200 lines) does the hard part:
 - **Auto-circle assignment** — domain heuristics (family-domain email → family circle, work-domain → work, known-friend-domain → friend, everything else → acquaintance) combined with frequency and recency.
 - **Alias merge + whitespace normalization + name-subset dedup** — "J Smith" folds into "John Smith" if the email addresses match, "Alex" folds into "Alex Khan" if the phone numbers match, and so on.
 
-Then the LLM enrichment pass (`llm-enrich.py`) runs one call per person, with `sqrt`-scaled message sampling so that a top-tier relationship gets a rich context window and a low-tier acquaintance gets a minimal one. The output is relationship_type, tone, context_notes, and key_topics per person. The enrichment is I/O-bound and parallelizable; the default runs 10 workers. Cost is roughly 1 cent per person on a small model, so ~`\$2-4` for a 280-person seed is what the first run actually costs in practice.
+Then the LLM enrichment pass (`llm-enrich.py`) runs one call per person, with `sqrt`-scaled message sampling so that a top-tier relationship gets a rich context window and a low-tier acquaintance gets a minimal one. The output is relationship_type, tone, context_notes, and key_topics per person. The enrichment is I/O-bound and parallelizable; the default runs 10 workers. Cost is roughly 1 cent per person on a small model, so ~`$2-4` for a 280-person seed is what the first run actually costs in practice.
 
-### Phase 3 — Review + finalize
+### Step 3 — Review + finalize
 
 This is the phase that is easy to skip and the one you absolutely must not skip. `contact-aggregator.py` does not write directly to the people directory. Instead, it writes a **tiered review markdown** — a table of every candidate contact grouped by score tier, with the inferred circle, relationship type, and rationale for each. The operator reads that review file in an editor, deletes marketing contacts, corrects obvious mis-classifications, merges duplicates the aggregator missed, adjusts circles, and then re-runs the aggregator with `--finalize` to commit the seeds to `~/Dropbox/clawford-brain/people/{email-slug}.md`.
 
@@ -122,7 +122,7 @@ Three second-order details fell out:
 
 ## Current state
 
-Phase 4b (commit `33175c5`, 2026-04-14) moved Huckle Cat entirely onto host crons. Phase 7b (commit `c3b4d99`, 2026-04-15) completed the Clawford path migration. As of 2026-04-15, Huckle Cat runs four host crons off `~/.clawford/connector-workspace/`.
+As of 2026-04-15, Huckle Cat runs four host crons off `~/.clawford/connector-workspace/`.
 
 **Host cron surface.** Registered via `ops/scripts/install-host-cron.sh`:
 
@@ -162,9 +162,9 @@ scripts/
 
 ## Deployment walkthrough
 
-This is the overlay on [Ch 07-0 — Your first agent](07-0-your-first-agent.md). The unusual bit for Huckle Cat is that step 0 — the mining pipeline — comes *before* any cron is registered, and step 0 is a lot of the total work.
+This is the overlay on [Ch 08 — Your first agent](08-your-first-agent.md). The unusual bit for Huckle Cat is that step 0 — the mining pipeline — comes *before* any cron is registered, and step 0 is a lot of the total work.
 
-**Pre-step: reuse the Google OAuth setup.** If [Mistress Mouse](07-3-mistress-mouse.md) or [Sergeant Murphy](07-4-sergeant-murphy.md) is already deployed, reuse the same Google Cloud project and credentials. Add the `contacts.readonly` and `gmail.readonly` scopes to the existing consent screen, re-run `google-auth-setup.py` locally, SCP the new `token.json` to the VPS. You do not need a fresh Google Cloud project.
+**Pre-step: reuse the Google OAuth setup.** If [Mistress Mouse](12-mistress-mouse.md) or [Sergeant Murphy](13-sergeant-murphy.md) is already deployed, reuse the same Google Cloud project and credentials. Add the `contacts.readonly` and `gmail.readonly` scopes to the existing consent screen, re-run `google-auth-setup.py` locally, SCP the new `token.json` to the VPS. You do not need a fresh Google Cloud project.
 
 **Pre-step: Google Messages pairing.** Run `python3 agents/connector/scripts/gmessages-auth.py` on the operator's local machine (not the VPS). A Camoufox browser opens, the pairing page takes a screenshot, the operator scans the QR code with their phone, and the session persists in `~/.clawford/connector-workspace/gmessages-profile/`. SCP the entire profile directory to the VPS when the pairing is done.
 
@@ -202,12 +202,12 @@ This is the overlay on [Ch 07-0 — Your first agent](07-0-your-first-agent.md).
 
 > 🧨 **Pitfall.** Treating the shared-brain `people/` directory as append-only. **Why:** the mining pipeline and the ongoing crons both modify files in `people/`, and if any of those modifications are not atomic, concurrent writes between the local laptop (the operator editing a people file by hand) and the VPS crons (the daily-refresh cron updating `last_interaction`) can lose data silently. **How to avoid:** all writes to people files go through `agents.shared.brain.update_people_file`, which does a read-modify-atomic-write with a Dropbox-aware lock file. Do not edit people files by hand on the VPS. Editing on the local laptop is fine because the VPS crons are idempotent against the local edits; the lock file prevents the race.
 
-> 🧨 **Pitfall.** LLM enrichment cost scaling linearly with contact count. **Why:** the enrichment pass runs one LLM call per candidate, regardless of whether the candidate is high-tier or marketing. On a first deploy of 280 people, that is `\~\$3`. On a second-pass mining run of 600 people (because the gmail history grew or because a new source was added), it is `\~\$6`. There is no safeguard against runaway spending — if a bug in the aggregator produces 5000 candidates, the enrichment pass will cheerfully run 5000 LLM calls. **How to avoid:** the aggregator has a candidate-count guard: if the final candidate list exceeds 1000, the pipeline hard-stops with `"Candidate count {N} exceeds safety ceiling — investigate before proceeding"` and the operator has to explicitly override with `--i-know-what-i-am-doing`. Do not disable the guard lightly.
+> 🧨 **Pitfall.** LLM enrichment cost scaling linearly with contact count. **Why:** the enrichment pass runs one LLM call per candidate, regardless of whether the candidate is high-tier or marketing. On a first deploy of 280 people, that is `\~$3`. On a second-pass mining run of 600 people (because the gmail history grew or because a new source was added), it is `\~$6`. There is no safeguard against runaway spending — if a bug in the aggregator produces 5000 candidates, the enrichment pass will cheerfully run 5000 LLM calls. **How to avoid:** the aggregator has a candidate-count guard: if the final candidate list exceeds 1000, the pipeline hard-stops with `"Candidate count {N} exceeds safety ceiling — investigate before proceeding"` and the operator has to explicitly override with `--i-know-what-i-am-doing`. Do not disable the guard lightly.
 
 ## See also
 
 - [Ch 07 — Intro to agents](07-intro-to-agents.md) — the deploy path and safeguard story
-- [Ch 07-0 — Your first agent](07-0-your-first-agent.md) — the general deploy walkthrough
-- [Ch 07-3 — Mistress Mouse 🐭📅](07-3-mistress-mouse.md) — canonical Google OAuth pattern
-- [Ch 07-4 — Sergeant Murphy 🐷🔍](07-4-sergeant-murphy.md) — the cache-is-not-a-delivery-queue rule that all of Huckle Cat's orchestrators follow
-- [Ch 07-7 — Auth architectures](07-7-auth-architectures.md) — the cross-agent auth reference (pending)
+- [Ch 08 — Your first agent](08-your-first-agent.md) — the general deploy walkthrough
+- [Ch 12 — Mistress Mouse 🐭📅](12-mistress-mouse.md) — canonical Google OAuth pattern
+- [Ch 13 — Sergeant Murphy 🐷🔍](13-sergeant-murphy.md) — the cache-is-not-a-delivery-queue rule that all of Huckle Cat's orchestrators follow
+- [Ch 17 — Auth architectures](17-auth-architectures.md) — the cross-agent auth reference (pending)

@@ -2,37 +2,40 @@
 
 # Clawford Guide (v3)
 
-*Last updated: 2026-04-15 (Phase 7d — all chapters drafted) · Live guide*
+*Last updated: 2026-04-15 · Live guide*
 
-> **Guide v3 is the live guide.** Every chapter in the table below is drafted against the post-liberation Clawford-native runtime. The OpenClaw-era [guide v2](../guide-v2/index.md) is frozen and preserved as historical record. For the strategic reasoning behind the rewrite, start with [Ch 02 — What Clawford Isn't](02-what-clawford-isnt.md).
+> **Guide v3 is the live guide.** Every chapter in the table below is drafted against the post-liberation Clawford-native runtime. The OpenClaw-era [guide v2](../guide-v2/index.md) is frozen and preserved as historical record. For the strategic reasoning behind the rewrite, start with [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md).
 
 ## Full table of contents
 
-| # | Chapter | Status |
-|---|---------|--------|
-| 01 | [What is Clawford?](01-what-is-clawford.md) | **drafted** (Phase 7d) |
-| 02 | [What Clawford Isn't](02-what-clawford-isnt.md) | **drafted** (Phase 0) |
-| 03 | [Before you start](03-before-you-start.md) | **drafted** (Phase 7d) |
-| 04 | [VPS setup](04-vps-setup.md) | **drafted** (Phase 6) |
-| 05 | [Dev setup](05-dev-setup.md) | **drafted** (Phase 7d) |
-| 06 | [Infra setup](06-infra-setup.md) | **drafted** (Phase 5) |
-| 07 | [Intro to agents](07-intro-to-agents.md) | **drafted** (Phase 6) |
-| 07-0 | [Your first agent](07-0-your-first-agent.md) | **drafted** (Phase 7d) |
-| 07-1 | [Mr Fixit 🦊🔧](07-1-mr-fixit.md) | **drafted** (Phase 7d) |
-| 07-2a | [Lowly Worm — newsfeed 🐛📰](07-2a-lowly-worm-newsfeed.md) | **drafted** (Phase 7d) |
-| 07-2b | [Lowly Worm — social 🐛📰](07-2b-lowly-worm-social.md) | **drafted** (Phase 7d) |
-| 07-3 | [Mistress Mouse 🐭📅](07-3-mistress-mouse.md) | **drafted** (Phase 7d) |
-| 07-4 | [Sergeant Murphy 🐷🔍](07-4-sergeant-murphy.md) | **drafted** (Phase 7d) |
-| 07-5 | [Huckle Cat 🐱🤝](07-5-huckle-cat.md) | **drafted** (Phase 7d) |
-| 07-6 | [Hilda Hippo 🦛🛒](07-6-hilda-hippo.md) | **drafted** (Phase 7d) |
-| 07-7 | [Auth architectures](07-7-auth-architectures.md) | **drafted** (Phase 7d) |
-| 07-8 | [The inbox: making agents conversational](07-8-the-inbox.md) | **drafted** (Phase 7d) |
-| 08 | [Security and hardening](08-security-and-hardening.md) | **drafted** (Phase 7d) |
-| 09 | [Scripts and configs reference](09-scripts-and-configs.md) | **drafted** (Phase 7d) |
-| 10 | [Glossary](10-glossary.md) *(renumbered from Ch 11)* | **drafted** (Phase 7d) |
-| 99 | [Unsorted operator lessons](99-unsorted-lessons.md) | **drained** (Phase 7d) — historical record of the triage process; all lessons grafted into their natural chapters |
-
-See [`docs/v2-to-v3-migration.md`](../docs/v2-to-v3-migration.md) for the per-chapter migration checklist and status.
+| # | Chapter |
+|---|---------|
+|   | **Overview** |
+| 01 | [What is Clawford?](01-what-is-clawford.md) |
+| 02 | [What Isn't Clawford?](02-what-isnt-clawford.md) |
+|   | **Setup** |
+| 03 | [Before you start](03-before-you-start.md) |
+| 04 | [VPS setup](04-vps-setup.md) |
+| 05 | [Dev setup](05-dev-setup.md) |
+| 06 | [Infra setup](06-infra-setup.md) |
+|   | **Agents** |
+| 07 | [Intro to agents](07-intro-to-agents.md) |
+| 08 | [Your first agent](08-your-first-agent.md) |
+| 09 | [Mr Fixit 🦊🔧](09-mr-fixit.md) |
+| 10 | [Lowly Worm — newsfeed 🐛📰](10-lowly-worm-newsfeed.md) |
+| 11 | [Lowly Worm — social 🐛📰](11-lowly-worm-social.md) |
+| 12 | [Mistress Mouse 🐭📅](12-mistress-mouse.md) |
+| 13 | [Sergeant Murphy 🐷🔍](13-sergeant-murphy.md) |
+| 14 | [Huckle Cat 🐱🤝](14-huckle-cat.md) |
+| 15 | [Hilda Hippo 🦛🛒](15-hilda-hippo.md) |
+|   | **Architecture** |
+| 16 | [The shared brain](16-shared-brain.md) |
+| 17 | [Auth architectures](17-auth-architectures.md) |
+| 18 | [The inbox: making agents conversational](18-the-inbox.md) |
+| 19 | [Security and hardening](19-security-and-hardening.md) |
+|   | **Reference** |
+| 20 | [Scripts and configs reference](20-scripts-and-configs.md) |
+| 21 | [Glossary](21-glossary.md) |
 
 ## What's changing from v2
 
@@ -43,5 +46,4 @@ See [`docs/v2-to-v3-migration.md`](../docs/v2-to-v3-migration.md) for the per-ch
 ## See also
 
 - [`../guide-v2/index.md`](../guide-v2/index.md) — the frozen OpenClaw-era guide
-- [`../docs/v2-to-v3-migration.md`](../docs/v2-to-v3-migration.md) — per-chapter migration status
 - [`../docs/ballad-of-mr-fixit.md`](../docs/ballad-of-mr-fixit.md) — the lore version, still accurate

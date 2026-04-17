@@ -1,0 +1,94 @@
+site_name: Clawford
+site_description: Field guide to a personal fleet of LLM agents on a $30/month VPS.
+site_author: the operator
+
+docs_dir: _site_src
+site_dir: site
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - footnotes
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: false
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Overview:
+    - 01 — What is Clawford?: guide-v3/01-what-is-clawford.md
+    - 02 — What Isn't Clawford?: guide-v3/02-what-isnt-clawford.md
+  - Setup:
+    - 03 — Before you start: guide-v3/03-before-you-start.md
+    - 04 — VPS setup: guide-v3/04-vps-setup.md
+    - 05 — Dev setup: guide-v3/05-dev-setup.md
+    - 06 — Infra setup: guide-v3/06-infra-setup.md
+  - Agents:
+    - 07 — Intro to agents: guide-v3/07-intro-to-agents.md
+    - 08 — Your first agent: guide-v3/08-your-first-agent.md
+    - 09 — Mr Fixit 🦊🔧: guide-v3/09-mr-fixit.md
+    - 10 — Lowly Worm — newsfeed 🐛📰: guide-v3/10-lowly-worm-newsfeed.md
+    - 11 — Lowly Worm — social 🐛📰: guide-v3/11-lowly-worm-social.md
+    - 12 — Mistress Mouse 🐭📅: guide-v3/12-mistress-mouse.md
+    - 13 — Sergeant Murphy 🐷🔍: guide-v3/13-sergeant-murphy.md
+    - 14 — Huckle Cat 🐱🤝: guide-v3/14-huckle-cat.md
+    - 15 — Hilda Hippo 🦛🛒: guide-v3/15-hilda-hippo.md
+  - Architecture:
+    - 16 — The shared brain: guide-v3/16-shared-brain.md
+    - 17 — Auth architectures: guide-v3/17-auth-architectures.md
+    - 18 — The Inbox: guide-v3/18-the-inbox.md
+    - 19 — Security and hardening: guide-v3/19-security-and-hardening.md
+  - Reference:
+    - 20 — Scripts and configs: guide-v3/20-scripts-and-configs.md
+    - 21 — Glossary: guide-v3/21-glossary.md
+  - Lore:
+    - The Ballad of Mr Fixit: docs/ballad-of-mr-fixit.md
+  - v2 (frozen — OpenClaw era):
+    - Index: guide-v2/index.md
+    - 02 — Before you start: guide-v2/02-before-you-start.md
+    - 03 — VPS setup: guide-v2/03-vps-setup.md
+    - 04 — Dev setup: guide-v2/04-dev-setup.md
+    - 05 — Infra setup: guide-v2/05-infra-setup.md
+    - 06 — Intro to agents: guide-v2/06-intro-to-agents.md
+    - 07-0 — Your first agent: guide-v2/07-0-your-first-agent.md
+    - 07-1 — Mr Fixit 🦊🔧: guide-v2/07-1-mr-fixit.md
+    - 07-2a — Lowly Worm — newsfeed 🐛📰: guide-v2/07-2a-lowly-worm-newsfeed.md
+    - 07-2b — Lowly Worm — social 🐛📰: guide-v2/07-2b-lowly-worm-social.md

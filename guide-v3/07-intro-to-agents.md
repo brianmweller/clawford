@@ -107,7 +107,7 @@ git pull --ff-only origin master
 python3 agents/shared/deploy.py shopping --yes-updates
 ```
 
-**The trap to avoid:** running `deploy.py` on the dev box. The tool has no `scp`, no `rsync`, no `ssh` — it just writes files into `\$HOME/.clawford/<agent>-workspace/` on whatever box runs it. On the VPS that path is the production workspace. On a laptop it's a mirror that nothing reads. A `--dry-run` from a laptop will happily enumerate planned changes against the dead mirror and print a clean plan, which is exactly the kind of false confirmation that makes the trap dangerous.
+**The trap to avoid:** running `deploy.py` on the dev box. The tool has no `scp`, no `rsync`, no `ssh` — it just writes files into `$HOME/.clawford/<agent>-workspace/` on whatever box runs it. On the VPS that path is the production workspace. On a laptop it's a mirror that nothing reads. A `--dry-run` from a laptop will happily enumerate planned changes against the dead mirror and print a clean plan, which is exactly the kind of false confirmation that makes the trap dangerous.
 
 The first time I hit this, I spent an hour re-deriving why a local `deploy.py` kept complaining about six missing config files (`IDENTITY.md`, `TOOLS.md`, `AGENTS.md`, and friends). The hydrated PII versions of those files don't exist on the dev box — they live only on the VPS, gitignored — and the local mirror had no `fix-it-workspace/` directory at all because the laptop had never been a real deploy source. A `grep` for `scp\|rsync\|ssh` inside `deploy.py` came back empty and the fog cleared. The local invocation was writing to a directory nothing on the production host would ever read.
 
@@ -205,7 +205,7 @@ Every script an orchestrator (or host-cron wrapper) invokes must follow one shap
 
 The full spec and a skeleton template live in [`agents/shared/SCRIPT_CONTRACT.md`](../agents/shared/SCRIPT_CONTRACT.md). The test harness in `agents/shared/tests/test_script_contract.py` enforces the contract — statically by walking every manifest's cron messages and rejecting forbidden shell operators, and at runtime by running every script in isolation and asserting the output shape.
 
-The reason the contract is pedantic is scar tissue. An earlier platform version had a hardcoded exec preflight that rejected any `python3 <...>` command matching shell operators — `;`, `&&`, output redirects, `sh -lc`, exit-code capture. When an LLM running a cron session reflexively wrapped a command as `python3 script.py; printf "EXIT:%s" \$?` to "also check the exit code," the command got hard-rejected, and *before* the contract existed, exactly that wrapping cascaded the entire six-agent fleet into approval-blocked errors in a single morning. The durable fix had two sides: scripts started self-reporting status via JSON (removing the LLM's *reason* to wrap), and cron messages started opening with an explicit *"run this bare, do not append anything, do not capture exit codes"* preamble (removing the *temptation*). Both sides are load-bearing.
+The reason the contract is pedantic is scar tissue. An earlier platform version had a hardcoded exec preflight that rejected any `python3 <...>` command matching shell operators — `;`, `&&`, output redirects, `sh -lc`, exit-code capture. When an LLM running a cron session reflexively wrapped a command as `python3 script.py; printf "EXIT:%s" $?` to "also check the exit code," the command got hard-rejected, and *before* the contract existed, exactly that wrapping cascaded the entire six-agent fleet into approval-blocked errors in a single morning. The durable fix had two sides: scripts started self-reporting status via JSON (removing the LLM's *reason* to wrap), and cron messages started opening with an explicit *"run this bare, do not append anything, do not capture exit codes"* preamble (removing the *temptation*). Both sides are load-bearing.
 
 Safeguard 9 in `deploy.py` enforces the pattern blocklist on every deploy. [Ch 06](06-infra-setup.md) has the full story.
 
@@ -239,8 +239,8 @@ See the three invariants at the bottom of [Ch 04 — VPS setup](04-vps-setup.md)
 
 ## See also
 
-- [AGENTS-PATTERN.md](../AGENTS-PATTERN.md) — the repo's canonical list of workspace files, deployment invariants, and human-facing rules. Keep this open while reading Ch 07-0 through 07-6.
+- [AGENTS-PATTERN.md](../AGENTS-PATTERN.md) — the repo's canonical list of workspace files, deployment invariants, and human-facing rules. Keep this open while reading Ch 08 through Ch 15.
 - [`agents/shared/SCRIPT_CONTRACT.md`](../agents/shared/SCRIPT_CONTRACT.md) — the full script contract, the skeleton template, and the migration guide for pre-contract scripts.
 - [`agents/shopping/manifest.json.example`](../agents/shopping/manifest.json.example) — the canonical manifest example with real cron shapes.
 - [Ch 06 — Infra setup](06-infra-setup.md) — `deploy.py`'s safeguards, the shared library tiers, the shared brain, the host-cron runtime.
-- [Ch 02 — What Clawford Isn't](02-what-clawford-isnt.md) — the decision doc that explains why the runtime looks like this and not like the platform it used to sit on top of.
+- [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md) — the decision doc that explains why the runtime looks like this and not like the platform it used to sit on top of.

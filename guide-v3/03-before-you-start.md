@@ -7,7 +7,7 @@
 **TL;DR**
 
 - The decisions in this chapter determine whether your first agent is live in 2 days or 2 weeks. Most of them are one-way doors, and they're all cheap to get right if you make them here.
-- Budget **~\$50/month** to run Clawford (VPS + ChatGPT Plus subscription), plus **~\$1/month** in residential proxy fees later if you deploy the shopping agent, Hilda Hippo. Budget **2-3 days** to your first working agent and **2-4 weeks of evenings** to a full fleet. Don't lowball either number.
+- Budget **~$50/month** to run Clawford (VPS + ChatGPT Plus subscription), plus **~$1/month** in residential proxy fees later if you deploy the shopping agent, Hilda Hippo. Budget **2-3 days** to your first working agent and **2-4 weeks of evenings** to a full fleet. Don't lowball either number.
 - Run Clawford on a dedicated VPS, not your daily driver. Use Telegram, not WhatsApp. Deploy Mr Fixit first. Those three are the cheapest "listen to me" decisions in the whole guide.
 - The per-agent config files ship as `*.example` templates in git; on first setup you scaffold the unsuffixed siblings via `python3 agents/shared/deploy.py <agent> --bootstrap-configs`, edit your real values into them, and the siblings stay `.gitignore`d. That pattern is the seam that makes sharing this repo possible.
 - Plan for rebuilds, not stability. Every service that touches the real world breaks eventually. The question isn't *whether*, it's *how fast you notice and recover*.
@@ -34,11 +34,11 @@ Shell and git, run and read. Python familiarity is welcome but not required — 
 
 **LLM provider (required):**
 
-A **ChatGPT Plus / Codex subscription** (~\$20/month). Clawford's LLM entry point is `agents.shared.llm.infer()`, which wraps the `codex` CLI and rides your ChatGPT Plus subscription for every agent LLM call. See "Picking your LLM provider" below for the reasoning and the (limited) alternatives.
+A **ChatGPT Plus / Codex subscription** (~$20/month). Clawford's LLM entry point is `agents.shared.llm.infer()`, which wraps the `codex` CLI and rides your ChatGPT Plus subscription for every agent LLM call. See "Picking your LLM provider" below for the reasoning and the (limited) alternatives.
 
-**Optional — deferred until Ch 07-6:**
+**Optional — deferred until Ch 15:**
 
-- A **residential proxy subscription** (IPRoyal, Bright Data, or similar). Only matters once you deploy Hilda Hippo for purchasing — Amazon and Costco detect datacenter IPs and will block you — so you'll need a sticky residential egress to reach them. Don't buy this until you're actually ready to deploy her. Budget **~\$1/month** when you do — the actual bandwidth the fleet puts through the proxy is small, because Hilda's hot path is small HTTPS API calls, not heavy page scrapes. Uninformed usage (scraping full pages through the proxy on every query) would cost more; most providers' minimum-volume plans land in the \$8-30/month range if you don't pay attention to what you're routing through.
+- A **residential proxy subscription** (IPRoyal, Bright Data, or similar). Only matters once you deploy Hilda Hippo for purchasing — Amazon and Costco detect datacenter IPs and will block you — so you'll need a sticky residential egress to reach them. Don't buy this until you're actually ready to deploy her. Budget **~$1/month** when you do — the actual bandwidth the fleet puts through the proxy is small, because Hilda's hot path is small HTTPS API calls, not heavy page scrapes. Uninformed usage (scraping full pages through the proxy on every query) would cost more; most providers' minimum-volume plans land in the $8-30/month range if you don't pay attention to what you're routing through.
 
 ## What it'll cost you
 
@@ -46,12 +46,12 @@ Rough monthly numbers from my own setup. Your mileage will vary with region and 
 
 | Line item | Cost | Kicks in | Notes |
 |---|---|---|---|
-| Hetzner VPS (cpx31) | ~\$30/month | Ch 04 | 4 vCPU / 8 GB RAM / 160 GB SSD. Availability varies by region — I picked cpx31 partly because the slightly larger cpx32 wasn't available in mine. Smaller SKUs are fine for small fleets. |
-| ChatGPT Plus subscription | ~\$20/month | Ch 04 | Flat rate. What `codex` rides for every LLM call in the fleet. |
-| Dropbox | free or ~\$12/month | Ch 06 | Free tier fits the shared brain; paid only if you archive a lot of brain snapshots. |
-| Residential proxy | ~\$1/month | Ch 07-6 | Only if you deploy the shopping agent, Hilda Hippo. Cost is this low because the hot path is small HTTPS calls, not page scrapes. Uninformed usage lands in the \$8-30/month range. |
-| **Baseline (no proxy)** | **~\$50/month** | | |
-| **Full fleet with proxy** | **~\$51/month** | | |
+| Hetzner VPS (cpx31) | ~$30/month | Ch 04 | 4 vCPU / 8 GB RAM / 160 GB SSD. Availability varies by region — I picked cpx31 partly because the slightly larger cpx32 wasn't available in mine. Smaller SKUs are fine for small fleets. |
+| ChatGPT Plus subscription | ~$20/month | Ch 04 | Flat rate. What `codex` rides for every LLM call in the fleet. |
+| Dropbox | free or ~$12/month | Ch 06 | Free tier fits the shared brain; paid only if you archive a lot of brain snapshots. |
+| Residential proxy | ~$1/month | Ch 15 | Only if you deploy the shopping agent, Hilda Hippo. Cost is this low because the hot path is small HTTPS calls, not page scrapes. Uninformed usage lands in the $8-30/month range. |
+| **Baseline (no proxy)** | **~$50/month** | | |
+| **Full fleet with proxy** | **~$51/month** | | |
 
 None of this includes your time, which is the expensive part.
 
@@ -59,7 +59,7 @@ None of this includes your time, which is the expensive part.
 
 I've been doing this for a while and my calibration is still usually off. Assume:
 
-- **First working agent (Mr Fixit) end-to-end:** 1 full day if absolutely nothing goes wrong. **2-3 days realistic.** The first deploy of any new agent is a minefield — see [Ch 07-1](07-1-mr-fixit.md) for the list of silent failures I hit on Mr Fixit and how to avoid each one.
+- **First working agent (Mr Fixit) end-to-end:** 1 full day if absolutely nothing goes wrong. **2-3 days realistic.** The first deploy of any new agent is a minefield — see [Ch 09](09-mr-fixit.md) for the list of silent failures I hit on Mr Fixit and how to avoid each one.
 - **Full six-agent fleet:** **2-4 weeks of evenings**, depending on which services you're integrating and how much scar tissue you inherit from this guide.
 - **Ongoing operations after the fleet is stable:** a few hours per week of "something broke and I need to look at it," front-loaded after each new deploy and whenever an upstream service (Google, Amazon, Costco, LinkedIn) changes something under you.
 
@@ -73,7 +73,7 @@ These three are cheap to get right up-front and expensive to reverse later.
 
 A Clawford fleet runs with broad filesystem and shell access on its host. That's how the agents do their work — Playwright browsers, Camoufox sessions, Gmail tokens, Dropbox state, outgoing SSH. Pointing that at your work laptop means accidental file modifications, runaway processes during debugging, and a security posture you did not consent to.
 
-Use a dedicated VPS. Ch 04 walks Hetzner cpx31 (~\$30/month, 4 vCPU, 8 GB RAM, 160 GB SSD), which is comfortable for all six agents with headroom. **Availability varies by region** — I picked cpx31 partly because the slightly larger cpx32 wasn't available in mine. If your region offers a different set of SKUs, pick one step above what you think you need. A Raspberry Pi or old Mac mini *can* work if you already have one and don't mind the tradeoffs in [Ch 01](index.md)'s VPS-vs-Mac-mini section — but the whole guide is written against a VPS.
+Use a dedicated VPS. Ch 04 walks Hetzner cpx31 (~$30/month, 4 vCPU, 8 GB RAM, 160 GB SSD), which is comfortable for all six agents with headroom. **Availability varies by region** — I picked cpx31 partly because the slightly larger cpx32 wasn't available in mine. If your region offers a different set of SKUs, pick one step above what you think you need. A Raspberry Pi or old Mac mini *can* work if you already have one and don't mind the tradeoffs in [Ch 01](index.md)'s VPS-vs-Mac-mini section — but the whole guide is written against a VPS.
 
 On whichever host you pick, do not run the fleet as `root`. You'll hit package-manager permission errors, lose the ability to run systemd user services cleanly, and expand the blast radius of anything that goes wrong. The Terraform in Ch 04 creates a non-root `openclaw` user for you (the name is a historical artifact from the pre-liberation era — the platform it refers to is gone but the Unix user lives on as the fleet's operator account). If you're setting up manually instead, create one before you install anything:
 
@@ -124,7 +124,7 @@ Clawford has one LLM provider: **ChatGPT Plus via `codex`**. Every agent's LLM c
 
 The reasoning, for posterity:
 
-- **Flat monthly bill.** ~\$20/month regardless of how hard the fleet works. A leaked key cannot bleed me per-token the way a leaked API key can, because there is no per-token — the subscription is the bill.
+- **Flat monthly bill.** ~$20/month regardless of how hard the fleet works. A leaked key cannot bleed me per-token the way a leaked API key can, because there is no per-token — the subscription is the bill.
 - **Strong models.** GPT-5.4 is what `codex` currently routes to for the agent workloads Clawford runs — news ranking, meeting-transcript summarization, morning-digest composition, LLM-as-judge for preference learning. I have not needed to swap in a different model in any cron.
 - **Scope is auditable.** The credential is tied to an account I already watch. Adding a new client or a new agent doesn't add a new billing surface.
 
@@ -138,7 +138,7 @@ Every service with multi-factor authentication (MFA) — Google, Costco, Amazon,
 
 The cost is real: that plumbing is fragile, it takes debugging when a service changes its login flow, and every auth vector is a potential security issue you are choosing to automate instead of interactive-prompt. The benefit is that my overnight crons actually run overnight.
 
-This is a personal choice. Reasonable operators land on the other side and prefer a manual re-auth step with a Telegram nudge — it's simpler, it's arguably safer, and it works if you're at a keyboard often enough. The guide covers the automated path in [Ch 07-7](07-7-auth-architectures.md), but if you'd rather not maintain it, that's a defensible call. Know which side you want to be on before you start Ch 04.
+This is a personal choice. Reasonable operators land on the other side and prefer a manual re-auth step with a Telegram nudge — it's simpler, it's arguably safer, and it works if you're at a keyboard often enough. The guide covers the automated path in [Ch 17](17-auth-architectures.md), but if you'd rather not maintain it, that's a defensible call. Know which side you want to be on before you start Ch 04.
 
 ## Pick one thing to prioritize
 
@@ -166,15 +166,15 @@ Every design choice in this guide is downstream of that assumption. Mr Fixit as 
 
 > 🧨 **Pitfall.** Picking WhatsApp "just to try it" because your family already uses it. **Why:** Baileys-based WhatsApp bindings ban within days, and the 24-hour inactivity window silently drops the exact overnight alerts you'd want most. **How to avoid:** stand the fleet up on Telegram first, always. If you later need WhatsApp for human reachability (I do, for Mistress Mouse), wire it as a *delivery target* an agent hands off to, not as the agent's primary channel.
 
-> 🧨 **Pitfall.** Underestimating time-to-first-agent and booking real deadlines against it. **Why:** first deploy of a new agent hits silent failures (Ch 07-1). A "should be an afternoon" plan routinely turns into three evenings of debugging BotFather, a Dropbox conflict from a file you didn't know was open, and a Playwright login flow that worked locally but not on the VPS. **How to avoid:** plan 2-3 days to Mr Fixit and 2-4 weeks of evenings to a full fleet. Tell the people waiting on you something generous.
+> 🧨 **Pitfall.** Underestimating time-to-first-agent and booking real deadlines against it. **Why:** first deploy of a new agent hits silent failures (Ch 20). A "should be an afternoon" plan routinely turns into three evenings of debugging BotFather, a Dropbox conflict from a file you didn't know was open, and a Playwright login flow that worked locally but not on the VPS. **How to avoid:** plan 2-3 days to Mr Fixit and 2-4 weeks of evenings to a full fleet. Tell the people waiting on you something generous.
 
 ## See also
 
 - [Ch 01 — What is Clawford?](index.md) — the framing decisions this chapter's details hang off.
-- [Ch 02 — What Clawford Isn't](02-what-clawford-isnt.md) — the decision doc explaining why the stack looks the way it does.
+- [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md) — the decision doc explaining why the stack looks the way it does.
 - [Ch 04 — VPS setup](04-vps-setup.md) — the next stop; you'll put the decisions here to work there.
 - [Ch 05 — Dev setup](05-dev-setup.md) — Claude Code as the dev environment, and the four things it gets wrong.
-- [Ch 07-1 — Mr Fixit](07-1-mr-fixit.md) — the first-deploy-minefield war story that motivates "deploy Mr Fixit first."
-- [Ch 07-7 — Auth architectures](07-7-auth-architectures.md) — the automated re-auth patterns the spicy take above is pointing at.
+- [Ch 09 — Mr Fixit](09-mr-fixit.md) — the first-deploy-minefield war story that motivates "deploy Mr Fixit first."
+- [Ch 17 — Auth architectures](17-auth-architectures.md) — the automated re-auth patterns the spicy take above is pointing at.
 - [README.md](../README.md) — the canonical `*.example` → unsuffixed-sibling copy loop and the "First-time setup" section referenced above.
 - [docs/ballad-of-mr-fixit.md](../docs/ballad-of-mr-fixit.md) — for when this chapter starts feeling too dry.

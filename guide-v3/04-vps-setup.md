@@ -28,7 +28,7 @@ Ch 05 (dev setup) and Ch 06 (infra setup) pick up from there — Ch 06 is where 
 
 ## Choosing a provider
 
-Hetzner cpx31 out of Hillsboro, Oregon is the default recommendation. Four vCPUs, 8 GB RAM, 160 GB SSD, ~\$30/month. Comfortable for a six-agent fleet with headroom. Hetzner's combination of cheap SSD, a usable console, and a US-West location that doesn't add transatlantic latency to every Telegram round-trip is what makes it the baseline.
+Hetzner cpx31 out of Hillsboro, Oregon is the default recommendation. Four vCPUs, 8 GB RAM, 160 GB SSD, ~$30/month. Comfortable for a six-agent fleet with headroom. Hetzner's combination of cheap SSD, a usable console, and a US-West location that doesn't add transatlantic latency to every Telegram round-trip is what makes it the baseline.
 
 Other providers work — DigitalOcean, Linode, Vultr, OVH, AWS Lightsail. What porting away from Hetzner costs is that the community Terraform module this guide leans on is Hetzner-specific. On another provider, most of the work is in the provider-specific `terraform` module; the rest of Clawford doesn't care what's underneath.
 
@@ -172,7 +172,7 @@ A practical note on how the VPS's 160 GB of disk gets used:
 
 - **The shared brain.** Tiny today. The whole brain directory lives comfortably under 100 MB — a few months of daily notes, people files, commitments, tasks, and a modest fact set. Expect it to grow as the brain is enriched with more facts, more history, and deeper per-person context over time. cpx31 has headroom even for a much larger brain.
 - **The codex binary + model weights cache.** Not large. `codex` itself is tens of megabytes; its runtime cache is small.
-- **Deploy-backup tarballs.** `deploy.py` writes a pre-deploy tarball to `~/.clawford/deploy-backups/<agent>-<timestamp>.tar.gz` on every deploy. These pile up unless pruned. Cheap to keep; even cheaper to forget about until debugging a disk-full event at midnight. (The current filesystem path still shows `.openclaw/` pending the Phase 7 rename; treat the two names as interchangeable.)
+- **Deploy-backup tarballs.** `deploy.py` writes a pre-deploy tarball to `~/.clawford/deploy-backups/<agent>-<timestamp>.tar.gz` on every deploy. These pile up unless pruned. Cheap to keep; even cheaper to forget about until debugging a disk-full event at midnight. (The current filesystem path may still show `.openclaw/` pending a final rename; treat the two names as interchangeable.)
 - **Playwright browser cache and Camoufox state.** Browser automation eats a surprising amount of disk in cookies, local storage, and cached page assets. Watch `~/.cache/camoufox/` and `~/.cache/ms-playwright/` if unexpected disk growth appears.
 
 **Automatic Hetzner snapshots** — 20% of the VPS monthly price, one snapshot per day, seven-day retention — are the difference between "last night's update broke everything and rolling back is an option" and "last night's update broke everything and the brain has to be rebuilt by hand." Turn them on.
@@ -223,7 +223,7 @@ On-VPS config edits are the same class of forbidden as on-VPS code edits. When a
 
 ## See also
 
-- [Ch 02 — What Clawford Isn't](02-what-clawford-isnt.md) — the decision doc that explains why the runtime looks like this and not like the platform it used to sit on top of.
+- [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md) — the decision doc that explains why the runtime looks like this and not like the platform it used to sit on top of.
 - [Ch 05 — Dev setup](05-dev-setup.md) *(pending)* — what goes on the laptop to talk to this VPS.
 - [Ch 06 — Infra setup](06-infra-setup.md) — the shared library, shared brain, host-cron runtime, and `deploy.py` safeguards that use this VPS as their target.
 - [Ch 07 — Intro to agents](07-intro-to-agents.md) — the anatomy of a Clawford agent, built on top of everything this chapter provisioned.

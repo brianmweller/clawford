@@ -1,8 +1,8 @@
-# Ch 07-3 — Mistress Mouse 🐭📅 (the family-calendar agent)
+# Ch 12 — Mistress Mouse 🐭📅 (the family-calendar agent)
 
-*Guide v3 · net-new in v3 · last revised Phase 7d*
+*Last updated: 2026-04-16 · Reading time: ~25 min · Difficulty: hard*
 
-> **TL;DR.** Mistress Mouse is the household-logistics agent: she reads a family's Google Calendars, composes a morning briefing delivered at 5 AM PT, fires 60/30/15-minute reminders for the events that matter today, parses activity-provider emails (school closures, cancellations, signup windows), surfaces Google Calendar invites that actually need a response, and summarizes WhatsApp family-chat traffic into a once-a-day digest. She is also the first agent in a Clawford fleet to go through Google OAuth — the local-auth-then-SCP pattern she pioneered is the same pattern [Sergeant Murphy](07-4-sergeant-murphy.md) and [Huckle Cat](07-5-huckle-cat.md) reuse. Read [the WhatsApp section](#the-whatsapp-chapter) before binding her to a real phone number — there is a live ban risk on personal accounts. Read [the routing boundary section](#the-routing-boundary-with-sergeant-murphy) before deploying her alongside Sergeant Murphy.
+> **TL;DR.** Mistress Mouse is the household-logistics agent: she reads a family's Google Calendars, composes a morning briefing delivered at 5 AM PT, fires 60/30/15-minute reminders for the events that matter today, parses activity-provider emails (school closures, cancellations, signup windows), surfaces Google Calendar invites that actually need a response, and summarizes WhatsApp family-chat traffic into a once-a-day digest. She is also the first agent in a Clawford fleet to go through Google OAuth — the local-auth-then-SCP pattern she pioneered is the same pattern [Sergeant Murphy](13-sergeant-murphy.md) and [Huckle Cat](14-huckle-cat.md) reuse. Read [the WhatsApp section](#the-whatsapp-chapter) before binding her to a real phone number — there is a live ban risk on personal accounts. Read [the routing boundary section](#the-routing-boundary-with-sergeant-murphy) before deploying her alongside Sergeant Murphy.
 
 ## Meet the agent
 
@@ -49,7 +49,7 @@ The pattern is five rules.
 
 **Rule 4 — The refresh token lives forever unless you revoke it.** Once you have a valid `token.json` with a refresh token, Google will keep refreshing it on demand indefinitely — no rotation, no manual re-auth, no expiration. The only things that invalidate the refresh token are: explicit user revocation (from the Google account security page), deletion of the Google Cloud project, or removal from the test-users list. None of those happen by accident. This is a fire-and-forget setup after the first local auth run.
 
-**Rule 5 — Expanding scopes requires a new auth flow.** Mistress Mouse started on Phase 1 with `calendar.readonly` scope (just enough to read events). Phase 2+5 added `calendar` (full write) and `gmail.readonly` (for invite parsing). Upgrading scopes requires running `InstalledAppFlow.run_local_server` again against a new scope list, which pops a fresh consent screen, which writes a new `token.json`. Mistress Mouse's auth-setup script (`google-auth-setup.py`, kept in the workspace but not run from cron) takes the full scope list as a constant and is safe to re-run at any time — it will short-circuit if the existing `token.json` already covers the requested scopes, and run the flow if not.
+**Rule 5 — Expanding scopes requires a new auth flow.** Mistress Mouse started with `calendar.readonly` scope (just enough to read events), then later added `calendar` (full write) and `gmail.readonly` (for invite parsing). Upgrading scopes requires running `InstalledAppFlow.run_local_server` again against a new scope list, which pops a fresh consent screen, which writes a new `token.json`. Mistress Mouse's auth-setup script (`google-auth-setup.py`, kept in the workspace but not run from cron) takes the full scope list as a constant and is safe to re-run at any time — it will short-circuit if the existing `token.json` already covers the requested scopes, and run the flow if not.
 
 ## The WhatsApp chapter
 
@@ -87,7 +87,7 @@ If you deploy only Mistress Mouse and not Sergeant Murphy, the Workflowy check i
 
 ## Current state
 
-Phase 7b completed on 2026-04-15; Mistress Mouse runs entirely on host crons under `~/.clawford/family-calendar-workspace/`. Six live host crons, with six supporting I/O scripts and a small pile of state files.
+As of 2026-04-15, Mistress Mouse runs entirely on host crons under `~/.clawford/family-calendar-workspace/`. Six live host crons, with six supporting I/O scripts and a small pile of state files.
 
 **Host cron surface.** Registered via `ops/scripts/install-host-cron.sh`:
 
@@ -132,7 +132,7 @@ scripts/                # all Python scripts listed above
 
 ## Deployment walkthrough
 
-This adds onto [Ch 07-0 — Your first agent](07-0-your-first-agent.md). Everything in Ch 07-0 applies; the items below are the Mistress-Mouse-specific additions. Read [Ch 07-0](07-0-your-first-agent.md) first and treat the list below as the overlay.
+This adds onto [Ch 08 — Your first agent](08-your-first-agent.md). Everything in Ch 08 applies; the items below are the Mistress-Mouse-specific additions. Read [Ch 08](08-your-first-agent.md) first and treat the list below as the overlay.
 
 **Pre-step: Google Cloud project setup.** Before you write a single line of code, create a Google Cloud project at `console.cloud.google.com/projectcreate`, enable the Google Calendar API and the Gmail API, then go to "Credentials → Create credentials → OAuth client ID → Desktop app" and download the resulting `credentials.json`. Go to "OAuth consent screen → Test users" and add the operator's email. This is the step that `Access blocked: ... has not completed the Google verification process` means you forgot.
 
@@ -164,14 +164,14 @@ This adds onto [Ch 07-0 — Your first agent](07-0-your-first-agent.md). Everyth
 
 > 🧨 **Pitfall.** Upgrading Google OAuth scopes without re-running the auth flow. **Why:** the refresh token is scoped to exactly the scopes the consent screen showed the first time. If you add `calendar` (write) to a token that was originally generated for `calendar.readonly` only, every write call will return a 403 with a cryptic message about insufficient permissions. The refresh token will not auto-upgrade. **How to avoid:** any time you change the scope list in `google-auth-setup.py`, re-run the script on the local laptop. It will detect the scope mismatch, pop a fresh consent screen, and write a new `token.json`. SCP the new file to the VPS and redeploy. This is a once-per-scope-change operation, not a recurring one.
 
-> 🧨 **Pitfall.** The routing boundary check against Workflowy silently failing. **Why:** the Workflowy presence check in `gcal-fetch.py` is a best-effort lookup against Workflowy's search endpoint. If the Workflowy session is expired, the search call returns an empty result set — which Mistress Mouse interprets as "no Workflowy node, so I own this event," which means she might start sending reminders for work meetings that Sergeant Murphy should own. The symptom is duplicated reminders across both agents. **How to avoid:** the Workflowy session is maintained by Sergeant Murphy's own auth pipeline; see [Ch 07-4](07-4-sergeant-murphy.md) for the pattern. If deploying Mistress Mouse standalone (without Sergeant Murphy), the Workflowy check always returns empty and Mistress Mouse owns everything — which is the intended standalone behavior. The bug only manifests when both agents are deployed and Murphy's Workflowy session has expired; fix Murphy first, not Mistress Mouse.
+> 🧨 **Pitfall.** The routing boundary check against Workflowy silently failing. **Why:** the Workflowy presence check in `gcal-fetch.py` is a best-effort lookup against Workflowy's search endpoint. If the Workflowy session is expired, the search call returns an empty result set — which Mistress Mouse interprets as "no Workflowy node, so I own this event," which means she might start sending reminders for work meetings that Sergeant Murphy should own. The symptom is duplicated reminders across both agents. **How to avoid:** the Workflowy session is maintained by Sergeant Murphy's own auth pipeline; see [Ch 13](13-sergeant-murphy.md) for the pattern. If deploying Mistress Mouse standalone (without Sergeant Murphy), the Workflowy check always returns empty and Mistress Mouse owns everything — which is the intended standalone behavior. The bug only manifests when both agents are deployed and Murphy's Workflowy session has expired; fix Murphy first, not Mistress Mouse.
 
 > 🧨 **Pitfall.** Schedule-change detection in WhatsApp dropping ambiguous messages. **Why:** `chat-parse-schedule.py` uses a keyword-based filter for "schedule change language" — times, cancellations, date references. It is deliberately conservative: it would rather miss a real schedule change than flood the operator with false positives. That means a message like "hey can you push it back an hour" is caught, but "does tomorrow still work for the thing" is not. The agent is not a complete substitute for reading the WhatsApp group. **How to avoid:** the agent is a safety net, not a primary channel. Read the WhatsApp group at whatever cadence you currently do; the agent's value is catching the things that hit in the middle of a busy day, not replacing the channel entirely.
 
 ## See also
 
 - [Ch 07 — Intro to agents](07-intro-to-agents.md) — the deploy path and safeguard story
-- [Ch 07-0 — Your first agent](07-0-your-first-agent.md) — the general deploy walkthrough
-- [Ch 07-4 — Sergeant Murphy 🐷🔍](07-4-sergeant-murphy.md) — the routing boundary partner
-- [Ch 07-5 — Huckle Cat 🐱🤝](07-5-huckle-cat.md) — reuses the Google OAuth pattern
-- [Ch 07-7 — Auth architectures](07-7-auth-architectures.md) — the cross-agent auth reference (pending)
+- [Ch 08 — Your first agent](08-your-first-agent.md) — the general deploy walkthrough
+- [Ch 13 — Sergeant Murphy 🐷🔍](13-sergeant-murphy.md) — the routing boundary partner
+- [Ch 14 — Huckle Cat 🐱🤝](14-huckle-cat.md) — reuses the Google OAuth pattern
+- [Ch 17 — Auth architectures](17-auth-architectures.md) — the cross-agent auth reference (pending)

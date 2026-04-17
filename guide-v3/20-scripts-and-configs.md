@@ -1,6 +1,6 @@
-# Ch 09 — Scripts and configs reference
+# Ch 20 — Scripts and configs reference
 
-*Guide v3 · net-new in v3 · last revised Phase 7d*
+*Last updated: 2026-04-16 · Reading time: ~10 min · Difficulty: reference*
 
 > **TL;DR.** This chapter is a reference, not a tutorial. It catalogs every tracked script and config file that a Clawford fleet touches, organized by **what it does** (shared library / deploy tooling / ops helpers / per-agent) rather than **where it lives**. If you know the name of the thing you are looking for, jump to [§ Alphabetical index](#alphabetical-index). If you know the *job* you need to do but not the name of the file, start with the category that matches the job. Every entry links back to the chapter that explains the deeper context.
 
@@ -14,7 +14,7 @@ Everything in `agents/shared/` is world-access infrastructure that every agent c
 |--------|---------|--------------|
 | `agents/shared/telegram_api.py` | `send_telegram`, `timed_send`, `send_photo`, `edit_message` | The Telegram bot client. Unified 429 backoff, automatic retry via `retry_policy.py`. Every agent that sends a message goes through this module. |
 | `agents/shared/telegram_inbox.py` | `poll_updates`, `parse_callback_query`, `parse_command` | The inbound side — reads bot updates, dispatches `/confirm N` + `/dismiss N` + inline keyboard callbacks. |
-| `agents/shared/google_oauth.py` | `build_flow`, `get_credentials`, `refresh_if_stale` | Wraps `InstalledAppFlow` with the detail you always forget — redirect URI, scope validation, token-refresh drift handling. See [Ch 07-7 Shape 1](07-7-auth-architectures.md#shape-1--oauth-20-with-long-lived-refresh-token). |
+| `agents/shared/google_oauth.py` | `build_flow`, `get_credentials`, `refresh_if_stale` | Wraps `InstalledAppFlow` with the detail you always forget — redirect URI, scope validation, token-refresh drift handling. See [Ch 17 Shape 1](17-auth-architectures.md#shape-1--oauth-20-with-long-lived-refresh-token). |
 | `agents/shared/llm.py` | `infer(prompt, *, json_mode, timeout) -> InferResult` | The LLM broker. Routes through the `codex infer` CLI riding a ChatGPT Plus subscription. Zero marginal cost, enforces timeout, logs every prompt+response for audit. |
 | `agents/shared/brain.py` | `read_brain`, `write_brain`, `update_people_file`, `append_inbox` | The shared-brain access layer. Atomic writes with a Dropbox-aware lock file. See [Ch 06 — Infra setup](06-infra-setup.md) for the git + Dropbox split. |
 | `agents/shared/heartbeat_base.py` | `HeartbeatProbe` base class | Every agent's `scripts/heartbeat.py` subclasses this and implements `probe() -> dict`. The base class handles the timing envelope, the error catch, and the exit-code discipline. |
@@ -23,28 +23,27 @@ Everything in `agents/shared/` is world-access infrastructure that every agent c
 
 | Module | Exports | What it does |
 |--------|---------|--------------|
-| `agents/shared/playwright_profile.py` | `launch_persistent_profile`, `ensure_xvfb`, `cleanup_profile_lock` | Chromium persistent-profile launch + Xvfb management for the "cookies live, tokens refresh" case. Consumers: LinkedIn keepalive in [Ch 07-2b](07-2b-lowly-worm-social.md), Google Messages scraper in [Ch 07-5](07-5-huckle-cat.md). |
+| `agents/shared/playwright_profile.py` | `launch_persistent_profile`, `ensure_xvfb`, `cleanup_profile_lock` | Chromium persistent-profile launch + Xvfb management for the "cookies live, tokens refresh" case. Consumers: LinkedIn keepalive in [Ch 11](11-lowly-worm-social.md), Google Messages scraper in [Ch 14](14-huckle-cat.md). |
 
 ### Tier 3 — Camoufox + residential proxy
 
 | Module | Exports | What it does |
 |--------|---------|--------------|
-| `agents/shared/camoufox_proxy.py` | `launch_hardened`, `sticky_proxy_session`, `totp_code(secret)` | Camoufox launcher with residential-proxy sticky port + TOTP helper for auto-MFA. See [Ch 07-7 Shape 5](07-7-auth-architectures.md#shape-5--camoufox--residential-proxy--auto-mfa) for the deployment story and [Ch 07-6 Hilda Hippo](07-6-hilda-hippo.md) for the scar tissue. |
+| `agents/shared/camoufox_proxy.py` | `launch_hardened`, `sticky_proxy_session`, `totp_code(secret)` | Camoufox launcher with residential-proxy sticky port + TOTP helper for auto-MFA. See [Ch 17 Shape 5](17-auth-architectures.md#shape-5--camoufox--residential-proxy--auto-mfa) for the deployment story and [Ch 15 Hilda Hippo](15-hilda-hippo.md) for the scar tissue. |
 
 ### Ops modules
 
 | Module | Exports | What it does |
 |--------|---------|--------------|
-| `agents/shared/deploy.py` | CLI: `python3 -m agents.shared.deploy <agent>` | The deploy tool. 9 active safeguards. See [Ch 07 — Intro to agents](07-intro-to-agents.md) and [Ch 08 § Defense layer 3](08-security-and-hardening.md#defense-layer-3--the-deploy-tool-safeguards). |
-| `agents/shared/contract_wrap.py` | `contract_main(probe_fn)` | Wrapper that every cron-invoked script uses to enforce the script contract (exit 0 always, one JSON line on stdout, no shell). See [Ch 08 § Defense layer 2](08-security-and-hardening.md#defense-layer-2--the-script-contract). |
+| `agents/shared/deploy.py` | CLI: `python3 -m agents.shared.deploy <agent>` | The deploy tool. 9 active safeguards. See [Ch 07 — Intro to agents](07-intro-to-agents.md) and [Ch 19 § Defense layer 3](19-security-and-hardening.md#defense-layer-3--the-deploy-tool-safeguards). |
+| `agents/shared/contract_wrap.py` | `contract_main(probe_fn)` | Wrapper that every cron-invoked script uses to enforce the script contract (exit 0 always, one JSON line on stdout, no shell). See [Ch 19 § Defense layer 2](19-security-and-hardening.md#defense-layer-2--the-script-contract). |
 | `agents/shared/dispatcher.py` | `dispatch_command(text, handlers)` | Telegram command dispatcher — parses `/confirm 3` + `/dismiss 3` + inline callbacks and routes to handler functions. |
 | `agents/shared/conversation.py` | `Conversation` context manager | Stateful conversation helper for multi-turn LLM dialogues. Most agents don't use this; it exists for the narrow set that genuinely need it. |
 | `agents/shared/fleet_health_types.py` | `AgentStatus`, `FleetHealth`, `probe_fields` | Dataclasses for fleet-health schema. Imported by every agent's `heartbeat.py` and by `ops/scripts/fleet-health.py`. |
 | `agents/shared/retry_policy.py` | `retry_with_backoff`, `RateLimit429` | Unified retry for network calls — used by `telegram_api.py`, `llm.py`, and every agent that talks to external services. |
-| `agents/shared/subprocess_helpers.py` | `run_ok`, `run_capture` | Argument-list-only subprocess wrappers (no `shell=True` ever). Enforces [Ch 08 § Defense layer 2](08-security-and-hardening.md#defense-layer-2--the-script-contract) rule 3 at the import surface. |
-| `agents/shared/tool_use.py` | `Tool`, `ToolRegistry` | Deprecated. Predates the script contract. No live consumers as of Phase 7d; kept for reference while a full retirement is evaluated. |
+| `agents/shared/subprocess_helpers.py` | `run_ok`, `run_capture` | Argument-list-only subprocess wrappers (no `shell=True` ever). Enforces [Ch 19 § Defense layer 2](19-security-and-hardening.md#defense-layer-2--the-script-contract) rule 3 at the import surface. |
+| `agents/shared/tool_use.py` | `Tool`, `ToolRegistry` | Deprecated. Predates the script contract. No live consumers; kept for reference while a full retirement is evaluated. |
 | `agents/shared/workspace-snapshot.py` | CLI | Snapshots a workspace directory for debugging + drift analysis. Not called from cron; operator tool. |
-| `agents/shared/write-status.py` | CLI | Writes a single status line to an agent's `HEARTBEAT.md`. Not called directly from cron anymore — every `heartbeat.py` uses `heartbeat_base.py` instead. Kept for the rare manual status-write case. |
 | `agents/shared/import_from_deploy_sh.py` | one-shot migration tool | One-shot migration helper from the pre-`deploy.py` era. No live callers. Deletion candidate for a future cleanup pass. |
 
 ## Category 2 — Deploy and install tooling
@@ -66,13 +65,13 @@ The "host wrappers" — one `*-host.sh` per cron — sit in `ops/scripts/` and a
 
 | Wrapper | Cron schedule (UTC) | What it wraps | Reference |
 |---------|----------------------|---------------|-----------|
-| `ops/scripts/fleet-health-host.sh` | `*/15 * * * *` | `ops/scripts/fleet-health.py` | [Ch 07-1 Mr Fixit](07-1-mr-fixit.md) |
-| `ops/scripts/morning-status-host.sh` | `*/30 * * * *` | The fix-it morning status poll | [Ch 07-1 Mr Fixit](07-1-mr-fixit.md) |
+| `ops/scripts/fleet-health-host.sh` | `*/15 * * * *` | `ops/scripts/fleet-health.py` | [Ch 09 — Mr Fixit](09-mr-fixit.md) |
+| `ops/scripts/morning-status-host.sh` | `*/30 * * * *` | The fix-it morning status poll | [Ch 09 — Mr Fixit](09-mr-fixit.md) |
 | `ops/scripts/morning-fleet-deliver-host.sh` | `0 12 * * *` | The 5 AM PT fleet delivery aggregator (reads every agent's `cache/morning-brief-ready.txt` and sends one composite Telegram message) | [Ch 06 — Infra setup](06-infra-setup.md) |
-| `ops/scripts/news-digest-morning-edition-host.sh` | `30 10 * * *` | Lowly Worm's morning composition cron | [Ch 07-2a](07-2a-lowly-worm-newsfeed.md) |
-| `ops/scripts/fix-it-cron-self-check-host.sh` | `*/30 * * * *` | Mr Fixit's self-check probe | [Ch 07-1 Mr Fixit](07-1-mr-fixit.md) |
-| `ops/scripts/costco-token-refresh-host.sh` | every 15 min | Hilda Hippo's Costco persistent-daemon token refresh | [Ch 07-6 Hilda Hippo](07-6-hilda-hippo.md) |
-| `ops/scripts/script-contract-host.sh` | manual / deploy-time | Runs the script-contract compliance check against a target agent | [Ch 08 § Defense layer 2](08-security-and-hardening.md#defense-layer-2--the-script-contract) |
+| `ops/scripts/news-digest-morning-edition-host.sh` | `30 10 * * *` | Lowly Worm's morning composition cron | [Ch 10](10-lowly-worm-newsfeed.md) |
+| `ops/scripts/fix-it-cron-self-check-host.sh` | `*/30 * * * *` | Mr Fixit's self-check probe | [Ch 09 — Mr Fixit](09-mr-fixit.md) |
+| `ops/scripts/costco-token-refresh-host.sh` | every 15 min | Hilda Hippo's Costco persistent-daemon token refresh | [Ch 15 Hilda Hippo](15-hilda-hippo.md) |
+| `ops/scripts/script-contract-host.sh` | manual / deploy-time | Runs the script-contract compliance check against a target agent | [Ch 19 § Defense layer 2](19-security-and-hardening.md#defense-layer-2--the-script-contract) |
 
 Ops scripts that are not cron-invoked:
 
@@ -94,8 +93,8 @@ Every agent directory under `agents/{agent}/` follows the same skeleton. The exa
 | Path | Purpose | Reference |
 |------|---------|-----------|
 | `agents/{agent}/manifest.json` | The per-agent manifest: cron list, workspace path, smoke test, config-file list. Consumed by `deploy.py`. See [§ manifest.json schema](#manifestjson-schema) below. |
-| `agents/{agent}/SOUL.md.example` | Agent identity doc template — gitignored `SOUL.md` is populated from this during deploy. Receives `chattr +i` post-deploy. | [Ch 08 § Defense layer 1](08-security-and-hardening.md#defense-layer-1--os-level-immutability) |
-| `agents/{agent}/IDENTITY.md.example` | Operator-facing identity template. Same treatment as `SOUL.md`. | [Ch 08 § Defense layer 1](08-security-and-hardening.md#defense-layer-1--os-level-immutability) |
+| `agents/{agent}/SOUL.md.example` | Agent identity doc template — gitignored `SOUL.md` is populated from this during deploy. Receives `chattr +i` post-deploy. | [Ch 19 § Defense layer 1](19-security-and-hardening.md#defense-layer-1--os-level-immutability) |
+| `agents/{agent}/IDENTITY.md.example` | Operator-facing identity template. Same treatment as `SOUL.md`. | [Ch 19 § Defense layer 1](19-security-and-hardening.md#defense-layer-1--os-level-immutability) |
 | `agents/{agent}/TOOLS.md` | Complete tool inventory — every script the agent can run, what each does, what each requires. This file is tracked in git (not `.example`) because it is operator-editable rather than LLM-editable. |
 | `agents/{agent}/AGENTS.md` | Agent-interaction surface. How this agent talks to the other agents in the fleet (if at all). |
 | `agents/{agent}/CRONS.md` | Per-cron spec — the authoritative description of every cron the agent registers. The `CRONS.md` file is the source of truth that `install-host-cron.sh` is validated against. |
@@ -152,15 +151,15 @@ Common keys across multiple agents:
 |-----|---------|---------|
 | `TELEGRAM_BOT_TOKEN` | every agent that sends | The bot's API token |
 | `TELEGRAM_CHAT_ID` | every agent that sends | The chat id to send to |
-| `WORKFLOWY_TOKEN` | [Murphy](07-4-sergeant-murphy.md), [Huckle](07-5-huckle-cat.md) | Workflowy bearer token |
-| `PROXY_USER` / `PROXY_PASS` / `PROXY_HOST` / `PROXY_PORT` | [Hilda Hippo](07-6-hilda-hippo.md) | Residential proxy credentials, sticky port is 10000 |
-| `{VENDOR}_TOTP_SECRET` | [Hilda Hippo](07-6-hilda-hippo.md) | The TOTP seed for auto-MFA on vendor login |
+| `WORKFLOWY_TOKEN` | [Murphy](13-sergeant-murphy.md), [Huckle](14-huckle-cat.md) | Workflowy bearer token |
+| `PROXY_USER` / `PROXY_PASS` / `PROXY_HOST` / `PROXY_PORT` | [Hilda Hippo](15-hilda-hippo.md) | Residential proxy credentials, sticky port is 10000 |
+| `{VENDOR}_TOTP_SECRET` | [Hilda Hippo](15-hilda-hippo.md) | The TOTP seed for auto-MFA on vendor login |
 
 ### Identity file conventions
 
 The four identity files (`SOUL.md`, `IDENTITY.md`, `TOOLS.md`, `AGENTS.md`) all live at the root of the agent's workspace and all get `chattr +i` after deploy. Two come from `.example` templates (`SOUL.md.example`, `IDENTITY.md.example`) because they get per-agent identity substitution; the other two are tracked in git directly because they are operator-editable reference docs.
 
-See [Ch 08 § Defense layer 1](08-security-and-hardening.md#defense-layer-1--os-level-immutability) for the reasoning.
+See [Ch 19 § Defense layer 1](19-security-and-hardening.md#defense-layer-1--os-level-immutability) for the reasoning.
 
 ## Alphabetical index
 
@@ -200,12 +199,11 @@ For when you know the name but not the category.
 - [`telegram_inbox.py`](#tier-1--clean-apis) — Category 1
 - [`tool_use.py`](#ops-modules) — Category 1 (deprecated)
 - [`workspace-snapshot.py`](#ops-modules) — Category 1
-- [`write-status.py`](#ops-modules) — Category 1
 
 ## See also
 
 - [Ch 06 — Infra setup](06-infra-setup.md) — the shared library tier discussion + the shared brain + the host-cron runtime
 - [Ch 07 — Intro to agents](07-intro-to-agents.md) — the deploy path and the safeguard story
-- [Ch 07-0 — Your first agent](07-0-your-first-agent.md) — the walkthrough that uses these scripts end-to-end
-- [Ch 08 — Security and hardening](08-security-and-hardening.md) — the three defense layers, including the script contract + deploy safeguards
-- [Ch 10 — Glossary](10-glossary.md) *(pending)*
+- [Ch 08 — Your first agent](08-your-first-agent.md) — the walkthrough that uses these scripts end-to-end
+- [Ch 19 — Security and hardening](19-security-and-hardening.md) — the three defense layers, including the script contract + deploy safeguards
+- [Ch 21 — Glossary](21-glossary.md) *(pending)*
