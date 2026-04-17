@@ -856,6 +856,132 @@ def test_build_transcript_data_strips_notes_prefix(monkeypatch):
     assert "### Key Points" not in text
 
 
+def test_parse_doc_bullets_extracts_section_content():
+    """Krisp leaves meeting_notes.key_points empty for many meetings
+    even when the document Markdown has rich '### Key Points' content
+    (e.g. 2026-04-16 Steven Oliver interview — 4 substantive bullets
+    in the doc, zero in meeting_notes metadata). The fallback parser
+    must pull bullets from the doc text."""
+    import importlib.util
+    ts_path = REPO_ROOT / "agents" / "meetings-coach" / "scripts" / "transcript-scan.py"
+    spec = importlib.util.spec_from_file_location("transcript_scan", ts_path)
+    ts = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ts)
+
+    doc = (
+        "# Google Meet with Steven Oliver\n"
+        "### Action Items\n\n\n\n"
+        "### Key Points\n"
+        "- the operator interviewed with Steven Oliver for a DS lead role.\n"
+        "- Steven leads horizontal DS teams across search growth.\n"
+        "- Core metrics must be split by stakeholder.\n"
+        "\n"
+        "**Sam Smith | 00:10**\nHello.\n"
+    )
+    ai = ts._parse_doc_bullets(doc, "Action Items")
+    kp = ts._parse_doc_bullets(doc, "Key Points")
+    assert ai == []
+    assert len(kp) == 3
+    assert "the operator interviewed" in kp[0]
+    assert "Steven leads" in kp[1]
+    assert "Core metrics" in kp[2]
+
+
+def test_parse_doc_bullets_stops_at_transcript_start():
+    """The bullet extractor must not spill into the transcript body
+    (speaker turns aren't bullets but a greedy slice could eat them)."""
+    import importlib.util
+    ts_path = REPO_ROOT / "agents" / "meetings-coach" / "scripts" / "transcript-scan.py"
+    spec = importlib.util.spec_from_file_location("transcript_scan", ts_path)
+    ts = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ts)
+
+    doc = (
+        "### Key Points\n"
+        "- Point one.\n"
+        "- Point two.\n\n"
+        "**Sam Smith | 00:10**\n- This is a dash in dialogue\n"
+    )
+    kp = ts._parse_doc_bullets(doc, "Key Points")
+    assert kp == ["Point one.", "Point two."]
+
+
+def test_build_transcript_data_falls_back_to_doc_parse():
+    """When meeting_notes arrays are empty, populate krisp_action_items
+    and krisp_key_points from the doc's Markdown sections."""
+    import importlib.util
+    ts_path = REPO_ROOT / "agents" / "meetings-coach" / "scripts" / "transcript-scan.py"
+    spec = importlib.util.spec_from_file_location("transcript_scan", ts_path)
+    ts = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ts)
+
+    transcript = {
+        "id": "x", "title": "M",
+        "participants": ["the operator", "Steve"],
+        "speakers": ["Sam Smith", "Steve Shadman"],
+        "key_points": [],
+        "action_items": [],
+        "text": (
+            "# Meeting\n### Action Items\n"
+            "- the operator to draft the role spec.\n"
+            "### Key Points\n"
+            "- Steve's team owns attribution.\n"
+            "- Focus on user metrics first.\n\n"
+            "**Sam Smith | 00:10**\nHi.\n"
+        ),
+        "source": "krisp_mcp",
+    }
+    data = ts.build_transcript_data(transcript)
+    assert data["krisp_action_items"] == ["the operator to draft the role spec."]
+    assert len(data["krisp_key_points"]) == 2
+    assert "attribution" in data["krisp_key_points"][0]
+
+
+def test_build_transcript_data_preserves_meeting_notes_when_populated():
+    """If meeting_notes is populated, trust it — structured items carry
+    {title, assignee, completed}; the doc text is a stringified view."""
+    import importlib.util
+    ts_path = REPO_ROOT / "agents" / "meetings-coach" / "scripts" / "transcript-scan.py"
+    spec = importlib.util.spec_from_file_location("transcript_scan", ts_path)
+    ts = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ts)
+
+    transcript = {
+        "id": "x", "title": "M",
+        "participants": [], "speakers": [],
+        "key_points": ["from meeting_notes"],
+        "action_items": [{"title": "structured", "assignee": "the operator"}],
+        "text": "### Action Items\n- different text\n### Key Points\n- other\n\n**A | 00:01**\nX\n",
+        "source": "krisp_mcp",
+    }
+    data = ts.build_transcript_data(transcript)
+    # meeting_notes wins — structured items preserved, doc parse NOT used.
+    assert data["krisp_action_items"] == [{"title": "structured", "assignee": "the operator"}]
+    assert data["krisp_key_points"] == ["from meeting_notes"]
+
+
+def test_build_transcript_data_transcript_cap_allows_full_meeting():
+    """Feed the whole transcript to the LLM. A 25-min meeting is ~20K
+    chars of dialogue; a 1-hr meeting ~40-50K. The cap must comfortably
+    accommodate realistic meeting lengths (well above the prior 16K)."""
+    import importlib.util
+    ts_path = REPO_ROOT / "agents" / "meetings-coach" / "scripts" / "transcript-scan.py"
+    spec = importlib.util.spec_from_file_location("transcript_scan", ts_path)
+    ts = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ts)
+
+    big_body = "**Sam Smith | 00:01**\n" + ("word " * 8000) + "\n"
+    transcript = {
+        "id": "x", "title": "M",
+        "participants": [], "speakers": [],
+        "key_points": [], "action_items": [],
+        "text": big_body,
+        "source": "krisp_mcp",
+    }
+    data = ts.build_transcript_data(transcript)
+    assert len(data["transcript_text"]) >= 40000
+
+
 def test_run_suppresses_empty_debrief_delivery(
     mod, scan_one_new, meeting_config, tmp_path, monkeypatch,
 ):

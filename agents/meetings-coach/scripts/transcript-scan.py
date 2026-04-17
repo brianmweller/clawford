@@ -597,6 +597,13 @@ def match_transcript_to_events(transcript, events):
 _FIRST_TURN_RE = re.compile(
     r"\*\*[A-Z][a-zA-Z \-']+\s*\|\s*\d{1,2}:\d{2}\*\*"
 )
+_SECTION_END_RE = re.compile(
+    r"#{2,3}\s+\w|\*\*[A-Z][a-zA-Z \-']+\s*\|\s*\d{1,2}:\d{2}\*\*"
+)
+# Maximum transcript body stored and fed to the coaching LLM. Covers a
+# full 4hr meeting at typical dialogue density (~16K chars/hr). Token
+# cost at 64K chars ≈ 16K tokens — trivial on current models.
+_TRANSCRIPT_CAP_CHARS = 64000
 
 
 def _transcript_body(raw: str) -> str:
@@ -611,15 +618,61 @@ def _transcript_body(raw: str) -> str:
     return raw or ""
 
 
+def _parse_doc_bullets(raw: str, section_name: str) -> list:
+    """Pull the bulleted items out of a '### {section_name}' block in a
+    Krisp document. Stops at the next Markdown header or the first
+    speaker turn so dialogue lines starting with '-' don't pollute
+    the list. Returns a list of trimmed strings (may be empty)."""
+    if not raw or not section_name:
+        return []
+    header_re = re.compile(
+        rf"#{{2,3}}\s*{re.escape(section_name)}\s*",
+        re.IGNORECASE,
+    )
+    m = header_re.search(raw)
+    if not m:
+        return []
+    start = m.end()
+    end_m = _SECTION_END_RE.search(raw[start:])
+    end = start + end_m.start() if end_m else len(raw)
+    bullets: list = []
+    for line in raw[start:end].split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            text = stripped[2:].strip()
+            if text:
+                bullets.append(text)
+    return bullets
+
+
 def build_transcript_data(transcript):
-    """Build transcript data for the agent to process."""
+    """Build transcript data for the agent to process.
+
+    Krisp's ``search_meetings`` response sometimes leaves
+    ``meeting_notes.action_items`` and ``meeting_notes.key_points``
+    empty even when the full document (from ``get_multiple_documents``)
+    carries rich '### Action Items' and '### Key Points' Markdown
+    sections — 2026-04-16 Steven Oliver had 0 key_points in metadata
+    but 4 substantive bullets in the doc. Fall back to parsing the
+    doc when metadata is empty; preserve the structured items from
+    metadata when it is populated (they carry {title, assignee,
+    completed}, richer than the stringified doc form)."""
     raw = transcript.get("text", "") or ""
     body = _transcript_body(raw)
+
+    action_items = transcript.get("action_items") or []
+    if not action_items:
+        action_items = _parse_doc_bullets(raw, "Action Items")
+
+    key_points = transcript.get("key_points") or []
+    if not key_points:
+        key_points = _parse_doc_bullets(raw, "Key Points")
+
     return {
-        "krisp_key_points": transcript.get("key_points", []),
-        "krisp_action_items": transcript.get("action_items", []),
+        "krisp_key_points": key_points,
+        "krisp_action_items": action_items,
         "krisp_speakers": list(transcript.get("speakers", []) or []),
-        "transcript_text": body[:16000],
+        "transcript_text": body[:_TRANSCRIPT_CAP_CHARS],
         "participants": transcript.get("participants", []),
     }
 
