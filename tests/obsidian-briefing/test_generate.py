@@ -7,7 +7,10 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "scripts" / "obsidian-briefing"
+SCRIPTS_DIR = (
+    Path(__file__).resolve().parent.parent.parent
+    / "ops" / "brain" / "scripts" / "obsidian-briefing"
+)
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"

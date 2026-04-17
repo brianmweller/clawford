@@ -16,8 +16,8 @@ from pathlib import Path
 
 from config import (
     AGENT_ROSTER,
-    AGENTS_STATUS_DIR,
     COMMITMENTS_PATH,
+    FLEET_HEALTH_PATH,
     MORNING_BRIEFING_PATH,
     OUTPUT_DIR,
     TASKS_PATH,
@@ -33,7 +33,7 @@ from wikilinks import apply_wikilinks
 
 def generate_briefing(
     morning_briefing_path: Path = MORNING_BRIEFING_PATH,
-    agents_status_dir: Path = AGENTS_STATUS_DIR,
+    fleet_health_path: Path = FLEET_HEALTH_PATH,
     commitments_path: Path = COMMITMENTS_PATH,
     tasks_path: Path = TASKS_PATH,
     output_path: Path | None = None,
@@ -51,7 +51,7 @@ def generate_briefing(
 
     # --- Gather data ---
     schedule_text = parse_morning_briefing(morning_briefing_path)
-    agent_statuses = parse_agent_status(agents_status_dir)
+    agent_statuses = parse_agent_status(fleet_health_path)
     commitments = parse_commitments(commitments_path)
     tasks = parse_tasks(tasks_path)
 

@@ -5,8 +5,13 @@ import sys
 import unittest
 from pathlib import Path
 
-# Add the scripts directory to path
-SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "scripts" / "obsidian-briefing"
+# Add the scripts directory to path. Canonical location is under
+# ops/brain/ (the tree that flows to ~/Dropbox/openclaw-backup/scripts/
+# on the VPS and backs the live fix-it-obsidian-briefing cron).
+SCRIPTS_DIR = (
+    Path(__file__).resolve().parent.parent.parent
+    / "ops" / "brain" / "scripts" / "obsidian-briefing"
+)
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"

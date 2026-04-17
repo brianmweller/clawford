@@ -1,5 +1,6 @@
 """Parsers for each input source of the obsidian-briefing generator."""
 
+import json
 import re
 from pathlib import Path
 
@@ -46,32 +47,37 @@ def parse_morning_briefing(path: Path) -> str:
     return "\n".join(cleaned)
 
 
-def parse_agent_status(agents_dir: Path) -> list[dict]:
-    """Parse all *.status.md files in a directory.
+def parse_agent_status(fleet_health_path: Path) -> list[dict]:
+    """Parse fleet-health.json into briefing-ready agent status rows.
 
-    Returns list of dicts with keys: name, status, last_heartbeat.
-    Only reads the first 8 lines of each file (structured fields).
+    Post-R6, <brain>/fleet-health.json is the single authoritative source of
+    per-agent health (written every 15 min by ops/scripts/fleet-health.py).
+    The per-agent <agent>.status.md files were retired.
+
+    Returns list of {name, status, last_heartbeat}. `status="ok"` is mapped
+    to `"healthy"` to preserve the briefing's user-facing wording; other
+    statuses (degraded, error, …) pass through unchanged. Missing or
+    malformed fleet-health.json yields an empty list so the briefing
+    section renders "no data" rather than crashing.
     """
+    if not fleet_health_path.is_file():
+        return []
+
+    try:
+        data = json.loads(fleet_health_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+
+    agents = data.get("agents", {}) or {}
     results = []
-    status_files = sorted(agents_dir.glob("*.status.md"))
-
-    for f in status_files:
-        agent_name = f.stem.replace(".status", "")
-        entry = {"name": agent_name, "status": "unknown", "last_heartbeat": "—"}
-
-        lines = f.read_text(encoding="utf-8").split("\n")[:8]
-        for line in lines:
-            m = re.match(r"^-\s+\*\*(\w[\w_]*):\*\*\s*(.+)$", line)
-            if m:
-                key = m.group(1).strip()
-                value = m.group(2).strip()
-                if key == "status":
-                    entry["status"] = value
-                elif key == "last_heartbeat":
-                    entry["last_heartbeat"] = value
-
-        results.append(entry)
-
+    for agent_id, report in sorted(agents.items()):
+        raw_status = report.get("status", "unknown")
+        display_status = "healthy" if raw_status == "ok" else raw_status
+        results.append({
+            "name": agent_id,
+            "status": display_status,
+            "last_heartbeat": report.get("probe_ts", "—"),
+        })
     return results
 
 
