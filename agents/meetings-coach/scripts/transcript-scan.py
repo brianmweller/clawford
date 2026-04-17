@@ -247,7 +247,7 @@ async def fetch_krisp_transcripts_mcp(days_back=1):
                             "limit": 50,
                             "offset": offset,
                             "fields": [
-                                "name", "date", "speakers",
+                                "name", "date", "url", "speakers",
                                 "attendees", "key_points",
                                 "action_items",
                             ],
@@ -275,6 +275,9 @@ async def fetch_krisp_transcripts_mcp(days_back=1):
                     "id": f"krisp_mcp_{doc_id}",
                     "title": meeting.get("name", ""),
                     "date": meeting.get("date", ""),
+                    # Krisp-supplied deep-link URL (https://app.krisp.ai/t/<id>).
+                    # Preferred by build_transcript_data over any constructed URL.
+                    "url": str(meeting.get("url", "") or ""),
                     "participants": list(dict.fromkeys(
                         meeting.get("speakers", [])
                         + meeting.get("attendees", [])
@@ -415,14 +418,19 @@ def _extract_meetings_from_response(call_result):
 
         # Parse structured text format: "## Title (date)\nmeeting_id: ...\nspeakers: ..."
         if "meeting_id:" in text:
-            meeting = {}
+            meeting: dict = {}
             lines = text.split("\n")
             for line in lines:
                 line = line.strip()
                 if line.startswith("## "):
+                    # New meeting block — flush the previous one before
+                    # overwriting its fields. Fixes multi-meeting
+                    # responses where only the last was ever appended.
+                    if meeting.get("meeting_id"):
+                        meetings.append(meeting)
+                    meeting = {}
                     # Parse "## Title (date)"
                     title_part = line[3:].strip()
-                    # Extract date from parentheses at end
                     paren_match = re.search(r"\((\d{4}-\d{2}-\d{2}T[^)]+)\)\s*$", title_part)
                     if paren_match:
                         meeting["date"] = paren_match.group(1)
@@ -431,6 +439,8 @@ def _extract_meetings_from_response(call_result):
                         meeting["name"] = title_part
                 elif line.startswith("meeting_id:"):
                     meeting["meeting_id"] = line.split(":", 1)[1].strip()
+                elif line.startswith("url:"):
+                    meeting["url"] = line.split(":", 1)[1].strip()
                 elif line.startswith("speakers:"):
                     speakers_str = line.split(":", 1)[1].strip()
                     meeting["speakers"] = [s.strip() for s in speakers_str.split(",") if s.strip()]
@@ -668,13 +678,21 @@ def build_transcript_data(transcript):
     if not key_points:
         key_points = _parse_doc_bullets(raw, "Key Points")
 
-    # Derive the Krisp web URL from the doc id so the debrief keyboard
-    # can deep-link into Krisp's own UI via a native Telegram URL
-    # button. Pattern confirmed 2026-04-16: the `id` field is
-    # 'krisp_mcp_<doc_id>' when sourced from MCP.
-    raw_id = str(transcript.get("id", "") or "")
-    doc_id = raw_id[len("krisp_mcp_"):] if raw_id.startswith("krisp_mcp_") else raw_id
-    krisp_url = f"https://app.krisp.ai/meetings/{doc_id}" if doc_id else ""
+    # Krisp's web URL for the debrief keyboard's "See more" button.
+    # Prefer the ``url`` Krisp's MCP returns on each meeting
+    # (confirmed shape: https://app.krisp.ai/t/<doc_id>). Fall back
+    # to constructing the same /t/<doc_id> path when the API response
+    # omits url. The earlier /meetings/<id> guess returned HTTP 200
+    # but landed on the app shell, not the specific meeting.
+    krisp_url = str(transcript.get("url", "") or "").strip()
+    if not krisp_url:
+        raw_id = str(transcript.get("id", "") or "")
+        doc_id = (
+            raw_id[len("krisp_mcp_"):]
+            if raw_id.startswith("krisp_mcp_")
+            else raw_id
+        )
+        krisp_url = f"https://app.krisp.ai/t/{doc_id}" if doc_id else ""
 
     return {
         "krisp_key_points": key_points,

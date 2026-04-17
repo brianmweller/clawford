@@ -1204,10 +1204,37 @@ def test_build_transcript_data_preserves_meeting_notes_when_populated():
     assert data["krisp_key_points"] == ["from meeting_notes"]
 
 
-def test_build_transcript_data_sets_krisp_meeting_url():
-    """Pending files now carry a native Krisp web URL so the debrief's
-    'See more' button can deep-link into Krisp's own UI rather than
-    recreating the full summary ourselves."""
+def test_build_transcript_data_prefers_krisp_returned_url():
+    """Krisp MCP exposes a ``url`` field per meeting of the form
+    ``https://app.krisp.ai/t/<doc_id>`` — the actual deep-link into
+    that meeting's page. Trust Krisp's own URL when it's present."""
+    import importlib.util
+    ts_path = REPO_ROOT / "agents" / "meetings-coach" / "scripts" / "transcript-scan.py"
+    spec = importlib.util.spec_from_file_location("transcript_scan", ts_path)
+    ts = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ts)
+
+    transcript = {
+        "id": "krisp_mcp_abcdef0123456789abcdef0123456789",
+        "title": "Meeting",
+        "participants": [], "speakers": [],
+        "key_points": [], "action_items": [],
+        "text": "**Sam Smith | 00:01**\nHi.\n",
+        "url": "https://app.krisp.ai/t/abcdef0123456789abcdef0123456789",
+        "source": "krisp_mcp",
+    }
+    data = ts.build_transcript_data(transcript)
+    assert data["krisp_meeting_url"] == (
+        "https://app.krisp.ai/t/abcdef0123456789abcdef0123456789"
+    )
+
+
+def test_build_transcript_data_constructs_t_url_fallback():
+    """When Krisp doesn't supply a ``url`` (defensive), construct one
+    from the doc id using the confirmed 2026-04-16 pattern:
+    ``https://app.krisp.ai/t/<doc_id>``. The earlier /meetings/<id>
+    guess returned 200 but landed on the app shell, not the specific
+    meeting — that's the bug the /t/ path fixes."""
     import importlib.util
     ts_path = REPO_ROOT / "agents" / "meetings-coach" / "scripts" / "transcript-scan.py"
     spec = importlib.util.spec_from_file_location("transcript_scan", ts_path)
@@ -1224,7 +1251,7 @@ def test_build_transcript_data_sets_krisp_meeting_url():
     }
     data = ts.build_transcript_data(transcript)
     assert data["krisp_meeting_url"] == (
-        "https://app.krisp.ai/meetings/abcdef0123456789abcdef0123456789"
+        "https://app.krisp.ai/t/abcdef0123456789abcdef0123456789"
     )
 
 
