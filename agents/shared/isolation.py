@@ -147,30 +147,16 @@ def bwrap_command(
 
     # Brain — RO at the root.
     #
-    # Two RW exceptions for the agent's own writes:
-    #   (a) <brain>/agents/   — RW because heartbeat_base writes the
-    #       per-agent .status.md via the atomic-rename pattern
-    #       (open '<id>.status.md.tmp' → os.replace). The .tmp file
-    #       is a SIBLING of the target, so the parent dir must be
-    #       writable, and bwrap binds at file/dir granularity (no
-    #       way to make one file writable inside an RO parent).
-    #       Tradeoff: agents under bwrap can overwrite OTHER agents'
-    #       .status.md files. Status files are non-secret monitoring
-    #       data; the real isolation goal (protecting workspace cache
-    #       with tokens + conversation history + secrets) is preserved
-    #       because per-agent brain subdirs are NOT auto-RW-bound.
-    #       fix-it.status.md is unaffected because fix-it is exempt
-    #       from bwrap entirely (feedback_fixit_bubblewrap_exempt.md).
-    #   (b) <brain>/agents/<agent_id>/  — RW so memory_writer.py can
-    #       append to the agent's own MEMORY.md.
+    # Single RW exception for the agent's own writes:
+    #   <brain>/agents/<agent_id>/  — RW so memory_writer.py can
+    #   append to the agent's own MEMORY.md. Everything else under
+    #   <brain>/agents/ stays RO (inherited from the brain-root bind);
+    #   no agent writes sibling files there post status.md retirement.
     if brain_root is not None:
         brain = Path(_expand(str(brain_root))).resolve()
         if brain.exists():
             cmd += ["--ro-bind", str(brain), str(brain)]
-            agents_dir = brain / "agents"
-            if agents_dir.exists():
-                cmd += ["--bind", str(agents_dir), str(agents_dir)]
-            agent_brain = agents_dir / agent_id
+            agent_brain = brain / "agents" / agent_id
             if agent_brain.exists():
                 cmd += ["--bind", str(agent_brain), str(agent_brain)]
 

@@ -172,16 +172,20 @@ def test_bwrap_command_own_brain_subdir_is_read_write(tmp_path: Path) -> None:
     assert _has_triple(cmd, "--bind", str(agent_brain), str(agent_brain))
 
 
-def test_bwrap_command_agents_dir_is_read_write(tmp_path: Path) -> None:
-    """heartbeat_base uses an atomic-rename pattern: writes
-    `<id>.status.md.tmp` (sibling of target), then os.replace(). The
-    .tmp file lands in <brain>/agents/, so that directory must be
-    RW-bound — bwrap can't make a single file writable inside an RO
-    parent. The acceptable tradeoff: agents under bwrap can overwrite
-    OTHER agents' .status.md files (non-secret monitoring data); the
-    real isolation goal (protecting workspace cache with tokens) is
-    preserved because per-agent brain subdirs are still RO unless
-    explicitly listed as the agent's own."""
+def test_bwrap_command_agents_dir_is_read_only(tmp_path: Path) -> None:
+    """Post status.md retirement, the only writes inside <brain>/agents/
+    come from each agent's own subdir (MEMORY.md via memory_writer,
+    per-agent config edits). No agent writes sibling files at the
+    <brain>/agents/ level anymore, so the whole directory inherits
+    the brain-root RO bind. The per-agent subdir still flips to RW
+    via the separate --bind <brain>/agents/<agent_id> below.
+
+    Regression guard for the 2026-04-17 cleanup: earlier profiles
+    RW-bound the full <brain>/agents/ directory so heartbeat_base
+    could atomic-rename-write sibling .status.md files. That write
+    path is gone; the RW bind would just be residual attack surface
+    (a compromised agent could overwrite another agent's .status.md
+    if it still existed)."""
     brain = tmp_path / "brain"
     agents_dir = brain / "agents"
     agents_dir.mkdir(parents=True)
@@ -190,7 +194,11 @@ def test_bwrap_command_agents_dir_is_read_write(tmp_path: Path) -> None:
     cmd = isolation.bwrap_command(
         agent_id="shopping", workspace=workspace, brain_root=brain,
     )
-    assert _has_triple(cmd, "--bind", str(agents_dir), str(agents_dir))
+    # No explicit RW --bind on the agents/ directory itself — it
+    # inherits the brain-root RO bind.
+    assert not _has_triple(cmd, "--bind", str(agents_dir), str(agents_dir)), (
+        "<brain>/agents/ must NOT be RW-bound post status.md retirement"
+    )
 
 
 def test_bwrap_command_includes_user_local_bin(tmp_path: Path) -> None:
