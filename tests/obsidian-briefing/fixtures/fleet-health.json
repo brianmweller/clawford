@@ -1,0 +1,40 @@
+{
+  "generated_at": "2026-04-08T12:00:00Z",
+  "agents": {
+    "fix-it": {
+      "id": "fix-it",
+      "probe_ts": "2026-04-08T12:00:00Z",
+      "status": "ok",
+      "probes": {
+        "checked": {"status": "ok", "detail": "6"},
+        "stale_count": {"status": "ok", "detail": "0"}
+      }
+    },
+    "family-calendar": {
+      "id": "family-calendar",
+      "probe_ts": "2026-04-08T11:55:00Z",
+      "status": "ok",
+      "probes": {
+        "missing_files": {"status": "ok", "detail": "[]"}
+      }
+    },
+    "news-digest": {
+      "id": "news-digest",
+      "probe_ts": "2026-04-08T12:00:00Z",
+      "status": "ok",
+      "probes": {
+        "linkedin_session": {"status": "ok", "detail": "ok"}
+      }
+    },
+    "shopping": {
+      "id": "shopping",
+      "probe_ts": "2026-04-08T11:30:00Z",
+      "status": "degraded",
+      "probes": {
+        "costco_session": {"status": "expired", "detail": "expired"},
+        "error_log": {"status": "ok", "detail": "costco JWT expired"}
+      },
+      "alert": "\u26a0\ufe0f shopping degraded: costco JWT expired"
+    }
+  }
+}

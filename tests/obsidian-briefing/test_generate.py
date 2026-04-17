@@ -19,14 +19,15 @@ class TestGenerateBriefing(unittest.TestCase):
     """Integration tests: fixtures in → markdown out."""
 
     def _generate(self, morning_briefing="morning-briefing-normal.txt",
-                  agents_dir=None, commitments="commitments-active.md",
+                  fleet_health="fleet-health.json",
+                  commitments="commitments-active.md",
                   tasks="tasks-queue.md"):
         """Helper to generate a briefing from fixtures."""
         outdir = tempfile.mkdtemp()
         outfile = Path(outdir) / "test-briefing.md"
         generate_briefing(
             morning_briefing_path=FIXTURES / morning_briefing,
-            agents_status_dir=agents_dir or FIXTURES,
+            fleet_health_path=FIXTURES / fleet_health,
             commitments_path=FIXTURES / commitments,
             tasks_path=FIXTURES / tasks,
             output_path=outfile,

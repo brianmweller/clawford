@@ -53,28 +53,45 @@ class TestParseMorningBriefing(unittest.TestCase):
 
 
 class TestParseAgentStatus(unittest.TestCase):
-    """Tests for parsing agent status files."""
+    """Tests for parsing agent status from fleet-health.json.
+
+    Post-R6 the per-agent <agent>.status.md files are retired; fleet-health.json
+    is the single authoritative source. parse_agent_status now takes the path
+    to that file and returns the same {name, status, last_heartbeat} shape
+    the generator expects.
+    """
+
+    FLEET_HEALTH = FIXTURES / "fleet-health.json"
 
     def test_parses_healthy_agent(self):
-        agents = parse_agent_status(FIXTURES)
+        agents = parse_agent_status(self.FLEET_HEALTH)
         fix_it = next(a for a in agents if a["name"] == "fix-it")
+        # "ok" in fleet-health maps to "healthy" for the briefing display
+        # (preserves the existing user-facing wording).
         self.assertEqual(fix_it["status"], "healthy")
         self.assertEqual(fix_it["last_heartbeat"], "2026-04-08T12:00:00Z")
 
     def test_parses_degraded_agent(self):
-        agents = parse_agent_status(FIXTURES)
+        agents = parse_agent_status(self.FLEET_HEALTH)
         shopping = next(a for a in agents if a["name"] == "shopping")
         self.assertEqual(shopping["status"], "degraded")
+        self.assertEqual(shopping["last_heartbeat"], "2026-04-08T11:30:00Z")
 
     def test_returns_all_agents(self):
-        agents = parse_agent_status(FIXTURES)
+        agents = parse_agent_status(self.FLEET_HEALTH)
         names = {a["name"] for a in agents}
         self.assertEqual(names, {"fix-it", "family-calendar", "news-digest", "shopping"})
 
-    def test_empty_directory_returns_empty_list(self):
+    def test_missing_fleet_health_returns_empty_list(self):
+        agents = parse_agent_status(FIXTURES / "nonexistent-fleet-health.json")
+        self.assertEqual(agents, [])
+
+    def test_malformed_fleet_health_returns_empty_list(self):
         import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
-            agents = parse_agent_status(Path(tmpdir))
+            bad = Path(tmpdir) / "fleet-health.json"
+            bad.write_text("not json at all")
+            agents = parse_agent_status(bad)
             self.assertEqual(agents, [])
 
 

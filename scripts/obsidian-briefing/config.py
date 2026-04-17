@@ -8,7 +8,7 @@ BRAIN_ROOT = Path.home() / "Dropbox" / "openclaw-backup"
 MORNING_BRIEFING_PATH = (
     Path.home() / ".openclaw" / "family-calendar-workspace" / "cache" / "morning-briefing.txt"
 )
-AGENTS_STATUS_DIR = BRAIN_ROOT / "agents"
+FLEET_HEALTH_PATH = BRAIN_ROOT / "fleet-health.json"
 COMMITMENTS_PATH = BRAIN_ROOT / "commitments" / "active.md"
 TASKS_PATH = BRAIN_ROOT / "tasks" / "queue.md"
 OUTPUT_DIR = BRAIN_ROOT / "obsidian" / "briefings"
