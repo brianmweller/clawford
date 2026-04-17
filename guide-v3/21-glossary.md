@@ -18,9 +18,9 @@
 
 **Cache-is-not-a-queue rule.** The design rule that came out of [§ The 5x resend incident](13-sergeant-murphy.md#the-5x-resend-incident): delivery decisions are made from the current run's script output, never from iterating a cache directory. Staging files are a workbench for human confirmation, not a delivery queue. Applies to every cron-based staging-and-confirm flow in the fleet.
 
-**Camoufox.** Hardened Firefox build with anti-fingerprinting patches. The Tier-3 browser in the shared library, used by [Hilda Hippo](15-hilda-hippo.md) for Costco and Amazon login flows and by [Huckle Cat](14-huckle-cat.md) for the Google Messages Web pairing flow. Wrapped by `agents/shared/camoufox_proxy.py`. See [Ch 17 Shape 5](17-auth-architectures.md#shape-5--camoufox--residential-proxy--auto-mfa).
+**Camoufox.** Hardened Firefox build with anti-fingerprinting patches. The Tier-3 browser in the shared library, used by [Hilda Hippo](15-hilda-hippo.md) for Costco and Amazon login flows and by [Huckle Cat](14-huckle-cat.md) for the Google Messages Web pairing flow. Wrapped by `agents/shared/camoufox_proxy.py`. See [Ch 17 Shape 5](17-auth-architectures.md#shape-5-camoufox-residential-proxy-auto-mfa).
 
-**`chattr +i`.** Linux "immutable" filesystem attribute. Applied to `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, and `AGENTS.md` in every agent workspace after every deploy. Blocks writes even by root, which is the whole point — an LLM code path that tries to rewrite its own identity file fails with `Operation not permitted`. See [Ch 19 § Defense layer 1](19-security-and-hardening.md#defense-layer-1--os-level-immutability).
+**`chattr +i`.** Linux "immutable" filesystem attribute. Applied to `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, and `AGENTS.md` in every agent workspace after every deploy. Blocks writes even by root, which is the whole point — an LLM code path that tries to rewrite its own identity file fails with `Operation not permitted`. See [Ch 19 § Defense layer 1](19-security-and-hardening.md#defense-layer-1-os-level-immutability).
 
 **Clawford.** The fleet runtime. A personal single-operator AI agent system built on plain Python, host crontab, `codex` via ChatGPT Plus, Dropbox, and Telegram. No gateway container, no platform SDK, no custom CLI. See [Ch 01 — What is Clawford?](01-what-is-clawford.md) for the introduction and [Ch 02 — What Clawford isn't](02-what-isnt-clawford.md) for the manifesto.
 
@@ -30,13 +30,13 @@
 
 **Confirm executor.** A tool executor that lives in `EXECUTORS` but **not** in `TOOLS` — meaning the LLM cannot call it directly. The only path to a confirm executor is the operator tapping a Confirm button on a staged pending action. Examples: `confirm_reorder` (Hilda Hippo), `confirm_calendar_add` (Mistress Mouse). See [Ch 18 § The tools.py pattern](18-the-inbox.md#the-toolspy-pattern).
 
-**Compose/deliver split.** The pattern where an expensive LLM composition runs in one cron (typically at `30 10 UTC`) and a cheap aggregation+delivery step runs in a later cron (typically at `0 12 UTC`), gated by a cache file (`cache/morning-brief-ready.txt`). Introduced to work around the retired 600-second LLM cron timeout; preserved post-liberation because it also maps cleanly onto the [5 AM PT fleet delivery path](#fleet-delivery-path).
+**Compose/deliver split.** The pattern where an expensive LLM composition runs in one cron (typically at `30 10 UTC`) and a cheap aggregation+delivery step runs in a later cron (typically at `0 12 UTC`), gated by a cache file (`cache/morning-brief-ready.txt`). Introduced to work around the retired 600-second LLM cron timeout; preserved post-liberation because it also maps cleanly onto the [5 AM PT fleet delivery path](#az).
 
-**Contract.** Shorthand for [the script contract](#script-contract).
+**Contract.** Shorthand for [the script contract](#az).
 
 **Conversation window.** Per-agent sliding window of the last 20 input items, persisted as JSONL at `~/.clawford/inbox/{agent-id}.jsonl`. A 1-hour inactivity timeout drops older items so stale context does not leak into a new session. Implemented by `agents/shared/conversation.py`. See [Ch 18 § Conversation window](18-the-inbox.md#4-the-conversation-window-conversationpy).
 
-**`contract_wrap.py`.** The helper in `agents/shared/` that wraps every cron-invoked script to enforce [the script contract](#script-contract). Every `main()` entry point in every agent script goes through `contract_wrap.contract_main(probe_fn)`.
+**`contract_wrap.py`.** The helper in `agents/shared/` that wraps every cron-invoked script to enforce [the script contract](#az). Every `main()` entry point in every agent script goes through `contract_wrap.contract_main(probe_fn)`.
 
 **CRONS.md.** The per-agent authoritative spec for every host cron the agent registers. Lives at `agents/{agent}/CRONS.md`. The source of truth that `install-host-cron.sh` is validated against. Operator-editable.
 
@@ -44,7 +44,7 @@
 
 **`deploy.py`.** The single path code takes from the repo into a live agent workspace on the VPS. Runs 9 active safeguards before touching the VPS. Invoked as `python3 agents/shared/deploy.py <agent>` on the VPS, after a `git pull --ff-only`. See [Ch 07 — Intro to agents](07-intro-to-agents.md).
 
-**Drift detection.** Safeguard 4 in `deploy.py`. Refuses to deploy if the workspace on the VPS has changed since the last deploy — i.e., if somebody edited a live workspace file by hand. Blocking, not advisory. See [Ch 19 § Defense layer 3](19-security-and-hardening.md#defense-layer-3--the-deploy-tool-safeguards).
+**Drift detection.** Safeguard 4 in `deploy.py`. Refuses to deploy if the workspace on the VPS has changed since the last deploy — i.e., if somebody edited a live workspace file by hand. Blocking, not advisory. See [Ch 19 § Defense layer 3](19-security-and-hardening.md#defense-layer-3-the-deploy-tool-safeguards).
 
 **`.env`.** Per-agent workspace-local environment file. Gitignored. Contains bearer tokens, proxy credentials, TOTP secrets, Telegram bot tokens. Loaded by `agents.shared.env.load_env` on script startup. See [Ch 20 § .env schema](20-scripts-and-configs.md#env-schema).
 
@@ -64,7 +64,7 @@
 
 **`IDENTITY.md`.** Operator-facing identity file in every agent workspace. Populated from `IDENTITY.md.example` during deploy and `chattr +i`-ed. Describes who the agent is to the operator (name, emoji, voice, bounded scope).
 
-**Immutability.** See [`chattr +i`](#a%E2%80%93z).
+**Immutability.** See [`chattr +i`](#az).
 
 **Kill-switch file.** `~/.clawford/inbox-disabled`. When this file exists, the inbox daemon exits cleanly at startup and the systemd unit's `ExecStartPre` check prevents restarts. Used to park the VPS daemon while the operator runs the inbox locally for development. See [Ch 18 § Deployment walkthrough](18-the-inbox.md#deployment-walkthrough).
 
@@ -80,7 +80,7 @@
 
 **Mining pipeline.** The one-time, run-locally, human-review-gated seed for [Huckle Cat's](14-huckle-cat.md#the-mining-pipeline) people directory. Seven miners (Gmail, Google Calendar, Google Contacts, MCP transcription provider, WhatsApp, Google Messages, Workflowy) + aggregator + LLM enrichment + review markdown + `--finalize`. Step 0 of a Huckle Cat deploy, not optional.
 
-**Morning brief / morning briefing.** The 5 AM PT composite Telegram message aggregated from every agent's morning output. Each agent writes its contribution to `cache/morning-brief-ready.txt`; the fleet-deliver cron at `0 12 UTC` assembles and sends. See [Fleet delivery path](#fleet-delivery-path-5-am-pt).
+**Morning brief / morning briefing.** The 5 AM PT composite Telegram message aggregated from every agent's morning output. Each agent writes its contribution to `cache/morning-brief-ready.txt`; the fleet-deliver cron at `0 12 UTC` assembles and sends. See [Fleet delivery path](#az).
 
 **Pending action.** A staged mutation awaiting the operator's Confirm/Cancel button tap. Stored per-agent at `~/.clawford/{agent-id}-workspace/pending-actions.json` with a unique ID, a TTL (default 4 hours), and customizable button labels. Managed by `agents/shared/pending_actions.py`. See [Ch 18 § The pending-actions store](18-the-inbox.md#5-the-pending-actions-store-pending_actionspy).
 
@@ -92,11 +92,11 @@
 
 **Persistent profile.** A browser profile directory that survives across Playwright or Camoufox sessions, preserving cookies + local storage so that an authenticated session doesn't need to re-login on every script run. Used by [Lowly Worm social](11-lowly-worm-social.md) (Playwright + LinkedIn), [Mistress Mouse](12-mistress-mouse.md) (Baileys), [Huckle Cat](14-huckle-cat.md) (Google Messages), and [Hilda Hippo](15-hilda-hippo.md) (Costco + Amazon).
 
-**PKCE.** Proof Key for Code Exchange, the OAuth 2.0/2.1 extension that lets public clients use the auth-code flow without a client secret. Used by [Hilda Hippo's](15-hilda-hippo.md) Costco integration to get refresh tokens from the Azure B2C public-client endpoint. See [Ch 17 Shape 5](17-auth-architectures.md#shape-5--camoufox--residential-proxy--auto-mfa).
+**PKCE.** Proof Key for Code Exchange, the OAuth 2.0/2.1 extension that lets public clients use the auth-code flow without a client secret. Used by [Hilda Hippo's](15-hilda-hippo.md) Costco integration to get refresh tokens from the Azure B2C public-client endpoint. See [Ch 17 Shape 5](17-auth-architectures.md#shape-5-camoufox-residential-proxy-auto-mfa).
 
-**Producer tool.** A tool in the `TOOLS` manifest that stages a [pending action](#a%E2%80%93z) instead of executing a mutation directly. The tool calls `pending_actions.stage()` and returns a `__pending_action__` marker that the dispatcher uses to auto-attach inline buttons. Examples: `propose_reorder` (Hilda Hippo), `propose_event_add` (Mistress Mouse). See [Ch 18 § The tools.py pattern](18-the-inbox.md#the-toolspy-pattern).
+**Producer tool.** A tool in the `TOOLS` manifest that stages a [pending action](#az) instead of executing a mutation directly. The tool calls `pending_actions.stage()` and returns a `__pending_action__` marker that the dispatcher uses to auto-attach inline buttons. Examples: `propose_reorder` (Hilda Hippo), `propose_event_add` (Mistress Mouse). See [Ch 18 § The tools.py pattern](18-the-inbox.md#the-toolspy-pattern).
 
-**Post-liberation.** The state of the fleet after the Clawford liberation completed (2026-04-15). Synonymous with "the live runtime" in most contexts. Contrast with [pre-liberation](#pre-liberation).
+**Post-liberation.** The state of the fleet after the Clawford liberation completed (2026-04-15). Synonymous with "the live runtime" in most contexts. Contrast with [pre-liberation](#az).
 
 **Pre-liberation.** The state of the fleet before the Clawford liberation started (before 2026-04-02). Characterized by the OpenClaw gateway container, the exec-approvals allowlist, and the 600-second LLM cron timeout. Referenced in historical context only.
 
@@ -106,19 +106,19 @@
 
 **Review-before-finalize.** The pattern where a pipeline generates a tiered review markdown and the operator reviews + edits before a `--finalize` flag commits anything durable. Used by [Huckle Cat's](14-huckle-cat.md#the-mining-pipeline) mining pipeline. Prevents bad-quality automated output from landing in the shared brain.
 
-**Safeguard.** A deterministic Python check in `deploy.py` that either passes or fails, with no gray area. Nine active safeguards (1 Backup, 2 Source-cleanliness, 3 UPDATE confirm, 4 Drift detection, 5 Workflow banner, 6 Smoke test, 7 Manifest semantics, 9 Cron message discipline, 10 Config source classification). Two retired (8 exec-approvals baseline, 11 docker-compose.yml drift). See [Ch 19 § Defense layer 3](19-security-and-hardening.md#defense-layer-3--the-deploy-tool-safeguards).
+**Safeguard.** A deterministic Python check in `deploy.py` that either passes or fails, with no gray area. Nine active safeguards (1 Backup, 2 Source-cleanliness, 3 UPDATE confirm, 4 Drift detection, 5 Workflow banner, 6 Smoke test, 7 Manifest semantics, 9 Cron message discipline, 10 Config source classification). Two retired (8 exec-approvals baseline, 11 docker-compose.yml drift). See [Ch 19 § Defense layer 3](19-security-and-hardening.md#defense-layer-3-the-deploy-tool-safeguards).
 
-**Script contract.** The three-rule contract every cron-invoked script in the fleet obeys: (1) always exit 0, (2) emit exactly one JSON line on stdout, (3) never execute shell. Enforced by `contract_wrap.py` at the import surface and by Safeguard 9 at the deploy boundary. See [Ch 19 § Defense layer 2](19-security-and-hardening.md#defense-layer-2--the-script-contract).
+**Script contract.** The three-rule contract every cron-invoked script in the fleet obeys: (1) always exit 0, (2) emit exactly one JSON line on stdout, (3) never execute shell. Enforced by `contract_wrap.py` at the import surface and by Safeguard 9 at the deploy boundary. See [Ch 19 § Defense layer 2](19-security-and-hardening.md#defense-layer-2-the-script-contract).
 
-**Shared brain.** See [Brain](#a%E2%80%93z).
+**Shared brain.** See [Brain](#az).
 
-**Shared library.** `agents/shared/*` — the world-access layer, organized by Tier 1 (clean APIs), Tier 2 (stock Playwright), Tier 3 (hardened Camoufox), plus a handful of ops modules. See [Ch 06 — Infra setup](06-infra-setup.md) and [Ch 20 Category 1](20-scripts-and-configs.md#category-1--shared-library).
+**Shared library.** `agents/shared/*` — the world-access layer, organized by Tier 1 (clean APIs), Tier 2 (stock Playwright), Tier 3 (hardened Camoufox), plus a handful of ops modules. See [Ch 06 — Infra setup](06-infra-setup.md) and [Ch 20 Category 1](20-scripts-and-configs.md#category-1-shared-library).
 
 **Smoke test.** Safeguard 6 in `deploy.py`. A per-manifest command that runs after deploy and must exit 0 for the deploy to be marked successful. Typically `python3 scripts/heartbeat.py --dry-run`.
 
 **`SOUL.md`.** Agent identity doc at the workspace root. Populated from `SOUL.md.example` during deploy and `chattr +i`-ed. The part of the agent that should never change without explicit operator intervention.
 
-**Soft constraint.** A rule encoded as SOUL.md text (e.g., "never modify this file"). Useful as documentation for humans; **not** a security mechanism. An LLM given a direct instruction will happily violate a soft constraint. Hard constraints (OS-level file permissions + `chattr +i`) are the security layer. See [Ch 19 § The soft-constraint trap](19-security-and-hardening.md#defense-layer-1--os-level-immutability).
+**Soft constraint.** A rule encoded as SOUL.md text (e.g., "never modify this file"). Useful as documentation for humans; **not** a security mechanism. An LLM given a direct instruction will happily violate a soft constraint. Hard constraints (OS-level file permissions + `chattr +i`) are the security layer. See [Ch 19 § The soft-constraint trap](19-security-and-hardening.md#defense-layer-1-os-level-immutability).
 
 **Sticky port.** Residential-proxy feature where a specific port number binds to the same residential IP for the duration of a session, so sequential requests from the same script look like they originated from the same user. Port 10000 in the fleet's current setup.
 
@@ -142,7 +142,7 @@
 
 Load-bearing war stories referenced by name across multiple chapters. Each one produced a design rule or a scar-tissue invariant that still shapes the live runtime.
 
-**The 5x resend incident (2026-04-14).** [Sergeant Murphy](13-sergeant-murphy.md#the-5x-resend-incident). Post-meeting-scan cron used cache files as a delivery queue, re-sent the same debrief five times over 2.5 hours until the operator pulled the cron by hand. Rule: [cache-is-not-a-queue](#a%E2%80%93z). Silent prior on 2026-04-08 discovered during post-mortem.
+**The 5x resend incident (2026-04-14).** [Sergeant Murphy](13-sergeant-murphy.md#the-5x-resend-incident). Post-meeting-scan cron used cache files as a delivery queue, re-sent the same debrief five times over 2.5 hours until the operator pulled the cron by hand. Rule: [cache-is-not-a-queue](#az). Silent prior on 2026-04-08 discovered during post-mortem.
 
 **The Costco saga (April 5–12, 2026).** [Hilda Hippo](15-hilda-hippo.md). Four-act narrative covering the cold-start collapse (April 5–9, persistent daemon pivot), the B2C public-client discovery (April 12), the 2010 setCookie bug (April 12), and the Act IV stabilization (April 12–15). Rule: auto-MFA is non-optional for Shape 5 vendors.
 
@@ -164,7 +164,7 @@ Terms that used to matter in the pre-liberation fleet and are now historical. Fl
 
 **`oc` / `oci` CLI.** Retired. The pre-liberation gateway CLI for managing agents (`oc agents add`, `oci cron list`, `oci approvals policy`). No post-liberation equivalent — the operator drives the fleet directly via `deploy.py`, `install-host-cron.sh`, `crontab`, `ssh`, and `codex infer`.
 
-**600-second LLM cron timeout.** Retired. The pre-liberation hard limit on cron runtime. Drove the introduction of the [compose/deliver split](#a%E2%80%93z) pattern, which survives post-liberation because it also maps cleanly onto the [fleet delivery path](#fleet-delivery-path-5-am-pt).
+**600-second LLM cron timeout.** Retired. The pre-liberation hard limit on cron runtime. Drove the introduction of the [compose/deliver split](#az) pattern, which survives post-liberation because it also maps cleanly onto the [fleet delivery path](#az).
 
 **`~/.openclaw/`.** Retired directory path. Renamed to `~/.clawford/` on 2026-04-15. References in live code are bugs; the regression guard at `agents/shared/tests/test_phase7b_openclaw_paths_retired.py` prevents them from recurring.
 

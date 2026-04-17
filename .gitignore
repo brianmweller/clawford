@@ -30,6 +30,9 @@ openclaw-docker-config/
 /site/
 /_site_src/
 
+# Cloudflare Wrangler cache (populated by `npx wrangler pages deploy`)
+.wrangler/
+
 # Python
 __pycache__/
 *.pyc

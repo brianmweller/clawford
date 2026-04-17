@@ -55,7 +55,7 @@ Seven miners, each scoped to one data source, each producing a flat JSON output 
 | `contacts-mine.py` | Google Contacts | Both `people.connections.list` (2500+ saved) and `otherContacts.list` (1900+ auto-saved) |
 | `transcripts-mine.py` | MCP transcription provider | Session metadata + participant lists; cross-references by first-name + title against calendar attendees |
 | `whatsapp-mine.py` | WhatsApp session logs | Message participants; group chats split per non-operator author |
-| `gmessages-mine.py` | Google Messages (DevTools) | DOM-scraped conversation list + metadata — see [§ The Google Messages + DevTools story](#the-google-messages--devtools-story) |
+| `gmessages-mine.py` | Google Messages (DevTools) | DOM-scraped conversation list + metadata — see [§ The Google Messages + DevTools story](#the-google-messages-devtools-story) |
 | `workflowy-read.py` | Workflowy (API export) | ~3000 people extracted from ~16K meeting nodes in the contact cache |
 
 The miners run in parallel where possible. Each has a sampling cap (e.g., gmail-mine caps at N messages per sender to keep the cost bounded) and writes its output to `cache/mined-{source}.json`.
