@@ -98,6 +98,13 @@ def stage():
     _rewrite_out_of_tree_links()
     _rewrite_guide_v2_dead_links()
 
+    # robots.txt — block all crawlers. Paired with the noindex meta
+    # tag injected by overrides/main.html. MkDocs copies non-markdown
+    # files from docs_dir straight to site_dir.
+    (SRC / "robots.txt").write_text(
+        "User-agent: *\nDisallow: /\n", encoding="utf-8",
+    )
+
 
 def _rewrite_guide_v2_dead_links():
     """Within _site_src/guide-v2/, rewrite sibling links to chapters

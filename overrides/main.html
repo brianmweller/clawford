@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{#
+  Inject a noindex/nofollow robots meta tag into every rendered page.
+  Paired with site/robots.txt (written by scripts/build-guide-site.py)
+  to keep the guide off search-engine indexes. The cloudflare-pages
+  subdomain slug is already obscured; this is the belt-and-suspenders
+  layer in case someone links to it from a public page.
+#}
+{% block extrahead %}
+  <meta name="robots" content="noindex, nofollow">
+{% endblock %}
