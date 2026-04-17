@@ -210,12 +210,85 @@ def _extract_action_item(item, speakers=None) -> tuple[str, str, str]:
     return who, what, by_when
 
 
-def format_debrief(pending: dict) -> str:
+_RANKING_PROMPT_TEMPLATE = """Pick the 3 MOST IMPORTANT key points from a meeting brief for a busy executive. Importance = strategic relevance, decisions, and action-driving insight. Skip ceremony, small talk, and chronological filler.
+
+Meeting: {meeting_title}
+
+Key points (numbered):
+{numbered_points}
+
+Return JSON ONLY with shape: {{"top_3": ["...verbatim string one...", "...verbatim string two...", "...verbatim string three..."]}}
+
+Copy each chosen string VERBATIM from the list above — do NOT paraphrase or shorten. If fewer than 3 are substantive, still return 3 (pick the next most relevant)."""
+
+
+def _rank_key_points(key_points: list, meeting_title: str) -> list:
+    """Pick the top 3 most important key points via LLM. Falls back to
+    ``key_points[:3]`` on LLM failure or paraphrase leakage. When ≤3
+    bullets are available, returns the input verbatim without an LLM
+    call. Regression target: 2026-04-16 debriefs rendered 14–15 bullets
+    which is too dense for Telegram."""
+    if not isinstance(key_points, list) or len(key_points) <= 3:
+        return list(key_points or [])
+
+    numbered = "\n".join(f"{i + 1}. {kp}" for i, kp in enumerate(key_points))
+    prompt = _RANKING_PROMPT_TEMPLATE.format(
+        meeting_title=meeting_title or "(untitled)",
+        numbered_points=numbered,
+    )
+
+    data = None
+    for attempt in range(2):
+        if attempt > 0:
+            time.sleep(LLM_RETRY_BACKOFF_S)
+        result = llm_infer(prompt, json_mode=True, timeout=LLM_TIMEOUT_S)
+        if not getattr(result, "ok", False):
+            continue
+        try:
+            data = json.loads(_strip_markdown_fence(result.text or ""))
+            break
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+    if not isinstance(data, dict):
+        return list(key_points[:3])
+
+    picked = data.get("top_3")
+    if not isinstance(picked, list):
+        return list(key_points[:3])
+
+    # Keep only LLM strings that match the originals verbatim (guard
+    # against paraphrase drift). Preserve the LLM's ordering.
+    source_set = set(key_points)
+    verbatim = []
+    seen = set()
+    for s in picked:
+        if isinstance(s, str) and s in source_set and s not in seen:
+            verbatim.append(s)
+            seen.add(s)
+
+    # Pad from the top of the original list if the LLM returned fewer
+    # than 3 usable verbatim matches.
+    for kp in key_points:
+        if len(verbatim) >= 3:
+            break
+        if kp not in seen:
+            verbatim.append(kp)
+            seen.add(kp)
+
+    return verbatim[:3]
+
+
+def format_debrief(pending: dict, key_points: list | None = None) -> str:
     """Render the debrief Telegram message from a pending-debrief-*.json
-    staged file."""
+    staged file. ``key_points`` — when provided — overrides the stored
+    ``krisp_key_points`` (used by ``run()`` to inject the LLM-ranked
+    top 3). Without it, we fall back to the stored list capped at 3
+    as defense-in-depth so legacy callers never emit walls of bullets."""
     title = (pending.get("meeting_title") or "(untitled)").strip()
     action_items = pending.get("krisp_action_items") or []
-    key_points = pending.get("krisp_key_points") or []
+    if key_points is None:
+        key_points = (pending.get("krisp_key_points") or [])[:3]
     speakers = pending.get("krisp_speakers") or []
 
     lines: list[str] = [
@@ -240,7 +313,7 @@ def format_debrief(pending: dict) -> str:
         lines.append("")
 
     if key_points:
-        lines.append("\U0001f4cc KEY POINTS:")
+        lines.append("\U0001f4cc TOP 3:")
         for point in key_points:
             lines.append(f"\u2022 {point}")
         lines.append("")
@@ -253,24 +326,26 @@ def format_debrief(pending: dict) -> str:
 
 def build_debrief_keyboard(pending: dict) -> dict | None:
     """Build the inline keyboard attached to a debrief message.
-    One button set per debrief: Save / Dismiss / Modify. Returns None
-    when the pending has no event_id — the callbacks would be unable
-    to resolve the source file."""
+
+    Layout: [✅ Save] [❌ Dismiss] [🔎 See more]. Save and Dismiss route
+    via callback_data; See more is a native Telegram URL button
+    pointing at the Krisp meeting page (Krisp owns the full summary —
+    we just link to it). The See more button is omitted when the
+    pending has no ``krisp_meeting_url`` so we never ship a broken
+    link. Returns None when ``event_id`` is missing entirely."""
     event_id = (pending.get("event_id") or "").strip()
     if not event_id:
         return None
-    return {
-        "inline_keyboard": [
-            [
-                {"text": "\u2705 Save",
-                 "callback_data": f"debrief_save:{event_id}"},
-                {"text": "\u274c Dismiss",
-                 "callback_data": f"debrief_dismiss:{event_id}"},
-                {"text": "\u270f\ufe0f Modify",
-                 "callback_data": f"debrief_modify:{event_id}"},
-            ]
-        ]
-    }
+    row = [
+        {"text": "\u2705 Save",
+         "callback_data": f"debrief_save:{event_id}"},
+        {"text": "\u274c Dismiss",
+         "callback_data": f"debrief_dismiss:{event_id}"},
+    ]
+    krisp_url = (pending.get("krisp_meeting_url") or "").strip()
+    if krisp_url:
+        row.append({"text": "\U0001f50e See more", "url": krisp_url})
+    return {"inline_keyboard": [row]}
 
 
 # ─── save/dismiss executors (button handlers) ────────────────────────
@@ -867,7 +942,11 @@ def run() -> dict:
         if not has_actionable_item and not key_points:
             continue
 
-        debrief_msg = format_debrief(pending)
+        ranked_kps = _rank_key_points(
+            pending.get("krisp_key_points") or [],
+            pending.get("meeting_title") or "",
+        )
+        debrief_msg = format_debrief(pending, key_points=ranked_kps)
         keyboard = build_debrief_keyboard(pending)
         if send_message(
             token, chat_id, debrief_msg,

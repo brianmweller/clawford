@@ -59,31 +59,15 @@ def dismiss_debrief(event_id: str) -> dict:
     return _pms_mod().dismiss_debrief(event_id)
 
 
-def modify_debrief(event_id: str) -> dict:
-    """Button executor: Modify. Returns a prompt asking what to change;
-    the dispatcher relays it back to the operator. The next inbound text
-    message flows to the LLM, which edits the pending debrief and
-    re-delivers it."""
-    return {
-        "status": "ok",
-        "event_id": event_id,
-        "prompt": (
-            "What would you like to change? Reply with the corrected "
-            "action item(s) — one per line, e.g. 'Steve: Talk to "
-            "recruiting about the operator's pipeline.' Then I'll save those "
-            "to the brain instead of the originals.\n\n"
-            f"(event_id: {event_id})"
-        ),
-    }
-
-
 def replace_action_items(event_id: str, items: list) -> dict:
     """LLM tool: wholesale replace the action items on a pending
     debrief with the operator's corrected list, then write them to
-    ``commitments/active.md``. Call this after the Modify button was
-    pressed and the operator has typed his corrections — parse his reply into
-    a list of strings (one per item) and pass here along with the
-    event_id he was modifying (it's in the Modify prompt)."""
+    ``commitments/active.md``. Call this when the operator tells you to edit
+    a debrief's action items (e.g. "change item 1 to 'Steve: Talk to
+    recruiting'"). Parse his reply into a list of strings (one per
+    item) and pass with the event_id he's modifying — the event_id
+    usually appears in the conversation as part of the most recent
+    debrief message he's responding to."""
     return _pms_mod().replace_action_items(event_id, items or [])
 
 AGENT_ID = "meetings-coach"
@@ -527,6 +511,5 @@ EXECUTORS: dict = {
     "confirm_remember": confirm_remember,
     "save_debrief": save_debrief,
     "dismiss_debrief": dismiss_debrief,
-    "modify_debrief": modify_debrief,
     "replace_action_items": replace_action_items,
 }

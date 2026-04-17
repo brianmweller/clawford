@@ -381,32 +381,25 @@ def test_debrief_dismiss_routes_to_dismiss_executor(disp, monkeypatch):
         dismiss_exec.assert_called_once_with(event_id="evt-xyz")
 
 
-def test_debrief_modify_routes_to_modify_executor(disp, monkeypatch):
-    """Modify doesn't write state — it replies with the prompt string
-    the executor returns so the operator knows to send his correction."""
+def test_debrief_modify_prefix_no_longer_routed(disp, monkeypatch):
+    """The Modify button was removed — the operator edits via chat ('change
+    item 1 to ...') and Murphy's LLM calls replace_action_items.
+    Ensure the dispatcher no longer special-cases debrief_modify:* so
+    any stale callback falls through to the LLM path rather than
+    raising or sending a ghost reply."""
     monkeypatch.setenv("MEETINGS_BOT_TOKEN", "FAKE_MEETINGS_TOKEN")
-    modify_exec = MagicMock(return_value={
-        "status": "ok", "event_id": "evt-xyz",
-        "prompt": "What would you like to change?",
-    })
     cfg = _mock_config(
         agent_id="meetings-coach", token="FAKE_MEETINGS_TOKEN",
-        executors={"modify_debrief": modify_exec},
+        executors={},
     )
-
-    with patch.object(disp, "telegram_api") as mock_tg, \
+    with patch.object(disp, "telegram_api"), \
          patch.object(disp, "load_agent_config", return_value=cfg), \
          patch.object(disp, "tool_use") as mock_tu:
         disp.dispatch(
             "meetings-coach", _callback_update("debrief_modify:evt-xyz"),
         )
-        mock_tu.run.assert_not_called()
-        modify_exec.assert_called_once_with(event_id="evt-xyz")
-        # The prompt text should be sent back to the operator as a message.
-        sent_texts = [
-            c.args[2] for c in mock_tg.send_message.call_args_list
-        ]
-        assert any("What would you like to change?" in t for t in sent_texts)
+        # Falls through to the LLM path (unknown callback).
+        mock_tu.run.assert_called_once()
 
 
 # ── unknown callback falls through to LLM ────────────────────────

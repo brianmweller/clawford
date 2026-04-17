@@ -668,12 +668,21 @@ def build_transcript_data(transcript):
     if not key_points:
         key_points = _parse_doc_bullets(raw, "Key Points")
 
+    # Derive the Krisp web URL from the doc id so the debrief keyboard
+    # can deep-link into Krisp's own UI via a native Telegram URL
+    # button. Pattern confirmed 2026-04-16: the `id` field is
+    # 'krisp_mcp_<doc_id>' when sourced from MCP.
+    raw_id = str(transcript.get("id", "") or "")
+    doc_id = raw_id[len("krisp_mcp_"):] if raw_id.startswith("krisp_mcp_") else raw_id
+    krisp_url = f"https://app.krisp.ai/meetings/{doc_id}" if doc_id else ""
+
     return {
         "krisp_key_points": key_points,
         "krisp_action_items": action_items,
         "krisp_speakers": list(transcript.get("speakers", []) or []),
         "transcript_text": body[:_TRANSCRIPT_CAP_CHARS],
         "participants": transcript.get("participants", []),
+        "krisp_meeting_url": krisp_url,
     }
 
 
@@ -692,6 +701,7 @@ def stage_debrief(event_id, event, transcript, transcript_data):
         "krisp_key_points": transcript_data.get("krisp_key_points", []),
         "krisp_action_items": transcript_data.get("krisp_action_items", []),
         "krisp_speakers": transcript_data.get("krisp_speakers", []),
+        "krisp_meeting_url": transcript_data.get("krisp_meeting_url", ""),
         "transcript_text": transcript_data.get("transcript_text", ""),
         "participants": transcript_data.get("participants", []),
         "staged_at": datetime.now(timezone.utc).isoformat(),

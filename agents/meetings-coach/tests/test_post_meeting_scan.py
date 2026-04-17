@@ -120,6 +120,106 @@ def _coaching_llm_reply() -> dict:
     }
 
 
+# ─── _rank_key_points ────────────────────────────────────────────────
+
+
+FIFTEEN_KP = [
+    f"Point {i} about some topic with enough text to be distinct." for i in range(1, 16)
+]
+
+
+def test_rank_key_points_returns_three_from_fifteen(mod, monkeypatch):
+    """LLM ranks 15 key points and returns the 3 most important. The
+    helper string-matches those back against the original list so we
+    never leak paraphrases or duplicates."""
+    picked = [FIFTEEN_KP[7], FIFTEEN_KP[2], FIFTEEN_KP[12]]
+    calls: list = []
+
+    def fake_infer(prompt, **kw):
+        calls.append(prompt)
+        return _fake_infer({"top_3": picked})
+
+    monkeypatch.setattr(mod, "llm_infer", fake_infer)
+    monkeypatch.setattr(mod.time, "sleep", lambda s: None)
+
+    ranked = mod._rank_key_points(FIFTEEN_KP, "Sample Meeting")
+    assert ranked == picked
+    assert len(calls) == 1
+    # Prompt must carry the meeting title and all 15 bullets.
+    assert "Sample Meeting" in calls[0]
+    for bullet in FIFTEEN_KP:
+        assert bullet in calls[0]
+
+
+def test_rank_key_points_no_llm_call_when_three_or_fewer(mod, monkeypatch):
+    """≤3 bullets: skip the LLM, return verbatim."""
+    calls: list = []
+    monkeypatch.setattr(
+        mod, "llm_infer",
+        lambda p, **kw: calls.append(p) or _fake_infer({"top_3": []}),
+    )
+    for pts in ([], ["only one"], ["a", "b"], ["a", "b", "c"]):
+        assert mod._rank_key_points(pts, "X") == pts
+    assert calls == []
+
+
+def test_rank_key_points_falls_back_to_first_three_on_llm_failure(mod, monkeypatch):
+    """Both LLM attempts return ok=False — fall back to key_points[:3]
+    (Krisp's extraction order, roughly chronological). Don't crash."""
+    monkeypatch.setattr(
+        mod, "llm_infer",
+        lambda p, **kw: SimpleNamespace(
+            ok=False, text="", error="down",
+            input_tokens=0, output_tokens=0, model="fake",
+        ),
+    )
+    monkeypatch.setattr(mod.time, "sleep", lambda s: None)
+    ranked = mod._rank_key_points(FIFTEEN_KP, "Meeting")
+    assert ranked == FIFTEEN_KP[:3]
+
+
+def test_rank_key_points_drops_paraphrases(mod, monkeypatch):
+    """If the LLM paraphrased instead of returning verbatim strings,
+    the helper should drop the paraphrases and pad from the top of
+    the original list rather than send mangled text to Telegram."""
+    paraphrased_and_one_real = [
+        "A paraphrase that is not in the original list at all.",
+        FIFTEEN_KP[4],
+        "Another made-up summary.",
+    ]
+    monkeypatch.setattr(
+        mod, "llm_infer",
+        lambda p, **kw: _fake_infer({"top_3": paraphrased_and_one_real}),
+    )
+    monkeypatch.setattr(mod.time, "sleep", lambda s: None)
+    ranked = mod._rank_key_points(FIFTEEN_KP, "Meeting")
+    # Verbatim match survives; the rest pads from the original.
+    assert FIFTEEN_KP[4] in ranked
+    for r in ranked:
+        assert r in FIFTEEN_KP, f"paraphrase leaked: {r!r}"
+    assert len(ranked) == 3
+
+
+def test_rank_key_points_retries_once_on_transient_failure(mod, monkeypatch):
+    """Mirrors _compose_coaching_message's 1-retry policy."""
+    attempts: list = []
+
+    def fake_infer(prompt, **kw):
+        attempts.append(prompt)
+        if len(attempts) == 1:
+            return SimpleNamespace(
+                ok=False, text="", error="timeout",
+                input_tokens=0, output_tokens=0, model="fake",
+            )
+        return _fake_infer({"top_3": FIFTEEN_KP[:3]})
+
+    monkeypatch.setattr(mod, "llm_infer", fake_infer)
+    monkeypatch.setattr(mod.time, "sleep", lambda s: None)
+    ranked = mod._rank_key_points(FIFTEEN_KP, "Meeting")
+    assert len(attempts) == 2
+    assert ranked == FIFTEEN_KP[:3]
+
+
 # ─── format_debrief ──────────────────────────────────────────────────
 
 
@@ -127,9 +227,71 @@ def test_format_debrief_includes_title_and_sections(mod, pending_alexis):
     msg = mod.format_debrief(pending_alexis)
     assert "Alexis 1:1" in msg
     assert "ACTION ITEMS" in msg
-    assert "DECISIONS" in msg or "KEY POINTS" in msg
+    assert "TOP 3" in msg or "KEY POINTS" in msg
     assert "Q2 roadmap draft" in msg
     assert "hiring pipeline" in msg
+
+
+def test_format_debrief_renders_only_top_3_key_points(mod):
+    """When the pending carries 15 key points, the debrief must render
+    exactly the 3 the caller passed (via a `key_points` override) —
+    never the whole list. Regression: 2026-04-16 debriefs with 14–15
+    bullets were too noisy on Telegram."""
+    pending = {
+        "event_id": "e-top3",
+        "meeting_title": "Interview Debrief",
+        "krisp_action_items": [],
+        "krisp_key_points": [f"Point {i} of fifteen." for i in range(1, 16)],
+        "krisp_speakers": [],
+    }
+    top_3 = [
+        "Point 7 of fifteen.",
+        "Point 2 of fifteen.",
+        "Point 11 of fifteen.",
+    ]
+    msg = mod.format_debrief(pending, key_points=top_3)
+    # Only the 3 chosen bullets render.
+    bullet_lines = [ln for ln in msg.splitlines() if ln.startswith("\u2022 ")]
+    assert len(bullet_lines) == 3
+    assert "Point 7" in msg
+    assert "Point 2" in msg
+    assert "Point 11" in msg
+    # None of the other 12 appear.
+    assert "Point 1 of fifteen." not in msg
+    assert "Point 3 of fifteen." not in msg
+    assert "TOP 3" in msg
+
+
+def test_format_debrief_falls_back_to_pending_key_points_when_no_override(mod):
+    """If the caller passes no key_points override, format_debrief
+    uses pending['krisp_key_points'] as-is (caps at 3 for safety —
+    defense-in-depth if a caller forgets to rank)."""
+    pending = {
+        "event_id": "e-fb",
+        "meeting_title": "Quick Sync",
+        "krisp_action_items": [],
+        "krisp_key_points": ["Only one bullet."],
+        "krisp_speakers": [],
+    }
+    msg = mod.format_debrief(pending)
+    assert "Only one bullet." in msg
+    assert "TOP 3" in msg or "KEY POINTS" in msg
+
+
+def test_format_debrief_top_3_header_reads_tightly(mod):
+    """Header should read 'TOP 3 KEY POINTS' or just 'TOP 3' — the old
+    'KEY POINTS' on its own suggests an exhaustive list, which now
+    misleads the operator into scrolling for more."""
+    pending = {
+        "event_id": "e-hdr",
+        "meeting_title": "X",
+        "krisp_action_items": [],
+        "krisp_key_points": ["a", "b", "c"],
+        "krisp_speakers": [],
+    }
+    msg = mod.format_debrief(pending, key_points=["a", "b", "c"])
+    # Accept either "TOP 3" or "TOP 3 KEY POINTS"; reject bare "KEY POINTS".
+    assert "TOP 3" in msg
 
 
 def test_format_debrief_drops_text_command_footer(mod, pending_alexis):
@@ -147,24 +309,62 @@ def test_format_debrief_drops_text_command_footer(mod, pending_alexis):
 # ─── build_debrief_keyboard ──────────────────────────────────────────
 
 
-def test_build_debrief_keyboard_has_three_buttons(mod):
-    """One button set per debrief: Save / Dismiss / Modify. Each carries
-    the event_id so the dispatcher can resolve the pending file."""
-    pending = {"event_id": "evt-abc-123", "meeting_title": "X"}
+def test_build_debrief_keyboard_save_dismiss_see_more(mod):
+    """Button set: Save / Dismiss / See more. Save and Dismiss use
+    callback_data; See more is a native Telegram URL button pointing
+    at the Krisp web URL. Modify was removed — the operator can edit via chat
+    ('change item 1 to ...') and Murphy's LLM calls replace_action_items."""
+    pending = {
+        "event_id": "evt-abc-123",
+        "meeting_title": "X",
+        "krisp_meeting_url": "https://app.krisp.ai/meetings/abcdef123",
+    }
     markup = mod.build_debrief_keyboard(pending)
     assert isinstance(markup, dict)
     rows = markup.get("inline_keyboard")
     assert rows and len(rows) == 1
     buttons = rows[0]
     assert len(buttons) == 3
-    texts = [b["text"] for b in buttons]
-    assert any("Save" in t for t in texts)
-    assert any("Dismiss" in t for t in texts)
-    assert any("Modify" in t for t in texts)
-    callback_data = [b["callback_data"] for b in buttons]
-    assert "debrief_save:evt-abc-123" in callback_data
-    assert "debrief_dismiss:evt-abc-123" in callback_data
-    assert "debrief_modify:evt-abc-123" in callback_data
+
+    save_btn = next(b for b in buttons if "Save" in b["text"])
+    assert save_btn["callback_data"] == "debrief_save:evt-abc-123"
+    assert "url" not in save_btn
+
+    dismiss_btn = next(b for b in buttons if "Dismiss" in b["text"])
+    assert dismiss_btn["callback_data"] == "debrief_dismiss:evt-abc-123"
+    assert "url" not in dismiss_btn
+
+    see_more = next(b for b in buttons if "more" in b["text"].lower())
+    assert see_more["url"] == "https://app.krisp.ai/meetings/abcdef123"
+    assert "callback_data" not in see_more
+
+
+def test_build_debrief_keyboard_omits_see_more_without_url(mod):
+    """No krisp_meeting_url on the pending → no See more button (don't
+    emit a broken link). Save and Dismiss still render."""
+    pending = {"event_id": "evt-no-url", "meeting_title": "Y"}
+    markup = mod.build_debrief_keyboard(pending)
+    buttons = markup["inline_keyboard"][0]
+    assert len(buttons) == 2
+    labels = [b["text"].lower() for b in buttons]
+    assert any("save" in l for l in labels)
+    assert any("dismiss" in l for l in labels)
+    assert not any("more" in l for l in labels)
+
+
+def test_build_debrief_keyboard_no_modify_button(mod):
+    """Modify button removed; ensure no remnant 'debrief_modify:' prefix
+    appears in any callback_data anywhere."""
+    pending = {
+        "event_id": "evt-no-mod",
+        "meeting_title": "Z",
+        "krisp_meeting_url": "https://app.krisp.ai/meetings/m1",
+    }
+    markup = mod.build_debrief_keyboard(pending)
+    for row in markup["inline_keyboard"]:
+        for btn in row:
+            assert "Modify" not in btn.get("text", "")
+            assert not btn.get("callback_data", "").startswith("debrief_modify")
 
 
 def test_build_debrief_keyboard_returns_none_without_event_id(mod):
@@ -1002,6 +1202,51 @@ def test_build_transcript_data_preserves_meeting_notes_when_populated():
     # meeting_notes wins — structured items preserved, doc parse NOT used.
     assert data["krisp_action_items"] == [{"title": "structured", "assignee": "the operator"}]
     assert data["krisp_key_points"] == ["from meeting_notes"]
+
+
+def test_build_transcript_data_sets_krisp_meeting_url():
+    """Pending files now carry a native Krisp web URL so the debrief's
+    'See more' button can deep-link into Krisp's own UI rather than
+    recreating the full summary ourselves."""
+    import importlib.util
+    ts_path = REPO_ROOT / "agents" / "meetings-coach" / "scripts" / "transcript-scan.py"
+    spec = importlib.util.spec_from_file_location("transcript_scan", ts_path)
+    ts = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ts)
+
+    transcript = {
+        "id": "krisp_mcp_abcdef0123456789abcdef0123456789",
+        "title": "Meeting",
+        "participants": [], "speakers": [],
+        "key_points": [], "action_items": [],
+        "text": "**Sam Smith | 00:01**\nHi.\n",
+        "source": "krisp_mcp",
+    }
+    data = ts.build_transcript_data(transcript)
+    assert data["krisp_meeting_url"] == (
+        "https://app.krisp.ai/meetings/abcdef0123456789abcdef0123456789"
+    )
+
+
+def test_build_transcript_data_omits_url_when_no_doc_id():
+    """If we can't derive a doc_id (unexpected; defensive), store an
+    empty URL — the debrief keyboard will omit See more rather than
+    emit a broken button."""
+    import importlib.util
+    ts_path = REPO_ROOT / "agents" / "meetings-coach" / "scripts" / "transcript-scan.py"
+    spec = importlib.util.spec_from_file_location("transcript_scan", ts_path)
+    ts = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ts)
+
+    transcript = {
+        "id": "", "title": "X",
+        "participants": [], "speakers": [],
+        "key_points": [], "action_items": [],
+        "text": "",
+        "source": "krisp_mcp",
+    }
+    data = ts.build_transcript_data(transcript)
+    assert data.get("krisp_meeting_url", "") == ""
 
 
 def test_build_transcript_data_transcript_cap_allows_full_meeting():

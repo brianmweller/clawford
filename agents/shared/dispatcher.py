@@ -509,14 +509,14 @@ def _handle_nudge_callback(
         log.warning("handle_nudge_action failed: %s", exc)
 
 
-# debrief_{save,dismiss,modify}:<event_id> — Sergeant Murphy post-meeting
+# debrief_{save,dismiss}:<event_id> — Sergeant Murphy post-meeting
 # buttons. Save appends action items to commitments/active.md; Dismiss
-# deletes the pending file; Modify prompts the operator for a correction and
-# the next inbound text goes through the LLM path.
+# deletes the pending file. 'See more' is a native Telegram URL button
+# and doesn't need a callback handler. Modify was removed — the operator
+# edits via chat (LLM calls replace_action_items).
 _DEBRIEF_CALLBACK_PREFIXES = {
     "debrief_save": ("save_debrief", "\u2705 Saving..."),
     "debrief_dismiss": ("dismiss_debrief", "\u274c Dismissed"),
-    "debrief_modify": ("modify_debrief", "\u270f\ufe0f Modify"),
 }
 
 
@@ -574,9 +574,6 @@ def _handle_debrief_callback(
             cfg.token, chat_id,
             "\u274c Debrief dismissed.", skip_review=True,
         )
-    elif prefix == "debrief_modify":
-        prompt = result.get("prompt") or "What would you like to change?"
-        telegram_api.send_message(cfg.token, chat_id, prompt, skip_review=True)
 
 
 def _try_callback_shortcut(
