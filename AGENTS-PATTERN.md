@@ -54,9 +54,9 @@ for the agent's prompts to resolve correctly:
 ## Shared Brain
 
 - Lives at `~/Dropbox/openclaw-backup/` (synced via Dropbox)
-- Agents write to their own status file (`agents/{name}.status.md`)
-- Append-only convention — never overwrite another agent's entries
-- Mr Fixit monitors all status files and validates brain health
+- Per-agent health flows through `fleet-health.json`, written every 15 min by `ops/scripts/fleet-health.py`
+- Agents own only their own workspace + brain subdir; cross-agent writes are forbidden
+- Mr Fixit reads `fleet-health.json` and validates brain health
 
 ## LLM access
 

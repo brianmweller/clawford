@@ -1,8 +1,8 @@
-# OpenClaw Shared Brain
+# Clawford Shared Brain
 
-A file-based knowledge layer for the OpenClaw multi-agent system. No database, no dependencies — just markdown files in a Dropbox-synced folder with strict conventions.
+A file-based knowledge layer for the Clawford multi-agent system. No database, no dependencies — just markdown files in a Dropbox-synced folder with strict conventions.
 
-Seven agents read and write to this brain: **Fix-It** (🦊🔧), **Rudolf Von Flugel** (✈️🐕), **Family Calendar** (🐭📅), **Meetings Coach** (🐷🔍), **Shopping** (🦛🛒), **News Digest** (🐛📰), and **Connector** (🐱🤝).
+Six agents read and write to this brain: **Fix-It** (🦊🔧), **Family Calendar** (🐭📅), **Meetings Coach** (🐷🔍), **Shopping** (🦛🛒), **News Digest** (🐛📰), and **Connector** (🐱🤝).
 
 ---
 
@@ -172,11 +172,11 @@ A person can belong to multiple circles. The Connector uses circles to determine
 
 ## Agent Files
 
-### Status files (`agents/{name}.status.md`)
+### Fleet health (`fleet-health.json`)
 
-Each agent writes its own status file. Fix-It reads all of them on a cron to detect unhealthy agents.
+Per-agent health flows through a single central JSON file written every 15 minutes by `ops/scripts/fleet-health.py`. The orchestrator invokes each agent's `probe()` function and aggregates results. Fix-It's heartbeat reads this file and alerts if it goes stale.
 
-**Fields:** last_heartbeat, status (`healthy`/`degraded`/`error`), last_cron_run, last_cron_result (`success`/`partial`/`failure`), error_log, token_usage_today.
+**Per-agent fields:** `id`, `probe_ts`, `status` (`ok`/`degraded`/`error`), `probes` (free-form per-agent health dict).
 
 ### Rules files
 
@@ -201,14 +201,14 @@ Each agent writes its own status file. Fix-It reads all of them on a cron to det
 
 ## Agent Access Matrix
 
-| Resource | Fix-It | Rudolf | Family Calendar | Meetings Coach | Shopping | News Digest | Connector |
-|----------|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| `/people/` | R | — | R/W | R/W | R | — | R/W |
-| `/facts/` | R | — | R/W | R/W | R/W | R/W | R/W |
-| `/commitments/` | R | — | R/W | R/W | — | — | R/W |
-| `/tasks/` | R/W | — | W | W | W | W | W |
-| `/notes/` | R | — | R | R | R | — | R/W (triage) |
-| `/agents/` | R/W (all) | W (own) | W (own) | W (own) | W (own) | W (own) | W (own) |
+| Resource | Fix-It | Family Calendar | Meetings Coach | Shopping | News Digest | Connector |
+|----------|:-:|:-:|:-:|:-:|:-:|:-:|
+| `/people/` | R | R/W | R/W | R | — | R/W |
+| `/facts/` | R | R/W | R/W | R/W | R/W | R/W |
+| `/commitments/` | R | R/W | R/W | — | — | R/W |
+| `/tasks/` | R/W | W | W | W | W | W |
+| `/notes/` | R | R | R | R | — | R/W (triage) |
+| `/agents/` | R/W (all) | W (own) | W (own) | W (own) | W (own) | W (own) |
 
 R = Read, W = Write, R/W = Read and Write, — = No access
 
@@ -223,14 +223,3 @@ python scripts/validate.py
 ```
 
 Checks: required directories exist, seed files have valid headers, no Dropbox conflict files, no files over 500KB.
-
----
-
-## Migration to Flux
-
-When a Flux capability is vetted and stable:
-
-1. The relevant MCP tool is exposed to the agent(s) that need it
-2. The agent's SOUL is updated to prefer the Flux tool over the shared-brain file
-3. The shared-brain file continues to exist as a fallback/backup
-4. Once Flux has been stable for 30+ days, the shared-brain version is deprecated

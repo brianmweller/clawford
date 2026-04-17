@@ -146,7 +146,6 @@ Each agent has `agents/<agent_id>/manifest.json`. Minimal example:
   "agent_id": "shopping",
   "display_name": "Hilda Hippo",
   "workspace": "~/.clawford/shopping-workspace",
-  "status_file": "~/Dropbox/openclaw-backup/agents/shopping.status.md",
   "telegram": {
     "account": "shopping",
     "bot_token_env": "SHOPPING_BOT_TOKEN"
@@ -206,8 +205,7 @@ For a brand-new agent that has never been onboarded:
    each conforming to `agents/shared/SCRIPT_CONTRACT.md` (one JSON
    line on stdout with a `status` field).
 4. **Write a `manifest.json`** with `agent_id`, `display_name`,
-   `workspace` (`~/.clawford/<agent>-workspace`), `status_file`
-   (`~/Dropbox/openclaw-backup/agents/<agent>.status.md`),
+   `workspace` (`~/.clawford/<agent>-workspace`),
    `telegram.account` + `bot_token_env`, `config_files[]`,
    `scripts[]`, `state_files[]`, `crons[]`, and optionally
    `smoke_test`.
