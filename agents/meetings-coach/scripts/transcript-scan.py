@@ -594,13 +594,32 @@ def match_transcript_to_events(transcript, events):
     return None, 0.0
 
 
+_FIRST_TURN_RE = re.compile(
+    r"\*\*[A-Z][a-zA-Z \-']+\s*\|\s*\d{1,2}:\d{2}\*\*"
+)
+
+
+def _transcript_body(raw: str) -> str:
+    """Anchor stored transcript_text at the first speaker-turn marker.
+    Krisp's document interleaves notes (Action Items / Key Points) with
+    the transcript section; header text varies across meeting types
+    ('### Transcript', '## Transcript', '## Transcript 1', none).
+    The first ``**Name | MM:SS**`` marker is the reliable cut point."""
+    m = _FIRST_TURN_RE.search(raw or "")
+    if m:
+        return raw[m.start():]
+    return raw or ""
+
+
 def build_transcript_data(transcript):
     """Build transcript data for the agent to process."""
+    raw = transcript.get("text", "") or ""
+    body = _transcript_body(raw)
     return {
         "krisp_key_points": transcript.get("key_points", []),
         "krisp_action_items": transcript.get("action_items", []),
         "krisp_speakers": list(transcript.get("speakers", []) or []),
-        "transcript_text": (transcript.get("text", "") or "")[:8000],
+        "transcript_text": body[:16000],
         "participants": transcript.get("participants", []),
     }
 

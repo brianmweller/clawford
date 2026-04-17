@@ -776,6 +776,129 @@ def test_run_happy_path_sends_debrief_and_coaching(
     assert ids == ["evt-alexis-420"]
 
 
+def test_compose_coaching_feeds_transcript_dialogue_not_notes(
+    mod, meeting_config, monkeypatch,
+):
+    """Krisp's document is notes + transcript concatenated. When we feed
+    the raw blob to the LLM, the first 3000 chars are mostly notes
+    (action items, key points) and the LLM keeps saying 'too little
+    material to assess'. The coaching prompt must receive the TRANSCRIPT
+    BODY — speaker turns — not the notes section.
+    Regression: 2026-04-16 Meet & Greet coaching said 'not enough
+    material' for a 25-min meeting with 19 speaker turns."""
+    growth_areas = meeting_config["coaching"]["growth_areas"]
+    pending = {
+        "event_id": "e-talk",
+        "meeting_title": "Meet & Greet",
+        "transcript_text": (
+            "# Meet & Greet\n### Action Items\n- Speaker_2 to schedule more calls.\n"
+            "### Key Points\n- Purpose: get to know each other.\n- Steve works at Meta.\n\n"
+            "**Sam Smith | 00:17**\nTesting testing.\n\n"
+            "**Steve Shadman | 02:45**\nHi the operator, good to meet you. "
+            "Thanks for taking the time. I lead the Monetization Ecosystem "
+            "DS team at Meta which is a horizontal team that owns "
+            "attribution, measurement, and the ad auction infrastructure.\n\n"
+            "**Sam Smith | 03:12**\nGreat, yeah, tell me more about "
+            "what you're looking for in this role.\n\n"
+        ),
+    }
+    metrics = {"status": "ok", "metrics": {"talk_ratio": 0.46}}
+
+    seen_prompts: list = []
+    def fake_infer(prompt, **kw):
+        seen_prompts.append(prompt)
+        return _fake_infer(_coaching_llm_reply())
+    monkeypatch.setattr(mod, "llm_infer", fake_infer)
+
+    mod._compose_coaching_message(pending, metrics, growth_areas)
+    prompt = seen_prompts[0]
+    # The prompt transcript excerpt must include speaker turns, not just
+    # the notes section.
+    assert "**Sam Smith" in prompt
+    assert "**Steve Shadman" in prompt
+    assert "Monetization Ecosystem" in prompt
+    # Notes should NOT be in the transcript excerpt (they're already
+    # summarized as action_items/key_points on the debrief).
+    assert "### Action Items" not in prompt
+    assert "### Key Points" not in prompt
+
+
+def test_build_transcript_data_strips_notes_prefix(monkeypatch):
+    """build_transcript_data (transcript-scan.py) should anchor stored
+    transcript_text at the first speaker-turn marker so downstream
+    consumers (transcript-metrics, coaching) see dialogue, not notes."""
+    import importlib.util
+    ts_path = REPO_ROOT / "agents" / "meetings-coach" / "scripts" / "transcript-scan.py"
+    spec = importlib.util.spec_from_file_location("transcript_scan", ts_path)
+    ts = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ts)
+
+    transcript = {
+        "id": "x",
+        "title": "M",
+        "participants": ["the operator", "Steve"],
+        "speakers": ["Sam Smith", "Steve Shadman"],
+        "key_points": ["KP"],
+        "action_items": [{"title": "AI1"}],
+        "text": (
+            "# Meeting Title\n### Action Items\n- X\n### Key Points\n- Y\n\n"
+            "## Transcript\n\n"
+            "**Sam Smith | 00:10**\nHello.\n\n"
+            "**Steve Shadman | 00:12**\nHi!\n"
+        ),
+        "source": "krisp_mcp",
+    }
+    data = ts.build_transcript_data(transcript)
+    text = data["transcript_text"]
+    assert text.startswith("**Sam Smith")
+    assert "**Steve Shadman" in text
+    assert "### Action Items" not in text
+    assert "### Key Points" not in text
+
+
+def test_run_suppresses_empty_debrief_delivery(
+    mod, scan_one_new, meeting_config, tmp_path, monkeypatch,
+):
+    """Debriefs with no action items AND no key points carry zero
+    signal — just a title and buttons. Skip delivery so the operator isn't
+    paged with nothing to act on. The transcript is still marked
+    processed; if Krisp enriches the notes later, a manual replay
+    can re-stage."""
+    empty_pending = {
+        "event_id": "evt-alexis-420",
+        "meeting_title": "Google Meet with X",
+        "meeting_start": "2026-04-16T16:00:00-07:00",
+        "krisp_action_items": [],
+        "krisp_key_points": [],
+        "krisp_speakers": ["Sam Smith", "X"],
+        "transcript_text": "**Sam Smith | 00:10**\nHi.\n",
+        "participants": ["Sam Smith", "X"],
+        "status": "pending_review",
+    }
+    workspace, history = _patch_common(
+        mod, tmp_path, monkeypatch,
+        scan=scan_one_new,
+        pending_fixture=empty_pending,
+        meeting_cfg=meeting_config,
+    )
+    sent: list[str] = []
+    monkeypatch.setattr(mod, "resolve_credentials", lambda env: ("tok", "chat"))
+    monkeypatch.setattr(
+        mod, "send_message", lambda tok, chat, text, **kw: sent.append(text) or True
+    )
+
+    class _Dt(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 4, 16, 23, 50, tzinfo=timezone.utc)
+    monkeypatch.setattr(mod, "datetime", _Dt)
+
+    result = mod.run()
+    assert result["status"] == "ok"
+    assert result["debriefs_sent"] == 0
+    assert sent == []
+
+
 def test_compose_coaching_retries_once_on_transient_llm_failure(
     mod, pending_alexis, metrics_alexis, meeting_config, monkeypatch,
 ):

@@ -129,6 +129,9 @@ def _strip_markdown_fence(text: str) -> str:
 
 
 _SPEAKER_PLACEHOLDER_RE = re.compile(r"\{\{\s*Speaker_(\d+)\s*\}\}")
+_FIRST_TURN_RE = re.compile(
+    r"\*\*[A-Z][a-zA-Z \-']+\s*\|\s*\d{1,2}:\d{2}\*\*"
+)
 _OWNER_PROSE_RE = re.compile(
     r"^(?P<who>[A-Z][a-zA-Z\-']+(?:\s+[A-Z][a-zA-Z\-']+)?)"
     r"\s+(?P<verb>to|will|should|shall|must|needs to|has to|is going to)"
@@ -625,7 +628,14 @@ def _compose_coaching_message(
     """Use the LLM to assess each growth area, then format a single
     Telegram message. Returns None on LLM failure."""
     metrics_block = (metrics or {}).get("metrics", {}) if isinstance(metrics, dict) else {}
-    transcript = (pending.get("transcript_text") or "")[:3000]
+    # Feed the transcript body (speaker turns only) to the LLM. New
+    # pending files are stored body-anchored by build_transcript_data,
+    # but defend against stale files that still have the notes prefix.
+    # Regression: 2026-04-16 Meet & Greet coaching said "too little
+    # material" because the first 3000 chars were all notes.
+    raw_transcript = pending.get("transcript_text") or ""
+    m = _FIRST_TURN_RE.search(raw_transcript)
+    transcript = raw_transcript[m.start():] if m else raw_transcript
 
     areas_text = "\n".join(
         f"- {a.get('id')}: {a.get('label')} — {a.get('description', '')}"
@@ -828,6 +838,20 @@ def run() -> dict:
             continue
         pending = _load_pending(event_id)
         if pending is None:
+            continue
+
+        # Suppress delivery of debriefs with zero extracted content.
+        # Krisp sometimes returns a meeting doc with empty action_items
+        # AND empty key_points (e.g. Google Meet with Steven Oliver,
+        # 2026-04-16). Rendering a title-only debrief with Save/Dismiss
+        # buttons is noise — the operator sees "junk" and has to dismiss.
+        action_items = pending.get("krisp_action_items") or []
+        key_points = pending.get("krisp_key_points") or []
+        has_actionable_item = any(
+            _extract_action_item(it, speakers=pending.get("krisp_speakers") or [])[1]
+            for it in action_items
+        )
+        if not has_actionable_item and not key_points:
             continue
 
         debrief_msg = format_debrief(pending)
