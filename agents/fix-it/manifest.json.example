@@ -2,7 +2,6 @@
   "agent_id": "fix-it",
   "display_name": "Mr Fixit",
   "workspace": "~/.clawford/fix-it-workspace",
-  "status_file": "~/Dropbox/openclaw-backup/agents/fix-it.status.md",
   "telegram": {
     "account": "fixit",
     "bot_token_env": "TELEGRAM_BOT_TOKEN"
@@ -19,7 +18,6 @@
   "scripts": [
     "scripts/heartbeat.py",
     "scripts/timed-deliver.py",
-    "scripts/heartbeat-write.py",
     "scripts/security-audit.py",
     "scripts/morning-fleet-deliver.py",
     "scripts/morning-status.py",

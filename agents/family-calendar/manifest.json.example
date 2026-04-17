@@ -2,7 +2,6 @@
   "agent_id": "family-calendar",
   "display_name": "Mistress Mouse",
   "workspace": "~/.clawford/family-calendar-workspace",
-  "status_file": "~/Dropbox/openclaw-backup/agents/family-calendar.status.md",
   "telegram": {
     "account": "familycal",
     "bot_token_env": "FAMILYCAL_BOT_TOKEN"

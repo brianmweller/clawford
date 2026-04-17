@@ -397,7 +397,6 @@ def _synthetic_manifest(
         "agent_id": agent_id,
         "display_name": display_name,
         "workspace": workspace or "/tmp/test-workspace",
-        "status_file": "/tmp/fake-brain/testagent.status.md",
         "telegram": {"account": "testagent", "bot_token_env": "TEST_BOT_TOKEN"},
         "config_files": (
             config_files

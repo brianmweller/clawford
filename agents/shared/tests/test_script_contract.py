@@ -163,7 +163,6 @@ NATIVE_COMPLIANCE_XFAIL: set[str] = {
     "family-calendar/activity-email-check.py",
     "family-calendar/gmail-invite-check.py",
     "family-calendar/chat-parse-schedule.py",
-    "fix-it/heartbeat-write.py",
     "fix-it/security-audit.py",
     "fix-it/diagnose-approval.py",
     "fix-it/morning-fleet-deliver.py",

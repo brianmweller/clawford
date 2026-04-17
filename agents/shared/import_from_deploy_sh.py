@@ -249,7 +249,6 @@ def main() -> int:
         "agent_id": agent_id,
         "display_name": defaults.get("display_name", agent_id),
         "workspace": f"~/.clawford/{agent_id}-workspace",
-        "status_file": f"~/Dropbox/openclaw-backup/agents/{agent_id}.status.md",
         "telegram": defaults.get("telegram", {"account": agent_id, "bot_token_env": ""}),
         "config_files": find_config_files(text, agent_dir),
         "scripts": find_scripts(text),

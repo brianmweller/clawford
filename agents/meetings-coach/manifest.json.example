@@ -2,7 +2,6 @@
   "agent_id": "meetings-coach",
   "display_name": "Sergeant Murphy",
   "workspace": "~/.clawford/meetings-coach-workspace",
-  "status_file": "~/Dropbox/openclaw-backup/agents/meetings-coach.status.md",
   "telegram": {
     "account": "murphy",
     "bot_token_env": "MEETINGS_BOT_TOKEN"

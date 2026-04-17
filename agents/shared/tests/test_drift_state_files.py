@@ -72,7 +72,6 @@ def source_repo_with_state_file(tmp_path: Path, monkeypatch) -> Path:
         "agent_id": "stateagent",
         "display_name": "State Agent",
         "workspace": str(tmp_path / "state-workspace"),
-        "status_file": str(brain_root / "stateagent.status.md"),
         "telegram": {"account": "stateagent", "bot_token_env": "TEST_BOT_TOKEN"},
         "config_files": [],
         "scripts": ["scripts/hello.py", "scripts/heartbeat.py"],

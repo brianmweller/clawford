@@ -2,7 +2,6 @@
   "agent_id": "news-digest",
   "display_name": "Lowly Worm",
   "workspace": "~/.clawford/news-digest-workspace",
-  "status_file": "~/Dropbox/openclaw-backup/agents/news-digest.status.md",
   "telegram": {
     "account": "newsdigest",
     "bot_token_env": "NEWSDIGEST_BOT_TOKEN"

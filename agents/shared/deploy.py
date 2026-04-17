@@ -207,7 +207,6 @@ class Manifest:
     agent_id: str
     display_name: str
     workspace: str
-    status_file: str
     telegram_account: str
     telegram_bot_token_env: str
     config_files: list[ConfigFile]
@@ -263,7 +262,6 @@ def load_manifest_from_dict(data: dict, source_dir: Path | None = None, source_l
         agent_id=data["agent_id"],
         display_name=data["display_name"],
         workspace=data["workspace"],
-        status_file=data.get("status_file", ""),
         telegram_account=data["telegram"]["account"],
         telegram_bot_token_env=data["telegram"].get("bot_token_env", ""),
         config_files=[

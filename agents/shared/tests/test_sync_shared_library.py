@@ -68,7 +68,6 @@ def _seed_shared_library(repo: Path) -> Path:
     # Deploy-only / infra — must NOT get copied into workspaces
     (shared / "deploy.py").write_text("# deploy tool — never deploy into workspaces\n", encoding="utf-8")
     (shared / "workspace-snapshot.py").write_text("# snapshot tool\n", encoding="utf-8")
-    (shared / "write-status.py").write_text("# status writer\n", encoding="utf-8")
     (shared / "contract_wrap.py").write_text("# contract wrapper\n", encoding="utf-8")
     (shared / "import_from_deploy_sh.py").write_text("# legacy importer\n", encoding="utf-8")
     (shared / "SCRIPT_CONTRACT.md").write_text("# contract doc\n", encoding="utf-8")
@@ -191,12 +190,11 @@ def test_sync_shared_library_skips_deploy_tool_itself(
 def test_sync_shared_library_skips_other_deploy_only_modules(
     deploy_module, seeded_repo, fake_workspace
 ):
-    """workspace-snapshot.py, contract_wrap.py, write-status.py,
-    import_from_deploy_sh.py, SCRIPT_CONTRACT.md are all deploy-side
-    only. (fleet-manifest.json was added to SHARED_RUNTIME_MODULES
-    in the P0.2 doctor-audit rollout because the script looks the
-    manifest up relative to its own __file__ — it's no longer
-    deploy-only.)"""
+    """workspace-snapshot.py, contract_wrap.py, import_from_deploy_sh.py,
+    SCRIPT_CONTRACT.md are all deploy-side only. (fleet-manifest.json
+    was added to SHARED_RUNTIME_MODULES in the P0.2 doctor-audit rollout
+    because the script looks the manifest up relative to its own
+    __file__ — it's no longer deploy-only.)"""
     mf = deploy_module.load_manifest(
         seeded_repo / "agents" / "testagent" / "manifest.json"
     )
@@ -206,7 +204,6 @@ def test_sync_shared_library_skips_other_deploy_only_modules(
     for name in (
         "workspace-snapshot.py",
         "contract_wrap.py",
-        "write-status.py",
         "import_from_deploy_sh.py",
         "SCRIPT_CONTRACT.md",
     ):

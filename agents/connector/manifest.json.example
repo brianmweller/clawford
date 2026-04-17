@@ -2,7 +2,6 @@
   "agent_id": "connector",
   "display_name": "Huckle Cat",
   "workspace": "~/.clawford/connector-workspace",
-  "status_file": "~/Dropbox/openclaw-backup/agents/connector.status.md",
   "telegram": {
     "account": "huckle",
     "bot_token_env": "CONNECTOR_BOT_TOKEN"

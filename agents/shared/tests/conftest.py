@@ -82,7 +82,6 @@ def fake_source_repo(tmp_path: Path, fake_brain_root: Path) -> Path:
         "agent_id": "testagent",
         "display_name": "Test Agent",
         "workspace": str(tmp_path / "fake-workspace"),
-        "status_file": str(fake_brain_root / "testagent.status.md"),
         "telegram": {"account": "testagent", "bot_token_env": "TEST_BOT_TOKEN"},
         "config_files": [],
         "scripts": ["scripts/hello.py", "scripts/heartbeat.py"],

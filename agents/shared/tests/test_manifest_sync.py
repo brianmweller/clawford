@@ -10,7 +10,7 @@ this sync to apply it to their manifest.json.
 
 Structural fields synced: config_files, scripts, state_files.
 Operator-private fields preserved: crons (contains prompt PII),
-approvals, agent_id, display_name, workspace, status_file, telegram.
+approvals, agent_id, display_name, workspace, telegram.
 """
 from __future__ import annotations
 
