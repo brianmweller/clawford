@@ -313,6 +313,68 @@ def test_run_fetches_week_on_monday(mb, gcal_2d, gcal_7d, tmp_path, monkeypatch)
     assert "📅 WEEK AHEAD" in body
 
 
+# ─── all-day events (Bug: 2026-04-17) ────────────────────────────────
+
+
+def test_all_day_event_not_assigned_to_evening_bucket(mb):
+    """Google Calendar all-day events come in as '2026-04-14' (date-only).
+    Before the fix, datetime.fromisoformat parsed these as naive
+    midnight, got stamped UTC, then converted to Pacific = 5 PM PDT the
+    previous day — landing every birthday/holiday in the 'evening'
+    bucket at 5pm. All-day events must live in their own bucket."""
+    events = [
+        {
+            "summary": "Avery's birthday",
+            "start": "2026-04-14",
+            "end": "2026-04-15",
+            "all_day": True,
+        },
+        {
+            "summary": "5pm playdate",
+            "start": "2026-04-14T17:00:00-07:00",
+            "all_day": False,
+        },
+    ]
+    grouped = mb.group_by_time_block(events)
+    assert [e["summary"] for e in grouped["all_day"]] == ["Avery's birthday"]
+    assert [e["summary"] for e in grouped["evening"]] == ["5pm playdate"]
+    # Most importantly, the birthday must NOT end up in the evening bucket.
+    assert "Avery's birthday" not in {e["summary"] for e in grouped["evening"]}
+
+
+def test_all_day_event_assigned_to_today_not_previous_day(mb):
+    """split_today_tomorrow must compare the raw date string to the
+    Pacific 'today', not go through a UTC-stamped midnight conversion
+    that slides all-day events back one day."""
+    now_pacific = datetime(2026, 4, 14, 3, 0, tzinfo=ZoneInfo("America/Los_Angeles"))
+    events = [
+        {"summary": "Today's birthday", "start": "2026-04-14", "all_day": True},
+        {"summary": "Tomorrow's holiday", "start": "2026-04-15", "all_day": True},
+    ]
+    today, tomorrow = mb.split_today_tomorrow(events, now_pacific)
+    assert [e["summary"] for e in today] == ["Today's birthday"]
+    assert [e["summary"] for e in tomorrow] == ["Tomorrow's holiday"]
+
+
+def test_format_brief_renders_all_day_section_without_timestamp(mb):
+    """The rendered brief must include an '📅 ALL-DAY' section and the
+    all-day event line must NOT contain '5:00 PM' (or any time prefix)."""
+    now_pacific = datetime(2026, 4, 14, 3, 0, tzinfo=ZoneInfo("America/Los_Angeles"))
+    events = [
+        {
+            "summary": "Dad's birthday",
+            "start": "2026-04-14",
+            "all_day": True,
+            "calendar_emoji": "🎂",
+        },
+    ]
+    body = mb.format_brief(events, None, now_pacific)
+    assert "📅 ALL-DAY" in body
+    assert "Dad's birthday" in body
+    # Regression: the pre-fix bug rendered this at 5:00 PM.
+    assert "5:00 PM" not in body, f"all-day event must not render a timestamp:\n{body}"
+
+
 def test_main_always_exits_zero_on_error(mb, monkeypatch, capsys):
     def boom():
         raise RuntimeError("simulated failure")

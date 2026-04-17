@@ -61,8 +61,18 @@ def _run_script(script_name: str, *args: str, timeout: int = SUBPROCESS_TIMEOUT_
 def _parse_event_dt(iso_str: str) -> datetime | None:
     """Parse an ISO-8601 event start (e.g. '2026-04-14T09:00:00-07:00')
     into an offset-aware datetime. Converts to Pacific so downstream
-    code only deals with local times."""
+    code only deals with local times.
+
+    Returns None for date-only strings ('2026-04-14') — all-day events
+    must be routed through _event_date() / event["all_day"] instead.
+    Before 2026-04-17, this path silently parsed date-only strings as
+    naive midnight, stamped UTC, then converted to Pacific, landing
+    every all-day event at 5 PM the previous day."""
     if not iso_str:
+        return None
+    # Date-only strings are the all-day sentinel from gcal-fetch.py —
+    # never produce a datetime for them.
+    if "T" not in iso_str:
         return None
     try:
         dt = datetime.fromisoformat(iso_str)
@@ -71,6 +81,25 @@ def _parse_event_dt(iso_str: str) -> datetime | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(PACIFIC)
+
+
+def _event_date(event: dict) -> "date | None":
+    """Return the Pacific-local calendar date an event belongs to, for
+    both all-day and timed events. All-day events use the raw 'start'
+    date string (no timezone conversion); timed events fall through to
+    _parse_event_dt."""
+    from datetime import date as _date
+
+    start = event.get("start", "") if isinstance(event, dict) else ""
+    if not start:
+        return None
+    if event.get("all_day"):
+        try:
+            return _date.fromisoformat(start[:10])
+        except ValueError:
+            return None
+    dt = _parse_event_dt(start)
+    return dt.date() if dt else None
 
 
 def split_today_tomorrow(events: list, now_pacific: datetime) -> tuple[list, list]:
@@ -82,10 +111,9 @@ def split_today_tomorrow(events: list, now_pacific: datetime) -> tuple[list, lis
     for event in events:
         if not isinstance(event, dict):
             continue
-        start_dt = _parse_event_dt(event.get("start", ""))
-        if start_dt is None:
+        event_date = _event_date(event)
+        if event_date is None:
             continue
-        event_date = start_dt.date()
         days_ahead = (event_date - today_p).days
         if days_ahead == 0:
             today_events.append(event)
@@ -98,10 +126,15 @@ def split_today_tomorrow(events: list, now_pacific: datetime) -> tuple[list, lis
 
 
 def group_by_time_block(events: list) -> dict:
-    """Split events into morning (<12), afternoon (12-16), evening (17+)
-    buckets. Uses the Pacific hour of each event's start time."""
-    groups = {"morning": [], "afternoon": [], "evening": []}
+    """Split events into all_day / morning (<12) / afternoon (12-16) /
+    evening (17+) buckets. All-day events go to their own bucket so the
+    renderer can omit the time prefix; timed events use the Pacific
+    hour of their start time."""
+    groups = {"all_day": [], "morning": [], "afternoon": [], "evening": []}
     for event in events:
+        if event.get("all_day"):
+            groups["all_day"].append(event)
+            continue
         start_dt = _parse_event_dt(event.get("start", ""))
         if start_dt is None:
             continue
@@ -125,15 +158,24 @@ def _fmt_time(dt: datetime) -> str:
 
 
 def _fmt_event_line(event: dict) -> str:
-    start_dt = _parse_event_dt(event.get("start", ""))
-    time_str = _fmt_time(start_dt) if start_dt else "??:??"
     emoji = event.get("calendar_emoji") or ""
     label = event.get("calendar_label") or ""
     summary = event.get("summary") or "(untitled)"
     location = (event.get("location") or "").strip()
 
-    # Shape: "HH:MM  {emoji} {label} — {summary} ({location})"
-    parts = [f"{time_str}"]
+    if event.get("all_day"):
+        time_str = None
+    else:
+        start_dt = _parse_event_dt(event.get("start", ""))
+        time_str = _fmt_time(start_dt) if start_dt else "??:??"
+
+    # Shape (timed):   "HH:MM AM  {emoji} {label} — {summary} ({location})"
+    # Shape (all-day): "         {emoji} {label} — {summary} ({location})"
+    # Space-padding for all-day keeps the summary column aligned with
+    # timed lines so the brief reads as a single column.
+    parts = []
+    if time_str is not None:
+        parts.append(time_str)
     if emoji:
         parts.append(emoji)
     if label:
@@ -146,11 +188,13 @@ def _fmt_event_line(event: dict) -> str:
 
 
 def _fmt_preview_line(event: dict) -> str:
-    start_dt = _parse_event_dt(event.get("start", ""))
-    time_str = _fmt_time(start_dt) if start_dt else "??:??"
     emoji = event.get("calendar_emoji") or ""
     summary = event.get("summary") or "(untitled)"
     tag = f"{emoji} " if emoji else ""
+    if event.get("all_day"):
+        return f"  all-day  {tag}{summary}"
+    start_dt = _parse_event_dt(event.get("start", ""))
+    time_str = _fmt_time(start_dt) if start_dt else "??:??"
     return f"  {time_str}  {tag}{summary}"
 
 
@@ -180,6 +224,12 @@ def format_brief(
     else:
         grouped = group_by_time_block(today_events)
         rule = "━━━━━━━━━━━━━━━"
+        if grouped["all_day"]:
+            lines.append("📅 ALL-DAY")
+            lines.append(rule)
+            for event in grouped["all_day"]:
+                lines.append(_fmt_event_line(event))
+            lines.append("")
         if grouped["morning"]:
             lines.append("☀️ MORNING")
             lines.append(rule)
@@ -231,13 +281,13 @@ def _format_weekly_overview_lines(
     today_p = now_pacific.date()
     by_day: dict[str, list[dict]] = {}
     for event in week_events:
-        start_dt = _parse_event_dt(event.get("start", ""))
-        if start_dt is None:
+        event_date = _event_date(event)
+        if event_date is None:
             continue
-        delta = (start_dt.date() - today_p).days
+        delta = (event_date - today_p).days
         if delta < 0 or delta > 6:
             continue
-        key = start_dt.strftime("%A")
+        key = event_date.strftime("%A")
         by_day.setdefault(key, []).append(event)
 
     import datetime as _dt  # local alias to avoid shadowing the module

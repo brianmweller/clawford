@@ -115,6 +115,59 @@ def resolve_google_news_url(url):
     return url
 
 
+# Map publisher hostnames to friendly source labels. Falls back to the
+# bare domain (minus leading www.) for any host not listed here.
+_PUBLISHER_LABELS = {
+    "nytimes.com": "NYT",
+    "wsj.com": "WSJ",
+    "washingtonpost.com": "WaPo",
+    "bbc.com": "BBC",
+    "bbc.co.uk": "BBC",
+    "reuters.com": "Reuters",
+    "apnews.com": "AP",
+    "ft.com": "FT",
+    "theguardian.com": "Guardian",
+    "bloomberg.com": "Bloomberg",
+    "cnn.com": "CNN",
+    "cnbc.com": "CNBC",
+    "npr.org": "NPR",
+    "economist.com": "Economist",
+    "axios.com": "Axios",
+    "politico.com": "Politico",
+    "theatlantic.com": "Atlantic",
+    "newyorker.com": "New Yorker",
+    "vox.com": "Vox",
+    "arstechnica.com": "Ars Technica",
+    "techcrunch.com": "TechCrunch",
+    "wired.com": "Wired",
+    "theverge.com": "Verge",
+}
+
+
+def publisher_label_from_url(url: str) -> str | None:
+    """Return a friendly publisher label (e.g. 'NYT') for a resolved
+    article URL, or the bare domain if we don't have a friendly name.
+    Returns None if the URL is unparseable or still a Google News
+    redirect (which means resolution failed upstream)."""
+    if not url or "news.google.com" in url:
+        return None
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(url).hostname or ""
+    except Exception:
+        return None
+    host = host.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    if host in _PUBLISHER_LABELS:
+        return _PUBLISHER_LABELS[host]
+    # Also match suffix (e.g. 'edition.cnn.com' → 'CNN' via 'cnn.com')
+    for suffix, label in _PUBLISHER_LABELS.items():
+        if host.endswith("." + suffix):
+            return label
+    return host or None
+
+
 def clean_url(url):
     """Strip tracking parameters from URLs."""
     from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
@@ -148,6 +201,13 @@ def parse_pub_date(entry):
     return datetime.now(timezone.utc)
 
 
+_FEEDPARSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
+
 def fetch_single_feed(feed_config):
     """Fetch and parse a single RSS feed. Returns list of article dicts."""
     url = feed_config["url"]
@@ -156,7 +216,9 @@ def fetch_single_feed(feed_config):
     articles = []
 
     try:
-        feed = feedparser.parse(url)
+        # Some publishers (NYT, WSJ, WaPo) 403 the default feedparser UA
+        # from datacenter IPs. Send a browser-like UA to unblock them.
+        feed = feedparser.parse(url, agent=_FEEDPARSER_UA)
         if feed.bozo and not feed.entries:
             return articles, {"source": label, "error": str(feed.bozo_exception)}
 
@@ -175,8 +237,14 @@ def fetch_single_feed(feed_config):
                 continue
 
             # Resolve Google News redirect URLs to real article URLs
+            article_label = label
             if source == "google_news":
                 link = resolve_google_news_url(link)
+                # After unwrap, show the real publisher instead of the
+                # generic feed label ("Google AI", "Google Economics", ...)
+                publisher = publisher_label_from_url(link)
+                if publisher:
+                    article_label = publisher
 
             # Clean tracking params from all URLs
             link = clean_url(link)
@@ -188,7 +256,7 @@ def fetch_single_feed(feed_config):
                 "link": link,
                 "summary": summary,
                 "source": source,
-                "source_label": label,
+                "source_label": article_label,
                 "pub_date": pub_date.isoformat(),
                 "fetched_at": datetime.now(timezone.utc).isoformat(),
             }, source_type=f"rss:{source}"))
@@ -328,13 +396,20 @@ def fetch_linkedin_browser():
             continue
         first_line = text.split("\n")[0][:120]
         title = f"{author}: {first_line}{'...' if len(first_line) >= 120 else ''}"
+        # Coerce likes to an integer — the scraper sometimes returns the
+        # button label ("Like") instead of a count, producing the
+        # nonsense "LinkedIn (Like likes)" source label the operator saw.
+        likes_raw = str(post.get("likes", "0"))
+        likes_digits = "".join(ch for ch in likes_raw if ch.isdigit())
+        likes_int = int(likes_digits) if likes_digits else 0
+        source_label = f"LinkedIn ({likes_int} likes)" if likes_int > 0 else "LinkedIn"
         articles.append(_scan_article_fields({
             "id": article_id(post.get("url", "") + text[:50]),
             "title": title,
             "link": clean_url(post.get("url", "https://www.linkedin.com")),
             "summary": text[:300],
             "source": "linkedin",
-            "source_label": f"LinkedIn ({post.get('likes', '0')} likes)",
+            "source_label": source_label,
             "pub_date": datetime.now(timezone.utc).isoformat(),
             "fetched_at": datetime.now(timezone.utc).isoformat(),
         }, source_type="linkedin-feed"))

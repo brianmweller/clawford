@@ -464,7 +464,11 @@ def _operator_emails() -> set[str]:
 
 
 def _find_google_token() -> Path | None:
+    # Connector's own token first (created via agents/connector/scripts/gcal-auth.py).
+    # Cross-workspace paths are kept as legacy fallbacks but silently break under
+    # bubblewrap isolation — the connector process can't see another workspace's files.
     candidates = [
+        Path(os.path.expanduser("~/.clawford/connector-workspace/token.json")),
         Path(os.path.expanduser("~/.clawford/family-calendar-workspace/token.json")),
         Path(os.path.expanduser("~/.clawford/meetings-coach-workspace/token.json")),
     ]
