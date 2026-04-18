@@ -237,7 +237,7 @@ Two stand out from the migration window itself:
 - **~260x reduction in per-call LLM token overhead.** The codex CLI prepends ~8,100 tokens of agentic framing to every call. The direct-HTTP broker in `agents/shared/llm.py` sends ~25 tokens of system-prompt scaffolding. For a fleet that fires dozens of cron ticks a day, the difference is the gap between "subscription is fine" and "subscription is fine *and* I have headroom for new agents."
 - **~350 lines of `deploy.py` deleted in the cleanup pass.** That sweep removed ~1,000 lines of test + production OpenClaw code paths. `deploy.py` is now a file-sync + validation tool — exactly the shape it should have always been.
 - **Zero-OC live-run invariant.** `deploy.py` no longer references the OpenClaw gateway anywhere. The structural guarantee is enforced by a test (`test_phase7_openclaw_helpers_deleted`) that fails loudly if any deleted symbol gets resurrected.
-- **Test count grew.** ~810 tests passing across the fleet at the end of the migration, up from the pre-liberation baseline. Not net additions (some OpenClaw-coupled tests got deleted alongside their subjects) but an honest expansion of what's covered. The TDD discipline carried throughout: every shared-library module landed with tests in the same commit or earlier, never later.
+- **Test count grew.** ~810 tests at the end of the migration, up from the pre-liberation baseline. Not net additions (some OpenClaw-coupled tests got deleted alongside their subjects) but an honest expansion of what's covered. Since then the fleet has kept growing under the same TDD discipline — ~2,100 tests today. Every shared-library module landed with tests in the same commit or earlier, never later.
 
 ### What didn't change
 
