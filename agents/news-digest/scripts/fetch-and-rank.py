@@ -321,34 +321,57 @@ def _summarize_linkedin_thread(sender: str, full_messages: list[str]) -> str | N
 
 _PROFILE_VIEW_NAME_RE = re.compile(r"^(.+?)\s+viewed your profile", re.IGNORECASE)
 
+_TIME_AGO_UNIT_RANK = {"m": 0, "h": 1, "d": 2, "w": 3}
+
+
+def _time_ago_key(t: str) -> tuple[int, int]:
+    t = (t or "").strip().lower()
+    unit = t[-1:] if t[-1:] in _TIME_AGO_UNIT_RANK else "h"
+    try:
+        value = int("".join(c for c in t if c.isdigit()) or "99")
+    except ValueError:
+        value = 99
+    return (_TIME_AGO_UNIT_RANK.get(unit, 1), value)
+
+
+def _time_ago_within_24h(t: str) -> bool:
+    """Keep minutes- and hours-ago viewers (strictly under a day).
+
+    Drop 'd'/'w' entries: since the brief runs daily, those viewers
+    were either surfaced on an earlier morning (or would have been, if
+    the system had been running). The filter is deliberately stricter
+    than 24h — '1d' is ambiguous (could be 25h, could be 40h) so we
+    drop it to avoid re-showing yesterday's viewers."""
+    if not t:
+        return False
+    unit = t.strip().lower()[-1:]
+    return unit in ("m", "h")
+
 
 def _build_profile_view_summary(notifications: list[dict]) -> dict | None:
     """Collapse every `type: profile_view` notification into ONE rollup.
 
-    LinkedIn fires one "X viewed your profile" notification per viewer
-    (and occasional aggregate ones like "53 recruiters viewed your
-    profile"). The scraper captures each with a `detail_names` list of
-    {name, time_ago} for the most recent viewers. Previously each
-    individual ping landed in the morning brief as its own low-signal
-    item; now we produce one synthesized notification carrying the
-    count and every viewer+time the scraper saw.
+    LinkedIn fires one 'X viewed your profile' notification per recent
+    view event. The scraper captures each with:
+      - `text`: the headline viewer label (e.g. 'Omar Shahine viewed
+        your profile' OR, for anonymous viewers,
+        'Soldier / Military Officer at US Navy viewed your profile')
+      - `time_ago`: how recently the headline viewer landed
+      - `detail_names`: named 1st-connections ONLY — anonymous viewers
+        ('someone at Google', 'Principal Engineer at Anthropic') never
+        appear here; they only show up in `text`.
 
-    Returns None when no profile_view notifications are present.
+    This helper merges viewers from BOTH places, deduping by name
+    (keeping the freshest time_ago per person), filters to strictly
+    under 24h so repeat brief cadence doesn't re-show yesterday's
+    viewers, and returns one synthesized notification article.
+
+    Returns None when no fresh (within-24h) profile_view viewers exist.
     """
-    viewer_times: dict[str, str] = {}  # name → time_ago (freshest kept)
+    viewer_times: dict[str, str] = {}
 
     def _less_old(a: str, b: str) -> bool:
-        # Rough ordering: shorter time_ago strings are fresher. "2h" < "9h" < "1d" < "3d".
-        rank = {"m": 0, "h": 1, "d": 2, "w": 3}
-        def key(t: str) -> tuple[int, int]:
-            t = (t or "").strip().lower()
-            unit = t[-1:] if t[-1:] in rank else "h"
-            try:
-                value = int("".join(c for c in t if c.isdigit()) or "99")
-            except ValueError:
-                value = 99
-            return (rank.get(unit, 1), value)
-        return key(a) < key(b)
+        return _time_ago_key(a) < _time_ago_key(b)
 
     def _add(name: str, time_ago: str) -> None:
         name = (name or "").strip()
@@ -363,32 +386,27 @@ def _build_profile_view_summary(notifications: list[dict]) -> dict | None:
         if notif.get("type") != "profile_view":
             continue
         any_profile_view = True
-        details = notif.get("detail_names") or []
-        if details:
-            for d in details:
-                _add(d.get("name", ""), d.get("time_ago", ""))
-        else:
-            # Fallback: scraper gave us "X viewed your profile" with no
-            # detail_names. Pull X out so the viewer still shows up.
-            m = _PROFILE_VIEW_NAME_RE.match(notif.get("text", "") or "")
-            if m:
-                _add(m.group(1), notif.get("time_ago", ""))
+        # Text headline viewer — the ONLY place anonymous viewers land.
+        m = _PROFILE_VIEW_NAME_RE.match(notif.get("text", "") or "")
+        if m:
+            _add(m.group(1), notif.get("time_ago", ""))
+        # Named 1st-connections enumerated by LinkedIn.
+        for d in notif.get("detail_names") or []:
+            _add(d.get("name", ""), d.get("time_ago", ""))
 
     if not any_profile_view:
         return None
 
-    # Sort viewers by freshness (same ordering rule as the merge).
-    ordered = sorted(
-        viewer_times.items(),
-        key=lambda kv: (
-            {"m": 0, "h": 1, "d": 2, "w": 3}.get((kv[1] or "h")[-1:].lower(), 1),
-            int("".join(c for c in (kv[1] or "") if c.isdigit()) or 99),
-        ),
-    )
-    count = len(ordered)
-    lines = [f"• {name} — {time_ago}" if time_ago else f"• {name}" for name, time_ago in ordered]
-    summary = "\n".join(lines) if lines else "See LinkedIn for details."
+    # 24h filter: drop viewers with time_ago in days/weeks — they were
+    # already on an earlier brief, or would have been.
+    fresh = {name: t for name, t in viewer_times.items() if _time_ago_within_24h(t)}
+    if not fresh:
+        return None
 
+    ordered = sorted(fresh.items(), key=lambda kv: _time_ago_key(kv[1]))
+    count = len(ordered)
+    lines = [f"• {name} — {time_ago}" for name, time_ago in ordered]
+    summary = "\n".join(lines)
     title = f"👁️ Profile visitors — last 24h ({count})"
     return {
         "id": article_id(f"profile-view-rollup-{count}-{'-'.join(n for n, _ in ordered)[:80]}"),
