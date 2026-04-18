@@ -46,6 +46,7 @@ from agents.shared.google_oauth import build_flow, save_credentials
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/tasks",
 ]
 
 DEFAULT_CREDS = os.path.expanduser(

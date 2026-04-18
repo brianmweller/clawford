@@ -16,6 +16,7 @@
 #   */15 * * * *  fleet-health                    → TELEGRAM_BOT_TOKEN  (R3 — replaces per-agent heartbeats)
 #   0 */6 * * *   linkedin-keepalive              → NEWSDIGEST_BOT_TOKEN
 #   */5 * * * *   family-calendar-reminder-check  → FAMILYCAL_BOT_TOKEN
+#   */5 * * * *   family-calendar-tasks-sync      → FAMILYCAL_BOT_TOKEN  (two-way sync brain tasks ↔ Google Tasks "Sam.M.Smith's list")
 #   */5 * * * *   news-digest-engagement-poll     → NEWSDIGEST_BOT_TOKEN
 #   0 23 * * *    news-digest-preference-update   → NEWSDIGEST_BOT_TOKEN  (Phase 3b — pure-Python, calls llm.infer internally)
 #   30 10 * * *   shopping-delivery-digest        → SHOPPING_BOT_TOKEN   (Phase 4 — full daily digest, writes cache/morning-brief-ready.txt for 5 AM PT fleet delivery; appends monthly S&S section on the 1st)
@@ -111,6 +112,7 @@ DIRECT_ENTRIES=(
 CONTRACT_ENTRIES=(
   "0 */6 * * *|linkedin-keepalive|/home/openclaw/.clawford/news-digest-workspace/scripts/linkedin-keepalive.py|NEWSDIGEST_BOT_TOKEN|300"
   "*/5 * * * *|family-calendar-reminder-check|/home/openclaw/.clawford/family-calendar-workspace/scripts/reminder-check.py|FAMILYCAL_BOT_TOKEN|90"
+  "*/5 * * * *|family-calendar-tasks-sync|/home/openclaw/.clawford/family-calendar-workspace/scripts/gcal-tasks-sync.py|FAMILYCAL_BOT_TOKEN|120"
   "*/5 * * * *|news-digest-engagement-poll|/home/openclaw/.clawford/news-digest-workspace/scripts/engagement-poller.py|NEWSDIGEST_BOT_TOKEN|60"
   "0 23 * * *|news-digest-preference-update|/home/openclaw/.clawford/news-digest-workspace/scripts/update-preferences.py|NEWSDIGEST_BOT_TOKEN|300"
   "30 10 * * *|shopping-delivery-digest|/home/openclaw/.clawford/shopping-workspace/scripts/delivery-digest.py|SHOPPING_BOT_TOKEN|900"

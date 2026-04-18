@@ -131,7 +131,7 @@ Notes are raw human inputs — things jotted down in Workflowy or on a Post-it. 
 
 ### 4. Tasks
 
-Tasks are action items assigned to a person or agent.
+Tasks are action items assigned to a person or agent. Append-only with a narrow set of in-place edit exceptions; see below.
 
 **Location:** `tasks/queue.md`
 
@@ -142,13 +142,29 @@ Tasks are action items assigned to a person or agent.
 | id | Yes | `{agent}-{YYYY-MM-DD}-{seq}` |
 | description | Yes | What needs to be done |
 | assignee | Yes | `me`, `wife`, or an agent name |
-| status | Yes | `open`, `done`, `cancelled` |
-| due_date | No | When it's due |
+| status | Yes | `open`, `done`, `cancelled`, `ignored`, `deleted` |
+| due_at | No | ISO 8601. Date-only (`2026-04-18`) means all-day; datetime (`2026-04-18T17:00:00Z`) means specific time. |
 | source_agent | Yes | Which agent created it |
 | created_at | Yes | ISO 8601 timestamp |
-| completed_at | No | When marked done |
+| completed_at | No | Stamped in place when status flips to `done` |
 
-Tasks assigned to "me" are synced to Google Calendar Tasks by the creating agent. Completed tasks are archived monthly by Fix-It.
+**Status semantics.**
+- `open` — active, surfaceable.
+- `done` — user completed it.
+- `cancelled` — no longer applicable (agent or user decision).
+- `ignored` — user explicitly dismissed via the reminder's 🚫 button. Remote surfaces (e.g., Google Tasks) get a `[IGNORED] ` title prefix and `completed` status so the task is archived but recoverable.
+- `deleted` — tombstone for phone-side deletes. Filtered from all reads unless `include_deleted=True`. Surfaces see it as if it never existed.
+
+**Surfacing (Mistress Mouse).** Tasks with `assignee=me` and `status=open` surface in the 5 AM Pacific morning brief under "✅ TODAY'S TASKS" when their `due_at` date is today. Timed tasks additionally get a Telegram T-30min reminder with inline buttons: ✅ done · ⏭ snooze · 🚫 ignore. Overdue-by-24h escalation fires once. On Mondays the brief renders a "📝 UNSCHEDULED" rollup of open tasks with no `due_at`.
+
+**Google Tasks sync.** Tasks with `assignee=me` two-way sync to the operator's `Sam.M.Smith's list` Google Tasks list (read/write, every 5 min) via `gcal-tasks-sync.py`. queue.md is canonical for descriptions and timing; checking a task off from the phone flips `status` locally at the next sync tick.
+
+**In-place edit exceptions (to append-only).** Tasks are the only primitive with designed in-place edits:
+- `status` — `open → done|cancelled|ignored|deleted`, plus `ignored → open` when a phone-side reopen is detected.
+- `due_at` — overwritten in place when the user taps ⏭ snooze (timed tasks advance 1h, all-day advance 1d).
+- `completed_at` — written in place when `status` flips to `done`.
+
+Fix-It's monthly archival prunes terminal-status tasks (including `deleted` tombstones).
 
 ---
 

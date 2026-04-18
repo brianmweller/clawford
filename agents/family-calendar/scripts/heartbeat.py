@@ -42,6 +42,7 @@ from agents.shared.google_oauth import get_credentials  # noqa: E402
 GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/tasks",
 ]
 
 WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")

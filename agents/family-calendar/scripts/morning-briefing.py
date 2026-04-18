@@ -187,6 +187,18 @@ def _fmt_event_line(event: dict) -> str:
     return line
 
 
+def _fmt_task_line(task) -> str:
+    """Render a task for the TODAY'S TASKS section. Timed tasks show
+    Pacific-local time; all-day tasks omit time. Tasks with no due_at
+    should not reach this function (the surfacer filters them)."""
+    desc = task.description or "(untitled)"
+    if task.is_timed():
+        start_dt = _parse_event_dt(task.due_at)
+        time_str = _fmt_time(start_dt) if start_dt else "??:??"
+        return f"  {time_str}  ✓ {desc}"
+    return f"  all-day  ✓ {desc}"
+
+
 def _fmt_preview_line(event: dict) -> str:
     emoji = event.get("calendar_emoji") or ""
     summary = event.get("summary") or "(untitled)"
@@ -202,13 +214,22 @@ def format_brief(
     events: list,
     week_events: list | None,
     now_pacific: datetime,
+    *,
+    today_tasks: list | None = None,
+    unscheduled_tasks: list | None = None,
 ) -> str:
     """Render the full morning brief: today section (time-blocked) + tomorrow preview.
 
     `events` is the combined today+tomorrow list from gcal-fetch --days 2.
     `week_events` is optional — pass a 7-day list only on Mondays to
     emit the appended WEEK AHEAD section.
+    `today_tasks` / `unscheduled_tasks` are ``brain_tasks.Task`` objects
+    surfaced by ``task_surfacer``. Tasks render in a dedicated section
+    between the event blocks and the tomorrow preview. The unscheduled
+    rollup is Monday-only.
     """
+    today_tasks = today_tasks or []
+    unscheduled_tasks = unscheduled_tasks or []
     today_events, tomorrow_events = split_today_tomorrow(events, now_pacific)
 
     weekday = now_pacific.strftime("%A")
@@ -249,6 +270,17 @@ def format_brief(
                 lines.append(_fmt_event_line(event))
             lines.append("")
 
+    if today_tasks:
+        lines.append("✅ TODAY'S TASKS")
+        lines.append("━━━━━━━━━━━━━━━")
+        # Timed first (sorted by due_at), all-day after
+        timed = [t for t in today_tasks if t.is_timed()]
+        timed.sort(key=lambda t: t.due_at or "")
+        all_day = [t for t in today_tasks if t.is_all_day()]
+        for t in timed + all_day:
+            lines.append(_fmt_task_line(t))
+        lines.append("")
+
     lines.append("📋 TOMORROW PREVIEW")
     if tomorrow_events:
         for event in tomorrow_events:
@@ -257,6 +289,15 @@ def format_brief(
         tomorrow_dt = now_pacific + __import__("datetime").timedelta(days=1)
         lines.append(f"  Standard {tomorrow_dt.strftime('%A')} — no exceptions.")
     lines.append("")
+
+    # Monday-only: unscheduled tasks rollup
+    if now_pacific.weekday() == 0 and unscheduled_tasks:
+        lines.append("📝 UNSCHEDULED")
+        lines.append("━━━━━━━━━━━━━━━")
+        for t in unscheduled_tasks:
+            desc = t.description or "(untitled)"
+            lines.append(f"  • {desc}")
+        lines.append("")
 
     # Monday-only: weekly overview section
     if now_pacific.weekday() == 0 and week_events:
@@ -358,7 +399,34 @@ def run() -> dict:
         elif isinstance(weekly, dict):
             week_events = weekly.get("events", [])
 
-    body = format_brief(daily_events, week_events, now_pacific)
+    # Tasks from shared brain. Failure here is non-fatal — events are the
+    # primary signal, task-section silent-omission is better than erroring
+    # out the whole brief.
+    today_tasks: list = []
+    unscheduled_tasks: list = []
+    try:
+        # Self-locate agents/shared and agents/family-calendar for the
+        # brain_tasks + task_surfacer imports when invoked as a script.
+        _repo_root = Path(__file__).resolve().parents[3]
+        for _p in (str(_repo_root / "agents" / "shared"), str(_repo_root / "agents" / "family-calendar")):
+            if _p not in sys.path:
+                sys.path.insert(0, _p)
+        import brain_tasks  # type: ignore
+        import task_surfacer  # type: ignore
+        all_tasks = brain_tasks.read_tasks()
+        today_tasks = task_surfacer.tasks_for_morning_brief(all_tasks, now_pacific)
+        if now_pacific.weekday() == 0:
+            unscheduled_tasks = task_surfacer.tasks_for_unscheduled_rollup(all_tasks)
+    except Exception as e:
+        sources_failed.append({"source": "brain_tasks", "error": str(e)})
+
+    body = format_brief(
+        daily_events,
+        week_events,
+        now_pacific,
+        today_tasks=today_tasks,
+        unscheduled_tasks=unscheduled_tasks,
+    )
     _write_atomic(BRIEF_FILE, body)
 
     today_events, tomorrow_events = split_today_tomorrow(daily_events, now_pacific)

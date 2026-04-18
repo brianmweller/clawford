@@ -17,6 +17,10 @@ import pending_actions  # type: ignore
 import memory_writer  # type: ignore
 from subprocess_helpers import run_json_script, is_subprocess_error  # type: ignore
 
+# task_callback lives at agents/family-calendar/task_callback.py; when
+# tools.py is imported by the dispatcher the agent dir is on sys.path.
+from task_callback import handle_task_callback  # type: ignore  # noqa: E402
+
 AGENT_ID = "family-calendar"
 
 WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
@@ -429,4 +433,6 @@ EXECUTORS: dict = {
     "confirm_calendar_cancel": confirm_calendar_cancel,
     "propose_remember": propose_remember,
     "confirm_remember": confirm_remember,
+    # Dispatcher shortcut — callback buttons on task reminders.
+    "handle_task_callback": handle_task_callback,
 }

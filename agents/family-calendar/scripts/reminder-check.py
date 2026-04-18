@@ -46,6 +46,13 @@ for _p in Path(__file__).resolve().parents:
 
 from agents.shared.meeting_classifier import has_videoconference_link  # noqa: E402
 from agents.shared.calendar_index import meeting_event_ids  # noqa: E402
+from agents.shared import brain_tasks  # noqa: E402
+
+# Surfacer lives at agents/family-calendar/task_surfacer.py — added to sys.path
+# above. Import after the brain-tasks import so the surfacer's ``from
+# brain_tasks import Task`` resolves cleanly.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import task_surfacer  # type: ignore  # noqa: E402
 
 WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
 REMINDERS_PATH = os.path.join(WORKSPACE, "sent-reminders.json")
@@ -142,25 +149,25 @@ def format_reminder_message(reminder: dict) -> str:
     return base
 
 
-def send_telegram(bot_token: str, chat_id: str, text: str) -> bool:
+def send_telegram(bot_token: str, chat_id: str, text: str, reply_markup: dict | None = None) -> bool:
     """POST one reminder to the Telegram Bot API.
 
-    Returns True only if the API responds with body.ok == True. Empty
-    bot_token or chat_id returns False without hitting the network
-    (useful so tests can confirm the host wrapper's env plumbing).
-
-    Any exception (network, auth, rate-limit) logs to stderr and
-    returns False — callers use the bool to decide whether to update
-    the sent-reminders dedup cache.
+    ``reply_markup`` is an optional inline-keyboard dict (see
+    ``build_task_keyboard``). When provided, it's passed through so task
+    reminders get actionable done/snooze/ignore buttons. Event reminders
+    omit it and get a plain text message.
     """
     if not bot_token or not chat_id:
         return False
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = json.dumps({
+    body: dict = {
         "chat_id": chat_id,
         "text": text,
         "disable_web_page_preview": True,
-    }).encode("utf-8")
+    }
+    if reply_markup is not None:
+        body["reply_markup"] = reply_markup
+    payload = json.dumps(body).encode("utf-8")
     req = urllib_request.Request(
         url,
         data=payload,
@@ -173,6 +180,41 @@ def send_telegram(bot_token: str, chat_id: str, text: str) -> bool:
     except Exception as e:
         print(f"Telegram send failed: {e}", file=sys.stderr)
         return False
+
+
+def format_task_reminder_message(payload: dict) -> str:
+    """Render a task ping as Telegram body text.
+
+    T-30min:   "🐭📋 Heads up — {description} in 30 min"
+    T+24h:     "🐭📋 Overdue — {description} (was due {pretty_due})"
+    """
+    desc = payload.get("description", "(untitled task)")
+    tier = payload.get("tier")
+    if tier == "t_30min":
+        return f"🐭📋 Heads up — {desc} in 30 min"
+    # t_24h_overdue — include the original due for context
+    due_at = payload.get("due_at", "")
+    # Strip time zone marker and seconds for display; best-effort.
+    pretty = due_at.replace("T", " ").replace("Z", " UTC")
+    return f"🐭📋 Overdue — {desc} (was due {pretty})"
+
+
+def build_task_keyboard(task_id: str) -> dict:
+    """Inline keyboard with three callback buttons: done, snooze, ignore.
+
+    Prefix convention matches ``agents/shared/dispatcher.py`` — see the
+    ``_TASK_CALLBACK_PREFIXES`` group that routes these to
+    ``handle_task_callback``.
+    """
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "✅ done", "callback_data": f"task_done:{task_id}"},
+                {"text": "⏭ snooze", "callback_data": f"task_snooze:{task_id}"},
+                {"text": "🚫 ignore", "callback_data": f"task_ignore:{task_id}"},
+            ],
+        ]
+    }
 
 
 def get_credentials():
@@ -354,6 +396,24 @@ def main():
         msg = format_reminder_message(reminder)
         if send_telegram(bot_token, chat_id, msg):
             sent_reminders[dedup_key] = now.isoformat()
+            sent_count += 1
+        else:
+            failed_count += 1
+
+    # Task pings — share sent-reminders.json dedup cache with events.
+    try:
+        tasks = brain_tasks.read_tasks()
+    except Exception as e:
+        print(f"brain_tasks.read_tasks failed: {e}", file=sys.stderr)
+        tasks = []
+    task_payloads = task_surfacer.pending_reminders(
+        tasks, now, already_sent=set(sent_reminders.keys())
+    )
+    for payload in task_payloads:
+        msg = format_task_reminder_message(payload)
+        kb = build_task_keyboard(payload["task_id"])
+        if send_telegram(bot_token, chat_id, msg, reply_markup=kb):
+            sent_reminders[payload["dedup_key"]] = now.isoformat()
             sent_count += 1
         else:
             failed_count += 1

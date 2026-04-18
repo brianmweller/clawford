@@ -509,6 +509,36 @@ def _handle_nudge_callback(
         log.warning("handle_nudge_action failed: %s", exc)
 
 
+# task_{done,snooze,ignore}:<task_id> — Mistress Mouse task reminders.
+# The executor (family-calendar/task_callback.py) flips status in queue.md
+# or advances due_at for snoozes. Propagation to Google Tasks happens at
+# the next family-calendar-tasks-sync cron tick (≤5 min).
+_TASK_CALLBACK_PREFIXES = {
+    "task_done": ("done", "\u2705 Marked done"),
+    "task_snooze": ("snooze", "\u23ed Snoozed"),
+    "task_ignore": ("ignore", "\U0001f6ab Ignored"),
+}
+
+
+def _handle_task_callback(
+    cfg: AgentConfig, chat_id: str,
+    action: str, task_id: str, cbq_id: str,
+) -> None:
+    toast = next(
+        (t for p, (a, t) in _TASK_CALLBACK_PREFIXES.items() if a == action),
+        "Noted",
+    )
+    telegram_api.answer_callback_query(cfg.token, cbq_id, text=toast)
+    executor = cfg.executors.get("handle_task_callback")
+    if executor is None:
+        log.warning("no handle_task_callback executor on %s", cfg.agent_id)
+        return
+    try:
+        executor(action=action, task_id=task_id)
+    except Exception as exc:
+        log.warning("handle_task_callback failed: %s", exc)
+
+
 # debrief_{save,dismiss}:<event_id> — Sergeant Murphy post-meeting
 # buttons. Save appends action items to commitments/active.md; Dismiss
 # deletes the pending file. 'See more' is a native Telegram URL button
@@ -620,6 +650,13 @@ def _try_callback_shortcut(
         if data.startswith(prefix + ":"):
             slug = data[len(prefix) + 1:]
             _handle_nudge_callback(cfg, chat_id, action, slug, cbq_id)
+            return True
+
+    # Task reminder buttons (Mistress Mouse): task_{done,snooze,ignore}:<task_id>
+    for prefix, (action, _toast) in _TASK_CALLBACK_PREFIXES.items():
+        if data.startswith(prefix + ":"):
+            task_id = data[len(prefix) + 1:]
+            _handle_task_callback(cfg, chat_id, action, task_id, cbq_id)
             return True
 
     # Debrief buttons (Sergeant Murphy): debrief_{save,dismiss,modify}:<event_id>
