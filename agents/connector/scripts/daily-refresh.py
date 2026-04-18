@@ -566,6 +566,20 @@ def run() -> dict:
     # Merge all email-keyed signals
     merged = merge_signals(gmail_signals, gcal_past, krisp_signals)
 
+    # Per-file write failures are collected rather than raised. Dropbox
+    # can park a single person file in transient Errno-30 state; the
+    # pre-2026-04-18 behavior let that abort the whole batch (see
+    # 2026-04-18 kristen-pearis.md host log). Keep going and surface the
+    # list in the result payload.
+    write_failures: list[dict[str, str]] = []
+
+    def _safe_update(fp: Path, date: str) -> bool | None:
+        try:
+            return update_last_interaction(fp, date)
+        except OSError as exc:
+            write_failures.append({"path": str(fp), "error": f"{exc.__class__.__name__}: {exc}"})
+            return None
+
     # Apply email-keyed updates
     email_idx = build_email_index(BRAIN_PEOPLE)
     updated = 0
@@ -577,7 +591,7 @@ def run() -> dict:
             unmatched += 1
             continue
         fp, _existing = entry
-        if update_last_interaction(fp, date):
+        if _safe_update(fp, date):
             updated += 1
             updated_paths.add(fp)
 
@@ -593,7 +607,7 @@ def run() -> dict:
             continue
         fp, _existing = entry
         matched_by_phone.add(fp)
-        if update_last_interaction(fp, date):
+        if _safe_update(fp, date):
             if fp not in updated_paths:
                 updated += 1
                 updated_paths.add(fp)
@@ -616,7 +630,7 @@ def run() -> dict:
         if fp in matched_by_phone:
             # Already stamped via phone — skip the extra work
             continue
-        if update_last_interaction(fp, date):
+        if _safe_update(fp, date):
             if fp not in updated_paths:
                 updated += 1
                 updated_paths.add(fp)
@@ -636,8 +650,17 @@ def run() -> dict:
         encoding="utf-8",
     )
 
-    return {
-        "status": "ok" if not sources_failed else "degraded",
+    degraded = bool(sources_failed) or bool(write_failures)
+    alert_bits: list[str] = []
+    if sources_failed:
+        alert_bits.append(f"{len(sources_failed)} source(s) failed")
+    if write_failures:
+        alert_bits.append(
+            f"{len(write_failures)} person file(s) unwritable (Dropbox EROFS?)"
+        )
+
+    result = {
+        "status": "degraded" if degraded else "ok",
         "people_updated": updated,
         "signals_unmatched": unmatched,
         "gmail_signals": len(gmail_signals),
@@ -646,12 +669,11 @@ def run() -> dict:
         "krisp_signals": len(krisp_signals),
         "gmessages_signals": len(gmessages_signals),
         "sources_failed": sources_failed,
-        **(
-            {"alert": "daily-refresh: one or more sources failed — see sources_failed"}
-            if sources_failed
-            else {}
-        ),
+        "write_failures": write_failures,
     }
+    if alert_bits:
+        result["alert"] = "daily-refresh: " + "; ".join(alert_bits)
+    return result
 
 
 def main() -> int:

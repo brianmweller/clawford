@@ -374,6 +374,75 @@ def test_run_falls_back_to_name_match_when_phone_missing(tmp_path, dr, monkeypat
     assert "- **last_interaction:** 2026-04-10" in text
 
 
+def test_run_continues_when_one_person_file_is_read_only(tmp_path, dr, monkeypatch):
+    """2026-04-18 regression: Dropbox sync can park a single file in
+    transient Errno-30 / Read-only filesystem state. Before the fix, one
+    stuck file raised OSError out of update_last_interaction and aborted
+    the whole batch — so every OTHER person on the same run (Kyle
+    Kloster yesterday) never got stamped either. The fix: swallow per-
+    file OSError, surface the failure count, keep the batch going."""
+    people = tmp_path / "people"
+    people.mkdir()
+    stuck = people / "stuck.md"
+    stuck.write_text(
+        "# Stuck Person\n- **email:** stuck@x.com\n- **phone:** (650) 555-0000\n"
+        "- **last_interaction:** 2026-02-01\n",
+        encoding="utf-8",
+    )
+    kyle = people / "kyle-kloster.md"
+    kyle.write_text(
+        "# Kyle Kloster\n- **email:** kyle@x.com\n- **phone:** —\n"
+        "- **last_interaction:** 2026-02-11\n",
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "connector-workspace"
+    workspace.mkdir()
+    (workspace / "cache").mkdir()
+    (workspace / "cache" / "mined-gmessages.json").write_text(json.dumps({
+        "contacts": [
+            {"name": "Stuck Person", "phone": "", "last_message_date": "2026-04-18"},
+            {"name": "Kyle Kloster", "phone": "", "last_message_date": "2026-04-17"},
+        ],
+    }))
+    mc_cache = tmp_path / "mc" / "cache"
+    mc_cache.mkdir(parents=True)
+
+    monkeypatch.setattr(dr, "BRAIN_PEOPLE", people)
+    monkeypatch.setattr(dr, "WORKSPACE", workspace)
+    monkeypatch.setattr(dr, "UPCOMING_CACHE", workspace / "upcoming-meetings.json")
+    monkeypatch.setattr(dr, "GMESSAGES_CACHE", workspace / "cache" / "mined-gmessages.json")
+    monkeypatch.setattr(dr, "MC_CACHE", mc_cache)
+    monkeypatch.setattr(dr, "_build_google_services", lambda: (object(), object()))
+    monkeypatch.setattr(
+        dr, "_collect_gcal_signals", lambda svc, lookback_days, lookahead_days: ({}, {})
+    )
+    monkeypatch.setattr(
+        dr, "_collect_gmail_signals", lambda svc, days, operator_emails: {}
+    )
+    monkeypatch.setattr(dr, "_operator_emails", lambda: set())
+
+    orig_update = dr.update_last_interaction
+
+    def flaky_update(fp, new_date):
+        if fp.name == "stuck.md":
+            raise OSError(30, "Read-only file system", str(fp))
+        return orig_update(fp, new_date)
+
+    monkeypatch.setattr(dr, "update_last_interaction", flaky_update)
+
+    result = dr.run()
+
+    assert kyle.read_text(encoding="utf-8").find("- **last_interaction:** 2026-04-17") >= 0, (
+        "Kyle must be stamped even though stuck.md errored"
+    )
+    assert result["status"] == "degraded", result
+    write_failures = result.get("write_failures", [])
+    assert any("stuck.md" in f.get("path", "") for f in write_failures), (
+        f"stuck.md write failure must surface in result, got {write_failures}"
+    )
+    assert result["people_updated"] >= 1
+
+
 def test_run_applies_gmessages_signals_via_phone_match(tmp_path, dr, monkeypatch):
     """Integration: a gmessages cache with a phone signal updates the
     matching person file even when Gmail/GCal have nothing to say."""
