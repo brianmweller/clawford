@@ -57,9 +57,9 @@ extra_css:
 
 nav:
   - Overview:
+    - Table of contents: guide-v3/index.md
     - 01 — What is Clawford?: guide-v3/01-what-is-clawford.md
     - 02 — What Isn't Clawford?: guide-v3/02-what-isnt-clawford.md
-    - Table of contents: guide-v3/index.md
   - Setup:
     - 03 — Before you start: guide-v3/03-before-you-start.md
     - 04 — VPS setup: guide-v3/04-vps-setup.md
