@@ -28,6 +28,16 @@ import json
 import os
 import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+# --- shared library sys.path shim ---
+for _p in Path(__file__).resolve().parents:
+    if (_p / "agents" / "shared").is_dir():
+        if str(_p) not in sys.path:
+            sys.path.insert(0, str(_p))
+        break
+
+from agents.shared.meeting_classifier import has_videoconference_link  # noqa: E402
 
 WORKSPACE = os.path.expanduser("~/.clawford/meetings-coach-workspace")
 CONFIG_PATH = os.path.join(WORKSPACE, "meeting-config.json")
@@ -107,25 +117,26 @@ def get_credentials():
 
 
 def extract_conference_link(event):
-    """Extract video meeting link from event data."""
-    # Check hangoutLink first (Google Meet)
+    """Extract video meeting link URL (for rendering/linking).
+
+    Routing (is-this-a-meeting) lives in
+    agents.shared.meeting_classifier.has_videoconference_link — this
+    function returns the *URL* for downstream formatters that need it.
+    """
     link = event.get("hangoutLink", "")
     if link:
         return link
 
-    # Check conferenceData for other providers (Zoom, Teams, etc.)
     conf = event.get("conferenceData", {})
     for entry_point in conf.get("entryPoints", []):
         if entry_point.get("entryPointType") == "video":
             return entry_point.get("uri", "")
 
-    # Check description for common meeting URLs
     desc = event.get("description", "")
     if desc:
         for pattern in ["https://zoom.us/", "https://meet.google.com/", "https://teams.microsoft.com/"]:
             idx = desc.find(pattern)
             if idx >= 0:
-                # Extract URL (up to whitespace or newline)
                 end = len(desc)
                 for ch in [" ", "\n", "\r", '"', "'"]:
                     pos = desc.find(ch, idx)
@@ -137,26 +148,23 @@ def extract_conference_link(event):
 
 
 def is_real_meeting(event, config):
-    """Determine if an event is a real meeting vs. a task block or reminder."""
+    """Decide if a calendar item is a meeting (Murphy) vs event (Mouse).
+
+    As of 2026-04-18 the rule is: meeting iff the item has a
+    videoconferencing link. Attendee count no longer promotes an
+    in-person invite (e.g. "exploring ballet" with Sam) into Murphy's
+    queue. The shared predicate lives in
+    agents.shared.meeting_classifier so Mouse applies the same check —
+    see memory project_meeting_event_routing.md.
+    """
     filters = config.get("meeting_filters", {})
     summary = event.get("summary", "")
 
-    # Check skip titles
-    skip_titles = filters.get("skip_titles", [])
-    for skip in skip_titles:
+    for skip in filters.get("skip_titles", []):
         if skip.lower() in summary.lower():
             return False
 
-    if not filters.get("require_attendees_or_video", True):
-        return True
-
-    # Real meeting = has attendees (besides organizer) or has a video link
-    attendees = event.get("attendees", [])
-    non_self_attendees = [a for a in attendees if not a.get("self", False)]
-    has_attendees = len(non_self_attendees) > 0
-    has_video = bool(extract_conference_link(event))
-
-    return has_attendees or has_video
+    return has_videoconference_link(event)
 
 
 def fetch_calendar_events(service, calendar_id, time_min, time_max, config):

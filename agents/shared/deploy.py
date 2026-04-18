@@ -1181,6 +1181,7 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "inbound_scanner.py",    # P0.4 — scan_inbound() + semantic_guard()
     "isolation.py",          # P1.2 — bubblewrap argv builder
     "llm.py",
+    "meeting_classifier.py",  # 2026-04-18 — Murphy/Mouse routing predicate
     "memory_writer.py",
     "pending_actions.py",
     "playwright_profile.py",
