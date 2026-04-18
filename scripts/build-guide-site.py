@@ -18,11 +18,10 @@ DROP_FROM_V3 = {"99-unsorted-lessons.md"}
 
 # Links of the form `[label](../X/...)` where `X` is NOT one of these
 # top-level dirs resolve outside the staged docs tree (into the
-# repo's source code), and MkDocs can't find them. Rewrite those to
-# absolute GitHub blob URLs so the rendered site gives readers a
-# clickable pointer at the canonical source.
+# repo's source code). The repo is private, so those links would
+# either 404 or leak the repo URL. The build fails hard if it finds
+# one — authors must drop the link or the bullet at source.
 STAGED_TOP_LEVEL_DIRS = {"guide-v3", "guide-v2", "assets", "docs"}
-GITHUB_BLOB_BASE = "https://github.com/samsmith/clawford/blob/master"
 
 # guide-v2 is the frozen pre-liberation guide. Many of its chapters
 # reference sibling v2 chapters that were never written before the
@@ -127,27 +126,30 @@ def _rewrite_guide_v2_dead_links():
 
 
 def _rewrite_out_of_tree_links():
-    """Walk every staged .md file and rewrite `../<path>` links whose
-    target lives outside the staged docs tree into absolute GitHub
-    blob URLs. `../guide-v2/…`, `../assets/…`, `../docs/…` are all
-    inside the staged tree and left alone."""
+    """Scan every staged .md file for `../<path>` links whose target
+    lives outside the staged docs tree. `../guide-v2/…`, `../assets/…`,
+    `../docs/…` are all inside the staged tree and fine. Anything else
+    points into the private repo — fail loudly so the author can drop
+    the link (or the whole bullet) at source."""
     pattern = re.compile(r"\[([^\]]+)\]\(\.\./([^)]+)\)")
-
-    def _fix(m: re.Match) -> str:
-        label, inner = m.group(1), m.group(2)
-        first_segment = inner.split("/", 1)[0]
-        if first_segment in STAGED_TOP_LEVEL_DIRS:
-            return m.group(0)
-        # External targets carry URL fragments (#anchor) cleanly — GitHub
-        # blob URLs ignore unknown fragments, so passing them through
-        # is a no-op at worst.
-        return f"[{label}]({GITHUB_BLOB_BASE}/{inner})"
+    offenders: list[str] = []
 
     for md_path in SRC.rglob("*.md"):
         text = md_path.read_text(encoding="utf-8")
-        new_text = pattern.sub(_fix, text)
-        if new_text != text:
-            md_path.write_text(new_text, encoding="utf-8")
+        for m in pattern.finditer(text):
+            inner = m.group(2)
+            first_segment = inner.split("/", 1)[0]
+            if first_segment in STAGED_TOP_LEVEL_DIRS:
+                continue
+            rel = md_path.relative_to(SRC)
+            offenders.append(f"  {rel}: {m.group(0)}")
+
+    if offenders:
+        raise SystemExit(
+            "build-guide-site: out-of-tree relative links found "
+            "(private repo — the reader can't follow them). Drop the "
+            "link or the bullet at source:\n" + "\n".join(offenders)
+        )
 
 
 def build():
