@@ -92,13 +92,11 @@ def stage():
             return m.group(0)
         if target.startswith("../"):
             inner = target[3:]
-            if inner.startswith(("guide-v2/", "docs/")) and inner.endswith(".md"):
-                return f"[{label}]({inner[:-3]}/)"
             if inner.startswith(("guide-v2/", "docs/")):
                 return f"[{label}]({inner})"
             return m.group(0)
         if target.endswith(".md"):
-            return f"[{label}](guide-v3/{target[:-3]}/)"
+            return f"[{label}](guide-v3/{target})"
         return m.group(0)
 
     home = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", fix_link, home)
