@@ -1,54 +1,116 @@
-/* TOC grid-card polish.
- * Applied to guide-v3/index.md's grid-cards sections. Gives each card a
- * subtle border, hover lift, and tighter typography. Keeps the rest of
- * Material's default spacing. */
+/* TOC grid-card styling.
+ * Applied to guide-v3/index.md's grid-cards sections. Each <li> carries
+ * a .d-easy / .d-moderate / .d-hard / .d-reference class (via attr_list
+ * suffix in the markdown); the CSS picks a left-accent colour per
+ * difficulty. Cards get a visible border, a hover lift, and tighter
+ * typography. */
+
+/* Difficulty palette — tuned to read in both light and dark schemes. */
+:root {
+  --d-easy:      #2e7d32;  /* green 700 */
+  --d-moderate:  #1565c0;  /* blue 800 */
+  --d-hard:      #c62828;  /* red 800 */
+  --d-reference: #616161;  /* grey 700 */
+}
+[data-md-color-scheme="slate"] {
+  --d-easy:      #66bb6a;
+  --d-moderate:  #42a5f5;
+  --d-hard:      #ef5350;
+  --d-reference: #9e9e9e;
+}
+
+/* ---- Card body ---- */
 
 .md-typeset .grid.cards > ul > li {
   border: 1px solid var(--md-default-fg-color--lightest);
-  border-left: 4px solid var(--md-primary-fg-color);
-  border-radius: 0.2rem;
+  border-left: 5px solid var(--md-default-fg-color--lighter);
+  border-radius: 0.25rem;
   padding: 1rem 1.1rem 0.9rem 1rem;
-  transition: box-shadow 0.15s ease-out, transform 0.15s ease-out;
+  transition: box-shadow 0.15s ease-out, transform 0.15s ease-out, border-color 0.15s ease-out;
   background: var(--md-default-bg-color);
+  position: relative;
 }
 
 .md-typeset .grid.cards > ul > li:hover {
-  box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.08);
+  box-shadow: 0 3px 10px 0 rgba(0, 0, 0, 0.08);
   transform: translateY(-1px);
-  border-left-color: var(--md-accent-fg-color);
+  border-color: var(--md-default-fg-color--light);
 }
 
-/* Title (the chapter link) — slightly larger. */
+/* ---- Per-difficulty accent ---- */
+
+/* The .d-* class is on the tagline <p> (attr_list attaches to the
+ * preceding block), so we use :has() to reach up to the <li>. */
+.md-typeset .grid.cards > ul > li:has(p.d-easy)      { border-left-color: var(--d-easy); }
+.md-typeset .grid.cards > ul > li:has(p.d-moderate)  { border-left-color: var(--d-moderate); }
+.md-typeset .grid.cards > ul > li:has(p.d-hard)      { border-left-color: var(--d-hard); }
+.md-typeset .grid.cards > ul > li:has(p.d-reference) { border-left-color: var(--d-reference); }
+
+/* Tint the difficulty badge (first <code> element) to match the bar. */
+.md-typeset .grid.cards > ul > li:has(p.d-easy)      > p > code:first-child { color: var(--d-easy); }
+.md-typeset .grid.cards > ul > li:has(p.d-moderate)  > p > code:first-child { color: var(--d-moderate); }
+.md-typeset .grid.cards > ul > li:has(p.d-hard)      > p > code:first-child { color: var(--d-hard); }
+.md-typeset .grid.cards > ul > li:has(p.d-reference) > p > code:first-child { color: var(--d-reference); }
+
+/* ---- Title row ---- */
+
 .md-typeset .grid.cards > ul > li > p:first-child {
   margin-top: 0;
-  margin-bottom: 0.3rem;
+  margin-bottom: 0.35rem;
   font-size: 1.05em;
+  line-height: 1.35;
 }
 
-/* The <hr> separator between title and body — tighter spacing. */
+.md-typeset .grid.cards > ul > li > p:first-child > strong {
+  font-weight: 600;
+}
+
+/* ---- Divider ---- */
+
 .md-typeset .grid.cards > ul > li > hr {
-  margin: 0.35rem 0 0.55rem 0;
+  margin: 0.4rem 0 0.55rem 0;
   border-top-color: var(--md-default-fg-color--lightest);
 }
 
-/* Badge line (code-span with difficulty + reading time). */
-.md-typeset .grid.cards > ul > li > p > code {
+/* ---- Badge line ---- */
+
+.md-typeset .grid.cards > ul > li > p > code:first-child {
   font-size: 0.78em;
-  padding: 0.1em 0.4em;
-  border-radius: 0.2rem;
+  padding: 0.1em 0.5em;
+  border-radius: 0.25rem;
+  font-weight: 600;
   background: var(--md-code-bg-color);
 }
 
-/* Tagline body paragraph — muted colour, compact spacing. */
+/* ---- Tagline body ---- */
+
 .md-typeset .grid.cards > ul > li > p:last-child {
   margin-top: 0;
   margin-bottom: 0;
   color: var(--md-default-fg-color--light);
   font-size: 0.93em;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
-/* Tighten the gap between an h2 section heading and its grid. */
+/* ---- Section-to-grid spacing ---- */
+
 .md-typeset h2 + .grid.cards {
   margin-top: 0.6rem;
 }
+
+/* ---- Legend tags (in the intro paragraph) ---- */
+
+.md-typeset .d-tag {
+  display: inline-block;
+  padding: 0.05em 0.5em;
+  border-radius: 0.25rem;
+  font-size: 0.85em;
+  font-weight: 600;
+  color: white;
+  margin: 0 0.15em;
+}
+
+.md-typeset .d-tag.d-easy      { background: var(--d-easy); }
+.md-typeset .d-tag.d-moderate  { background: var(--d-moderate); }
+.md-typeset .d-tag.d-hard      { background: var(--d-hard); }
+.md-typeset .d-tag.d-reference { background: var(--d-reference); }

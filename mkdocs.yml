@@ -56,7 +56,6 @@ extra_css:
   - stylesheets/toc-cards.css
 
 nav:
-  - Home: index.md
   - Overview:
     - 01 — What is Clawford?: guide-v3/01-what-is-clawford.md
     - 02 — What Isn't Clawford?: guide-v3/02-what-isnt-clawford.md

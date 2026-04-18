@@ -7,13 +7,16 @@
 Twenty-one chapters, six sections. Pick a chapter by the job you want to
 do, or read top-to-bottom if you're deploying a fleet from scratch.
 Reading-time estimates are rough (230 words per minute); difficulty is
-easy / moderate / hard / reference.
+color-coded: <span class="d-tag d-easy">easy</span>
+<span class="d-tag d-moderate">moderate</span>
+<span class="d-tag d-hard">hard</span>
+<span class="d-tag d-reference">reference</span>.
 
 ## Overview
 
 <div class="grid cards" markdown>
 
--   **[01 — What is Clawford?](01-what-is-clawford.md)**
+-   __[01 — What is Clawford?](01-what-is-clawford.md)__
 
     ---
 
@@ -21,8 +24,9 @@ easy / moderate / hard / reference.
 
     A personal fleet of LLM agents on a $30/month VPS. Each agent is a
     teleported Busytown character with a narrow job.
+    { .d-easy }
 
--   **[02 — What Isn't Clawford?](02-what-isnt-clawford.md)**
+-   __[02 — What Isn't Clawford?](02-what-isnt-clawford.md)__
 
     ---
 
@@ -30,6 +34,7 @@ easy / moderate / hard / reference.
 
     The decision doc for why Clawford left the OpenClaw platform —
     written up front, not buried at the back as a retrospective.
+    { .d-moderate }
 
 </div>
 
@@ -37,7 +42,7 @@ easy / moderate / hard / reference.
 
 <div class="grid cards" markdown>
 
--   **[03 — Before you start](03-before-you-start.md)**
+-   __[03 — Before you start](03-before-you-start.md)__
 
     ---
 
@@ -45,8 +50,9 @@ easy / moderate / hard / reference.
 
     The one-way-door decisions: dedicated VPS, Telegram over WhatsApp,
     Mr Fixit first. Cheap to get right, expensive to reverse.
+    { .d-easy }
 
--   **[04 — VPS setup](04-vps-setup.md)**
+-   __[04 — VPS setup](04-vps-setup.md)__
 
     ---
 
@@ -54,8 +60,9 @@ easy / moderate / hard / reference.
 
     Terraform-provisioned Hetzner box. SSH-hardened, Tailscale overlay,
     `codex` installed, residential proxy wired in and tested.
+    { .d-moderate }
 
--   **[05 — Dev setup](05-dev-setup.md)**
+-   __[05 — Dev setup](05-dev-setup.md)__
 
     ---
 
@@ -63,8 +70,9 @@ easy / moderate / hard / reference.
 
     Claude Code as the dev environment. Red-green TDD for infra. The
     four things Claude Code gets wrong, in decreasing order of cost.
+    { .d-moderate }
 
--   **[06 — Infra setup](06-infra-setup.md)**
+-   __[06 — Infra setup](06-infra-setup.md)__
 
     ---
 
@@ -73,6 +81,7 @@ easy / moderate / hard / reference.
     Three boring pieces: the three-tier shared library, the shared
     brain (git + Dropbox), the host-cron runtime. Ten active deploy
     safeguards.
+    { .d-moderate }
 
 </div>
 
@@ -80,7 +89,7 @@ easy / moderate / hard / reference.
 
 <div class="grid cards" markdown>
 
--   **[07 — Intro to agents](07-intro-to-agents.md)**
+-   __[07 — Intro to agents](07-intro-to-agents.md)__
 
     ---
 
@@ -88,8 +97,9 @@ easy / moderate / hard / reference.
 
     The anatomy of a Clawford agent: eight workspace files, a manifest,
     the script contract, and the LLM-vs-deterministic line.
+    { .d-moderate }
 
--   **[08 — Your first agent](08-your-first-agent.md)**
+-   __[08 — Your first agent](08-your-first-agent.md)__
 
     ---
 
@@ -97,8 +107,9 @@ easy / moderate / hard / reference.
 
     The seven-step first-deploy arc every agent inherits — Telegram
     bot, workspace bootstrap, scripts, deploy, smoke test.
+    { .d-moderate }
 
--   **[09 — Mr Fixit 🦊🔧](09-mr-fixit.md)**
+-   __[09 — Mr Fixit 🦊🔧](09-mr-fixit.md)__
 
     ---
 
@@ -107,8 +118,9 @@ easy / moderate / hard / reference.
     The infrastructure fox. Fleet-health canary, brain validator,
     conflict-scanner. Currently on probation after the 2026-04-11
     confabulation episode.
+    { .d-hard }
 
--   **[10 — Lowly Worm — newsfeed 🐛📰](10-lowly-worm-newsfeed.md)**
+-   __[10 — Lowly Worm: newsfeed 🐛📰](10-lowly-worm-newsfeed.md)__
 
     ---
 
@@ -116,8 +128,9 @@ easy / moderate / hard / reference.
 
     A personalized morning news digest that learns from your thumbs.
     The preference-learning story is the hero of this chapter.
+    { .d-moderate }
 
--   **[11 — Lowly Worm — social 🐛📰](11-lowly-worm-social.md)**
+-   __[11 — Lowly Worm: social 🐛📰](11-lowly-worm-social.md)__
 
     ---
 
@@ -125,8 +138,9 @@ easy / moderate / hard / reference.
 
     Optional LinkedIn layer on top of the core newsfeed. Playwright,
     aria-label selectors, and the smart-reply chip incident.
+    { .d-hard }
 
--   **[12 — Mistress Mouse 🐭📅](12-mistress-mouse.md)**
+-   __[12 — Mistress Mouse 🐭📅](12-mistress-mouse.md)__
 
     ---
 
@@ -134,18 +148,20 @@ easy / moderate / hard / reference.
 
     Family logistics: Google Calendar reader, three-tier reminders,
     school-email parser, WhatsApp digest. First Google OAuth agent.
+    { .d-hard }
 
--   **[13 — Sergeant Murphy 🐷🔍](13-sergeant-murphy.md)**
+-   __[13 — Sergeant Murphy 🐷🔍](13-sergeant-murphy.md)__
 
     ---
 
     `hard` · ~20 min
 
     Meeting prep, transcript-driven debrief, commitment tracking,
-    coaching. Home of the 5x resend incident and the cache-is-not-a-queue
-    rule.
+    coaching. Home of the 5x resend incident and the
+    cache-is-not-a-queue rule.
+    { .d-hard }
 
--   **[14 — Huckle Cat 🐱🤝](14-huckle-cat.md)**
+-   __[14 — Huckle Cat 🐱🤝](14-huckle-cat.md)__
 
     ---
 
@@ -153,8 +169,9 @@ easy / moderate / hard / reference.
 
     Relationship memory across seven sources. The only agent where the
     mining pipeline runs **before** the first cron — by design.
+    { .d-hard }
 
--   **[15 — Hilda Hippo 🦛🛒](15-hilda-hippo.md)**
+-   __[15 — Hilda Hippo 🦛🛒](15-hilda-hippo.md)__
 
     ---
 
@@ -163,6 +180,7 @@ easy / moderate / hard / reference.
     Amazon + Costco orders, Subscribe & Save, delivery digest. Hardest
     auth in the fleet — a seven-act saga through Akamai, Azure B2C,
     and the home-ISP tunnel.
+    { .d-hard }
 
 </div>
 
@@ -170,7 +188,7 @@ easy / moderate / hard / reference.
 
 <div class="grid cards" markdown>
 
--   **[16 — The shared brain](16-shared-brain.md)**
+-   __[16 — The shared brain](16-shared-brain.md)__
 
     ---
 
@@ -178,8 +196,9 @@ easy / moderate / hard / reference.
 
     The git + Dropbox directory that turns a pile of agents into a
     fleet. Four primitives, two halves, all appends.
+    { .d-moderate }
 
--   **[17 — Auth architectures](17-auth-architectures.md)**
+-   __[17 — Auth architectures](17-auth-architectures.md)__
 
     ---
 
@@ -187,8 +206,9 @@ easy / moderate / hard / reference.
 
     Six auth shapes across the fleet, plus three cross-cutting idioms:
     local-then-SCP, gitignored credentials, no raw API keys in crons.
+    { .d-hard }
 
--   **[18 — The inbox](18-the-inbox.md)**
+-   __[18 — The inbox](18-the-inbox.md)__
 
     ---
 
@@ -197,8 +217,9 @@ easy / moderate / hard / reference.
     The inbound side. One async daemon polls six bots, routes each
     message to the right agent, stages every mutation behind a Confirm
     button.
+    { .d-moderate }
 
--   **[19 — Security and hardening](19-security-and-hardening.md)**
+-   __[19 — Security and hardening](19-security-and-hardening.md)__
 
     ---
 
@@ -206,6 +227,7 @@ easy / moderate / hard / reference.
 
     Seven defense layers against drift, accident, credential leak,
     trust erosion, promptware, and active attack.
+    { .d-hard }
 
 </div>
 
@@ -213,7 +235,7 @@ easy / moderate / hard / reference.
 
 <div class="grid cards" markdown>
 
--   **[20 — Scripts and configs](20-scripts-and-configs.md)**
+-   __[20 — Scripts and configs](20-scripts-and-configs.md)__
 
     ---
 
@@ -221,8 +243,9 @@ easy / moderate / hard / reference.
 
     The catalog: every tracked script and config file, organised by
     job. A lookup, not a read-through.
+    { .d-reference }
 
--   **[21 — Glossary](21-glossary.md)**
+-   __[21 — Glossary](21-glossary.md)__
 
     ---
 
@@ -230,6 +253,7 @@ easy / moderate / hard / reference.
 
     Every Clawford-specific term, alphabetically. Plus named incidents
     and retired terms for historical context.
+    { .d-reference }
 
 </div>
 
@@ -237,7 +261,7 @@ easy / moderate / hard / reference.
 
 <div class="grid cards" markdown>
 
--   **[The Ballad of Mr Fixit](../docs/ballad-of-mr-fixit.md)**
+-   __[The Ballad of Mr Fixit](../docs/ballad-of-mr-fixit.md)__
 
     ---
 
@@ -245,6 +269,7 @@ easy / moderate / hard / reference.
 
     A five-act tragedy covering the first day of setup. The myth
     version before the manual version.
+    { .d-easy }
 
 </div>
 
