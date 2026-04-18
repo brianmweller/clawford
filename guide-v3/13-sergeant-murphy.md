@@ -1,6 +1,6 @@
 # Sergeant Murphy 🐷🔍 — the meetings-coach agent
 
-*Last updated: 2026-04-17 · Reading time: ~20 min · Difficulty: hard*
+*Last updated: 2026-04-18 · Reading time: ~20 min · Difficulty: hard*
 
 > **TL;DR.** Sergeant Murphy is the meetings agent — not a calendar agent, a meetings agent. He composes a morning meeting brief at 5 AM PT with factual context for every meeting on the day (no invented talking points), fires pre-meeting alerts 15–45 minutes ahead with the real agenda, scans meeting transcripts from an MCP-speaking transcription provider after each meeting to stage action items + decisions for confirmation, tracks the commitments that actually get confirmed, and runs a coaching analysis against a configured set of communication growth areas. He is the **second** Google-OAuth agent in the fleet (after [Mistress Mouse](12-mistress-mouse.md)) and he sits on the other side of [§ the routing boundary](12-mistress-mouse.md#the-routing-boundary-with-sergeant-murphy): Workflowy-presence events are his, non-Workflowy events are Mistress Mouse's. Read [§ The 5x resend incident](#the-5x-resend-incident) before deploying the post-meeting scan. It is the reason the rest of the fleet treats "cache files are not a delivery queue" as a named design rule.
 
@@ -98,11 +98,11 @@ Sergeant Murphy's post-meeting scan talks to a meeting-transcription provider ov
 
 ## The routing boundary with Mistress Mouse
 
-The full explanation of the routing rule lives in [§ The routing boundary section of Ch 12](12-mistress-mouse.md#the-routing-boundary-with-sergeant-murphy). The short version: **Workflowy presence is the bright line.** If a calendar event has a corresponding Workflowy item, Sergeant Murphy owns it. If not, Mistress Mouse owns it.
+The full explanation of the routing rule lives in [§ The routing boundary section of Ch 12](12-mistress-mouse.md#the-routing-boundary-with-sergeant-murphy). The short version (after the 2026-04-18 revision): **a calendar event is Sergeant Murphy's iff it has a videoconference link OR the operator has linked it in Workflowy.** Otherwise it's Mistress Mouse's.
 
-In Sergeant Murphy's code, the check lives in `meeting-prep.py` and in every orchestrator that acts on an event: before including an event in the morning brief, firing a pre-meeting alert, or staging a post-meeting debrief, look up the event in Workflowy. No Workflowy node means "not my meeting" and the event gets dropped from Sergeant Murphy's output. The symmetric check lives on Mistress Mouse's side.
+Both agents read the same classification — a shared brain calendar index at `~/Dropbox/clawford-backup/status/calendar-index.json`, rebuilt once per morning tick by Mouse's `calendar-index-build.py` — rather than each running their own classifier inline. Sergeant Murphy's orchestrators (morning-meeting-brief, pre-meeting-alert, post-meeting-scan) still fall back to a local `has_videoconference_link` check for events the index hasn't seen yet.
 
-The failure mode to watch for is the Workflowy session expiring — see the [routing pitfall in Ch 12](12-mistress-mouse.md#pitfalls). When the Workflowy session is dead, the Workflowy search endpoint returns empty for every query, which both agents interpret as "this event is not mine." In that state, Mistress Mouse over-claims (she treats meetings as events and sends reminders for them) and Sergeant Murphy under-claims (he drops real meetings from the morning brief). The symptom is a morning brief with suspiciously few meetings and a reminder stream with suspiciously many events. The fix is to refresh the Workflowy session, not to patch either agent's routing code.
+The failure mode to watch for is the Workflowy session expiring — see the [routing pitfall in Ch 12](12-mistress-mouse.md#pitfalls). A dead Workflowy session means the `workflowy-links.json` cache stops updating, and any meeting whose only signal was the Workflowy tag will misroute. Video-link meetings still get classified correctly in that degraded state; only in-person meetings the operator tagged for coaching slip through to Mistress Mouse. The fix is to refresh the Workflowy session, not to patch either agent's routing code.
 
 ## Current state
 

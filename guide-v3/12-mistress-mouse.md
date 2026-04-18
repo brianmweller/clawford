@@ -1,6 +1,6 @@
 # Mistress Mouse 🐭📅 — the family-calendar agent
 
-*Last updated: 2026-04-17 · Reading time: ~20 min · Difficulty: hard*
+*Last updated: 2026-04-18 · Reading time: ~20 min · Difficulty: hard*
 
 > **TL;DR.** Mistress Mouse is the household-logistics agent: she reads a family's Google Calendars, composes a morning briefing delivered at 5 AM PT, fires 60/30/15-minute reminders for the events that matter today, parses activity-provider emails (school closures, cancellations, signup windows), surfaces Google Calendar invites that actually need a response, and summarizes WhatsApp family-chat traffic into a once-a-day digest. She is also the first agent in a Clawford fleet to go through Google OAuth — the local-auth-then-SCP pattern she pioneered is the same pattern [Sergeant Murphy](13-sergeant-murphy.md) and [Huckle Cat](14-huckle-cat.md) reuse. Read [the WhatsApp section](#the-whatsapp-chapter) before binding her to a real phone number — there is a live ban risk on personal accounts. Read [the routing boundary section](#the-routing-boundary-with-sergeant-murphy) before deploying her alongside Sergeant Murphy.
 
@@ -73,17 +73,15 @@ This is the section you must read before deploying the WhatsApp crons. It is als
 
 When Sergeant Murphy deployed on top of Mistress Mouse in mid-April, both agents immediately started touching the same Google Calendar entries — Murphy because meetings are calendar events, Mistress Mouse because events are calendar events. The operator got duplicate reminders, two different briefing formats, and cross-agent coordination noise.
 
-The fix (landed 2026-04-12) is a bright-line rule that both agents check before acting:
+The fix went through two revisions. The first (2026-04-12) was "Workflowy presence is the bright line" — every meeting worth coaching had a Workflowy node, so the asymmetry worked as a classifier. That held until mid-April when it became clear Murphy needed to pick up video-link meetings the operator hadn't taken the time to tag in Workflowy (and, separately, that Mistress Mouse was blanking event descriptions before her own classifier ran, so a Webex URL pasted into the description was invisible to her). The revised rule (2026-04-18):
 
-**If a calendar event has a corresponding Workflowy item, it's a meeting, and only Sergeant Murphy touches it. If it does not, it's an event, and only Mistress Mouse touches it.**
+**A calendar event is a *meeting* — and only Sergeant Murphy touches it — iff it has a videoconferencing link (Google Meet, Zoom, Teams, Webex) OR the operator has linked it in Workflowy. Otherwise it's an *event*, and only Mistress Mouse touches it.**
 
-Workflowy (the outliner the operator uses for work planning) is the canonical place where work meetings get declared — every meeting Murphy cares about has a Workflowy node with a canonical URL, prep notes, and a coaching history. Non-work events (doctor appointments, school pickups, kid activities, social plans) never touch Workflowy and never get a node. That asymmetry becomes the routing rule.
+Physical signal OR human signal, with either flipping the ownership. The videoconference check covers every meeting the operator didn't think to tag (most of them). The Workflowy check remains the human override — an in-person coffee worth coaching on is Murphy's even with no meet link, if the operator tagged it.
 
-In the scripts, the check looks like this: before Mistress Mouse emits a reminder or includes an event in the morning briefing, `gcal-fetch.py` calls a cheap Workflowy search against the event title. If the event matches a Workflowy node, it is tagged as `owner=murphy` and Mistress Mouse drops it from her output. Sergeant Murphy does the inverse — if an event does *not* match a Workflowy node, she drops it.
+The architectural shape also changed in the same pass. Before 2026-04-18 each agent ran its own classifier inline. That failed because Mistress Mouse deliberately drops event descriptions from her output (safety-by-default against rendering untrusted HTML to Telegram), which meant her classifier couldn't see description-embedded Webex URLs even when they were right there. The fix was to introduce a **shared brain calendar index**: once per morning tick (10:25 UTC, 5 min before the 10:30 fleet brief), `calendar-index-build.py` fetches every upcoming event on the raw Google Calendar API, classifies each one with the OR rule against the raw description, and writes `~/Dropbox/clawford-backup/status/calendar-index.json`. Both agents read the index as the authority. The local `has_videoconference_link` check remains on each agent as a fallback for events the index hasn't seen yet (e.g. something the operator just created mid-day).
 
-Both agents live on the same VPS and run against the same calendar, but the Workflowy presence check gives them non-overlapping output. The reader (the operator's Telegram) never sees a duplicated reminder, and the two agents can be deployed independently or together without coordinating.
-
-If you deploy only Mistress Mouse and not Sergeant Murphy, the Workflowy check is a no-op — Mistress Mouse still runs the check but gets back an empty Workflowy result for every event, so everything falls through to her ownership. You do not need to disable the check or tear it out.
+If you deploy only Mistress Mouse and not Sergeant Murphy, the classifier still runs — everything will be classified as meeting or event, and Mistress Mouse will simply surface only the events. The index is still useful (and cheap) in single-agent mode; you do not need to disable it.
 
 ## Current state
 
@@ -102,7 +100,8 @@ As of 2026-04-15, Mistress Mouse runs entirely on host crons under `~/.clawford/
 
 **I/O scripts** (deterministic Python, subprocess-safe, called by the orchestrators above):
 
-- `gcal-fetch.py` — multi-calendar reader; flags conflicts; time-blocks by Morning/Afternoon/Evening; checks Workflowy presence for the routing boundary
+- `gcal-fetch.py` — multi-calendar reader; flags conflicts; time-blocks by Morning/Afternoon/Evening; consults the shared brain calendar index to drop Murphy-owned meetings
+- `calendar-index-build.py` — 10:25 UTC cron; builds the shared brain calendar index that encodes the Mouse/Murphy routing boundary (see [§ The routing boundary with Sergeant Murphy](#the-routing-boundary-with-sergeant-murphy))
 - `gcal-write.py` — create/move/remove events; requires `--confirm` flag for safety (preview mode without it); writes audit log to `logs/calendar-writes.jsonl`
 - `reminder-check.py` — also serves as an orchestrator; see cron table above
 - `activity-email-check.py` — recursive MIME parser; no LLM; emits raw event dicts for the alert cron to classify

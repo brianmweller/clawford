@@ -1,6 +1,6 @@
 # The shared brain
 
-*Last updated: 2026-04-17 · Reading time: ~10 min · Difficulty: moderate*
+*Last updated: 2026-04-18 · Reading time: ~10 min · Difficulty: moderate*
 
 **TL;DR**
 
@@ -24,7 +24,7 @@ The brain has two halves that live in different places and sync through differen
 
 **The git-tracked half — `ops/brain/*` in the Clawford repo.** Configuration: the canonical schema `README.md`, the seed `_template.md` for new person files, per-agent rules scaffolds, validation scripts. Flows *one-way*: local git → VPS via `deploy.py`. An agent edit never writes back here. If the schema or a rules file needs updating, edit locally, commit, push, redeploy.
 
-**The Dropbox-synced half — `~/Dropbox/clawford-backup/` on the VPS.** Runtime state: live facts, live people files (whose structure came from `_template.md` but whose content is populated by the connector agent and the human), commitments, tasks, notes, per-agent status, `fleet-health.json`. Flows *bidirectionally*: agents write on the VPS, Dropbox syncs it off-VPS.
+**The Dropbox-synced half — `~/Dropbox/clawford-backup/` on the VPS.** Runtime state: live facts, live people files (whose structure came from `_template.md` but whose content is populated by the connector agent and the human), commitments, tasks, notes, per-agent status, `fleet-health.json`, and cross-fleet indexes like `status/calendar-index.json` (built once per morning tick by Mouse's `calendar-index-build.py`; classifies every upcoming event as meeting vs event so Murphy and Mouse read one shared truth instead of independently re-classifying). Flows *bidirectionally*: agents write on the VPS, Dropbox syncs it off-VPS.
 
 > Paths in the repository may still show `openclaw-backup` rather than `clawford-backup` at the time of writing. The rename is queued for a final cleanup pass. Treat the two names as interchangeable until then.
 
