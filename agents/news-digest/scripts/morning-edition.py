@@ -164,6 +164,39 @@ def load_ranked_articles() -> tuple[list[dict], str]:
 # ─── select_items ───────────────────────────────────────────────────
 
 
+# LinkedIn notification titles/summaries matching any of these substrings
+# are routine platform-activity pings (profile views, reactions, endorsements,
+# birthdays/anniversaries, follow-announcements) with no news content.
+# They bypass the LLM categorization pass on the notifications path, so
+# without this filter they'd land in the morning digest unfiltered — exactly
+# how "Omar Shahine viewed your profile" reached the operator on 2026-04-18.
+_LOW_SIGNAL_NOTIFICATION_PATTERNS: tuple[str, ...] = (
+    "viewed your profile",
+    "profile view",
+    "reacted to",
+    "endorsed you",
+    "work anniversary",
+    "is now following",
+    "birthday",
+    "celebrate",
+    "suggested for you",
+    "people you may know",
+    "take a quiz",
+)
+
+
+def _filter_low_signal_notifications(notifs: list[dict]) -> list[dict]:
+    """Drop LinkedIn notifications whose title/summary is routine
+    platform-activity noise. See _LOW_SIGNAL_NOTIFICATION_PATTERNS."""
+    kept: list[dict] = []
+    for n in notifs:
+        blob = f"{n.get('title', '')}\n{n.get('summary', '')}".lower()
+        if any(pat in blob for pat in _LOW_SIGNAL_NOTIFICATION_PATTERNS):
+            continue
+        kept.append(n)
+    return kept
+
+
 def select_items(
     articles: list[dict],
     *,
@@ -191,10 +224,10 @@ def select_items(
         except (TypeError, ValueError):
             return 0.0
 
-    notifications = [
+    notifications = _filter_low_signal_notifications([
         a for a in articles
         if a.get("source") == "linkedin" and a.get("_is_notification")
-    ]
+    ])
     messages = [
         a for a in articles
         if a.get("source") == "linkedin" and a.get("_is_message")

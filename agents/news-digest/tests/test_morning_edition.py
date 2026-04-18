@@ -273,6 +273,40 @@ def test_select_items_includes_notifications_at_end(mod):
     )
 
 
+def test_select_items_drops_profile_view_notifications(mod):
+    """2026-04-18: profile-view and other low-signal notifications were
+    landing in the digest because notifications bypass the LLM
+    categorization pass. Keyword-blacklist them at select_items so the
+    morning digest only carries notifications worth the operator's attention."""
+    articles = _mixed_feed(non_li=25, linkedin=0)
+    articles.extend([
+        _linkedin_notif("pv0", "Omar Shahine viewed your profile. See all views.", 0.5),
+        _linkedin_notif("pv1", "Someone viewed your profile", 0.5),
+        _linkedin_notif("rx0", "Tom reacted to your post", 0.5),
+        _linkedin_notif("en0", "Lisa endorsed you for Product Management", 0.5),
+        _linkedin_notif("an0", "Celebrate Kate's work anniversary", 0.5),
+        _linkedin_notif("fo0", "Jane is now following you", 0.5),
+        _linkedin_notif("bd0", "Today is Alex's birthday", 0.5),
+    ])
+    selected = mod.select_items(articles)
+    notif_ids = {s["id"] for s in selected if s.get("_is_notification")}
+    assert notif_ids == set(), f"low-signal notifications must be dropped, got {notif_ids}"
+
+
+def test_select_items_keeps_substantive_notifications(mod):
+    """A mention, a new job, a comment, or a DM-preview notification is
+    signal — those must survive the filter."""
+    articles = _mixed_feed(non_li=25, linkedin=0)
+    articles.extend([
+        _linkedin_notif("m0", "Sarah mentioned you in a comment", 0.6),
+        _linkedin_notif("c0", "New comment on your post about AI agents", 0.5),
+        _linkedin_notif("j0", "Dan Zylberglejd started a new position as CTO at Anthropic", 0.4),
+    ])
+    selected = mod.select_items(articles)
+    notif_ids = {s["id"] for s in selected if s.get("_is_notification")}
+    assert notif_ids == {"m0", "c0", "j0"}, f"substantive notifications should pass, got {notif_ids}"
+
+
 def test_select_items_includes_messages_at_end(mod):
     articles = _mixed_feed(non_li=25, linkedin=4)
     articles.extend([
