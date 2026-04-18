@@ -1,32 +1,38 @@
 #!/usr/bin/env python3
-"""Regenerate the TOC taglines in `guide-v3/index.md` from each chapter's
-current TL;DR.
+"""TOC tagline helper — does NOT call any LLM.
 
-Called after material chapter rewrites to keep the TOC taglines in sync
-with the canonical summaries inside each chapter. The script:
+The authoring workflow is: the assistant driving the guide-chapter
+skill reads each chapter's TL;DR and writes the tagline directly into
+`guide-v3/index.md`. This script helps that workflow in two ways:
 
-  1. Reads every `guide-v3/NN-*.md`.
-  2. Extracts the chapter's first TL;DR bullet (or the TL;DR blockquote
-     for architecture-shape chapters).
-  3. Calls `codex infer` (the project's LLM broker) to distill the TL;DR
-     into a ~100-character tagline that lands the chapter's thesis.
-  4. Writes the updated `guide-v3/index.md` with fresh taglines, grouped
-     by the canonical section headings (Overview / Setup / Agents /
-     Architecture / Reference / Lore).
+1. **Staleness check.** Compares each chapter's current TL;DR against
+   the tagline currently shown in `guide-v3/index.md`. Flags chapters
+   where the TL;DR has shifted materially since the tagline was
+   written.
+
+2. **Scaffold regenerate.** Rebuilds the grid-card structure from the
+   `SECTIONS` dict, preserving every existing tagline and inserting
+   `TODO(tagline)` placeholders for new chapters. Run this when a
+   chapter is added, removed, or renamed — the assistant then fills
+   the TODO placeholders by reading the new chapter's TL;DR.
 
 Usage:
-    python scripts/generate-toc-taglines.py              # regenerate all
-    python scripts/generate-toc-taglines.py --dry-run    # preview only
-    python scripts/generate-toc-taglines.py --chapter 15-hilda-hippo  # one
+    python scripts/generate-toc-taglines.py --check
+        # Report chapters whose TL;DR likely drifted from their tagline.
+
+    python scripts/generate-toc-taglines.py --scaffold
+        # Rebuild the TOC structure. Preserves existing taglines; inserts
+        # TODO(tagline) placeholders for any chapter without one.
+
+    python scripts/generate-toc-taglines.py --dry-run --scaffold
+        # Preview scaffold output without writing.
 """
 
 from __future__ import annotations
 
 import argparse
 import io
-import json
 import re
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -69,38 +75,12 @@ SECTIONS: dict[str, list[str]] = {
     "Reference": ["20-scripts-and-configs", "21-glossary"],
 }
 
-TAGLINE_PROMPT = """\
-You are writing a one-sentence tagline for a technical-guide chapter,
-to appear on the guide's table-of-contents page underneath the chapter
-title.
+TODO_TAGLINE = "TODO(tagline) — read the TL;DR and write one here."
 
-Constraints:
-- 80-130 characters. Hard cap 130.
-- Lead with a concrete noun phrase, not a verb. Avoid "This chapter…",
-  "A guide to…", "Covers…".
-- No first-person pronouns. No second-person pronouns. No "we/our/us".
-- If the chapter is an agent chapter, name the agent's actual job, not
-  the abstract concept.
-- If the chapter has a named incident or scar story, name it briefly.
-- Match the voice of the source TL;DR — dry, technical, scar-tissue.
-
-Input: the chapter's first TL;DR bullet.
-
-Output: the tagline, and ONLY the tagline. No quotes, no markdown, no
-preamble like "Here's the tagline:".
-
-TL;DR source:
-{tldr}
-"""
-
-
-LAST_UPDATED = re.compile(r"^\*Last updated:[^\n]+\*", re.MULTILINE)
 H1 = re.compile(r"^#\s+(.+)$", re.MULTILINE)
 METADATA_LINE = re.compile(
     r"\*Last updated:\s*\d{4}-\d{2}-\d{2}\s*·\s*Reading time:\s*~?(\d+)\s*min\s*·\s*Difficulty:\s*(\w+)\*"
 )
-# First TL;DR bullet: find `**TL;DR**` (or `> **TL;DR.** ...`) then grab
-# the first bullet / sentence after.
 TLDR_BULLETS = re.compile(r"\*\*TL;DR\*\*\s*\n\n-\s+(.+?)(?:\n-|\n\n)", re.DOTALL)
 TLDR_BLOCKQUOTE = re.compile(r">\s+\*\*TL;DR\.?\*\*\s+(.+?)(?:\n\n|\n>\s*$)", re.DOTALL)
 
@@ -111,8 +91,13 @@ class ChapterMeta:
     title: str
     difficulty: str
     reading_minutes: int
-    tldr: str  # first TL;DR bullet or first sentence of TL;DR blockquote
-    tagline: str = ""
+    tldr: str
+
+
+@dataclass
+class TocEntry:
+    stem: str
+    tagline: str  # as currently rendered in index.md
 
 
 def parse_chapter(stem: str) -> ChapterMeta:
@@ -128,7 +113,6 @@ def parse_chapter(stem: str) -> ChapterMeta:
     minutes = int(meta.group(1))
     difficulty = meta.group(2)
 
-    # Try the bullet-list shape first; fall back to the blockquote shape.
     m = TLDR_BULLETS.search(text)
     if m:
         tldr = m.group(1).strip()
@@ -136,53 +120,43 @@ def parse_chapter(stem: str) -> ChapterMeta:
         m = TLDR_BLOCKQUOTE.search(text)
         if not m:
             raise ValueError(f"{stem}: no TL;DR bullet or blockquote found")
-        # Grab the first sentence or ~200 chars
         para = m.group(1).strip()
-        # Split on first period followed by whitespace
         m2 = re.match(r"(.+?\.)\s+\*\*", para)
-        if m2:
-            tldr = m2.group(1).strip()
-        else:
-            tldr = para[:300]
+        tldr = m2.group(1).strip() if m2 else para[:300]
 
-    # Strip trailing bold continuation / excess markdown
     tldr = re.sub(r"\s+", " ", tldr)
+    return ChapterMeta(stem=stem, title=title, difficulty=difficulty,
+                       reading_minutes=minutes, tldr=tldr)
 
-    return ChapterMeta(
-        stem=stem,
-        title=title,
-        difficulty=difficulty,
-        reading_minutes=minutes,
-        tldr=tldr,
+
+def parse_existing_toc() -> dict[str, str]:
+    """Parse guide-v3/index.md and return {stem: current_tagline}.
+    Matches the grid-card shape:
+        -   **[Title](NN-slug.md)**
+            ---
+            `difficulty` · ~N min
+            Tagline text here.
+    """
+    if not TOC.exists():
+        return {}
+    text = TOC.read_text(encoding="utf-8")
+    # Each card: capture the stem via the link, then skip badges, capture tagline paragraph.
+    pattern = re.compile(
+        r"-\s+\*\*\[[^\]]+\]\((\d{2}-[a-z0-9-]+)\.md\)\*\*\s*\n"
+        r"\s*\n\s*---\s*\n"
+        r"\s*\n\s*`[^`]+`\s*·\s*~?\d+\s*min\s*\n"
+        r"\s*\n\s*(.+?)\n\s*\n",
+        re.DOTALL,
     )
+    out: dict[str, str] = {}
+    for m in pattern.finditer(text):
+        stem = m.group(1)
+        tagline = re.sub(r"\s+", " ", m.group(2)).strip()
+        out[stem] = tagline
+    return out
 
 
-def call_codex_infer(prompt: str, timeout: int = 60) -> str | None:
-    """Invoke `codex infer` to get a single-line tagline.
-    Returns None if codex isn't available on the path (operator should
-    run this on a box that has it — typically the VPS or a laptop with
-    ChatGPT Plus via Codex OAuth)."""
-    if not shutil.which("codex"):
-        return None
-    try:
-        result = subprocess.run(
-            ["codex", "infer", "--timeout", str(timeout)],
-            input=prompt,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=timeout + 10,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return None
-    if result.returncode != 0:
-        return None
-    # Codex sometimes wraps output; strip quotes/whitespace.
-    line = result.stdout.strip().strip('"').strip("'").strip()
-    return line or None
-
-
-def render_toc(chapters: dict[str, ChapterMeta]) -> str:
+def render_toc(chapters: dict[str, ChapterMeta], taglines: dict[str, str]) -> str:
     """Render the full TOC page markdown."""
     today = subprocess.run(
         ["git", "-C", str(REPO), "log", "-1", "--format=%ad", "--date=short"],
@@ -210,16 +184,17 @@ def render_toc(chapters: dict[str, ChapterMeta]) -> str:
         out.append('<div class="grid cards" markdown>')
         out.append("")
         for stem in stems:
-            ch = chapters[stem]
-            # Strip any leading "NN — " from the title if it snuck in
-            display = ch.title
-            out.append(f"-   **[{display}]({stem}.md)**")
+            ch = chapters.get(stem)
+            if ch is None:
+                continue
+            tagline = taglines.get(stem, TODO_TAGLINE)
+            out.append(f"-   **[{ch.title}]({stem}.md)**")
             out.append("")
             out.append("    ---")
             out.append("")
             out.append(f"    `{ch.difficulty}` · ~{ch.reading_minutes} min")
             out.append("")
-            out.append(f"    {ch.tagline}")
+            out.append(f"    {tagline}")
             out.append("")
         out.append("</div>")
         out.append("")
@@ -248,17 +223,79 @@ def render_toc(chapters: dict[str, ChapterMeta]) -> str:
     return "\n".join(out)
 
 
+def cmd_check(chapters: dict[str, ChapterMeta], taglines: dict[str, str]) -> int:
+    """Flag chapters missing from the TOC or still carrying a TODO
+    placeholder. Does NOT flag "low word overlap" drift — a good tagline
+    paraphrases the TL;DR rather than quoting it, so that heuristic
+    produces false positives on well-written taglines. Re-checking
+    taglines after a material rewrite is the operator's responsibility
+    (Phase 5.6 of the guide-chapter skill)."""
+    missing: list[str] = []
+    todo: list[str] = []
+
+    for stem, ch in chapters.items():
+        if stem not in taglines:
+            missing.append(stem)
+            continue
+        tagline = taglines[stem]
+        if tagline.startswith("TODO(") or tagline == TODO_TAGLINE:
+            todo.append(stem)
+
+    if missing:
+        print("## Chapters missing from the TOC")
+        print()
+        for stem in missing:
+            print(f"- `{stem}` — not found in guide-v3/index.md. Run --scaffold.")
+        print()
+
+    if todo:
+        print("## Chapters with TODO placeholders")
+        print()
+        for stem in todo:
+            print(f"- `{stem}` — tagline is still `TODO(tagline)`. Write one.")
+            ch = chapters[stem]
+            print(f"  TL;DR starts: {ch.tldr[:180]}{'…' if len(ch.tldr) > 180 else ''}")
+        print()
+
+    if not missing and not todo:
+        print("TOC is structurally complete — every chapter has a tagline.")
+        print("Remember: this script cannot detect semantic drift. After a material")
+        print("chapter rewrite, re-read the tagline manually against the new TL;DR.")
+        return 0
+
+    return 1
+
+
+def cmd_scaffold(chapters: dict[str, ChapterMeta],
+                 existing_taglines: dict[str, str],
+                 dry_run: bool) -> int:
+    rendered = render_toc(chapters, existing_taglines)
+    if dry_run:
+        print(rendered)
+    else:
+        TOC.write_text(rendered, encoding="utf-8")
+        print(f"wrote {TOC.relative_to(REPO)}")
+        missing_taglines = [s for s in chapters if s not in existing_taglines]
+        if missing_taglines:
+            print()
+            print("New chapter(s) without taglines — fill these in guide-v3/index.md:")
+            for stem in missing_taglines:
+                print(f"  - {stem}: TL;DR starts with:")
+                print(f"      {chapters[stem].tldr[:200]}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    mode = ap.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--check", action="store_true",
+                      help="report taglines whose source TL;DR likely drifted")
+    mode.add_argument("--scaffold", action="store_true",
+                      help="rebuild the TOC structure, preserving existing taglines")
     ap.add_argument("--dry-run", action="store_true",
-                    help="print the proposed TOC to stdout; don't write")
-    ap.add_argument("--chapter", action="append", default=[],
-                    help="only regenerate tagline for these chapter stems (repeatable)")
-    ap.add_argument("--taglines-json", type=Path,
-                    help="JSON file to source taglines from (skip LLM entirely)")
+                    help="(scaffold) print the proposed TOC to stdout; don't write")
     args = ap.parse_args(argv)
 
-    # Gather chapter metadata
     chapters: dict[str, ChapterMeta] = {}
     for stems in SECTIONS.values():
         for stem in stems:
@@ -268,41 +305,11 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"WARN: {e}", file=sys.stderr)
                 continue
 
-    # Generate or load taglines
-    tagline_cache: dict[str, str] = {}
-    if args.taglines_json and args.taglines_json.exists():
-        tagline_cache = json.loads(args.taglines_json.read_text(encoding="utf-8"))
+    existing_taglines = parse_existing_toc()
 
-    target_stems = set(args.chapter) if args.chapter else set(chapters.keys())
-    codex_available = shutil.which("codex") is not None
-    if not codex_available and not args.taglines_json:
-        print("WARN: `codex` not found on PATH — falling back to first TL;DR bullet verbatim.", file=sys.stderr)
-
-    for stem, ch in chapters.items():
-        if stem not in target_stems and stem in tagline_cache:
-            ch.tagline = tagline_cache[stem]
-            continue
-        if stem in tagline_cache and stem not in args.chapter:
-            ch.tagline = tagline_cache[stem]
-            continue
-        if codex_available:
-            prompt = TAGLINE_PROMPT.format(tldr=ch.tldr)
-            tagline = call_codex_infer(prompt)
-            if tagline:
-                ch.tagline = tagline
-                print(f"  {stem}: {tagline}")
-                continue
-        # Fallback: trim the TL;DR to ~120 chars
-        ch.tagline = (ch.tldr[:117] + "…") if len(ch.tldr) > 120 else ch.tldr
-        print(f"  {stem}: [fallback] {ch.tagline}")
-
-    rendered = render_toc(chapters)
-    if args.dry_run:
-        print(rendered)
-    else:
-        TOC.write_text(rendered, encoding="utf-8")
-        print(f"wrote {TOC.relative_to(REPO)}")
-    return 0
+    if args.check:
+        return cmd_check(chapters, existing_taglines)
+    return cmd_scaffold(chapters, existing_taglines, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":
