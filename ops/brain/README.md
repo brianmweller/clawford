@@ -17,6 +17,9 @@ Six agents read and write to this brain: **Fix-It** (🦊🔧), **Family Calenda
 ├── tasks/               # Unified task queue (queue.md)
 ├── notes/               # Raw inputs awaiting triage (inbox.md)
 ├── agents/              # Per-agent status + rules files
+├── status/              # Derived cross-fleet indexes rebuilt on a schedule
+│   └── calendar-index.json   # Mouse/Murphy routing classifier
+├── fleet-health.json    # Central agent-health aggregation (see § Agent Files)
 ├── archive/             # Monthly archival of completed/stale data
 └── scripts/             # Validation and maintenance scripts
 ```
@@ -174,9 +177,19 @@ A person can belong to multiple circles. The Connector uses circles to determine
 
 ### Fleet health (`fleet-health.json`)
 
-Per-agent health flows through a single central JSON file written every 15 minutes by `ops/scripts/fleet-health.py`. The orchestrator invokes each agent's `probe()` function and aggregates results. Fix-It's heartbeat reads this file and alerts if it goes stale.
+Per-agent health flows through a single central JSON file at the backup root, written every 15 minutes by `ops/scripts/fleet-health.py`. The orchestrator invokes each agent's `probe()` function and aggregates results. Fix-It's heartbeat reads this file and alerts if it goes stale.
 
 **Per-agent fields:** `id`, `probe_ts`, `status` (`ok`/`degraded`/`error`), `probes` (free-form per-agent health dict).
+
+### Calendar index (`status/calendar-index.json`)
+
+A derived index rebuilt once per morning tick (10:25 UTC) by `agents/family-calendar/scripts/calendar-index-build.py`. Fetches every upcoming Google Calendar event across all configured calendars, classifies each as meeting-vs-event using the shared rule in `agents/shared/calendar_index.py`, and writes the whole index here.
+
+**Classification rule (2026-04-18):** meeting iff the event has a videoconference link (Google Meet / Zoom / Teams / Webex) OR the operator has linked it in Workflowy. Both Mistress Mouse and Sergeant Murphy read this file to decide who owns each event. Routing is mutually exclusive by construction.
+
+**Per-event fields:** `id`, `summary`, `start`, `end`, `calendar_id`, `has_video_link`, `in_workflowy`, `is_meeting`, `owner` (`sergeant-murphy` | `mistress-mouse`).
+
+**Consumers:** Mistress Mouse's `gcal-fetch.py --skip-meetings` and `reminder-check.py`. Sergeant Murphy's own gcal-fetch keeps its in-line classifier since it doesn't strip descriptions; the shared index closes the gap for Mouse, which does.
 
 ### Rules files
 
@@ -209,6 +222,7 @@ Per-agent health flows through a single central JSON file written every 15 minut
 | `/tasks/` | R/W | W | W | W | W | W |
 | `/notes/` | R | R | R | R | — | R/W (triage) |
 | `/agents/` | R/W (all) | W (own) | W (own) | W (own) | W (own) | W (own) |
+| `/status/` | R | R/W | R | — | — | — |
 
 R = Read, W = Write, R/W = Read and Write, — = No access
 
