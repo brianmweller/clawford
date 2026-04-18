@@ -21,7 +21,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import urllib.request
 import urllib.error
 
-import feedparser
+# feedparser is imported lazily inside the RSS fetch site (search for
+# `import feedparser` below) so bare invocation on a dep-less machine can
+# still emit a contract-compliant JSON envelope via the __main__ tail.
 
 # --- shared library sys.path shim ---
 # Find the first ancestor containing agents/shared/ and prepend it to
@@ -216,6 +218,7 @@ def fetch_single_feed(feed_config):
     articles = []
 
     try:
+        import feedparser
         # Some publishers (NYT, WSJ, WaPo) 403 the default feedparser UA
         # from datacenter IPs. Send a browser-like UA to unblock them.
         feed = feedparser.parse(url, agent=_FEEDPARSER_UA)
@@ -897,4 +900,24 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import json as _contract_json
+    import sys as _contract_sys
+    _contract_status = "ok"
+    _contract_error = None
+    try:
+        _contract_rc = main()
+        if _contract_rc not in (0, None):
+            _contract_status = "error"
+            _contract_error = f"main returned {_contract_rc}"
+    except SystemExit as _contract_e:
+        if _contract_e.code not in (0, None):
+            _contract_status = "error"
+            _contract_error = f"main exited with code {_contract_e.code}"
+    except BaseException as _contract_e:  # noqa: BLE001
+        _contract_status = "error"
+        _contract_error = str(_contract_e)[:200]
+    _contract_envelope = {"status": _contract_status}
+    if _contract_error:
+        _contract_envelope["error"] = _contract_error
+    print(_contract_json.dumps(_contract_envelope))
+    _contract_sys.exit(0)

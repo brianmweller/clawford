@@ -153,50 +153,13 @@ def test_cron_message_is_hygienic(agent_id: str, cron_name: str, msg: str) -> No
 # but the soft `test_script_is_natively_compliant` test marks them xfail
 # until converted. Add a reason when listing a script.
 NATIVE_COMPLIANCE_XFAIL: set[str] = {
-    # Module-level sys.exit patterns, pending conversion:
-    "connector/notes-triage.py",
-    "connector/commitment-scan.py",
-    "family-calendar/gcal-fetch.py",
-    "family-calendar/gcal-auth.py",
-    "family-calendar/gcal-write.py",
-    "family-calendar/reminder-check.py",
-    "family-calendar/activity-email-check.py",
-    "family-calendar/gmail-invite-check.py",
-    "family-calendar/chat-parse-schedule.py",
-    "fix-it/security-audit.py",
-    "fix-it/diagnose-approval.py",
-    "fix-it/morning-fleet-deliver.py",
-    "meetings-coach/gcal-fetch.py",
-    "meetings-coach/gcal-auth.py",
-    "meetings-coach/meeting-prep.py",
-    "meetings-coach/workflowy-sync.py",
-    "meetings-coach/transcript-scan.py",
-    "meetings-coach/transcript-metrics.py",
-    "meetings-coach/commitment-tracker.py",
-    "meetings-coach/person-bootstrap.py",
-    "meetings-coach/krisp-auth-manual.py",
-    "news-digest/fetch-and-rank.py",
-    "news-digest/on-demand.py",
-    "news-digest/linkedin-scrape.py",
-    "news-digest/linkedin-keepalive.py",
-    "news-digest/linkedin-auth.py",
-    "shopping/grocery.py",
-    "shopping/amazon-orders.py",
-    "shopping/amazon-reorder.py",
-    "shopping/amazon-sns-manage.py",
-    "shopping/amazon-sns-skip.py",
-    "shopping/amazon-sns-browse.py",
-    "shopping/amazon-auth.py",
-    "shopping/costco-orders.py",
-    "shopping/costco-reorder.py",
-    "shopping/costco-token-daemon.py",
-    "shopping/reauth_retry_policy.py",
-    "shopping/costco_refresh_headless.py",
-    "shopping/costco-pkce-probe.py",
-    "shopping/costco-keepalive.py",
-    "shopping/gmail-search.py",
-    "shopping/parse_costco_email.py",
-    "shopping/amazon_browser.py",
+    # (Cleared 2026-04-18 — all 41 prior entries converted via the
+    # contract-envelope tail pattern. Some entries were stale references
+    # to renamed/removed scripts: shopping/reauth_retry_policy.py,
+    # shopping/costco-keepalive.py, fix-it/diagnose-approval.py.
+    # If a script legitimately cannot satisfy the native contract
+    # (e.g., genuinely requires >20s of work on any invocation), add
+    # its rel key with a one-line reason.)
 }
 
 

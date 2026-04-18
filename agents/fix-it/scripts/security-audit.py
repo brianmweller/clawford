@@ -268,4 +268,24 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import json as _contract_json
+    import sys as _contract_sys
+    _contract_status = "ok"
+    _contract_error = None
+    try:
+        _contract_rc = main()
+        if _contract_rc not in (0, None):
+            _contract_status = "error"
+            _contract_error = f"main returned {_contract_rc}"
+    except SystemExit as _contract_e:
+        if _contract_e.code not in (0, None):
+            _contract_status = "error"
+            _contract_error = f"main exited with code {_contract_e.code}"
+    except BaseException as _contract_e:  # noqa: BLE001
+        _contract_status = "error"
+        _contract_error = str(_contract_e)[:200]
+    _contract_envelope = {"status": _contract_status}
+    if _contract_error:
+        _contract_envelope["error"] = _contract_error
+    print(_contract_json.dumps(_contract_envelope))
+    _contract_sys.exit(0)
