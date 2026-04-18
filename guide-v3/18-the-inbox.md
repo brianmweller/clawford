@@ -1,6 +1,6 @@
 # The inbox: making agents conversational
 
-*Last updated: 2026-04-16 · Reading time: ~15 min · Difficulty: moderate*
+*Last updated: 2026-04-17 · Reading time: ~20 min · Difficulty: moderate*
 
 > **TL;DR.** Every agent chapter up to this point describes **outbound** behavior — crons that fire, scripts that compose, Telegram messages that push to the operator. This chapter is the **inbound** side. A single inbox daemon long-polls all six Telegram bots concurrently, routes each incoming message to the right agent, hands it to an LLM with a tool manifest the agent defines, lets the LLM call read tools (no side effects) or producer tools (which stage a pending action with inline buttons), and waits for the operator to tap **Confirm** or **Cancel** before anything mutates state. The result is that every agent in the fleet is conversational — the operator can message Hilda Hippo and say "reorder the Kirkland water" and get a `[Add to cart]` `[Skip]` button pair without a single line of Hilda-specific dispatcher code. The architecture is ~1200 lines of shared Python, a `tools.py` file per agent, and a systemd user unit on the VPS. This chapter covers all five components, the tools.py pattern, the inline-button UX, the deployment story, and the pitfalls.
 

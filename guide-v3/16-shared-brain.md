@@ -1,6 +1,6 @@
 # The shared brain
 
-*Last updated: 2026-04-16 · Reading time: ~12 min · Difficulty: moderate*
+*Last updated: 2026-04-17 · Reading time: ~10 min · Difficulty: moderate*
 
 **TL;DR**
 

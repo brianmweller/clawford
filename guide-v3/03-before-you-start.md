@@ -1,6 +1,6 @@
 # Before you start
 
-*Last updated: 2026-04-15 · Reading time: ~15 min · Difficulty: easy*
+*Last updated: 2026-04-17 · Reading time: ~15 min · Difficulty: easy*
 
 **TL;DR**
 

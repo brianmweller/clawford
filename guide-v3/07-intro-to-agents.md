@@ -1,6 +1,6 @@
 # Intro to agents
 
-*Last updated: 2026-04-15 · Reading time: ~18 min · Difficulty: moderate*
+*Last updated: 2026-04-17 · Reading time: ~15 min · Difficulty: moderate*
 
 **TL;DR**
 

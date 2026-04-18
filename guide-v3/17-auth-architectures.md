@@ -1,6 +1,6 @@
 # Auth architectures
 
-*Last updated: 2026-04-16 · Reading time: ~20 min · Difficulty: hard*
+*Last updated: 2026-04-17 · Reading time: ~15 min · Difficulty: hard*
 
 > **TL;DR.** Six distinct auth shapes show up across the six-agent Clawford fleet, and most new agents will reuse one of them rather than invent a seventh. This chapter names the shapes, lists which agents use which, documents the three cross-cutting idioms (local-then-SCP token distribution, gitignored credential files in the workspace `cache/`, and a hard ban on raw API keys in cron-invoked scripts), and collects the pitfalls that repeat across more than one agent. If you are deploying a brand-new agent and the question is *"what auth should this talk to?"* — start here, pick the shape, then read the agent chapter that most resembles the new agent.
 

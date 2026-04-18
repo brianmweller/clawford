@@ -1,6 +1,6 @@
 # Mr Fixit 🦊🔧
 
-*Last updated: 2026-04-15 · Reading time: ~25 min · Difficulty: hard*
+*Last updated: 2026-04-17 · Reading time: ~20 min · Difficulty: hard*
 
 **TL;DR**
 

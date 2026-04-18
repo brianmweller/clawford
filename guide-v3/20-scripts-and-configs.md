@@ -1,6 +1,6 @@
 # Scripts and configs reference
 
-*Last updated: 2026-04-16 · Reading time: ~10 min · Difficulty: reference*
+*Last updated: 2026-04-17 · Reading time: ~10 min · Difficulty: reference*
 
 > **TL;DR.** This chapter is a reference, not a tutorial. It catalogs every tracked script and config file that a Clawford fleet touches, organized by **what it does** (shared library / deploy tooling / ops helpers / per-agent) rather than **where it lives**. If you know the name of the thing you are looking for, jump to [§ Alphabetical index](#alphabetical-index). If you know the *job* you need to do but not the name of the file, start with the category that matches the job. Every entry links back to the chapter that explains the deeper context.
 

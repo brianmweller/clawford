@@ -1,6 +1,6 @@
 # Glossary
 
-*Last updated: 2026-04-16 · Reading time: ~5 min · Difficulty: reference*
+*Last updated: 2026-04-17 · Reading time: ~15 min · Difficulty: reference*
 
 > **TL;DR.** Every Clawford-specific term that earns repeated use in the guide is defined here, alphabetically. Entries cross-link to the chapter that introduces the term properly. If you know the term you're looking for, Ctrl-F is faster than reading top-to-bottom. The last two sections collect **named incidents** (load-bearing war stories that are referenced by name across multiple chapters) and **retired terms** (things that used to matter in the pre-liberation fleet and are now historical).
 

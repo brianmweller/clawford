@@ -1,6 +1,6 @@
 # Sergeant Murphy 🐷🔍 — the meetings-coach agent
 
-*Last updated: 2026-04-16 · Reading time: ~25 min · Difficulty: hard*
+*Last updated: 2026-04-17 · Reading time: ~20 min · Difficulty: hard*
 
 > **TL;DR.** Sergeant Murphy is the meetings agent — not a calendar agent, a meetings agent. He composes a morning meeting brief at 5 AM PT with factual context for every meeting on the day (no invented talking points), fires pre-meeting alerts 15–45 minutes ahead with the real agenda, scans meeting transcripts from an MCP-speaking transcription provider after each meeting to stage action items + decisions for confirmation, tracks the commitments that actually get confirmed, and runs a coaching analysis against a configured set of communication growth areas. He is the **second** Google-OAuth agent in the fleet (after [Mistress Mouse](12-mistress-mouse.md)) and he sits on the other side of [§ the routing boundary](12-mistress-mouse.md#the-routing-boundary-with-sergeant-murphy): Workflowy-presence events are his, non-Workflowy events are Mistress Mouse's. Read [§ The 5x resend incident](#the-5x-resend-incident) before deploying the post-meeting scan. It is the reason the rest of the fleet treats "cache files are not a delivery queue" as a named design rule.
 

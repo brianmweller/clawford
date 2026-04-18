@@ -1,6 +1,6 @@
 # Huckle Cat 🐱🤝 — the connector agent
 
-*Last updated: 2026-04-16 · Reading time: ~25 min · Difficulty: hard*
+*Last updated: 2026-04-17 · Reading time: ~20 min · Difficulty: hard*
 
 > **TL;DR.** Huckle Cat is the relationship agent — the one that inverts the usual shape of a Clawford agent. Instead of wrapping a single external API the way Mr Fixit wraps the fleet's own heartbeat or Hilda Hippo wraps two retailers, Huckle Cat is built **around the shared brain itself**. His input is seven disparate data sources (Gmail, Google Calendar, Google Contacts, Google Messages, WhatsApp, meeting transcripts, and Workflowy) and his output is a relationship intelligence layer: ~280 people files in the brain with names, emails, phones, circles, last-interaction timestamps, enriched context notes, and facts pulled from email signatures. He composes a morning relationship nudge at 5 AM PT (overdue / approaching / healthy), triages a shared notes inbox twice a day, and keeps `last_interaction` fresh via a daily re-mining pass. He was the last agent in the fleet to deploy, and he is the only one where the [mining pipeline](#the-mining-pipeline) runs **before** the first cron fires — by design.
 

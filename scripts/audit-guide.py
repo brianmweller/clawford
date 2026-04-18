@@ -452,6 +452,95 @@ def check_we_pronoun(report: ChapterReport, text: str) -> None:
             ))
 
 
+LAST_UPDATED = re.compile(
+    r"\*Last updated:\s*(\d{4}-\d{2}-\d{2})\s*·\s*Reading time:\s*~?(\d+)\s*min"
+)
+
+
+def _git_last_modified(path: Path) -> str | None:
+    """Most recent commit date (YYYY-MM-DD) that touched this file."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(REPO), "log", "-1", "--format=%ad",
+             "--date=short", "--", str(path.relative_to(REPO))],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
+        pass
+    return None
+
+
+def check_last_updated(report: ChapterReport, text: str) -> None:
+    """Flag chapters whose `Last updated` date is older than the file's
+    last git commit date. Also flag reading-time estimates that are way
+    off from the word-count-derived value (230 wpm, ±50%).
+
+    Skips index.md (carries its own date format) and 99-unsorted-lessons.md
+    (historical holding pen, dropped from the build)."""
+    if report.path.name in ("index.md", "99-unsorted-lessons.md"):
+        return
+    m = None
+    last_updated_line = None
+    for lineno, line, in_code in iter_lines(text):
+        if in_code:
+            continue
+        mm = LAST_UPDATED.search(line)
+        if mm:
+            m = mm
+            last_updated_line = lineno
+            break
+    if not m:
+        report.add(Finding(
+            severity="P2",
+            check="missing-metadata-line",
+            line=1,
+            column=0,
+            message="chapter has no `*Last updated: YYYY-MM-DD · Reading time: ~N min · Difficulty: …*` line",
+            evidence="",
+        ))
+        return
+
+    declared_date = m.group(1)
+    declared_minutes = int(m.group(2))
+
+    last_commit_date = _git_last_modified(report.path)
+    if last_commit_date and last_commit_date > declared_date:
+        report.add(Finding(
+            severity="P1",
+            check="stale-last-updated",
+            line=last_updated_line,
+            column=0,
+            message=f"'Last updated: {declared_date}' is older than last commit date {last_commit_date}",
+            evidence="",
+        ))
+
+    # Word count on prose only (skip fenced code blocks)
+    word_count = 0
+    in_code = False
+    for line in text.splitlines():
+        if CODE_FENCE.match(line):
+            in_code = not in_code
+            continue
+        if in_code:
+            continue
+        word_count += len(line.split())
+    estimated_minutes = max(1, round(word_count / 230))
+
+    # Flag if declared is >2x or <0.5x the estimate
+    if declared_minutes > estimated_minutes * 2 or declared_minutes < estimated_minutes / 2:
+        report.add(Finding(
+            severity="P2",
+            check="reading-time-mismatch",
+            line=last_updated_line,
+            column=0,
+            message=f"declared reading time {declared_minutes} min vs estimate {estimated_minutes} min "
+                    f"({word_count} words ÷ 230 wpm)",
+            evidence="",
+        ))
+
+
 ALL_CHECKS = [
     check_commit_shas,
     check_markdown_links,
@@ -461,6 +550,7 @@ ALL_CHECKS = [
     check_stale_pending,
     check_github_leaks,
     check_we_pronoun,
+    check_last_updated,
 ]
 
 
