@@ -1,0 +1,54 @@
+/* TOC grid-card polish.
+ * Applied to guide-v3/index.md's grid-cards sections. Gives each card a
+ * subtle border, hover lift, and tighter typography. Keeps the rest of
+ * Material's default spacing. */
+
+.md-typeset .grid.cards > ul > li {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-left: 4px solid var(--md-primary-fg-color);
+  border-radius: 0.2rem;
+  padding: 1rem 1.1rem 0.9rem 1rem;
+  transition: box-shadow 0.15s ease-out, transform 0.15s ease-out;
+  background: var(--md-default-bg-color);
+}
+
+.md-typeset .grid.cards > ul > li:hover {
+  box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+  border-left-color: var(--md-accent-fg-color);
+}
+
+/* Title (the chapter link) — slightly larger. */
+.md-typeset .grid.cards > ul > li > p:first-child {
+  margin-top: 0;
+  margin-bottom: 0.3rem;
+  font-size: 1.05em;
+}
+
+/* The <hr> separator between title and body — tighter spacing. */
+.md-typeset .grid.cards > ul > li > hr {
+  margin: 0.35rem 0 0.55rem 0;
+  border-top-color: var(--md-default-fg-color--lightest);
+}
+
+/* Badge line (code-span with difficulty + reading time). */
+.md-typeset .grid.cards > ul > li > p > code {
+  font-size: 0.78em;
+  padding: 0.1em 0.4em;
+  border-radius: 0.2rem;
+  background: var(--md-code-bg-color);
+}
+
+/* Tagline body paragraph — muted colour, compact spacing. */
+.md-typeset .grid.cards > ul > li > p:last-child {
+  margin-top: 0;
+  margin-bottom: 0;
+  color: var(--md-default-fg-color--light);
+  font-size: 0.93em;
+  line-height: 1.45;
+}
+
+/* Tighten the gap between an h2 section heading and its grid. */
+.md-typeset h2 + .grid.cards {
+  margin-top: 0.6rem;
+}

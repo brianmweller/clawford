@@ -69,11 +69,21 @@ def stage():
     shutil.copytree(ROOT / "guide-v2", SRC / "guide-v2")
     shutil.copytree(ROOT / "assets", SRC / "assets")
 
+    # Custom CSS for the TOC grid-cards polish lives at
+    # overrides/stylesheets/ in source; MkDocs' extra_css loads it from
+    # _site_src/stylesheets/ at build time.
+    stylesheets_src = ROOT / "overrides" / "stylesheets"
+    if stylesheets_src.is_dir():
+        shutil.copytree(stylesheets_src, SRC / "stylesheets")
+
     docs_out = SRC / "docs"
     docs_out.mkdir()
     shutil.copy2(ROOT / "docs" / "ballad-of-mr-fixit.md", docs_out / "ballad-of-mr-fixit.md")
 
-    home = (ROOT / "guide-v3" / "index.md").read_text(encoding="utf-8")
+    # Home page = Ch 01 content. A duplicate of 01-what-is-clawford.md
+    # staged at the site root. The TOC lives at /guide-v3/ (served by
+    # guide-v3/index.md).
+    home = (ROOT / "guide-v3" / "01-what-is-clawford.md").read_text(encoding="utf-8")
     home = home.replace("../assets/", "assets/")
 
     def fix_link(m):

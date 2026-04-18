@@ -1,49 +1,254 @@
 ![Clawford](../assets/Clawford2.png)
 
-# Clawford Guide (v3)
+# Table of contents
 
-*Last updated: 2026-04-15 · Live guide*
+*Last updated: 2026-04-17*
 
-> **Guide v3 is the live guide.** Every chapter in the table below is drafted against the post-liberation Clawford-native runtime. The OpenClaw-era [guide v2](../guide-v2/index.md) is frozen and preserved as historical record. For the strategic reasoning behind the rewrite, start with [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md).
+Twenty-one chapters, six sections. Pick a chapter by the job you want to
+do, or read top-to-bottom if you're deploying a fleet from scratch.
+Reading-time estimates are rough (230 words per minute); difficulty is
+easy / moderate / hard / reference.
 
-## Full table of contents
+## Overview
 
-| # | Chapter |
-|---|---------|
-|   | **Overview** |
-| 01 | [What is Clawford?](01-what-is-clawford.md) |
-| 02 | [What Isn't Clawford?](02-what-isnt-clawford.md) |
-|   | **Setup** |
-| 03 | [Before you start](03-before-you-start.md) |
-| 04 | [VPS setup](04-vps-setup.md) |
-| 05 | [Dev setup](05-dev-setup.md) |
-| 06 | [Infra setup](06-infra-setup.md) |
-|   | **Agents** |
-| 07 | [Intro to agents](07-intro-to-agents.md) |
-| 08 | [Your first agent](08-your-first-agent.md) |
-| 09 | [Mr Fixit 🦊🔧](09-mr-fixit.md) |
-| 10 | [Lowly Worm — newsfeed 🐛📰](10-lowly-worm-newsfeed.md) |
-| 11 | [Lowly Worm — social 🐛📰](11-lowly-worm-social.md) |
-| 12 | [Mistress Mouse 🐭📅](12-mistress-mouse.md) |
-| 13 | [Sergeant Murphy 🐷🔍](13-sergeant-murphy.md) |
-| 14 | [Huckle Cat 🐱🤝](14-huckle-cat.md) |
-| 15 | [Hilda Hippo 🦛🛒](15-hilda-hippo.md) |
-|   | **Architecture** |
-| 16 | [The shared brain](16-shared-brain.md) |
-| 17 | [Auth architectures](17-auth-architectures.md) |
-| 18 | [The inbox: making agents conversational](18-the-inbox.md) |
-| 19 | [Security and hardening](19-security-and-hardening.md) |
-|   | **Reference** |
-| 20 | [Scripts and configs reference](20-scripts-and-configs.md) |
-| 21 | [Glossary](21-glossary.md) |
+<div class="grid cards" markdown>
 
-## What's changing from v2
+-   **[01 — What is Clawford?](01-what-is-clawford.md)**
 
-- **OpenClaw is gone.** Clawford now runs on a Clawford-native stack — `codex` for LLM calls (riding ChatGPT Plus), system crontab for scheduling, a real shared library under `agents/shared/` for the world-access layer, and a shared brain on git + Dropbox. Ch 02 explains why.
-- **Nothing is buried.** Every chapter that mentioned OpenClaw in v2 either gets rewritten or migrated with the scar tissue stripped. Where v2 spent paragraphs explaining how to work around OpenClaw's 600-second cron timeout or its exec-approvals allowlist, v3 doesn't have to — those problems are gone.
-- **The shared library is real.** v2 treated `agents/shared/` as a handful of deployment helpers. v3 describes a proper three-tier library for world access (clean APIs / stock Playwright / hardened Camoufox), plus a `brain.py` module for the shared-brain read/write pattern, plus an `llm.py` broker for the `codex` backend.
+    ---
+
+    `easy` · ~5 min
+
+    A personal fleet of LLM agents on a $30/month VPS. Each agent is a
+    teleported Busytown character with a narrow job.
+
+-   **[02 — What Isn't Clawford?](02-what-isnt-clawford.md)**
+
+    ---
+
+    `moderate` · ~20 min
+
+    The decision doc for why Clawford left the OpenClaw platform —
+    written up front, not buried at the back as a retrospective.
+
+</div>
+
+## Setup
+
+<div class="grid cards" markdown>
+
+-   **[03 — Before you start](03-before-you-start.md)**
+
+    ---
+
+    `easy` · ~15 min
+
+    The one-way-door decisions: dedicated VPS, Telegram over WhatsApp,
+    Mr Fixit first. Cheap to get right, expensive to reverse.
+
+-   **[04 — VPS setup](04-vps-setup.md)**
+
+    ---
+
+    `moderate` · ~15 min
+
+    Terraform-provisioned Hetzner box. SSH-hardened, Tailscale overlay,
+    `codex` installed, residential proxy wired in and tested.
+
+-   **[05 — Dev setup](05-dev-setup.md)**
+
+    ---
+
+    `moderate` · ~15 min
+
+    Claude Code as the dev environment. Red-green TDD for infra. The
+    four things Claude Code gets wrong, in decreasing order of cost.
+
+-   **[06 — Infra setup](06-infra-setup.md)**
+
+    ---
+
+    `moderate` · ~20 min
+
+    Three boring pieces: the three-tier shared library, the shared
+    brain (git + Dropbox), the host-cron runtime. Ten active deploy
+    safeguards.
+
+</div>
+
+## Agents
+
+<div class="grid cards" markdown>
+
+-   **[07 — Intro to agents](07-intro-to-agents.md)**
+
+    ---
+
+    `moderate` · ~15 min
+
+    The anatomy of a Clawford agent: eight workspace files, a manifest,
+    the script contract, and the LLM-vs-deterministic line.
+
+-   **[08 — Your first agent](08-your-first-agent.md)**
+
+    ---
+
+    `moderate` · ~10 min
+
+    The seven-step first-deploy arc every agent inherits — Telegram
+    bot, workspace bootstrap, scripts, deploy, smoke test.
+
+-   **[09 — Mr Fixit 🦊🔧](09-mr-fixit.md)**
+
+    ---
+
+    `hard` · ~20 min
+
+    The infrastructure fox. Fleet-health canary, brain validator,
+    conflict-scanner. Currently on probation after the 2026-04-11
+    confabulation episode.
+
+-   **[10 — Lowly Worm — newsfeed 🐛📰](10-lowly-worm-newsfeed.md)**
+
+    ---
+
+    `moderate` · ~15 min
+
+    A personalized morning news digest that learns from your thumbs.
+    The preference-learning story is the hero of this chapter.
+
+-   **[11 — Lowly Worm — social 🐛📰](11-lowly-worm-social.md)**
+
+    ---
+
+    `hard` · ~25 min
+
+    Optional LinkedIn layer on top of the core newsfeed. Playwright,
+    aria-label selectors, and the smart-reply chip incident.
+
+-   **[12 — Mistress Mouse 🐭📅](12-mistress-mouse.md)**
+
+    ---
+
+    `hard` · ~20 min
+
+    Family logistics: Google Calendar reader, three-tier reminders,
+    school-email parser, WhatsApp digest. First Google OAuth agent.
+
+-   **[13 — Sergeant Murphy 🐷🔍](13-sergeant-murphy.md)**
+
+    ---
+
+    `hard` · ~20 min
+
+    Meeting prep, transcript-driven debrief, commitment tracking,
+    coaching. Home of the 5x resend incident and the cache-is-not-a-queue
+    rule.
+
+-   **[14 — Huckle Cat 🐱🤝](14-huckle-cat.md)**
+
+    ---
+
+    `hard` · ~20 min
+
+    Relationship memory across seven sources. The only agent where the
+    mining pipeline runs **before** the first cron — by design.
+
+-   **[15 — Hilda Hippo 🦛🛒](15-hilda-hippo.md)**
+
+    ---
+
+    `hard` · ~35 min
+
+    Amazon + Costco orders, Subscribe & Save, delivery digest. Hardest
+    auth in the fleet — a seven-act saga through Akamai, Azure B2C,
+    and the home-ISP tunnel.
+
+</div>
+
+## Architecture
+
+<div class="grid cards" markdown>
+
+-   **[16 — The shared brain](16-shared-brain.md)**
+
+    ---
+
+    `moderate` · ~10 min
+
+    The git + Dropbox directory that turns a pile of agents into a
+    fleet. Four primitives, two halves, all appends.
+
+-   **[17 — Auth architectures](17-auth-architectures.md)**
+
+    ---
+
+    `hard` · ~15 min
+
+    Six auth shapes across the fleet, plus three cross-cutting idioms:
+    local-then-SCP, gitignored credentials, no raw API keys in crons.
+
+-   **[18 — The inbox](18-the-inbox.md)**
+
+    ---
+
+    `moderate` · ~20 min
+
+    The inbound side. One async daemon polls six bots, routes each
+    message to the right agent, stages every mutation behind a Confirm
+    button.
+
+-   **[19 — Security and hardening](19-security-and-hardening.md)**
+
+    ---
+
+    `hard` · ~25 min
+
+    Seven defense layers against drift, accident, credential leak,
+    trust erosion, promptware, and active attack.
+
+</div>
+
+## Reference
+
+<div class="grid cards" markdown>
+
+-   **[20 — Scripts and configs](20-scripts-and-configs.md)**
+
+    ---
+
+    `reference` · ~10 min
+
+    The catalog: every tracked script and config file, organised by
+    job. A lookup, not a read-through.
+
+-   **[21 — Glossary](21-glossary.md)**
+
+    ---
+
+    `reference` · ~15 min
+
+    Every Clawford-specific term, alphabetically. Plus named incidents
+    and retired terms for historical context.
+
+</div>
+
+## Lore
+
+<div class="grid cards" markdown>
+
+-   **[The Ballad of Mr Fixit](../docs/ballad-of-mr-fixit.md)**
+
+    ---
+
+    `easy` · ~10 min
+
+    A five-act tragedy covering the first day of setup. The myth
+    version before the manual version.
+
+</div>
 
 ## See also
 
-- [`../guide-v2/index.md`](../guide-v2/index.md) — the frozen OpenClaw-era guide
-- [`../docs/ballad-of-mr-fixit.md`](../docs/ballad-of-mr-fixit.md) — the lore version, still accurate
+- [Guide v2](../guide-v2/index.md) — the frozen OpenClaw-era guide,
+  preserved as historical record.
