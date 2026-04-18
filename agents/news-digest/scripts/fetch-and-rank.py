@@ -319,6 +319,123 @@ def _summarize_linkedin_thread(sender: str, full_messages: list[str]) -> str | N
     return text if text else None
 
 
+_PROFILE_VIEW_NAME_RE = re.compile(r"^(.+?)\s+viewed your profile", re.IGNORECASE)
+
+
+def _build_profile_view_summary(notifications: list[dict]) -> dict | None:
+    """Collapse every `type: profile_view` notification into ONE rollup.
+
+    LinkedIn fires one "X viewed your profile" notification per viewer
+    (and occasional aggregate ones like "53 recruiters viewed your
+    profile"). The scraper captures each with a `detail_names` list of
+    {name, time_ago} for the most recent viewers. Previously each
+    individual ping landed in the morning brief as its own low-signal
+    item; now we produce one synthesized notification carrying the
+    count and every viewer+time the scraper saw.
+
+    Returns None when no profile_view notifications are present.
+    """
+    viewer_times: dict[str, str] = {}  # name → time_ago (freshest kept)
+
+    def _less_old(a: str, b: str) -> bool:
+        # Rough ordering: shorter time_ago strings are fresher. "2h" < "9h" < "1d" < "3d".
+        rank = {"m": 0, "h": 1, "d": 2, "w": 3}
+        def key(t: str) -> tuple[int, int]:
+            t = (t or "").strip().lower()
+            unit = t[-1:] if t[-1:] in rank else "h"
+            try:
+                value = int("".join(c for c in t if c.isdigit()) or "99")
+            except ValueError:
+                value = 99
+            return (rank.get(unit, 1), value)
+        return key(a) < key(b)
+
+    def _add(name: str, time_ago: str) -> None:
+        name = (name or "").strip()
+        if not name:
+            return
+        cur = viewer_times.get(name)
+        if cur is None or _less_old(time_ago, cur):
+            viewer_times[name] = (time_ago or "").strip()
+
+    any_profile_view = False
+    for notif in notifications or []:
+        if notif.get("type") != "profile_view":
+            continue
+        any_profile_view = True
+        details = notif.get("detail_names") or []
+        if details:
+            for d in details:
+                _add(d.get("name", ""), d.get("time_ago", ""))
+        else:
+            # Fallback: scraper gave us "X viewed your profile" with no
+            # detail_names. Pull X out so the viewer still shows up.
+            m = _PROFILE_VIEW_NAME_RE.match(notif.get("text", "") or "")
+            if m:
+                _add(m.group(1), notif.get("time_ago", ""))
+
+    if not any_profile_view:
+        return None
+
+    # Sort viewers by freshness (same ordering rule as the merge).
+    ordered = sorted(
+        viewer_times.items(),
+        key=lambda kv: (
+            {"m": 0, "h": 1, "d": 2, "w": 3}.get((kv[1] or "h")[-1:].lower(), 1),
+            int("".join(c for c in (kv[1] or "") if c.isdigit()) or 99),
+        ),
+    )
+    count = len(ordered)
+    lines = [f"• {name} — {time_ago}" if time_ago else f"• {name}" for name, time_ago in ordered]
+    summary = "\n".join(lines) if lines else "See LinkedIn for details."
+
+    title = f"👁️ Profile visitors — last 24h ({count})"
+    return {
+        "id": article_id(f"profile-view-rollup-{count}-{'-'.join(n for n, _ in ordered)[:80]}"),
+        "title": title,
+        "link": "https://www.linkedin.com/me/profile-views/",
+        "summary": summary,
+        "source": "linkedin",
+        "source_label": "LinkedIn Notification",
+        "pub_date": datetime.now(timezone.utc).isoformat(),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "_is_notification": True,
+    }
+
+
+def _linkedin_articles_from_scrape(data: dict) -> list[dict]:
+    """Build the LinkedIn articles list from the scraper payload.
+
+    Extracted from fetch_linkedin_browser so the notification-collapse
+    behaviour is testable without standing up Playwright.
+    """
+    articles: list[dict] = []
+
+    profile_view_summary = _build_profile_view_summary(data.get("notifications", []))
+    if profile_view_summary is not None:
+        articles.append(_scan_article_fields(
+            profile_view_summary, source_type="linkedin-notification"
+        ))
+    for notif in data.get("notifications", []):
+        if notif.get("type") == "profile_view":
+            continue
+        text = notif.get("text", "")
+        if not text:
+            continue
+        articles.append(_scan_article_fields({
+            "id": article_id("notif-" + text[:50]),
+            "title": text[:200],
+            "link": "https://www.linkedin.com/notifications/",
+            "summary": text,
+            "source": "linkedin",
+            "source_label": "LinkedIn Notification",
+            "pub_date": datetime.now(timezone.utc).isoformat(),
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "_is_notification": True,
+        }, source_type="linkedin-notification"))
+    return articles
+
+
 def fetch_linkedin_browser():
     """Fetch LinkedIn content by running the Playwright scraper script.
 
@@ -414,8 +531,17 @@ def fetch_linkedin_browser():
             "fetched_at": datetime.now(timezone.utc).isoformat(),
         }, source_type="linkedin-feed"))
 
-    # Convert notifications to article format (separate category)
+    # Convert notifications to article format (separate category).
+    # Profile-view notifications get collapsed into ONE synthesized
+    # summary entry — see _build_profile_view_summary.
+    profile_view_summary = _build_profile_view_summary(data.get("notifications", []))
+    if profile_view_summary is not None:
+        articles.append(_scan_article_fields(
+            profile_view_summary, source_type="linkedin-notification"
+        ))
     for notif in data.get("notifications", []):
+        if notif.get("type") == "profile_view":
+            continue  # collapsed above
         text = notif.get("text", "")
         if not text:
             continue
