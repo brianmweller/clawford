@@ -35,6 +35,16 @@ import re
 import sys
 import urllib.request as urllib_request
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+# --- shared library sys.path shim ---
+for _p in Path(__file__).resolve().parents:
+    if (_p / "agents" / "shared").is_dir():
+        if str(_p) not in sys.path:
+            sys.path.insert(0, str(_p))
+        break
+
+from agents.shared.meeting_classifier import has_videoconference_link  # noqa: E402
 
 WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
 REMINDERS_PATH = os.path.join(WORKSPACE, "sent-reminders.json")
@@ -43,35 +53,6 @@ TOKEN_PATH = os.environ.get(
     "GOOGLE_CALENDAR_TOKEN_PATH",
     os.path.join(WORKSPACE, "token.json"),
 )
-
-# Mistress Mouse / Sergeant Murphy routing boundary: events present in
-# Murphy's workflowy-links.json are "meetings" (his domain). Mistress
-# Mouse must NOT fire reminders for those — Murphy owns them via
-# pre-meeting-alert. See memory: project_meeting_event_routing.md.
-WORKFLOWY_LINKS_PATH = os.environ.get(
-    "WORKFLOWY_LINKS_PATH",
-    os.path.expanduser(
-        "~/.clawford/meetings-coach-workspace/cache/workflowy-links.json"
-    ),
-)
-
-
-def load_workflowy_linked_event_ids() -> set:
-    """Return the set of GCal event IDs that have a Workflowy link.
-
-    File-missing → empty set (degrade open: if Murphy hasn't recorded
-    any meetings yet, don't over-filter).
-    """
-    if not os.path.exists(WORKFLOWY_LINKS_PATH):
-        return set()
-    try:
-        with open(WORKFLOWY_LINKS_PATH) as f:
-            data = json.load(f)
-    except Exception:
-        return set()
-    if not isinstance(data, dict):
-        return set()
-    return set(data.keys())
 
 TRAVEL_KEYWORDS = re.compile(
     r"airport|doctor|dentist|hospital|clinic|urgent care|emergency",
@@ -255,12 +236,10 @@ def main():
     sent_data = prune_old_reminders(sent_data)
     sent_reminders = sent_data.get("reminders", {})
 
-    # Mistress Mouse / Sergeant Murphy routing boundary: load Murphy's
-    # workflowy-links.json and skip reminders for any event that has a
-    # Workflowy item (those are Murphy's pre-meeting-alert domain).
-    workflowy_linked_ids = load_workflowy_linked_event_ids()
-
-    # Fetch events from all calendars
+    # Mouse/Murphy routing boundary (memory:
+    # project_meeting_event_routing.md, rule revised 2026-04-18):
+    # videoconference link = Murphy's meeting, skip here so his
+    # pre-meeting-alert owns it.
     reminders_to_send = []
 
     for cal in config.get("calendars", []):
@@ -291,8 +270,8 @@ def main():
 
                 event_id = event.get("id", "")
 
-                # Routing boundary: Murphy owns Workflowy-linked events.
-                if event_id in workflowy_linked_ids:
+                # Routing boundary: Murphy owns videoconferenced events.
+                if has_videoconference_link(event):
                     continue
 
                 summary = event.get("summary", "(No title)")

@@ -29,6 +29,16 @@ import json
 import os
 import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+# --- shared library sys.path shim ---
+for _p in Path(__file__).resolve().parents:
+    if (_p / "agents" / "shared").is_dir():
+        if str(_p) not in sys.path:
+            sys.path.insert(0, str(_p))
+        break
+
+from agents.shared.meeting_classifier import has_videoconference_link  # noqa: E402
 
 WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
 CONFIG_PATH = os.path.join(WORKSPACE, "calendar-config.json")
@@ -41,41 +51,6 @@ CREDENTIALS_PATH = os.environ.get(
     os.path.join(WORKSPACE, "credentials.json"),
 )
 CACHE_DIR = os.path.join(WORKSPACE, "cache")
-
-# Cross-agent read: Sergeant Murphy's workflowy-links.json is the
-# authoritative signal for "this calendar event is a meeting". Per the
-# Mistress-Mouse/Sergeant-Murphy routing boundary (memory:
-# project_meeting_event_routing.md), events with a Workflowy link are
-# owned by Murphy; everything else is Mistress Mouse. We read Murphy's
-# cache file directly since both workspaces are on the same volume.
-WORKFLOWY_LINKS_PATH = os.path.expanduser(
-    "~/.clawford/meetings-coach-workspace/cache/workflowy-links.json"
-)
-
-
-def load_workflowy_linked_event_ids() -> set:
-    """Return the set of GCal event IDs that have a Workflowy link.
-
-    These events are owned by Sergeant Murphy under the Mistress Mouse /
-    Sergeant Murphy routing boundary. Mistress Mouse should EXCLUDE them
-    from morning briefings and reminders so Sam doesn't get duplicate
-    coverage for the same event.
-
-    File-missing → empty set (degrade open: if Murphy hasn't recorded
-    any meetings yet, don't over-filter).
-    """
-    # Allow override via env for tests.
-    path = os.environ.get("WORKFLOWY_LINKS_PATH", WORKFLOWY_LINKS_PATH)
-    if not os.path.exists(path):
-        return set()
-    try:
-        with open(path) as f:
-            data = json.load(f)
-    except Exception:
-        return set()
-    if not isinstance(data, dict):
-        return set()
-    return set(data.keys())
 
 
 def parse_args():
@@ -96,8 +71,10 @@ def parse_args():
             calendar_id = sys.argv[i + 1]
             i += 2
         elif sys.argv[i] == "--skip-meetings":
-            # Mistress Mouse / Sergeant Murphy boundary: skip events that
-            # have a Workflowy link (those are Murphy's, not Mistress Mouse's).
+            # Mouse/Murphy boundary: drop events with a videoconference
+            # link (those are Murphy's). See memory
+            # project_meeting_event_routing.md — rule changed 2026-04-18
+            # from "has Workflowy link" to "has videoconference link".
             skip_meetings = True
             i += 1
         else:
@@ -320,19 +297,18 @@ def main():
     # Dedup shared events
     all_events = dedup_events(all_events)
 
-    # Annotate each event with the Workflowy-link flag (cross-agent check).
-    # This is the Mistress Mouse / Sergeant Murphy routing boundary:
-    # events present in Murphy's workflowy-links.json are "meetings" (his
-    # domain); others are "events" (Mistress Mouse's domain).
-    workflowy_linked_ids = load_workflowy_linked_event_ids()
+    # Annotate each event with the videoconference flag. Mouse/Murphy
+    # routing (memory: project_meeting_event_routing.md): an item with a
+    # videoconference link is Murphy's meeting; everything else is a
+    # Mouse event. Mutually exclusive by construction.
     for event in all_events:
-        event["has_workflowy_item"] = event.get("id", "") in workflowy_linked_ids
+        event["has_meeting_link"] = has_videoconference_link(event)
 
     # Apply --skip-meetings filter: drop the events that Murphy owns.
     skipped_count = 0
     if skip_meetings:
         before = len(all_events)
-        all_events = [e for e in all_events if not e.get("has_workflowy_item")]
+        all_events = [e for e in all_events if not e.get("has_meeting_link")]
         skipped_count = before - len(all_events)
 
     # Detect conflicts
