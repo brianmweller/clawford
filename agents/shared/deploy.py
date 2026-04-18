@@ -995,17 +995,38 @@ def _ensure_config_sources_present(mf: Manifest) -> int:
     needs_bootstrap: list[tuple[str, Path, Path]] = []
     truly_broken: list[tuple[str, Path]] = []
     sentinel_present: list[tuple[str, Path]] = []
+    self_healed: list[str] = []
+
+    workspace = mf.expanded_workspace
 
     for cf in mf.config_files:
         src = mf.source_dir / cf.src
         template = mf.source_dir / (cf.src + ".example")
         if not src.exists():
+            # Self-heal: if the deployed workspace already has a real
+            # (non-sentinel) copy, seed the repo source from it. A past
+            # ``git clean`` can wipe the gitignored repo copies while the
+            # workspace copies survive — restore the link transparently
+            # rather than forcing a bootstrap-then-re-edit cycle.
+            ws_copy = workspace / cf.src
+            if ws_copy.exists() and not _has_bootstrap_sentinel(ws_copy):
+                src.parent.mkdir(parents=True, exist_ok=True)
+                src.write_bytes(ws_copy.read_bytes())
+                self_healed.append(cf.src)
+                continue
             if template.exists():
                 needs_bootstrap.append((cf.src, src, template))
             else:
                 truly_broken.append((cf.src, src))
         elif _has_bootstrap_sentinel(src):
             sentinel_present.append((cf.src, src))
+
+    if self_healed:
+        log(
+            f"config sources self-healed from workspace ({len(self_healed)} file(s)): "
+            + ", ".join(self_healed),
+            "warn",
+        )
 
     if truly_broken:
         log(
