@@ -16,7 +16,7 @@ You don't need everything below paid for and activated by the end of this chapte
 
 **Accounts (required):**
 
-- A **[Hetzner Cloud](https://console.hetzner.cloud/)** account. Ch 04 walks the cpx31 provisioning with Terraform. Other providers (DigitalOcean, Linode, Vultr, OVH, AWS Lightsail) will also work, but swapping providers is a Ch 04 problem.
+- A **[Hetzner Cloud](https://console.hetzner.cloud/)** account. [Ch 04](04-vps-setup.md) walks the cpx31 provisioning with Terraform. Other providers (DigitalOcean, Linode, Vultr, OVH, AWS Lightsail) will also work, but swapping providers is a Ch 04 problem.
 - A **Dropbox** account with ~10 GB free. The shared brain and agent backups sync through Dropbox — a dedicated account for this fleet is cleaner than co-mingling with your personal files.
 - A **Telegram** account. You'll create one bot per agent via [@BotFather](https://t.me/BotFather).
 - A **[GitHub](https://github.com)** account (or equivalent git host) for your canonical remote. The checkout on your local box is the source of truth; the remote is backup plus a place to review diffs.
@@ -24,7 +24,7 @@ You don't need everything below paid for and activated by the end of this chapte
 **Dev environment (required):**
 
 - **Git** locally.
-- **[Claude Code](https://claude.com/claude-code)** or the **Codex CLI** — or an LLM pair-programming environment you already trust. Much of this guide assumes you'll be driving the tooling *with* an LLM copilot, not against a blank terminal. See [Ch 01](index.md)'s "Who this guide is for" for the framing. [Ch 05 — Dev setup](05-dev-setup.md) covers what Claude Code gets right and, more importantly, what it gets wrong.
+- **[Claude Code](https://claude.com/claude-code)** or the **Codex CLI** — or an LLM pair-programming environment you already trust. Much of this guide assumes you'll be driving the tooling *with* an LLM copilot, not against a blank terminal. See [Ch 01](01-what-is-clawford.md)'s "Who this guide is for" for the framing. [Ch 05 — Dev setup](05-dev-setup.md) covers what Claude Code gets right and, more importantly, what it gets wrong.
 
 **What you should already be comfortable with:**
 
@@ -34,7 +34,7 @@ Shell and git, run and read. Python familiarity is welcome but not required — 
 
 A **ChatGPT Plus / Codex subscription** (~$20/month). Clawford's LLM entry point is `agents.shared.llm.infer()`, which wraps the `codex` CLI and rides your ChatGPT Plus subscription for every agent LLM call. See "Picking your LLM provider" below for the reasoning and the (limited) alternatives.
 
-**Optional — deferred until Ch 15:**
+**Optional — deferred until [Ch 15](15-hilda-hippo.md):**
 
 - A **residential proxy subscription** (IPRoyal, Bright Data, or similar). Only matters once you deploy Hilda Hippo for purchasing — Amazon and Costco detect datacenter IPs and will block you — so you'll need a sticky residential egress to reach them. Don't buy this until you're actually ready to deploy her. Budget **~$1/month** when you do — the actual bandwidth the fleet puts through the proxy is small, because Hilda's hot path is small HTTPS API calls, not heavy page scrapes. Uninformed usage (scraping full pages through the proxy on every query) would cost more; most providers' minimum-volume plans land in the $8-30/month range if you don't pay attention to what you're routing through.
 
@@ -71,9 +71,9 @@ These three are cheap to get right up-front and expensive to reverse later.
 
 A Clawford fleet runs with broad filesystem and shell access on its host. That's how the agents do their work — Playwright browsers, Camoufox sessions, Gmail tokens, Dropbox state, outgoing SSH. Pointing that at your work laptop means accidental file modifications, runaway processes during debugging, and a security posture you did not consent to.
 
-Use a dedicated VPS. Ch 04 walks Hetzner cpx31 (~$30/month, 4 vCPU, 8 GB RAM, 160 GB SSD), which is comfortable for all six agents with headroom. **Availability varies by region** — I picked cpx31 partly because the slightly larger cpx32 wasn't available in mine. If your region offers a different set of SKUs, pick one step above what you think you need. A Raspberry Pi or old Mac mini *can* work if you already have one and don't mind the tradeoffs in [Ch 01](index.md)'s VPS-vs-Mac-mini section — but the whole guide is written against a VPS.
+Use a dedicated VPS. [Ch 04](04-vps-setup.md) walks Hetzner cpx31 (~$30/month, 4 vCPU, 8 GB RAM, 160 GB SSD), which is comfortable for all six agents with headroom. **Availability varies by region** — I picked cpx31 partly because the slightly larger cpx32 wasn't available in mine. If your region offers a different set of SKUs, pick one step above what you think you need. A Raspberry Pi or old Mac mini *can* work if you already have one and don't mind the tradeoffs in [Ch 01](01-what-is-clawford.md)'s VPS-vs-Mac-mini section — but the whole guide is written against a VPS.
 
-On whichever host you pick, do not run the fleet as `root`. You'll hit package-manager permission errors, lose the ability to run systemd user services cleanly, and expand the blast radius of anything that goes wrong. The Terraform in Ch 04 creates a non-root `openclaw` user for you (the name is a historical artifact from the pre-liberation era — the platform it refers to is gone but the Unix user lives on as the fleet's operator account). If you're setting up manually instead, create one before you install anything:
+On whichever host you pick, do not run the fleet as `root`. You'll hit package-manager permission errors, lose the ability to run systemd user services cleanly, and expand the blast radius of anything that goes wrong. The Terraform in [Ch 04](04-vps-setup.md) creates a non-root `openclaw` user for you (the name is a historical artifact from the pre-liberation era — the platform it refers to is gone but the Unix user lives on as the fleet's operator account). If you're setting up manually instead, create one before you install anything:
 
 ```bash
 adduser openclaw
@@ -94,7 +94,7 @@ WhatsApp support rides on Baileys, an unofficial library that reverse-engineers 
 
 Telegram uses the official Bot API. No ban risk, unlimited proactive messages, and each bot gets its own name and avatar so you can tell who's talking to you at a glance.
 
-> ⚠️ **Warning.** Install Telegram on your phone before Ch 06. Bot creation via @BotFather runs through a real Telegram client, not a CLI.
+> ⚠️ **Warning.** Install Telegram on your phone before [Ch 06](06-infra-setup.md). Bot creation via @BotFather runs through a real Telegram client, not a CLI.
 
 ### Deploy Mr Fixit first
 
@@ -112,7 +112,7 @@ Before you clone anything, know that the repo has a strict shape that keeps PII 
 - The unsuffixed siblings (`IDENTITY.md`, `manifest.json`, `family_map.py`) are `.gitignore`d. They exist only on your working machine.
 - **First-time setup** for each agent you plan to deploy is: `python3 agents/shared/deploy.py <agent-id> --bootstrap-configs` to scaffold every unsuffixed sibling from its `.example` template, then edit each one with your real values (names, IDs, preferences) and delete the `CLAWFORD_BOOTSTRAP_UNEDITED` sentinel comment from the top of every `.md` file. The bootstrap tool refuses to overwrite anything that already exists, so re-running it after you add a new agent is safe. Never commit the unsuffixed files.
 
-The templates ship populated with a fake placeholder family — Sam Smith (operator), Alex Rivera (partner), and kids Avery and Jordan — so the checked-in state is self-consistent and runnable without being anyone's actual life. When you personalize, you replace those values with your own in the unsuffixed copies. The sentinel rail is what stops you from accidentally shipping the placeholder cast into a live workspace if you forget to edit a file: `deploy.py`'s Safeguard 10 ([Ch 06](06-infra-setup.md)) refuses any deploy that still carries it.
+The templates ship populated with a fake placeholder family — Sam Smith (operator), Alex Rivera (partner), and kids Avery and Jordan — so the checked-in state is self-consistent and runnable without being anyone's actual life. When you personalize, you replace those values with your own in the unsuffixed copies. The sentinel rail is what stops you from accidentally shipping the placeholder cast into a live workspace if you forget to edit a file: `deploy.py`'s [Safeguard 10](19-security-and-hardening.md#defense-layer-3-the-deploy-tool-safeguards) refuses any deploy that still carries it.
 
 > 🔦 **Tip.** If you ever see real names or identifiers drift into a `.example` file, treat it as a PII leak and fix it before pushing. The `.example` files are what I expect to be in public git; the unsuffixed copies are what I expect to be in yours only. Running `git status` before every commit and watching for tracked unsuffixed agent configs is a cheap habit that catches this before it matters.
 
@@ -136,7 +136,7 @@ Every service with multi-factor authentication (MFA) — Google, Costco, Amazon,
 
 The cost is real: that plumbing is fragile, it takes debugging when a service changes its login flow, and every auth vector is a potential security issue you are choosing to automate instead of interactive-prompt. The benefit is that my overnight crons actually run overnight.
 
-This is a personal choice. Reasonable operators land on the other side and prefer a manual re-auth step with a Telegram nudge — it's simpler, it's arguably safer, and it works if you're at a keyboard often enough. The guide covers the automated path in [Ch 17](17-auth-architectures.md), but if you'd rather not maintain it, that's a defensible call. Know which side you want to be on before you start Ch 04.
+This is a personal choice. Reasonable operators land on the other side and prefer a manual re-auth step with a Telegram nudge — it's simpler, it's arguably safer, and it works if you're at a keyboard often enough. The guide covers the automated path in [Ch 17](17-auth-architectures.md), but if you'd rather not maintain it, that's a defensible call. Know which side you want to be on before you start [Ch 04](04-vps-setup.md).
 
 ## Pick one thing to prioritize
 
@@ -164,15 +164,14 @@ Every design choice in this guide is downstream of that assumption. Mr Fixit as 
 
 > 🧨 **Pitfall.** Picking WhatsApp "just to try it" because your family already uses it. **Why:** Baileys-based WhatsApp bindings ban within days, and the 24-hour inactivity window silently drops the exact overnight alerts you'd want most. **How to avoid:** stand the fleet up on Telegram first, always. If you later need WhatsApp for human reachability (I do, for Mistress Mouse), wire it as a *delivery target* an agent hands off to, not as the agent's primary channel.
 
-> 🧨 **Pitfall.** Underestimating time-to-first-agent and booking real deadlines against it. **Why:** first deploy of a new agent hits silent failures (Ch 20). A "should be an afternoon" plan routinely turns into three evenings of debugging BotFather, a Dropbox conflict from a file you didn't know was open, and a Playwright login flow that worked locally but not on the VPS. **How to avoid:** plan 2-3 days to Mr Fixit and 2-4 weeks of evenings to a full fleet. Tell the people waiting on you something generous.
+> 🧨 **Pitfall.** Underestimating time-to-first-agent and booking real deadlines against it. **Why:** first deploy of a new agent hits silent failures ([Ch 09](09-mr-fixit.md)). A "should be an afternoon" plan routinely turns into three evenings of debugging BotFather, a Dropbox conflict from a file you didn't know was open, and a Playwright login flow that worked locally but not on the VPS. **How to avoid:** plan 2-3 days to Mr Fixit and 2-4 weeks of evenings to a full fleet. Tell the people waiting on you something generous.
 
 ## See also
 
-- [Ch 01 — What is Clawford?](index.md) — the framing decisions this chapter's details hang off.
+- [Ch 01 — What is Clawford?](01-what-is-clawford.md) — the framing decisions this chapter's details hang off.
 - [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md) — the decision doc explaining why the stack looks the way it does.
 - [Ch 04 — VPS setup](04-vps-setup.md) — the next stop; you'll put the decisions here to work there.
 - [Ch 05 — Dev setup](05-dev-setup.md) — Claude Code as the dev environment, and the four things it gets wrong.
 - [Ch 09 — Mr Fixit](09-mr-fixit.md) — the first-deploy-minefield war story that motivates "deploy Mr Fixit first."
 - [Ch 17 — Auth architectures](17-auth-architectures.md) — the automated re-auth patterns the spicy take above is pointing at.
-- [README.md](../README.md) — the canonical `*.example` → unsuffixed-sibling copy loop and the "First-time setup" section referenced above.
 - [docs/ballad-of-mr-fixit.md](../docs/ballad-of-mr-fixit.md) — for when this chapter starts feeling too dry.

@@ -1,4 +1,4 @@
-# Ch 19 — Security and hardening
+# Security and hardening
 
 *Guide v3 · net-new in v3 · revised 2026-04-16 after the P0/P1 hardening pass*
 
@@ -28,7 +28,7 @@ Every file in every agent's Dropbox-brain directory (`~/Dropbox/openclaw-backup/
 - `IDENTITY.md` — operator-facing identity. Who the agent is to the operator.
 - `AGENTS.md` — the fleet map + cross-agent operating rules. How each agent's domain bounds against the others.
 
-These three files are the parts of an agent that should never change without explicit operator intervention. `TOOLS.md` was retired in the 2026-04 brain migration — the LLM-callable tool surface is now generated dynamically from each agent's `tools.py` manifest, so there's no separate doc to protect. `chattr +i` (Linux's "immutable" attribute) makes the file unwritable even by root. A new deploy that wants to update `SOUL.md` has to first `chattr -i` the file, write the new content, and then `chattr +i` it again. The deploy tool does this automatically; random agent code cannot.
+These three files are the parts of an agent that should never change without explicit operator intervention. (`TOOLS.md` still lives in the workspace as operator-readable reference, but the inbox daemon no longer loads it into the LLM context — the tool surface the model sees is generated dynamically from each agent's `tools.py` manifest — so there's no LLM-facing identity doc to protect under that name.) `chattr +i` (Linux's "immutable" attribute) makes the file unwritable even by root. A new deploy that wants to update `SOUL.md` has to first `chattr -i` the file, write the new content, and then `chattr +i` it again. The deploy tool does this automatically; random agent code cannot.
 
 **Why `chattr +i` and not file permissions.** File permissions (`chmod 444`) protect against accidental writes by non-root users, but root on the VPS — which is what every cron runs as, effectively — can write anyway. `chattr +i` blocks root too. The only path to writing the file is `chattr -i` first, which is a deliberate act that shows up in audit logs and is never something an LLM-driven code path would do on its own.
 
@@ -189,7 +189,7 @@ See [Ch 17 — Auth architectures](17-auth-architectures.md) for the full story.
 - **Idiom 2.** All credential files live under `~/.clawford/{agent}-workspace/cache/` and are gitignored. Nothing credential-shaped ever touches `git add`.
 - **Idiom 3.** No raw API keys in cron-invoked scripts. LLM calls route through `agents.shared.llm.infer` + the `codex` CLI subscription. Non-LLM third-party keys live in `.env`, loaded via `agents.shared.env.load_env`.
 
-The credential story is covered in Ch 17 because the relevant details differ by auth shape. This chapter's contribution is to point out that **the hardening of the credentials is not the same as the hardening of the workspace that contains the credentials.** A compromised workspace with mode-400 tokens is still a compromised workspace. The OS-level immutability, the script contract, and the deploy safeguards are what protect the workspace itself.
+The credential story is covered in [Ch 17](17-auth-architectures.md) because the relevant details differ by auth shape. This chapter's contribution is to point out that **the hardening of the credentials is not the same as the hardening of the workspace that contains the credentials.** A compromised workspace with mode-400 tokens is still a compromised workspace. The OS-level immutability, the script contract, and the deploy safeguards are what protect the workspace itself.
 
 ## The liberation rationale
 
@@ -249,4 +249,4 @@ Name the gaps so the operator knows where to spend the next marginal hour of har
 - [Ch 07 — Intro to agents](07-intro-to-agents.md) — the three-layer defense-in-depth discussion and the deploy path
 - [Ch 08 — Your first agent](08-your-first-agent.md) — the seven-step deploy walkthrough
 - [Ch 17 — Auth architectures](17-auth-architectures.md) — credential storage and the three cross-cutting idioms
-- [Ch 20 — Scripts and configs](20-scripts-and-configs.md) *(pending)*
+- [Ch 20 — Scripts and configs](20-scripts-and-configs.md) — the manifest schema and deploy-tool reference

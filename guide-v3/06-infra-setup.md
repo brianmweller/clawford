@@ -6,7 +6,7 @@
 
 - A Clawford fleet runs on three boring pieces. A **shared library** under `agents/shared/*` that handles everything the agents need from the outside world. A **shared brain** under `ops/brain/*` (git) and `~/Dropbox/clawford-backup/*` (Dropbox) that gives the fleet durable cross-agent state. A **host-cron runtime** that fires plain Python scripts from `crontab -l` on a schedule. Everything else is implementation detail.
 - The shared library is organised by how hostile the world you're talking to is. Tier 1 is clean APIs (Telegram, Google OAuth). Tier 2 is stock Playwright behind a browser profile. Tier 3 is hardened Camoufox behind a residential proxy. Every consumer that needs a scraper, a login flow, or a notification pipe goes through one of these three modules — agents don't reinvent any of it.
-- The deploy tool — [`agents/shared/deploy.py`](../agents/shared/deploy.py) — reads each agent's `manifest.json` and runs ten safeguards before touching the VPS. Three of them exist because of specific past outages. One of them used to exist because of a platform quirk that no longer exists and has been retired.
+- The deploy tool — `agents/shared/deploy.py` — reads each agent's `manifest.json` and runs ten active safeguards before touching the VPS. Three of them exist because of specific past outages. Two earlier ones (Safeguards 8 and 11) have been retired because the platform quirks they guarded against no longer exist; Safeguard 12 (pip-audit) was added in the 2026-04-16 P1 hardening pass.
 - Dropbox on a headless VPS is still the fiddliest thing in the setup. Budget an hour the first time. Apply exclusions within sixty seconds of linking the daemon or it will download your entire Dropbox account.
 
 ## The shape of the runtime
@@ -30,17 +30,17 @@ Nothing in that path depends on a gateway container, a skill runtime, an exec-ap
 
 The parts of the outside world that publish real APIs, issue real tokens, and return real JSON. You're writing the equivalent of an HTTP client library, plus error handling, plus one layer of convenience for the 80% case.
 
-- **[`agents/shared/telegram.py`](../agents/shared/telegram.py)** — `send_telegram(token, chat_id, text, *, silent, reply_markup)` plus `timed_send()` for the morning-brief fleet path. Unified 429 backoff. One HTTP client, one set of tests, six consumers.
-- **[`agents/shared/google_oauth.py`](../agents/shared/google_oauth.py)** — `build_flow`, `get_credentials`, `refresh_if_stale`. Wraps the upstream `InstalledAppFlow` with the detail you always forget: token refresh, scope validation, the fact that Desktop credentials need a redirect URI of `http://localhost`. The pattern for fresh auth is always: run it on a laptop, SCP the token to the VPS.
-- **[`agents/shared/heartbeat_base.py`](../agents/shared/heartbeat_base.py)** — `HeartbeatProbe` base class. Every agent ships a `scripts/heartbeat.py` that subclasses this and emits a JSON status line on stdout. The base class handles the timing envelope, the error catch, the exit-code discipline. Subclasses implement `probe() -> dict` and that's it.
-- **[`agents/shared/llm.py`](../agents/shared/llm.py)** — `infer(prompt, *, json_mode, timeout, backend) -> InferResult`. The LLM broker. Routes calls through `codex infer` by default. The backend dispatch is abstracted so a future second provider slots in behind the same interface.
-- **[`agents/shared/brain.py`](../agents/shared/brain.py)** — see the shared-brain section below.
+- **`agents/shared/telegram.py`** — `send_telegram(token, chat_id, text, *, silent, reply_markup)` plus `timed_send()` for the morning-brief fleet path. Unified 429 backoff. One HTTP client, one set of tests, six consumers.
+- **`agents/shared/google_oauth.py`** — `build_flow`, `get_credentials`, `refresh_if_stale`. Wraps the upstream `InstalledAppFlow` with the detail you always forget: token refresh, scope validation, the fact that Desktop credentials need a redirect URI of `http://localhost`. The pattern for fresh auth is always: run it on a laptop, SCP the token to the VPS.
+- **`agents/shared/heartbeat_base.py`** — `HeartbeatProbe` base class. Every agent ships a `scripts/heartbeat.py` that subclasses this and emits a JSON status line on stdout. The base class handles the timing envelope, the error catch, the exit-code discipline. Subclasses implement `probe() -> dict` and that's it.
+- **`agents/shared/llm.py`** — `infer(prompt, *, json_mode, timeout, backend) -> InferResult`. The LLM broker. Routes calls through `codex infer` by default. The backend dispatch is abstracted so a future second provider slots in behind the same interface.
+- **`agents/shared/brain.py`** — see the shared-brain section below.
 
 ### Tier 2 — stock Playwright
 
 The parts of the outside world that don't publish an API, but don't actively fight you either. A persistent browser profile with ordinary Chromium, running under Xvfb on the VPS so the login flow sticks across sessions. Cookies live. Tokens refresh on their own.
 
-- **[`agents/shared/playwright_profile.py`](../agents/shared/playwright_profile.py)** — `launch_persistent_profile(profile_dir, *, headless, xvfb_display)`, `ensure_xvfb(display_num)`, `cleanup_profile_lock(profile_dir)`. The mechanics of "launch Chromium in a way that preserves the logged-in session across reboots." Consumers today: the LinkedIn keepalive for one of the agents, the Google Messages Web scraper for another.
+- **`agents/shared/playwright_profile.py`** — `launch_persistent_profile(profile_dir, *, headless, xvfb_display)`, `ensure_xvfb(display_num)`, `cleanup_profile_lock(profile_dir)`. The mechanics of "launch Chromium in a way that preserves the logged-in session across reboots." Consumers today: the LinkedIn keepalive for one of the agents, the Google Messages Web scraper for another.
 
 The Tier 2 story is boring and that's fine. The hostile world starts one tier up.
 
@@ -48,8 +48,8 @@ The Tier 2 story is boring and that's fine. The hostile world starts one tier up
 
 The parts of the outside world that fingerprint you, detect headless browsers, present interactive Azure B2C login flows, and aggressively rotate their anti-bot rules. Think Costco. Think any retail site with fraud scoring. Stock Playwright fails in this layer — not because it *can't* log in, but because it gets flagged two sessions later and starts serving interstitials.
 
-- **[`agents/shared/camoufox_proxy.py`](../agents/shared/camoufox_proxy.py)** — `get_proxy_config(env_var, *, prefer_sticky)`, `launch_camoufox(proxy_cfg, *, width, height)`, bare-IP fallback helpers. Parses the residential proxy URL from env, detects sticky vs rotating ports, hands a ready-to-use context to the agent script.
-- **[`agents/shared/retry_policy.py`](../agents/shared/retry_policy.py)** — `classify_selfasserted_response`, `should_retry`, exponential backoff with the specific tuning the one shopping agent's login flow needs. Promoted out of a single agent's `reauth_retry_policy.py` when a second Tier 3 consumer came along.
+- **`agents/shared/camoufox_proxy.py`** — `get_proxy_config(env_var, *, prefer_sticky)`, `launch_camoufox(proxy_cfg, *, width, height)`, bare-IP fallback helpers. Parses the residential proxy URL from env, detects sticky vs rotating ports, hands a ready-to-use context to the agent script.
+- **`agents/shared/retry_policy.py`** — `classify_selfasserted_response`, `should_retry`, exponential backoff with the specific tuning the one shopping agent's login flow needs. Promoted out of a single agent's `reauth_retry_policy.py` when a second Tier 3 consumer came along.
 
 Tier 3 is the most intricate and the most fragile, and it's also the tier that most benefits from living behind one canonical module. Every time the upstream login flow changes, there's exactly one place to fix it.
 
@@ -63,7 +63,7 @@ Knowing which tier a new integration belongs in before writing a line of code is
 
 The shared brain is a first-class subsystem. It's the difference between a fleet of agents and a pile of scripts.
 
-The short version: it's a directory of plain markdown files with a small structured schema on top, split into a **git-tracked half** (`ops/brain/*`, for canonical config and schemas) and a **Dropbox-synced half** (`~/Dropbox/clawford-backup/*`, for runtime state). Every agent reads and writes through [`agents/shared/brain.py`](../agents/shared/brain.py), which enforces the split structurally and refuses writes to the git-tracked side. All writes are appends.
+The short version: it's a directory of plain markdown files with a small structured schema on top, split into a **git-tracked half** (`ops/brain/*`, for canonical config and schemas) and a **Dropbox-synced half** (`~/Dropbox/clawford-backup/*`, for runtime state). Every agent reads and writes through `agents/shared/brain.py`, which enforces the split structurally and refuses writes to the git-tracked side. All writes are appends.
 
 The full chapter is [Ch 16 — The shared brain](16-shared-brain.md): why the brain exists, the two halves and how they sync, the four primitives (facts, commitments, tasks, notes), the append-only rule, and the pitfalls. Read it before writing an agent that writes to the brain.
 
@@ -71,7 +71,7 @@ The full chapter is [Ch 16 — The shared brain](16-shared-brain.md): why the br
 
 Every scheduled job in the fleet fires from the host crontab. That is the entirety of the scheduling story.
 
-There's a script, [`ops/scripts/install-host-cron.sh`](../ops/scripts/install-host-cron.sh), that owns the contents of `crontab -l`. The script contains a list of `CONTRACT_ENTRY` lines — one per scheduled job — and it reconciles the live crontab against that list. It's drift-aware: if a schedule, path, or timeout changes between runs, the stale line is evicted and the new one installed. No manual `crontab -e`. No drift between what's in git and what's actually scheduled.
+There's a script, `ops/scripts/install-host-cron.sh`, that owns the contents of `crontab -l`. The script contains a list of `CONTRACT_ENTRY` lines — one per scheduled job — and it reconciles the live crontab against that list. It's drift-aware: if a schedule, path, or timeout changes between runs, the stale line is evicted and the new one installed. No manual `crontab -e`. No drift between what's in git and what's actually scheduled.
 
 Each agent declares its own crons as `CONTRACT_ENTRY` lines in the install script. The script writes them under a stable marker comment, so other tools (the heartbeat check, the fix-it agent's cron-self-check) can parse them back out and verify nothing has disappeared.
 
@@ -86,7 +86,7 @@ Every agent that contributes to the morning briefing follows the same shape:
 3. Do **not** call `telegram.send_telegram()` directly from the morning orchestrator.
 4. The fleet aggregator at `0 12 * * *` UTC (5:00 AM PT) reads every agent's cache file and sends a single consolidated brief.
 
-The fleet-path discipline matters because without it, five agents each send their own early-morning message at five slightly different times and the human wakes up to a notification storm instead of one actionable digest. The 3:30 AM populate / 5:00 AM deliver split gives every agent an hour and a half to be late without breaking the brief, and the atomic-write-to-cache pattern means a partially-failed agent cleanly drops out of the brief instead of corrupting it.
+The fleet-path discipline matters because without it, six agents each send their own early-morning message at six slightly different times and the human wakes up to a notification storm instead of one actionable digest. The 3:30 AM populate / 5:00 AM deliver split gives every agent an hour and a half to be late without breaking the brief, and the atomic-write-to-cache pattern means a partially-failed agent cleanly drops out of the brief instead of corrupting it.
 
 ### Retiring an agent — the file-based opt-out pattern
 
@@ -108,7 +108,7 @@ This isn't a philosophical stance. It's a cost-and-failure discipline: the LLM c
 
 `deploy.py` reads an agent's `manifest.json` and installs the agent onto the VPS idempotently: copies the workspace files into `~/.clawford/<agent>-workspace/`, seeds any declared state files, syncs `agents/shared/` into the workspace, and captures a pre-deploy backup tarball. It is one Python script, ~1800 lines, and it is the single structural choke-point between the git repo and the running fleet.
 
-It runs nine active safeguards (two earlier safeguards, 8 and 11, were retired during the liberation — more on both below). They're documented in full at [`DEPLOY.md`](../DEPLOY.md); the two worth naming explicitly are the ones that exist because of specific past outages.
+It runs ten active safeguards (two earlier safeguards, 8 and 11, were retired during the liberation; Safeguard 12 was added during the 2026-04-16 P1 hardening pass — all three are covered below). Two of the ten are worth naming explicitly, because they exist because of specific past outages.
 
 ### Safeguard 9: forbidden cron-message patterns
 
@@ -257,8 +257,8 @@ On the VPS side, the bot tokens live in `~/clawford/.env` (or, for installs pred
 
 Bot commands and descriptions get set via two small scripts:
 
-- [`scripts/set-bot-commands.sh`](../scripts/set-bot-commands.sh) — sets each agent's custom `/` picker entries.
-- [`scripts/set-bot-descriptions.sh`](../scripts/set-bot-descriptions.sh) — sets each agent's short and long descriptions.
+- `scripts/set-bot-commands.sh` — sets each agent's custom `/` picker entries.
+- `scripts/set-bot-descriptions.sh` — sets each agent's short and long descriptions.
 
 Both scripts are idempotent and UTF-8 safe. Run either from the host any time.
 
@@ -291,7 +291,3 @@ What's *outside* the Clawford backup system:
 ## See also
 
 - [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md) — the decision doc that explains why the runtime looks like this and not like the platform it used to sit on top of.
-- [`ops/brain/README.md`](../ops/brain/README.md) — the canonical brain schema with full field tables, half-lives, and access matrix.
-- [`agents/shared/deploy.py`](../agents/shared/deploy.py) — the unified deploy tool. Start with the function it calls last, not the function it calls first.
-- [`DEPLOY.md`](../DEPLOY.md) — the full safeguard inventory with the outage story behind each.
-- [`ops/scripts/install-host-cron.sh`](../ops/scripts/install-host-cron.sh) — the host-cron contract installer. Drift-aware; rerun any time.

@@ -1,4 +1,4 @@
-# Ch 14 — Huckle Cat 🐱🤝 (the connector agent)
+# Huckle Cat 🐱🤝 — the connector agent
 
 *Last updated: 2026-04-16 · Reading time: ~25 min · Difficulty: hard*
 
@@ -38,7 +38,7 @@ Three things, in order of operational weight.
 
 **Seven-source fanout is a data-quality problem, not an engineering problem.** Each of the seven miners produces output of different shapes, different fidelity, different levels of trust. Gmail gives you rich history but also gives you every newsletter you ever subscribed to. Google Contacts gives you high-signal saved contacts and also 1,900 auto-saved "other contacts" from stray CCs. Meeting transcripts give you participants but have to be matched back to calendar attendees via fuzzy name+title logic. Workflowy gives you ~3,000 meeting nodes but many of them reference people by first name only. The aggregator's job is to dedupe, score, merge aliases, and produce a coherent per-person record — and the only way to verify that it worked is a human review pass before finalization. That review pass is a real chunk of operator time on first deploy, and it cannot be skipped.
 
-**Stale `last_interaction` timestamps are the failure mode you will actually hit.** The mining pipeline runs once at deploy time and stamps every contact's `last_interaction` field with the most recent message found in the scan. If nothing updates those timestamps afterwards, the morning nudge will, within days, start flagging contacts the operator has interacted with since — which is the textbook way to lose operator trust in a relationship-nudge agent. The `daily-refresh` cron (commit `fa3f785`, 2026-04-14) exists specifically to fix this; see [§ The stale-dates bug and the daily-refresh fix](#the-stale-dates-bug-and-the-daily-refresh-fix).
+**Stale `last_interaction` timestamps are the failure mode you will actually hit.** The mining pipeline runs once at deploy time and stamps every contact's `last_interaction` field with the most recent message found in the scan. If nothing updates those timestamps afterwards, the morning nudge will, within days, start flagging contacts the operator has interacted with since — which is the textbook way to lose operator trust in a relationship-nudge agent. The `daily-refresh` cron (landed 2026-04-14) exists specifically to fix this; see [§ The stale-dates bug and the daily-refresh fix](#the-stale-dates-bug-and-the-daily-refresh-fix).
 
 ## The mining pipeline
 
@@ -92,7 +92,7 @@ The output — the finalized `people/` and `facts/` directories — lives on Dro
 
 Google Messages Web has no API, no bulk export, and no official scraping path. But the operator's iPhone-to-Android messaging history is sitting there in the browser, and it's one of the seven sources that matters most for relationship-cadence tracking because SMS is often where the closest relationships actually live.
 
-The solution (commits `53f1fa3`, `7a52092`, `1c03146`, `bce5dfc`) is a **self-contained JavaScript snippet** that walks every conversation thread in the Google Messages Web DOM, extracts message metadata (sender, recipient, timestamp), and copies the result to the clipboard as JSON. No extension installation, no permissions dialog, no persistent access token — just paste the snippet into Chrome DevTools, run it, and the clipboard contains the full conversation list.
+The solution (a four-commit series on 2026-04-14) is a **self-contained JavaScript snippet** that walks every conversation thread in the Google Messages Web DOM, extracts message metadata (sender, recipient, timestamp), and copies the result to the clipboard as JSON. No extension installation, no permissions dialog, no persistent access token — just paste the snippet into Chrome DevTools, run it, and the clipboard contains the full conversation list.
 
 The wrapper scripts around this:
 
@@ -110,7 +110,7 @@ Two days later, the morning relationship nudge started flagging contacts the ope
 
 The root cause was simple in retrospect: **the mining pipeline ran once, and the people files were frozen from that moment forward.** The morning relationship nudge was reading a snapshot from April 12 every day, and every day the snapshot was more wrong.
 
-The fix (commit `fa3f785`, 2026-04-14) introduced `daily-refresh.py`, a new host cron that runs at `0 10 UTC` (3:00 AM PT), re-mines a 14-day rolling Gmail + Google Calendar + Google Messages window, and updates the `last_interaction` field in the affected people files in place. The morning relationship nudge at `30 10 UTC` then reads the refreshed `last_interaction` values and produces an output that reflects the real state of things.
+The 2026-04-14 fix introduced `daily-refresh.py`, a new host cron that runs at `0 10 UTC` (3:00 AM PT), re-mines a 14-day rolling Gmail + Google Calendar + Google Messages window, and updates the `last_interaction` field in the affected people files in place. The morning relationship nudge at `30 10 UTC` then reads the refreshed `last_interaction` values and produces an output that reflects the real state of things.
 
 Three second-order details fell out:
 

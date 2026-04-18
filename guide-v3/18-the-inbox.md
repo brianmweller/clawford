@@ -1,4 +1,4 @@
-# Ch 18 — The inbox: making agents conversational
+# The inbox: making agents conversational
 
 *Last updated: 2026-04-16 · Reading time: ~15 min · Difficulty: moderate*
 
@@ -41,7 +41,7 @@ The dispatcher's flow, in order:
    
    The key design decision: **callback shortcuts bypass the LLM.** Tapping "Confirm" on a reorder button should not require a 2-second model round-trip to figure out what to do. The button's callback data contains everything the dispatcher needs.
 
-3. **Agent config loading.** Import the agent's `tools.py` module dynamically. Read the agent's five conversational docs — `SOUL.md` (values/principles, filesystem-immutable), `IDENTITY.md` (persona/voice, filesystem-immutable), `USER.md` (who the operator is), `AGENTS.md` (fleet map for cross-agent routing, filesystem-immutable), and `MEMORY.md` (learned rules, appendable via the `remember` tool) — from the **Dropbox brain** at `~/Dropbox/openclaw-backup/agents/<agent-id>/` to assemble the system prompt. Brain-sourced content is live-synced to the laptop and redundant to Dropbox cloud, so persistent memory survives a VPS disk loss. Inject the current user-local time (not VPS UTC) so the LLM doesn't mislabel "today" and "tomorrow." Operational docs (`HEARTBEAT.md` / `CRONS.md` / `TOOLS.md`) were retired in favor of the code being the source of truth — the `TOOLS` manifest is generated dynamically from `tools.py`, scheduled work lives in `fleet-manifest.json` + `ops/scripts/*-host.sh`, and heartbeat logic lives in `scripts/heartbeat.py`.
+3. **Agent config loading.** Import the agent's `tools.py` module dynamically. Read the agent's five identity docs — `SOUL.md` (values/principles, filesystem-immutable), `IDENTITY.md` (persona/voice, filesystem-immutable), `USER.md` (who the operator is), `AGENTS.md` (fleet map for cross-agent routing, filesystem-immutable), and `MEMORY.md` (learned rules, appendable via the `remember` tool) — from the **Dropbox brain** at `~/Dropbox/openclaw-backup/agents/<agent-id>/` to assemble the system prompt. Brain-sourced content is live-synced to the laptop and redundant to Dropbox cloud, so persistent memory survives a VPS disk loss. Inject the current user-local time (not VPS UTC) so the LLM doesn't mislabel "today" and "tomorrow." The three operational docs that still live in the workspace (`TOOLS.md`, `HEARTBEAT.md`, `CRONS.md`) are *not* loaded into the inbox system prompt — the `TOOLS` manifest the LLM sees is generated dynamically from `tools.py`, scheduled work is read from `fleet-manifest.json` + `ops/scripts/*-host.sh`, and heartbeat logic lives in `scripts/heartbeat.py`. The workspace copies of those files stay as operator-readable reference, not as LLM-loaded context.
 
 4. **Typing indicator.** Fire `sendChatAction(typing)` so the operator sees the Telegram typing bubble while the LLM thinks.
 

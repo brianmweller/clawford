@@ -1,4 +1,4 @@
-# Ch 17 — Auth architectures
+# Auth architectures
 
 *Last updated: 2026-04-16 · Reading time: ~20 min · Difficulty: hard*
 
@@ -149,4 +149,4 @@ A few observations from the table:
 - [Ch 13 — Sergeant Murphy 🐷🔍](13-sergeant-murphy.md) — canonical Shape 2 (rotation-prone OAuth)
 - [Ch 14 — Huckle Cat 🐱🤝](14-huckle-cat.md) — canonical Shape 6 (screenshot-QR variant)
 - [Ch 15 — Hilda Hippo 🦛🛒](15-hilda-hippo.md) — canonical Shape 5 (Camoufox + residential proxy + auto-MFA)
-- [Ch 19 — Security and hardening](19-security-and-hardening.md) — the credential-storage + attack-surface story *(pending)*
+- [Ch 19 — Security and hardening](19-security-and-hardening.md) — the credential-storage + attack-surface story

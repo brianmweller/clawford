@@ -17,7 +17,7 @@ I do nearly all of the work of building Clawford with Claude Code sitting betwee
 
 **What Claude Code is good at, in my experience:**
 
-- **Drafting scripts to a spec.** Give it [the script contract](../agents/shared/SCRIPT_CONTRACT.md), point it at one or two similar existing scripts, and ask for a new one. It'll get the structure right on the first try the large majority of the time.
+- **Drafting scripts to a spec.** Give it the script contract (`agents/shared/SCRIPT_CONTRACT.md`), point it at one or two similar existing scripts, and ask for a new one. It'll get the structure right on the first try the large majority of the time.
 - **Monkey-patching vendored or third-party code.** When a Playwright helper misbehaves or a dependency has a subtle bug, asking Claude to locate and patch the issue in the vendored file is often faster than upstreaming a fix. See the note on logic inversion below for the patch style to insist on.
 - **Writing tests.** Especially the red half of red-green — describing the failure mode, writing a test that pins the bad behavior, confirming it fails for the right reason before the fix lands.
 - **Reading unfamiliar subsystems.** When something fails in a way that touches a corner of the repo I haven't looked at, a targeted "find where X happens and tell me what it does" is usually faster than `grep` by hand.
@@ -45,8 +45,8 @@ The lesson is not "don't use Claude Code overnight." The lesson is: **memory is 
 
 Concretely: after that incident I moved the relevant invariants into enforcement surfaces:
 
-- `deploy.py` Safeguard 2 refuses to run if the agent's source directory has uncommitted modifications or untracked files. If you want a bypass, you pass `--allow-dirty` and it logs a warning.
-- `deploy.py` Safeguard 4 refuses to run if workspace state on the VPS has drifted from the last recorded backup. Override via `--accept-drift`, which also logs.
+- `deploy.py` [Safeguard 2](19-security-and-hardening.md#defense-layer-3-the-deploy-tool-safeguards) refuses to run if the agent's source directory has uncommitted modifications or untracked files. If you want a bypass, you pass `--allow-dirty` and it logs a warning.
+- `deploy.py` [Safeguard 4](19-security-and-hardening.md#defense-layer-3-the-deploy-tool-safeguards) refuses to run if workspace state on the VPS has drifted from the last recorded backup. Override via `--accept-drift`, which also logs.
 - `scripts/pre-push-check.sh` runs on every `git push` and hard-fails if it finds tracked secrets, `.env` files, large binaries, or suspicious per-agent unsuffixed config files.
 - `SOUL.md` and `IDENTITY.md` get `chattr +i`'d on deploy, so the agent cannot rewrite them even if Claude asks it to.
 
@@ -73,7 +73,7 @@ The rule I use now is: **one task, one session.** Start a fresh session for new 
 
 When Claude Code drafts a command that runs a Python script, it will reflexively append something like `; echo "EXIT:$?"` or `; printf "rc=%s\n" $?` to "also capture the exit code." This is a habit that made sense in a pre-Clawford world where commands returned meaningful exit codes and you had to extract them somehow.
 
-In Clawford this habit is a bug. An earlier platform version's exec preflight hard-rejected any `python3 <anything>` command containing shell operators, so the reflexive wrap turned a working command into a blocked one. The full story is in the opening scene of [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md). The durable fix is the script contract: scripts report their status via a JSON line on stdout (see [Ch 07](07-intro-to-agents.md)), the exit code isn't needed, it isn't available to the orchestrator, and trying to get it breaks the run. `deploy.py` Safeguard 9 statically grep-rejects the reflexive wrap patterns in every `crons[].message` field on every deploy.
+In Clawford this habit is a bug. An earlier platform version's exec preflight hard-rejected any `python3 <anything>` command containing shell operators, so the reflexive wrap turned a working command into a blocked one. The full story is in the opening scene of [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md). The durable fix is the script contract: scripts report their status via a JSON line on stdout (see [Ch 07](07-intro-to-agents.md)), the exit code isn't needed, it isn't available to the orchestrator, and trying to get it breaks the run. `deploy.py` [Safeguard 9](19-security-and-hardening.md#defense-layer-3-the-deploy-tool-safeguards) statically grep-rejects the reflexive wrap patterns in every `crons[].message` field on every deploy.
 
 What to do about it:
 
@@ -138,7 +138,7 @@ The reason TDD is mandatory specifically for infra is that I built the early ver
 Clawford has three distinct test layers, each with a clear boundary:
 
 - **Per-agent pytests at `agents/<agent>/tests/`.** The canonical per-agent suite. Unit tests for each script's parsing / classification / state-handling logic. Runs offline against tmp directories and monkey-patched subprocess calls, no VPS or live credentials needed. The family-calendar suite is 81 cases; connector is 113; news-digest is 63 (modulo xfails); shopping is 50; meetings-coach is 63. Run any one with `python3 -m pytest agents/<agent>/tests/ -q`.
-- **Deploy-tool + shared-library suite at `agents/shared/tests/`.** Exercises the ten-to-nine deploy safeguards (two retired during the migration), the script contract enforcement, cron-message hygiene, the config-source bootstrap flow, the diff-preview flow, environment loading, manifest validation, and the regression guard that asserts no `~/.openclaw/` paths have crept back in post-liberation. 425+ cases. Run with `python3 -m pytest agents/shared/tests/ -q`. If you're about to touch `deploy.py` or anything it imports, start here.
+- **Deploy-tool + shared-library suite at `agents/shared/tests/`.** Exercises the ten active deploy safeguards (two retired during the migration — Safeguards 8 and 11; [Safeguard 12](19-security-and-hardening.md#defense-layer-3-the-deploy-tool-safeguards), pip-audit, added during the 2026-04-16 P1 hardening pass), the script contract enforcement, cron-message hygiene, the config-source bootstrap flow, the diff-preview flow, environment loading, manifest validation, and the regression guard that asserts no `~/.openclaw/` paths have crept back in post-liberation. 425+ cases. Run with `python3 -m pytest agents/shared/tests/ -q`. If you're about to touch `deploy.py` or anything it imports, start here.
 - **Tests at repo root `tests/`.** A handful of offline parsing tests and a proper pytest suite for the obsidian-briefing subsystem. `tests/test-amazon-parsing.py`, `tests/test-costco-parsing.py`, `tests/test-grocery.py`, and `tests/obsidian-briefing/test_*.py` all run locally without VPS access. The pre-migration manual smoke-test harness that used to live alongside these (`T1` through `T13` shell scripts, setup scripts, e2e container tests) was retired in the liberation because it depended on the gateway container and the OpenClaw LLM cron runtime — both gone.
 
 The red-green discipline applies at all three layers. The deploy-tool suite is where the discipline is most strict: every safeguard landed after a failing test for it existed first, and the regression guard for the `~/.openclaw/` → `~/.clawford/` rename was written before any of the ~180 path-string replacements went in. Infrastructure code that mutates shared state — the crontab, the filesystem, Dropbox state — is the one place where "add code, run it, see what breaks" is actively dangerous, because the blast radius is the whole fleet.
@@ -175,6 +175,3 @@ Claude Code has a particular habit of defaulting to whatever model ID it saw in 
 - [Ch 07 — Intro to agents](07-intro-to-agents.md) — the script contract, the canonical deploy path, and why `; echo $?` is a bug.
 - [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md) — the full exec-preflight story that made the script contract load-bearing.
 - [Ch 19 — Security and hardening](19-security-and-hardening.md) — the full defense-in-depth story that "put rules in gates, not memory" hints at here.
-- [DEPLOY.md](../DEPLOY.md) — the nine `deploy.py` safeguards in full, each with the scar-tissue motivation.
-- [AGENTS-PATTERN.md](../AGENTS-PATTERN.md) — the repo-level dev rules, including the "only Mr Fixit pushes" convention and the commit-to-your-own-directory rule.
-- [`agents/shared/tests/`](../agents/shared/tests/) — the deploy-tool test suite. Read a few before you touch `deploy.py`.

@@ -20,7 +20,7 @@ This chapter starts from a Hetzner account and an SSH key. It ends with:
 - A residential proxy wired in and tested end-to-end.
 - A first-boot smoke test that can be re-run any time something looks off.
 
-Ch 05 (dev setup) and Ch 06 (infra setup) pick up from there — Ch 06 is where the shared library, shared brain, host-cron runtime, and `deploy.py` safeguards live.
+[Ch 05](05-dev-setup.md) (dev setup) and [Ch 06](06-infra-setup.md) (infra setup) pick up from there — Ch 06 is where the shared library, shared brain, host-cron runtime, and `deploy.py` safeguards live.
 
 > **Pre-liberation note.** The current Terraform module still provisions Docker on the VPS because it was written for the OpenClaw-gateway era. A Clawford-native install doesn't need Docker at all — host crons run directly on the host, `codex` is a single binary. The Docker install step is vestigial until the Terraform module catches up. Leave it in place; it's harmless.
 
@@ -110,7 +110,7 @@ The install is two binaries and one credential file.
 2. **Authenticate locally.** `codex login` opens a browser OAuth flow against the ChatGPT Plus account. Approve it. The credential file lands at `~/.codex/auth.json`.
 3. **Verify locally.** `codex infer "say hi"` should print a short reply. If it doesn't, stop and fix the local install before touching the VPS.
 4. **Install `codex` on the VPS.** Same install pathway; SSH in, run the same install command, verify `codex --version` prints the build string.
-5. **SCP the credential file across.** `scp ~/.codex/auth.json openclaw@<tailnet-hostname>:~/.codex/auth.json`. This is the same laptop-then-SCP pattern other auth flows in the fleet use (see the Google OAuth section of Ch 06).
+5. **SCP the credential file across.** `scp ~/.codex/auth.json openclaw@<tailnet-hostname>:~/.codex/auth.json`. This is the same laptop-then-SCP pattern other auth flows in the fleet use (see [Ch 17 — Auth architectures](17-auth-architectures.md) for the Google OAuth version of the same pattern).
 6. **Verify on the VPS.** `ssh openclaw@<tailnet-hostname> "codex infer 'say hi'"`. Expect a short reply.
 
 The credential file is a secret. It grants full access to the ChatGPT Plus account. Treat it like a private key: file mode 0600, never committed, never in a backup that lives somewhere the rest of the fleet doesn't.
@@ -148,7 +148,7 @@ Whichever URL comes out the other side is a secret: it contains the account pass
 PROXY_URL=http://<login>__<session-spec>:<password>@gw.dataimpulse.com:823
 ```
 
-Scripts that need the proxy read `PROXY_URL` and pass it to Playwright's `browser.launch(proxy={...})`. Scripts that don't need the proxy just ignore it. The seam is at the script level — each script decides whether to route through the proxy based on which tier it belongs to (see Ch 06 for the three-tier model).
+Scripts that need the proxy read `PROXY_URL` and pass it to Playwright's `browser.launch(proxy={...})`. Scripts that don't need the proxy just ignore it. The seam is at the script level — each script decides whether to route through the proxy based on which tier it belongs to (see [Ch 06 — Infra setup](06-infra-setup.md) for the three-tier model).
 
 ### Test it before you need it
 
@@ -177,7 +177,7 @@ A practical note on how the VPS's 160 GB of disk gets used:
 
 ## First-boot smoke test
 
-Before considering the VPS "done" and moving on to Ch 05, walk this checklist. Each item is a one-liner that should either pass or give an obvious clue:
+Before considering the VPS "done" and moving on to [Ch 05](05-dev-setup.md), walk this checklist. Each item is a one-liner that should either pass or give an obvious clue:
 
 - `ssh openclaw@<tailnet-hostname> "echo connected"` → prints `connected`
 - `ssh openclaw@<tailnet-hostname> "python3 --version"` → prints a Python 3.11+ version
@@ -187,7 +187,7 @@ Before considering the VPS "done" and moving on to Ch 05, walk this checklist. E
 - `ssh openclaw@<tailnet-hostname> "git clone https://github.com/your-handle/your-repo.git /tmp/test-clone && rm -rf /tmp/test-clone"` → clones and cleans up without a credential prompt
 - **Residential-proxy IP check** (from the section above) → prints a residential IP, not the Hetzner IP
 
-If all seven pass, the VPS is ready for Ch 05.
+If all seven pass, the VPS is ready for [Ch 05](05-dev-setup.md).
 
 ## The three invariants to carry into everything else
 
@@ -197,7 +197,7 @@ Three rules that everything else in the guide assumes.
 
 This is the first rule that's easy to break and the hardest to unbreak. The code that runs the fleet — scripts, `manifest.json` files, `deploy.py`, configs — lives in local git. The shared brain — facts, people, commitments, tasks, notes — lives in Dropbox and gets bind-mounted at runtime. Neither lives on the VPS as its source of truth. The VPS is a mount point where both are assembled, and nothing else.
 
-What this rule forbids is *on-VPS code edits*: hand-editing a script in the agent workspace, tweaking a cron prompt inside `~/.clawford/<agent>-workspace/CRONS.md`, or patching a deploy tool in place. On-VPS code edits are invisible to git, invisible to `deploy.py`'s drift detection (Safeguard 4 catches it), and they're the first thing forgotten when reproducing a working state weeks later. Safeguard 2 refuses to deploy if there are uncommitted local changes, and Safeguard 4 refuses to deploy if the VPS workspace has drifted from the last manifest — both exist because this rule was ignored once and the recovery was painful.
+What this rule forbids is *on-VPS code edits*: hand-editing a script in the agent workspace, tweaking a cron prompt inside `~/.clawford/<agent>-workspace/CRONS.md`, or patching a deploy tool in place. On-VPS code edits are invisible to git, invisible to `deploy.py`'s drift detection ([Safeguard 4](19-security-and-hardening.md#defense-layer-3-the-deploy-tool-safeguards) catches it), and they're the first thing forgotten when reproducing a working state weeks later. [Safeguard 2](19-security-and-hardening.md#defense-layer-3-the-deploy-tool-safeguards) refuses to deploy if there are uncommitted local changes, and Safeguard 4 refuses to deploy if the VPS workspace has drifted from the last manifest — both exist because this rule was ignored once and the recovery was painful.
 
 Brain writes are the explicit exception. Agents are *expected* to write facts, commitments, daily notes, and similar to the Dropbox-synced brain paths — that's the intended runtime flow, not a violation of the rule. The rule is about code, not about runtime state.
 
@@ -222,6 +222,6 @@ On-VPS config edits are the same class of forbidden as on-VPS code edits. When a
 ## See also
 
 - [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md) — the decision doc that explains why the runtime looks like this and not like the platform it used to sit on top of.
-- [Ch 05 — Dev setup](05-dev-setup.md) *(pending)* — what goes on the laptop to talk to this VPS.
+- [Ch 05 — Dev setup](05-dev-setup.md) — what goes on the laptop to talk to this VPS.
 - [Ch 06 — Infra setup](06-infra-setup.md) — the shared library, shared brain, host-cron runtime, and `deploy.py` safeguards that use this VPS as their target.
 - [Ch 07 — Intro to agents](07-intro-to-agents.md) — the anatomy of a Clawford agent, built on top of everything this chapter provisioned.

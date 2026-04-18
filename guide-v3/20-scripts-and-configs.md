@@ -1,4 +1,4 @@
-# Ch 20 — Scripts and configs reference
+# Scripts and configs reference
 
 *Last updated: 2026-04-16 · Reading time: ~10 min · Difficulty: reference*
 
@@ -35,7 +35,7 @@ Everything in `agents/shared/` is world-access infrastructure that every agent c
 
 | Module | Exports | What it does |
 |--------|---------|--------------|
-| `agents/shared/deploy.py` | CLI: `python3 -m agents.shared.deploy <agent>` | The deploy tool. 9 active safeguards. See [Ch 07 — Intro to agents](07-intro-to-agents.md) and [Ch 19 § Defense layer 3](19-security-and-hardening.md#defense-layer-3-the-deploy-tool-safeguards). |
+| `agents/shared/deploy.py` | CLI: `python3 -m agents.shared.deploy <agent>` | The deploy tool. 10 active safeguards. See [Ch 07 — Intro to agents](07-intro-to-agents.md) and [Ch 19 § Defense layer 3](19-security-and-hardening.md#defense-layer-3-the-deploy-tool-safeguards). |
 | `agents/shared/contract_wrap.py` | `contract_main(probe_fn)` | Wrapper that every cron-invoked script uses to enforce the script contract (exit 0 always, one JSON line on stdout, no shell). See [Ch 19 § Defense layer 2](19-security-and-hardening.md#defense-layer-2-the-script-contract). |
 | `agents/shared/dispatcher.py` | `dispatch_command(text, handlers)` | Telegram command dispatcher — parses `/confirm 3` + `/dismiss 3` + inline callbacks and routes to handler functions. |
 | `agents/shared/conversation.py` | `Conversation` context manager | Stateful conversation helper for multi-turn LLM dialogues. Most agents don't use this; it exists for the narrow set that genuinely need it. |
@@ -205,4 +205,4 @@ For when you know the name but not the category.
 - [Ch 07 — Intro to agents](07-intro-to-agents.md) — the deploy path and the safeguard story
 - [Ch 08 — Your first agent](08-your-first-agent.md) — the walkthrough that uses these scripts end-to-end
 - [Ch 19 — Security and hardening](19-security-and-hardening.md) — the three defense layers, including the script contract + deploy safeguards
-- [Ch 21 — Glossary](21-glossary.md) *(pending)*
+- [Ch 21 — Glossary](21-glossary.md) — alphabetical reference for every term the guide uses

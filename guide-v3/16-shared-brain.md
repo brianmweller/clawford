@@ -1,4 +1,4 @@
-# Ch 16 — The shared brain
+# The shared brain
 
 *Last updated: 2026-04-16 · Reading time: ~12 min · Difficulty: moderate*
 
@@ -6,7 +6,7 @@
 
 - The shared brain is what turns a *pile of agents* into a *fleet*. It's a directory of plain markdown files with a small structured schema on top — no database, no vendor, no API.
 - Four core primitives: **facts** (knowledge that decays), **commitments** (promises that resolve), **tasks** (action items), **notes** (raw inputs awaiting triage). Plus per-person profile files and per-agent status/rules files.
-- Two halves, two sync mechanisms. `ops/brain/*` is **git-tracked** and flows local → VPS via `deploy.py`. `~/Dropbox/clawford-backup/*` is **Dropbox-synced bidirectionally**. The split is enforced structurally by [`agents/shared/brain.py`](../agents/shared/brain.py).
+- Two halves, two sync mechanisms. `ops/brain/*` is **git-tracked** and flows local → VPS via `deploy.py`. `~/Dropbox/clawford-backup/*` is **Dropbox-synced bidirectionally**. The split is enforced structurally by `agents/shared/brain.py`.
 - All writes are appends. Every entry carries an agent ID and a timestamp; the file is its own changelog. Multiple agents writing the same file simultaneously is a designed-for case, not a bug.
 - This is the single most underrated piece of infrastructure in the whole fleet. It survived the migration off the OpenClaw platform untouched, because it never depended on the platform — it's just files on disk.
 
@@ -16,7 +16,7 @@ Before the brain existed, every agent in the fleet was an amnesiac. Each cron fi
 
 The brain solves that. It is where cross-agent state lives — facts, people, commitments, queues, per-agent status files, fleet-health snapshots. It persists across sessions, across deploys, across crashes. It's what lets one agent remember who somebody is so another agent can remind you to follow up with them.
 
-I almost left it off the list of things a personal fleet actually needs, because once you have it, it stops feeling like infrastructure. If you'd asked me on day one whether the brain was part of the OpenClaw platform or part of Clawford, I'd have said OpenClaw. It isn't. It's just files on disk, synced through Dropbox and git, with schemas I defined and helpers in [`agents/shared/brain.py`](../agents/shared/brain.py). It survives every migration the runtime has been through, because it never depended on the runtime.
+I almost left it off the list of things a personal fleet actually needs, because once you have it, it stops feeling like infrastructure. If you'd asked me on day one whether the brain was part of the OpenClaw platform or part of Clawford, I'd have said OpenClaw. It isn't. It's just files on disk, synced through Dropbox and git, with schemas I defined and helpers in `agents/shared/brain.py`. It survives every migration the runtime has been through, because it never depended on the runtime.
 
 ## The two halves
 
@@ -28,11 +28,11 @@ The brain has two halves that live in different places and sync through differen
 
 > Paths in the repository may still show `openclaw-backup` rather than `clawford-backup` at the time of writing. The rename is queued for a final cleanup pass. Treat the two names as interchangeable until then.
 
-**Don't cross the streams.** Writing agent config to the Dropbox half means it's not in git and can't be versioned, tested, or rolled back. Writing runtime state to the git half means it gets committed to history and potentially leaked. `deploy.py`'s drift check (Safeguard 4) enforces this boundary from one side, and the pre-push hook catches the other.
+**Don't cross the streams.** Writing agent config to the Dropbox half means it's not in git and can't be versioned, tested, or rolled back. Writing runtime state to the git half means it gets committed to history and potentially leaked. `deploy.py`'s drift check ([Safeguard 4](19-security-and-hardening.md#defense-layer-3-the-deploy-tool-safeguards)) enforces this boundary from one side, and the pre-push hook catches the other.
 
 ## The module that codifies the pattern
 
-Every agent used to touch the brain via raw filesystem I/O. That worked, but it meant the git/Dropbox split was enforced by *convention* — one careless `Path.write_text` in the wrong subdirectory could drop runtime state into a git-tracked location, or worse, the other way around. [`agents/shared/brain.py`](../agents/shared/brain.py) is the module that makes the split structural:
+Every agent used to touch the brain via raw filesystem I/O. That worked, but it meant the git/Dropbox split was enforced by *convention* — one careless `Path.write_text` in the wrong subdirectory could drop runtime state into a git-tracked location, or worse, the other way around. `agents/shared/brain.py` is the module that makes the split structural:
 
 - `read_brain(relative_path) -> str | dict` — reads from either half based on the path prefix
 - `write_brain(relative_path, content, *, append=False)` — refuses to write to any path under `ops/brain/*`, because those are git-tracked config that only the deploy tool should ever touch
@@ -55,7 +55,7 @@ Every entry in the brain falls into one of four shapes. The schema is intentiona
 - **Tasks.** Action items the human needs to do. Lighter than a commitment — no external party promised, no resolution date required. Used by the meeting agent to surface follow-ups, by the news agent to flag things worth following up on, etc.
 - **Notes.** Raw inputs that haven't been triaged into one of the above yet. The connector agent dumps everything here first, then promotes individual entries to facts/commitments/tasks during its triage pass.
 
-The full schema lives in [`ops/brain/README.md`](../ops/brain/README.md). Read it when you're about to write an agent that writes to the brain, not before — the schema only makes sense in the context of what an agent is trying to say.
+The full schema with field tables, half-lives, and access matrix lives alongside the brain directory itself, with validators that enforce it. It only makes sense in the context of what an agent is trying to say — so write the agent first, then read the schema when you're about to write to the brain for the first time.
 
 ## What the brain is *not*
 
@@ -85,5 +85,3 @@ A handful of brain-specific gotchas that bit me before they were obvious:
 - [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md) — *§ "A durable shared brain"* — the conceptual framing in the migration story
 - [Ch 06 — Infra setup](06-infra-setup.md) — where the brain sits in the broader runtime
 - [Ch 19 — Security and hardening](19-security-and-hardening.md) — *§ "Defense layer 1"* — the OS-level immutability that protects identity files in the brain
-- [`ops/brain/README.md`](../ops/brain/README.md) — the canonical schema reference
-- [`agents/shared/brain.py`](../agents/shared/brain.py) — the read/write module

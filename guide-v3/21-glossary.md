@@ -1,4 +1,4 @@
-# Ch 21 — Glossary
+# Glossary
 
 *Last updated: 2026-04-16 · Reading time: ~5 min · Difficulty: reference*
 
@@ -42,7 +42,7 @@
 
 **Dispatcher (`dispatcher.py`).** The stateless request handler for inbound Telegram messages. Routes each update to the right agent by bot-token resolution, applies the chat_id gate, handles callback shortcuts without invoking the LLM, and drives the tool-use loop for conversational queries. ~565 lines. See [Ch 18 § The dispatcher](18-the-inbox.md#2-the-dispatcher-dispatcherpy).
 
-**`deploy.py`.** The single path code takes from the repo into a live agent workspace on the VPS. Runs 9 active safeguards before touching the VPS. Invoked as `python3 agents/shared/deploy.py <agent>` on the VPS, after a `git pull --ff-only`. See [Ch 07 — Intro to agents](07-intro-to-agents.md).
+**`deploy.py`.** The single path code takes from the repo into a live agent workspace on the VPS. Runs 10 active safeguards before touching the VPS. Invoked as `python3 agents/shared/deploy.py <agent>` on the VPS, after a `git pull --ff-only`. See [Ch 07 — Intro to agents](07-intro-to-agents.md).
 
 **Drift detection.** Safeguard 4 in `deploy.py`. Refuses to deploy if the workspace on the VPS has changed since the last deploy — i.e., if somebody edited a live workspace file by hand. Blocking, not advisory. See [Ch 19 § Defense layer 3](19-security-and-hardening.md#defense-layer-3-the-deploy-tool-safeguards).
 
@@ -106,7 +106,7 @@
 
 **Review-before-finalize.** The pattern where a pipeline generates a tiered review markdown and the operator reviews + edits before a `--finalize` flag commits anything durable. Used by [Huckle Cat's](14-huckle-cat.md#the-mining-pipeline) mining pipeline. Prevents bad-quality automated output from landing in the shared brain.
 
-**Safeguard.** A deterministic Python check in `deploy.py` that either passes or fails, with no gray area. Nine active safeguards (1 Backup, 2 Source-cleanliness, 3 UPDATE confirm, 4 Drift detection, 5 Workflow banner, 6 Smoke test, 7 Manifest semantics, 9 Cron message discipline, 10 Config source classification). Two retired (8 exec-approvals baseline, 11 docker-compose.yml drift). See [Ch 19 § Defense layer 3](19-security-and-hardening.md#defense-layer-3-the-deploy-tool-safeguards).
+**Safeguard.** A deterministic Python check in `deploy.py` that either passes or fails, with no gray area. Ten active safeguards (1 Backup, 2 Source-cleanliness, 3 UPDATE confirm, 4 Drift detection, 5 Workflow banner, 6 Smoke test, 7 Manifest semantics, 9 Cron message discipline, 10 Config source classification, 12 pip-audit supply-chain). Two retired (8 exec-approvals baseline, 11 docker-compose.yml drift). See [Ch 19 § Defense layer 3](19-security-and-hardening.md#defense-layer-3-the-deploy-tool-safeguards).
 
 **Script contract.** The three-rule contract every cron-invoked script in the fleet obeys: (1) always exit 0, (2) emit exactly one JSON line on stdout, (3) never execute shell. Enforced by `contract_wrap.py` at the import surface and by Safeguard 9 at the deploy boundary. See [Ch 19 § Defense layer 2](19-security-and-hardening.md#defense-layer-2-the-script-contract).
 
@@ -144,9 +144,9 @@ Load-bearing war stories referenced by name across multiple chapters. Each one p
 
 **The 5x resend incident (2026-04-14).** [Sergeant Murphy](13-sergeant-murphy.md#the-5x-resend-incident). Post-meeting-scan cron used cache files as a delivery queue, re-sent the same debrief five times over 2.5 hours until the operator pulled the cron by hand. Rule: [cache-is-not-a-queue](#az). Silent prior on 2026-04-08 discovered during post-mortem.
 
-**The Costco saga (April 5–12, 2026).** [Hilda Hippo](15-hilda-hippo.md). Four-act narrative covering the cold-start collapse (April 5–9, persistent daemon pivot), the B2C public-client discovery (April 12), the 2010 setCookie bug (April 12), and the Act IV stabilization (April 12–15). Rule: auto-MFA is non-optional for Shape 5 vendors.
+**The Costco saga (April 5–18, 2026).** [Hilda Hippo](15-hilda-hippo.md). Six-act narrative covering the cold-start collapse (April 5–9, persistent daemon pivot), the B2C public-client discovery (April 12), the 2010 setCookie bug (April 12), the Act IV stabilization (April 12–15), the Act V sliding-window closure (April 17, three-tier refresh ladder with exponential backoff), and the Act VI home-ISP pivot (April 18, autossh+Tailscale tunnel routes silent refresh through the operator's residential IP). Rule: auto-MFA is non-optional for Shape 5 vendors.
 
-**The probation episode (2026-04-11).** [Mr Fixit](09-mr-fixit.md#the-probation-episode). `chr()` approval incident that violated three agent rules and triggered a brain transplant (commit `945ee28`). Produced the five Diagnostic Discipline rules, the P1-P4 failure framework, and the pre-baked `retire.sh`.
+**The probation episode (2026-04-11).** [Mr Fixit](09-mr-fixit.md#the-probation-episode). `chr()` approval incident that violated three agent rules and triggered a same-day brain transplant. Produced the five Diagnostic Discipline rules, the P1-P4 failure framework, and the pre-baked `retire.sh`.
 
 **The smart-reply chip incident (2026-04-14).** [Lowly Worm social](11-lowly-worm-social.md#the-smart-reply-chip-incident-2026-04-14). DM enrichment path accidentally triggered LinkedIn's smart-reply chip, auto-replying five times to a dormant thread. Rule: direct URL navigation only, no clicks in the enrichment loop, network-level send-block via `page.route`.
 

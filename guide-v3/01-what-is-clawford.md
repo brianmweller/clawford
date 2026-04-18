@@ -76,7 +76,7 @@ I went with a VPS for four reasons, none of them religious:
 1. **Always-on without kicking a family laptop.** A Mac mini under the TV works until someone unplugs it to dust.
 2. **Blast radius.** If an agent goes feral, I'd rather that happened on rented hardware than on the box with my tax returns on it.
 3. **Clean rebuild.** The whole fleet is Terraform-provisioned and configuration-managed, so "try again from scratch" is a 40-minute thing, not a weekend.
-4. **Not my residential IP.** For most services this is a feature; for Amazon and Costco it is the exact opposite, which is how I ended up with strong opinions about residential proxies (Ch 04).
+4. **Not my residential IP.** For most services this is a feature; for Amazon and Costco it is the exact opposite, which is how I ended up with strong opinions about residential proxies ([Ch 04](04-vps-setup.md)).
 
 A Mac mini is probably fine if your fleet is smaller, you already own the hardware, and you don't mind the first three points. I don't claim one path is right.
 
@@ -90,7 +90,7 @@ A Mac mini is probably fine if your fleet is smaller, you already own the hardwa
 
 - **You just want one bot.** If all you need is a single agent to do one thing, Busytown is massive overkill. Clone a smaller scaffold.
 - **You want a turnkey product.** This is a field guide, not a product. There are places in it where the answer is "I gave up and wrote a memory file."
-- **You need a security-reviewed system.** I'm not a security expert. I'll tell you what I do and what I know I don't do (Ch 19), but audited it is not.
+- **You need a security-reviewed system.** I'm not a security expert. I'll tell you what I do and what I know I don't do ([Ch 19](19-security-and-hardening.md)), but audited it is not.
 
 ## If you read nothing else — quickstart
 
@@ -110,8 +110,6 @@ If you find something here that's wrong, assume I'd like to know.
 
 ## See also
 
-- [index.md](index.md) — the full table of contents for this guide.
+- [The full table of contents](index.md) for this guide.
 - [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md) — the decision doc that explains why the runtime looks like this and not like the platform it used to sit on top of.
 - [docs/ballad-of-mr-fixit.md](../docs/ballad-of-mr-fixit.md) — a five-act tragedy covering just the first day of setup. A lot more has gone wrong since; the ballad is the overture, not the opera. Read it when you want the lore instead of the manual.
-- [README.md](../README.md) — the shorter elevator pitch.
-- [AGENTS-PATTERN.md](../AGENTS-PATTERN.md) — the shape of an agent in one file; useful as a cheat sheet once you start Ch 07.

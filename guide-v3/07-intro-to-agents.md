@@ -80,11 +80,11 @@ Each agent has a `manifest.json` sitting next to the workspace files. It is the 
 }
 ```
 
-When `agents/shared/deploy.py <agent-id>` runs, it reads this file and does the full install: copies workspace files into the VPS workspace, seeds state files, syncs the shared library, and captures a pre-deploy backup tarball. It also runs nine safeguards — see [Ch 06](06-infra-setup.md) for the full inventory with outage stories.
+When `agents/shared/deploy.py <agent-id>` runs, it reads this file and does the full install: copies workspace files into the VPS workspace, seeds state files, syncs the shared library, and captures a pre-deploy backup tarball. It also runs ten safeguards — see [Ch 06](06-infra-setup.md) for the full inventory with outage stories.
 
 > A few legacy fields (`approvals.allowlist`, `approvals.policy`, `approvals.security`) still appear in older `manifest.json.example` copies. They were gated on an OpenClaw-era approvals concept that no longer exists and are ignored by the current deploy tool. A cleanup pass in a later liberation phase removes them.
 
-> ⚠️ **Warning.** `manifest.json` is gitignored and `IDENTITY.md` and `USER.md` are gitignored for the same reason: real values contain PII (family names, calendar IDs, bot tokens). The checked-in versions are `*.example` files. On first-time setup, `deploy.py <agent> --bootstrap-configs` scaffolds each missing real file by copying its `.example` sibling and prepending a `CLAWFORD_BOOTSTRAP_UNEDITED` sentinel. Hand-edit the dummy values, delete the sentinel line, redeploy. Safeguard 10 refuses to deploy any agent that still has the sentinel on line 1.
+> ⚠️ **Warning.** `manifest.json` is gitignored and `IDENTITY.md` and `USER.md` are gitignored for the same reason: real values contain PII (family names, calendar IDs, bot tokens). The checked-in versions are `*.example` files. On first-time setup, `deploy.py <agent> --bootstrap-configs` scaffolds each missing real file by copying its `.example` sibling and prepending a `CLAWFORD_BOOTSTRAP_UNEDITED` sentinel. Hand-edit the dummy values, delete the sentinel line, redeploy. [Safeguard 10](19-security-and-hardening.md#defense-layer-3-the-deploy-tool-safeguards) refuses to deploy any agent that still has the sentinel on line 1.
 
 ## How a deploy actually moves code to production
 
@@ -126,7 +126,7 @@ The dirty-tree state is almost always benign — host wrapper mode bits, untrack
 
 ### When deploy.py refuses on a drift violation
 
-`deploy.py` Safeguard 4 (workspace drift) refuses to overwrite a workspace file that has changed since the last deploy's recorded backup. The intent is to catch hand-edits made directly on the VPS that haven't been committed back.
+`deploy.py` [Safeguard 4](19-security-and-hardening.md#defense-layer-3-the-deploy-tool-safeguards) (workspace drift) refuses to overwrite a workspace file that has changed since the last deploy's recorded backup. The intent is to catch hand-edits made directly on the VPS that haven't been committed back.
 
 Nine times out of ten, the "drift" is a false positive — the workspace content is byte-identical to the repo source, the safeguard is matching on a stat-only difference. Diff the file against the repo first:
 
@@ -167,7 +167,7 @@ This isn't a philosophical stance — it's a cost-and-failure discipline. LLM ca
 
 Every scheduled job in the fleet fires from the host crontab. No container runtime, no platform cron, no 600-second ceiling, no exec-approvals allowlist that tightens on an upgrade. Just `crontab -l` and the host Python interpreter.
 
-The contract installer at [`ops/scripts/install-host-cron.sh`](../ops/scripts/install-host-cron.sh) owns the contents of the crontab. It reconciles the live crontab against a list of `CONTRACT_ENTRY` lines declared per agent and evicts stale lines automatically when a schedule, path, timeout, or env-var token changes between runs. No manual `crontab -e`. Ch 06 covers the runtime in detail.
+The contract installer at `ops/scripts/install-host-cron.sh` owns the contents of the crontab. It reconciles the live crontab against a list of `CONTRACT_ENTRY` lines declared per agent and evicts stale lines automatically when a schedule, path, timeout, or env-var token changes between runs. No manual `crontab -e`. Ch 06 covers the runtime in detail.
 
 ### The fleet path for morning briefs
 
@@ -178,7 +178,7 @@ Every agent that contributes to the morning briefing follows the same shape:
 3. Do **not** call `telegram.send_telegram()` directly from the morning orchestrator.
 4. A single fleet aggregator at `0 12 * * *` UTC (5:00 AM PT) reads every agent's cache file and sends one consolidated brief.
 
-The fleet-path discipline matters because without it, five agents each send their own early-morning message at five slightly different times and the human wakes up to a notification storm instead of one actionable digest. The 3:30 populate / 5:00 deliver split gives every agent an hour and a half to be late without breaking the brief, and the atomic-write-to-cache pattern means a partially-failed agent cleanly drops out of the brief instead of corrupting it.
+The fleet-path discipline matters because without it, six agents each send their own early-morning message at six slightly different times and the human wakes up to a notification storm instead of one actionable digest. The 3:30 populate / 5:00 deliver split gives every agent an hour and a half to be late without breaking the brief, and the atomic-write-to-cache pattern means a partially-failed agent cleanly drops out of the brief instead of corrupting it.
 
 Non-morning crons don't need to follow the fleet path — a pre-meeting alert or an engagement poll goes out when it needs to. The fleet path is specifically for anything that contributes to the single consolidated morning message.
 
@@ -186,9 +186,9 @@ Non-morning crons don't need to follow the fleet path — a pre-meeting alert or
 
 Agents don't reinvent the world-access layer. Everything an agent needs to touch anything outside its own workspace goes through `agents/shared/*`, organised by how hostile the target is:
 
-- **Tier 1 — clean APIs.** `telegram.py`, `google_oauth.py`, `llm.py`, `heartbeat_base.py`, `brain.py`.
-- **Tier 2 — stock Playwright.** `playwright_profile.py` for LinkedIn, Google Messages Web, and similar.
-- **Tier 3 — hardened Camoufox behind a residential proxy.** `camoufox_proxy.py` + `retry_policy.py` for Costco, Amazon, any retailer with fraud scoring.
+- **[Tier 1](06-infra-setup.md#tier-1-clean-apis) — clean APIs.** `telegram.py`, `google_oauth.py`, `llm.py`, `heartbeat_base.py`, `brain.py`.
+- **[Tier 2](06-infra-setup.md#tier-2-stock-playwright) — stock Playwright.** `playwright_profile.py` for LinkedIn, Google Messages Web, and similar.
+- **[Tier 3](06-infra-setup.md#tier-3-hardened-camoufox-behind-a-residential-proxy) — hardened Camoufox behind a residential proxy.** `camoufox_proxy.py` + `retry_policy.py` for Costco, Amazon, any retailer with fraud scoring.
 
 Ch 06 walks through each module with intent and consumer list. The short version: before writing a line of integration code, decide which tier the target belongs in and use the module that matches. Code built in the wrong tier eventually gets rewritten.
 
@@ -201,11 +201,11 @@ Every script an orchestrator (or host-cron wrapper) invokes must follow one shap
 3. **Stderr is free.** Use it for debug logs — nothing parses it, so it won't interfere with the stdout contract.
 4. **Run as a bare `python3 <absolute-path>`.** No shell wrappers, no pipes, no redirects, no `sh -c`, no `; echo $?`.
 
-The full spec and a skeleton template live in [`agents/shared/SCRIPT_CONTRACT.md`](../agents/shared/SCRIPT_CONTRACT.md). The test harness in `agents/shared/tests/test_script_contract.py` enforces the contract — statically by walking every manifest's cron messages and rejecting forbidden shell operators, and at runtime by running every script in isolation and asserting the output shape.
+The full spec and a skeleton template live in `agents/shared/SCRIPT_CONTRACT.md`. The test harness in `agents/shared/tests/test_script_contract.py` enforces the contract — statically by walking every manifest's cron messages and rejecting forbidden shell operators, and at runtime by running every script in isolation and asserting the output shape.
 
 The reason the contract is pedantic is scar tissue. An earlier platform version had a hardcoded exec preflight that rejected any `python3 <...>` command matching shell operators — `;`, `&&`, output redirects, `sh -lc`, exit-code capture. When an LLM running a cron session reflexively wrapped a command as `python3 script.py; printf "EXIT:%s" $?` to "also check the exit code," the command got hard-rejected, and *before* the contract existed, exactly that wrapping cascaded the entire six-agent fleet into approval-blocked errors in a single morning. The durable fix had two sides: scripts started self-reporting status via JSON (removing the LLM's *reason* to wrap), and cron messages started opening with an explicit *"run this bare, do not append anything, do not capture exit codes"* preamble (removing the *temptation*). Both sides are load-bearing.
 
-Safeguard 9 in `deploy.py` enforces the pattern blocklist on every deploy. [Ch 06](06-infra-setup.md) has the full story.
+[Safeguard 9](19-security-and-hardening.md#defense-layer-3-the-deploy-tool-safeguards) in `deploy.py` enforces the pattern blocklist on every deploy. [Ch 06](06-infra-setup.md) has the full story.
 
 ## Defense in depth
 
@@ -215,7 +215,7 @@ The defense in depth that replaced it is structural and doesn't need per-agent t
 
 1. **OS-level immutability on identity.** `SOUL.md` and `IDENTITY.md` are `chattr +i` after deploy. An agent cannot rewrite its own values even if a prompt-injection attack tells it to, because the filesystem refuses.
 2. **The script contract.** Scripts always `exit 0` and report status via JSON. Combined with cron messages that forbid shell operators (Safeguard 9), there's no path for an LLM to catch a failed command via a nonzero exit and try to "recover" it by escalating.
-3. **`deploy.py` safeguards.** Nine active checks that run before any file touches the VPS: source clean, workspace drift, compose drift, manifest validation, config-source resolution, pre-deploy backup, post-deploy smoke test, cron-message hygiene, diff preview. Each one exists because of a specific past outage. Ch 06 has the inventory.
+3. **`deploy.py` safeguards.** Ten active checks that run before any file touches the VPS: source clean, workspace drift, manifest validation, config-source resolution, pre-deploy backup, post-deploy smoke test, cron-message hygiene, diff preview, workflow banner, and pip-audit supply-chain gate. Each one exists because of a specific past outage. Ch 06 has the inventory.
 
 None of the three layers is a replacement for the others. They compose — every mistake the fleet has seen in production is caught by at least one of them.
 
@@ -237,8 +237,5 @@ See the three invariants at the bottom of [Ch 04 — VPS setup](04-vps-setup.md)
 
 ## See also
 
-- [AGENTS-PATTERN.md](../AGENTS-PATTERN.md) — the repo's canonical list of workspace files, deployment invariants, and human-facing rules. Keep this open while reading Ch 08 through Ch 15.
-- [`agents/shared/SCRIPT_CONTRACT.md`](../agents/shared/SCRIPT_CONTRACT.md) — the full script contract, the skeleton template, and the migration guide for pre-contract scripts.
-- [`agents/shopping/manifest.json.example`](../agents/shopping/manifest.json.example) — the canonical manifest example with real cron shapes.
 - [Ch 06 — Infra setup](06-infra-setup.md) — `deploy.py`'s safeguards, the shared library tiers, the shared brain, the host-cron runtime.
 - [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md) — the decision doc that explains why the runtime looks like this and not like the platform it used to sit on top of.
