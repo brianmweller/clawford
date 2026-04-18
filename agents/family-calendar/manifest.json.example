@@ -18,6 +18,7 @@
     "scripts/chat-parse-schedule.py",
     "scripts/heartbeat.py",
     "scripts/calendar-index-build.py",
+    "scripts/gcal-tasks-sync.py",
     "scripts/morning-briefing.py",
     "scripts/activity-email-alert.py",
     "scripts/gmail-invite-alert.py",

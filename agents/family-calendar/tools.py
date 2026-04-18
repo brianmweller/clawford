@@ -17,8 +17,16 @@ import pending_actions  # type: ignore
 import memory_writer  # type: ignore
 from subprocess_helpers import run_json_script, is_subprocess_error  # type: ignore
 
-# task_callback lives at agents/family-calendar/task_callback.py; when
-# tools.py is imported by the dispatcher the agent dir is on sys.path.
+# Put the agent dir on sys.path so we can import agent-root modules.
+# dispatcher.py loads tools.py via spec_from_file_location, which doesn't
+# adjust sys.path; without this shim ``from task_callback import ...``
+# would fail even though the module sits right next to us.
+import sys as _sys
+from pathlib import Path as _Path
+_AGENT_DIR = _Path(__file__).resolve().parent
+if str(_AGENT_DIR) not in _sys.path:
+    _sys.path.insert(0, str(_AGENT_DIR))
+
 from task_callback import handle_task_callback  # type: ignore  # noqa: E402
 
 AGENT_ID = "family-calendar"
