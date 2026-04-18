@@ -41,9 +41,9 @@ __pycache__/
 credentials.json
 token.json
 
-# Local Claude Code settings (contains hardcoded paths + VPS IP)
-.claude/settings.local.json
-.claude/scheduled_tasks.lock
+# Local Claude Code harness state (settings + lock). Skills are tracked.
+.claude/*
+!.claude/skills/
 
 # === PII remediation (2026-04) ===
 # Agent config / identity / state files hold real names, DOBs, emails,
