@@ -255,13 +255,7 @@ color-coded: <span class="d-tag d-easy">easy</span>
     and retired terms for historical context.
     { .d-reference }
 
-</div>
-
-## Lore
-
-<div class="grid cards" markdown>
-
--   __[The Ballad of Mr Fixit](../docs/ballad-of-mr-fixit.md)__
+-   __[Bonus: The Ballad of Mr Fixit](../docs/ballad-of-mr-fixit.md)__
 
     ---
 
