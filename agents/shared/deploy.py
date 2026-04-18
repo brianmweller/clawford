@@ -1173,6 +1173,7 @@ def sync_scripts(
 # …). Expand as new shared modules ship.
 SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "brain.py",
+    "brain_tasks.py",         # 2026-04-18 — task-queue parser + in-place editors for Mouse
     "camoufox_proxy.py",
     "fleet_health_types.py",
     "google_oauth.py",
