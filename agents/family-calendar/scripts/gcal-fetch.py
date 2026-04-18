@@ -39,8 +39,24 @@ for _p in Path(__file__).resolve().parents:
         break
 
 from agents.shared.meeting_classifier import has_videoconference_link  # noqa: E402
+from agents.shared.calendar_index import meeting_event_ids  # noqa: E402
 
 WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
+
+BRAIN_INDEX_PATH = os.environ.get(
+    "CLAWFORD_CALENDAR_INDEX_PATH",
+    os.path.expanduser("~/Dropbox/openclaw-backup/status/calendar-index.json"),
+)
+
+
+def _load_brain_meeting_ids() -> set:
+    """Read the shared brain calendar index's meeting ids. Degrades to
+    empty set on any error so the local has_meeting_link fallback owns
+    classification when the index is missing/stale."""
+    try:
+        return meeting_event_ids(BRAIN_INDEX_PATH)
+    except Exception:
+        return set()
 CONFIG_PATH = os.path.join(WORKSPACE, "calendar-config.json")
 TOKEN_PATH = os.environ.get(
     "GOOGLE_CALENDAR_TOKEN_PATH",
@@ -154,6 +170,14 @@ def fetch_calendar_events(service, calendar_id, time_min, time_max):
             start_str = start.get("dateTime", start.get("date", ""))
             end_str = end.get("dateTime", end.get("date", ""))
 
+            # Classify on the RAW event (description intact). Mouse
+            # deliberately drops `description` from its output for
+            # display-safety, but the routing predicate needs to see
+            # it — a Webex/Zoom/Meet link pasted into the description
+            # is the signal that Murphy owns the event. Run the check
+            # here, then drop the description from the emitted record.
+            has_meeting_link = has_videoconference_link(event)
+
             events.append({
                 "id": event.get("id", ""),
                 "summary": event.get("summary", "(No title)"),
@@ -164,6 +188,7 @@ def fetch_calendar_events(service, calendar_id, time_min, time_max):
                 "description": "",  # Don't include — untrusted data, not needed for display
                 "status": event.get("status", "confirmed"),
                 "source_calendar_id": calendar_id,
+                "has_meeting_link": has_meeting_link,
             })
 
         page_token = result.get("nextPageToken")
@@ -297,18 +322,27 @@ def main():
     # Dedup shared events
     all_events = dedup_events(all_events)
 
-    # Annotate each event with the videoconference flag. Mouse/Murphy
-    # routing (memory: project_meeting_event_routing.md): an item with a
-    # videoconference link is Murphy's meeting; everything else is a
-    # Mouse event. Mutually exclusive by construction.
-    for event in all_events:
-        event["has_meeting_link"] = has_videoconference_link(event)
-
     # Apply --skip-meetings filter: drop the events that Murphy owns.
+    # Authoritative signal is the shared brain calendar index
+    # (ops/scripts/calendar-index-build.py), which classifies RAW
+    # events once per tick. The local `has_meeting_link` annotation
+    # above is a fallback for events the index hasn't seen yet (e.g.
+    # a meeting the operator just created mid-day) — it works for events
+    # whose video link is in hangoutLink/conferenceData but not for
+    # description-only links, because we blank descriptions at fetch
+    # time. Those cases rely on the index.
+    brain_meeting_ids: set[str] = set()
+    if skip_meetings:
+        brain_meeting_ids = _load_brain_meeting_ids()
+
     skipped_count = 0
     if skip_meetings:
         before = len(all_events)
-        all_events = [e for e in all_events if not e.get("has_meeting_link")]
+        all_events = [
+            e for e in all_events
+            if e.get("id", "") not in brain_meeting_ids
+            and not e.get("has_meeting_link")
+        ]
         skipped_count = before - len(all_events)
 
     # Detect conflicts

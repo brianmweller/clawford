@@ -17,6 +17,7 @@
     "scripts/gmail-invite-check.py",
     "scripts/chat-parse-schedule.py",
     "scripts/heartbeat.py",
+    "scripts/calendar-index-build.py",
     "scripts/morning-briefing.py",
     "scripts/activity-email-alert.py",
     "scripts/gmail-invite-alert.py",

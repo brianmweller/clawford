@@ -1180,6 +1180,7 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "inbound_patterns.py",   # P0.4 — regex list for inbound scanner
     "inbound_scanner.py",    # P0.4 — scan_inbound() + semantic_guard()
     "isolation.py",          # P1.2 — bubblewrap argv builder
+    "calendar_index.py",      # 2026-04-18 — shared brain calendar index reader
     "llm.py",
     "meeting_classifier.py",  # 2026-04-18 — Murphy/Mouse routing predicate
     "memory_writer.py",

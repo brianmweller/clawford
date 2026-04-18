@@ -45,6 +45,7 @@ for _p in Path(__file__).resolve().parents:
         break
 
 from agents.shared.meeting_classifier import has_videoconference_link  # noqa: E402
+from agents.shared.calendar_index import meeting_event_ids  # noqa: E402
 
 WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
 REMINDERS_PATH = os.path.join(WORKSPACE, "sent-reminders.json")
@@ -53,6 +54,20 @@ TOKEN_PATH = os.environ.get(
     "GOOGLE_CALENDAR_TOKEN_PATH",
     os.path.join(WORKSPACE, "token.json"),
 )
+BRAIN_INDEX_PATH = os.environ.get(
+    "CLAWFORD_CALENDAR_INDEX_PATH",
+    os.path.expanduser("~/Dropbox/openclaw-backup/status/calendar-index.json"),
+)
+
+
+def _load_brain_meeting_ids() -> set:
+    """Shared-brain authoritative set of ids Mouse must skip (Murphy's).
+    Degrades to empty set so the local has_videoconference_link check
+    owns when the index is missing/stale."""
+    try:
+        return meeting_event_ids(BRAIN_INDEX_PATH)
+    except Exception:
+        return set()
 
 TRAVEL_KEYWORDS = re.compile(
     r"airport|doctor|dentist|hospital|clinic|urgent care|emergency",
@@ -237,9 +252,12 @@ def main():
     sent_reminders = sent_data.get("reminders", {})
 
     # Mouse/Murphy routing boundary (memory:
-    # project_meeting_event_routing.md, rule revised 2026-04-18):
-    # videoconference link = Murphy's meeting, skip here so his
-    # pre-meeting-alert owns it.
+    # project_meeting_event_routing.md): Murphy owns events with a
+    # videoconference link. Authoritative set comes from the shared
+    # brain calendar index (populated at 10:25 UTC by
+    # calendar-index-build.py); local has_videoconference_link is the
+    # fallback for events the index hasn't seen yet.
+    brain_meeting_ids = _load_brain_meeting_ids()
     reminders_to_send = []
 
     for cal in config.get("calendars", []):
@@ -271,6 +289,10 @@ def main():
                 event_id = event.get("id", "")
 
                 # Routing boundary: Murphy owns videoconferenced events.
+                # Brain index first (authoritative for description-only
+                # links), local classifier as fallback.
+                if event_id in brain_meeting_ids:
+                    continue
                 if has_videoconference_link(event):
                     continue
 
