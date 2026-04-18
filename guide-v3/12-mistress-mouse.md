@@ -17,6 +17,7 @@ She is a **family** calendar agent, not a work calendar agent — Sergeant Murph
 - Activity-provider emails (school closures, lesson cancellations, signup windows) parsed and classified into five categories with a Telegram alert per non-trivial item, so the "the school emailed at 6 AM and nobody saw it" class of failure goes away.
 - Google Calendar invite surfacing — the common `METHOD:REQUEST` stuff you actually need to respond to, filtered out of the noise of calendar updates and cancellations.
 - A once-a-day digest of family WhatsApp chat traffic, delivered to Telegram, so the "partner sent a schedule change in WhatsApp and I missed it because I was heads-down" failure mode goes away.
+- Personal tasks surfaced the same way events are: anything in the shared brain's `tasks/queue.md` assigned to you shows up in the 5 AM PT brief under "TODAY'S TASKS"; timed tasks get a T-30min Telegram ping with `done / snooze / ignore` buttons; the ledger two-way syncs every 5 minutes with your phone's Google Tasks list so checking something off on the phone flips `status=done` in the brain, and vice versa.
 
 ## Why you might skip this one
 
@@ -85,14 +86,15 @@ If you deploy only Mistress Mouse and not Sergeant Murphy, the classifier still 
 
 ## Current state
 
-As of 2026-04-15, Mistress Mouse runs entirely on host crons under `~/.clawford/family-calendar-workspace/`. Six live host crons, with six supporting I/O scripts and a small pile of state files.
+As of 2026-04-18, Mistress Mouse runs entirely on host crons under `~/.clawford/family-calendar-workspace/`. Seven live host crons, with seven supporting I/O scripts and a small pile of state files.
 
 **Host cron surface.** Registered via `ops/scripts/install-host-cron.sh`:
 
 | Cron | Schedule (UTC) | What it does |
 |------|----------------|--------------|
 | `morning-briefing` | `30 10 * * *` | Compose today/tomorrow briefing (Monday adds week-ahead section); writes `cache/morning-brief-ready.txt` for fleet-deliver to pick up at 12:00 UTC |
-| `reminder-check` | `*/5 * * * *` | Compare events against wall-clock, fire 60/30/15-min reminders, dedup via `sent-reminders.json`, skip per-calendar `remind=false` |
+| `reminder-check` | `*/5 * * * *` | Compare events against wall-clock, fire 60/30/15-min reminders, dedup via `sent-reminders.json`, skip per-calendar `remind=false`. Also fires T-30min and T+24h-overdue task pings from the shared brain's `tasks/queue.md` with a `done/snooze/ignore` inline keyboard |
+| `tasks-sync` | `*/5 * * * *` | Two-way sync between `tasks/queue.md` and the operator's Google Tasks list. Push creates/patches/deletes remote tasks; pull propagates phone-side completions back as in-place `status=done` edits. State map in `tasks-sync-state.json` keyed by local task id |
 | `activity-email-alert` | `15 */2 * * *` | Fetch recent activity-provider emails, LLM-classify into {closure, cancellation, action, event, fyi, none}, send one Telegram alert per non-none item |
 | `gmail-invite-alert` | `30 */3 * * *` | Parse ICS attachments from Gmail, surface METHOD:REQUEST invites only, dedup via `seen-invites.json` |
 | `whatsapp-chat-alert` | `45 */2 * * *` | LLM-classify recent WhatsApp chat into action types, send Telegram alert per classified item. **Optional — see [§ The WhatsApp chapter](#the-whatsapp-chapter).** |
@@ -107,6 +109,7 @@ As of 2026-04-15, Mistress Mouse runs entirely on host crons under `~/.clawford/
 - `activity-email-check.py` — recursive MIME parser; no LLM; emits raw event dicts for the alert cron to classify
 - `gmail-invite-check.py` — ICS attachment parser; filters METHOD:REQUEST only
 - `chat-parse-schedule.py` — reads Baileys session store, extracts schedule-change keywords from family chat messages
+- `gcal-tasks-sync.py` — Google Tasks push/pull; resolves the target list by title (`Sam.M.Smith's list`), maintains `tasks-sync-state.json`, treats `status=ignored` as `completed` + `[IGNORED]` title prefix, tombstones phone-side deletes back to `queue.md`
 
 **Workspace layout** under `~/.clawford/family-calendar-workspace/`:
 
@@ -120,8 +123,9 @@ HEARTBEAT.md            # last-run status
 MEMORY.md               # persistent notes
 token.json              # Google OAuth refresh token (gitignored)
 credentials.json        # Google OAuth client credentials (gitignored)
-sent-reminders.json     # reminder dedup state
+sent-reminders.json     # reminder dedup state (events + tasks share the keyspace)
 seen-invites.json       # invite dedup state
+tasks-sync-state.json   # Google Tasks sync state (list_id, per-task map, etag, updatedMin watermark)
 calendar-config.json    # calendar list + activity providers + per-calendar flags
 whatsapp-session/       # Baileys session store (if WhatsApp enabled)
 logs/                   # calendar-writes.jsonl audit log
