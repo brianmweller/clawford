@@ -32,7 +32,11 @@ def _reload():
     return dispatcher
 
 
-def _callback_update(data: str, chat_id: int = 111111111) -> dict:
+def _callback_update(
+    data: str,
+    chat_id: int = 111111111,
+    message_text: str = "Original message body",
+) -> dict:
     return {
         "update_id": 2,
         "callback_query": {
@@ -41,6 +45,7 @@ def _callback_update(data: str, chat_id: int = 111111111) -> dict:
             "message": {
                 "message_id": 200,
                 "chat": {"id": chat_id, "type": "private"},
+                "text": message_text,
             },
             "data": data,
         },
@@ -336,6 +341,106 @@ def test_engagement_more_routes_to_executor(disp):
          patch.object(disp, "load_agent_config", return_value=cfg):
         disp.dispatch("news-digest", _callback_update("more:5"))
         record_engagement.assert_called_once_with(article_id="5", action="more")
+
+
+# ── in-place message edit (visual feedback for silent button presses) ─
+
+
+def _last_edit_call(mock_tg):
+    """Return the most recent edit_message_text call args, or None."""
+    if not mock_tg.edit_message_text.called:
+        return None
+    return mock_tg.edit_message_text.call_args
+
+
+def test_engagement_press_edits_message_with_banner(disp):
+    cfg = _mock_config(
+        agent_id="news-digest", token="FAKE_NEWS_TOKEN",
+        executors={"record_engagement": MagicMock()},
+    )
+    with patch.object(disp, "telegram_api") as mock_tg, \
+         patch.object(disp, "load_agent_config", return_value=cfg):
+        disp.dispatch(
+            "news-digest",
+            _callback_update("like:3", message_text="3. NYT — markets calm"),
+        )
+        edit = _last_edit_call(mock_tg)
+        assert edit is not None
+        # positional: token, chat_id, message_id, new_text
+        token, chat_id, message_id, new_text = edit.args
+        assert token == "FAKE_NEWS_TOKEN"
+        assert message_id == 200
+        assert new_text.startswith("\U0001f44d Liked")
+        assert "3. NYT — markets calm" in new_text
+
+
+def test_nudge_press_edits_message_with_banner(disp, monkeypatch):
+    monkeypatch.setenv("CONNECTOR_BOT_TOKEN", "FAKE_CONNECTOR_TOKEN")
+    (Path(disp.__file__).resolve().parent.parent / "connector-workspace").mkdir(
+        exist_ok=True,
+    )
+    cfg = _mock_config(
+        agent_id="connector", token="FAKE_CONNECTOR_TOKEN",
+        executors={"handle_nudge_action": MagicMock()},
+    )
+    with patch.object(disp, "telegram_api") as mock_tg, \
+         patch.object(disp, "load_agent_config", return_value=cfg):
+        disp.dispatch(
+            "connector",
+            _callback_update(
+                "nudge_done:kyle-kloster",
+                message_text="Kyle Kloster — friend\nlast: 45 days ago",
+            ),
+        )
+        edit = _last_edit_call(mock_tg)
+        assert edit is not None
+        _token, _chat, message_id, new_text = edit.args
+        assert message_id == 200
+        assert new_text.startswith("\u2705 Marked done")
+        assert "Kyle Kloster" in new_text
+
+
+def test_task_press_edits_message_with_banner(disp, monkeypatch):
+    monkeypatch.setenv("FAMILYCAL_BOT_TOKEN", "FAKE_FAMILY_TOKEN")
+    (Path(disp.__file__).resolve().parent.parent / "family-calendar-workspace").mkdir(
+        exist_ok=True,
+    )
+    cfg = _mock_config(
+        agent_id="family-calendar", token="FAKE_FAMILY_TOKEN",
+        executors={"handle_task_callback": MagicMock()},
+    )
+    with patch.object(disp, "telegram_api") as mock_tg, \
+         patch.object(disp, "load_agent_config", return_value=cfg):
+        disp.dispatch(
+            "family-calendar",
+            _callback_update(
+                "task_snooze:task_42",
+                message_text="\U0001f4cb Pick up dry cleaning",
+            ),
+        )
+        edit = _last_edit_call(mock_tg)
+        assert edit is not None
+        _token, _chat, message_id, new_text = edit.args
+        assert message_id == 200
+        assert new_text.startswith("\u23ed Snoozed")
+        assert "dry cleaning" in new_text
+
+
+def test_edit_failure_does_not_break_press(disp):
+    """edit_message_text returning False (stale message, etc.) is a
+    non-event — the toast already gave the operator feedback."""
+    record_engagement = MagicMock()
+    cfg = _mock_config(
+        agent_id="news-digest", token="FAKE_NEWS_TOKEN",
+        executors={"record_engagement": record_engagement},
+    )
+    with patch.object(disp, "telegram_api") as mock_tg, \
+         patch.object(disp, "load_agent_config", return_value=cfg):
+        mock_tg.edit_message_text.return_value = False
+        disp.dispatch("news-digest", _callback_update("like:3"))
+        # Toast still fired and executor still ran.
+        mock_tg.answer_callback_query.assert_called_once()
+        record_engagement.assert_called_once()
 
 
 # ── debrief callbacks (Sergeant Murphy) ──────────────────────────

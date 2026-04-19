@@ -50,6 +50,7 @@ from pathlib import Path
 TELEGRAM_API_URL_TEMPLATE = "https://api.telegram.org/bot{token}/sendMessage"
 TELEGRAM_CHAT_ACTION_URL_TEMPLATE = "https://api.telegram.org/bot{token}/sendChatAction"
 TELEGRAM_ANSWER_CBQ_URL_TEMPLATE = "https://api.telegram.org/bot{token}/answerCallbackQuery"
+TELEGRAM_EDIT_MESSAGE_URL_TEMPLATE = "https://api.telegram.org/bot{token}/editMessageText"
 MAX_MESSAGE_CHARS = 4000
 CHUNK_CHARS = 3900
 INTER_CHUNK_DELAY_S = 0.3
@@ -308,6 +309,49 @@ def answer_callback_query(
         payload["text"] = text
     if show_alert:
         payload["show_alert"] = True
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read())
+        return bool(body.get("ok", False))
+    except Exception:
+        return False
+
+
+def edit_message_text(
+    token: str,
+    chat_id: str,
+    message_id: int,
+    text: str,
+    *,
+    reply_markup: dict | None = None,
+    disable_web_preview: bool = True,
+    timeout: int = DEFAULT_TIMEOUT_S,
+) -> bool:
+    """POST to editMessageText — replace the text of an already-sent
+    message and (by default) drop its inline keyboard.
+
+    The dispatcher uses this to give a durable visual indicator on
+    button presses: prepend a status banner, collapse the buttons.
+    Returns True on Telegram's ok=true, False on any failure (Telegram
+    refuses edits >48h old or with unchanged text — both are non-events
+    here since the toast already fired).
+
+    `reply_markup=None` collapses any existing inline keyboard.
+    """
+    url = TELEGRAM_EDIT_MESSAGE_URL_TEMPLATE.format(token=token)
+    payload: dict = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": text,
+        "disable_web_page_preview": disable_web_preview,
+    }
+    payload["reply_markup"] = reply_markup if reply_markup is not None else {"inline_keyboard": []}
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),

@@ -458,11 +458,49 @@ def _handle_cancel_all(
     )
 
 
+# Standardized acknowledgement for any silent-state-write button press
+# (engagement / nudge / task). Without this, the only feedback for a
+# tap is the brief Telegram toast — which the operator routinely misses. The
+# in-place edit collapses the button row and prepends a status banner
+# so the message itself becomes the durable indicator.
+def _ack_button_press(
+    cfg: AgentConfig,
+    update: dict,
+    cbq_id: str,
+    *,
+    toast: str,
+    banner: str,
+) -> None:
+    telegram_api.answer_callback_query(cfg.token, cbq_id, text=toast)
+    msg = (update.get("callback_query") or {}).get("message") or {}
+    message_id = msg.get("message_id")
+    chat = msg.get("chat") or {}
+    chat_id = chat.get("id")
+    original = msg.get("text") or ""
+    if message_id is None or chat_id is None:
+        return
+    new_text = f"{banner}\n\n{original}".rstrip() if original else banner
+    telegram_api.edit_message_text(
+        cfg.token, str(chat_id), message_id, new_text,
+    )
+
+
+_ENGAGEMENT_BANNER = {
+    "thumbs_up": "\U0001f44d Liked",
+    "thumbs_down": "\U0001f44e Disliked",
+    "more": "\U0001f4d6 Opened",
+}
+
+
 def _handle_engagement(
     cfg: AgentConfig, chat_id: str,
-    action_type: str, article_id: str, cbq_id: str,
+    action_type: str, article_id: str, cbq_id: str, update: dict,
 ) -> None:
-    telegram_api.answer_callback_query(cfg.token, cbq_id, text="Noted!")
+    _ack_button_press(
+        cfg, update, cbq_id,
+        toast="Noted!",
+        banner=_ENGAGEMENT_BANNER.get(action_type, "Noted"),
+    )
 
     executor = cfg.executors.get("record_engagement")
     if executor is None:
@@ -492,12 +530,14 @@ _NUDGE_TOAST = {
 
 def _handle_nudge_callback(
     cfg: AgentConfig, chat_id: str,
-    action: str, slug: str, cbq_id: str,
+    action: str, slug: str, cbq_id: str, update: dict,
 ) -> None:
     """Route a Relationship-Check button press to the agent's
     handle_nudge_action executor, which writes to snoozes.json."""
-    telegram_api.answer_callback_query(
-        cfg.token, cbq_id, text=_NUDGE_TOAST.get(action, "Noted"),
+    _ack_button_press(
+        cfg, update, cbq_id,
+        toast=_NUDGE_TOAST.get(action, "Noted"),
+        banner=_NUDGE_TOAST.get(action, "Noted"),
     )
     executor = cfg.executors.get("handle_nudge_action")
     if executor is None:
@@ -522,13 +562,15 @@ _TASK_CALLBACK_PREFIXES = {
 
 def _handle_task_callback(
     cfg: AgentConfig, chat_id: str,
-    action: str, task_id: str, cbq_id: str,
+    action: str, task_id: str, cbq_id: str, update: dict,
 ) -> None:
     toast = next(
         (t for p, (a, t) in _TASK_CALLBACK_PREFIXES.items() if a == action),
         "Noted",
     )
-    telegram_api.answer_callback_query(cfg.token, cbq_id, text=toast)
+    _ack_button_press(
+        cfg, update, cbq_id, toast=toast, banner=toast,
+    )
     executor = cfg.executors.get("handle_task_callback")
     if executor is None:
         log.warning("no handle_task_callback executor on %s", cfg.agent_id)
@@ -641,7 +683,7 @@ def _try_callback_shortcut(
     for prefix, action_type in ENGAGEMENT_MAP.items():
         if data.startswith(prefix + ":"):
             article_id = data[len(prefix) + 1:]
-            _handle_engagement(cfg, chat_id, action_type, article_id, cbq_id)
+            _handle_engagement(cfg, chat_id, action_type, article_id, cbq_id, update)
             return True
 
     # Relationship-Check nudge callbacks: nudge_done:<slug>,
@@ -649,14 +691,14 @@ def _try_callback_shortcut(
     for prefix, action in _NUDGE_CALLBACK_PREFIXES.items():
         if data.startswith(prefix + ":"):
             slug = data[len(prefix) + 1:]
-            _handle_nudge_callback(cfg, chat_id, action, slug, cbq_id)
+            _handle_nudge_callback(cfg, chat_id, action, slug, cbq_id, update)
             return True
 
     # Task reminder buttons (Mistress Mouse): task_{done,snooze,ignore}:<task_id>
     for prefix, (action, _toast) in _TASK_CALLBACK_PREFIXES.items():
         if data.startswith(prefix + ":"):
             task_id = data[len(prefix) + 1:]
-            _handle_task_callback(cfg, chat_id, action, task_id, cbq_id)
+            _handle_task_callback(cfg, chat_id, action, task_id, cbq_id, update)
             return True
 
     # Debrief buttons (Sergeant Murphy): debrief_{save,dismiss,modify}:<event_id>
