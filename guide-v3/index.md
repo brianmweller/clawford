@@ -175,11 +175,10 @@ color-coded: <span class="d-tag d-easy">easy</span>
 
     ---
 
-    `hard` · ~35 min
+    `hard` · ~40 min
 
-    Amazon + Costco orders, Subscribe & Save, delivery digest. Hardest
-    auth in the fleet — a seven-act saga through Akamai, Azure B2C,
-    and the home-ISP tunnel.
+    Amazon + Costco orders, Subscribe & Save, morning digest. Hardest
+    auth in the fleet — nine-act saga ending at a 72-hour B2C cap.
     { .d-hard }
 
 </div>
