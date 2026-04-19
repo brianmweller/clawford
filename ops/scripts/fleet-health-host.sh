@@ -52,32 +52,32 @@ except Exception:
     print('')
 " "$LAST_LINE" 2>/dev/null || echo "")
 
-if [[ "$STATUS" != "ok" ]] && [[ -n "$STATUS" ]]; then
-  ALERT=$(/usr/bin/python3 -c "
-import json, sys
-try:
-    d = json.loads(sys.argv[1])
-    print(d.get('alert') or d.get('error') or '')
-except Exception:
-    print('')
-" "$LAST_LINE" 2>/dev/null || echo "")
+# Run the alert gate on every tick — not just degraded ones. The gate
+# needs to see "ok" transitions to emit recovery messages, and it
+# silently no-ops when the state is unchanged. Gate prints the message
+# to send on stdout; empty stdout = suppress.
+GATE="/home/openclaw/repo/ops/scripts/fleet_alert_gate.py"
+if [[ -n "$LAST_LINE" ]] && [[ -f "$GATE" ]]; then
+  MESSAGE=$(/usr/bin/python3 "$GATE" "$LAST_LINE" 2>>"$LOG_FILE")
+else
+  MESSAGE=""
+fi
 
-  if [[ -n "$ALERT" ]] && [[ -f "$ENV_FILE" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$ENV_FILE"
-    set +a
+if [[ -n "$MESSAGE" ]] && [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
 
-    BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
-    if [[ -n "$BOT_TOKEN" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
-      HTTP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
-        -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-        --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-        --data-urlencode "text=${ALERT}") || HTTP_STATUS="000"
-      echo "[$TS] fleet-health alert sent (http=$HTTP_STATUS): ${ALERT:0:120}" >> "$LOG_FILE"
-    else
-      echo "[$TS] fleet-health alert dropped — TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set" >> "$LOG_FILE"
-    fi
+  BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+  if [[ -n "$BOT_TOKEN" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
+    HTTP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+      -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+      --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+      --data-urlencode "text=${MESSAGE}") || HTTP_STATUS="000"
+    echo "[$TS] fleet-health alert sent (http=$HTTP_STATUS): ${MESSAGE:0:120}" >> "$LOG_FILE"
+  else
+    echo "[$TS] fleet-health alert dropped — TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set" >> "$LOG_FILE"
   fi
 fi
 
