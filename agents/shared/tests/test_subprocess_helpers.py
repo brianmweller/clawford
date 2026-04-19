@@ -96,6 +96,72 @@ def test_last_line_fallback_parses_trailing_json():
     assert result == {"status": "ok"}
 
 
+def test_data_then_contract_envelope_returns_data():
+    """Since the 2026-04-18 script-contract rollout, many scripts emit
+    their payload JSON from main(), then the __main__ wrapper appends
+    a second `{"status": "ok"}` envelope line. The concatenated stdout
+    fails a single json.loads. The helper must still return the data
+    object — the envelope is metadata, not the result."""
+    data = {
+        "status": "ok",
+        "date": "2026-04-19",
+        "events": [{"id": "a", "summary": "Fairport"}],
+    }
+    stdout = json.dumps(data, indent=2) + "\n" + json.dumps({"status": "ok"})
+    fake = _fake_completed(stdout=stdout)
+    with patch("subprocess_helpers.subprocess.run", return_value=fake):
+        result = subprocess_helpers.run_json_script("foo.py")
+    assert result == data
+
+
+def test_data_then_envelope_with_wrapper_fields_returns_data():
+    """contract_wrap.py injects trace_id/agent_id/tool_name into the
+    envelope. The data object (with real payload keys) must still win."""
+    data = {"status": "ok", "today_count": 2, "events": []}
+    envelope = {
+        "status": "ok",
+        "trace_id": "abc-123",
+        "agent_id": "meetings-coach",
+        "tool_name": "gcal-fetch",
+    }
+    stdout = json.dumps(data) + "\n" + json.dumps(envelope)
+    fake = _fake_completed(stdout=stdout)
+    with patch("subprocess_helpers.subprocess.run", return_value=fake):
+        result = subprocess_helpers.run_json_script("foo.py")
+    assert result == data
+
+
+def test_envelope_only_output_still_parses():
+    """A script that prints ONLY the contract envelope (e.g. main()
+    raised, wrapper caught it and emitted just status+error) must still
+    return that envelope rather than failing."""
+    env_only = {"status": "error", "error": "boom"}
+    fake = _fake_completed(stdout=json.dumps(env_only))
+    with patch("subprocess_helpers.subprocess.run", return_value=fake):
+        result = subprocess_helpers.run_json_script("foo.py")
+    assert result == env_only
+
+
+def test_parse_script_stdout_exposed_for_external_callers():
+    """fetch-and-rank.py calls linkedin-scrape.py with its own
+    subprocess.run and then json.loads(stdout). It needs the same
+    double-JSON-tolerant parser the helper uses internally."""
+    data = {"status": "ok", "posts": [{"text": "hi"}]}
+    stdout = json.dumps(data) + "\n" + json.dumps({"status": "ok"})
+    result = subprocess_helpers.parse_script_stdout(stdout)
+    assert result == data
+
+
+def test_parse_script_stdout_single_object():
+    stdout = '{"status": "ok", "count": 3}'
+    assert subprocess_helpers.parse_script_stdout(stdout) == {"status": "ok", "count": 3}
+
+
+def test_parse_script_stdout_returns_none_on_malformed():
+    assert subprocess_helpers.parse_script_stdout("not json at all") is None
+    assert subprocess_helpers.parse_script_stdout("") is None
+
+
 def test_timeout_returns_error_sentinel():
     def _raise(*a, **kw):
         raise subprocess.TimeoutExpired(cmd="foo.py", timeout=30)

@@ -43,6 +43,22 @@ DEFAULT_TIMEOUT_S = 90
 
 SENTINEL_KEY = "__error__"
 
+# Keys that appear ONLY in a contract envelope — added by the
+# __main__ tail in SCRIPT_CONTRACT-compliant scripts and by
+# contract_wrap.py. A dict whose keys are a subset of this set carries
+# no payload, just run metadata. When stdout contains both a data
+# object and an envelope (the 2026-04-18 contract rollout's
+# byproduct), the helper must prefer the data object.
+_ENVELOPE_ONLY_KEYS = frozenset({
+    "status",
+    "error",
+    "trace_id",
+    "agent_id",
+    "tool_name",
+    "wrapped",
+    "traceback",
+})
+
 
 def is_subprocess_error(result: Any) -> bool:
     """Return True iff `result` is the sentinel error dict produced
@@ -52,6 +68,90 @@ def is_subprocess_error(result: Any) -> bool:
 
 def _error(reason: str) -> dict:
     return {SENTINEL_KEY: reason}
+
+
+def _extract_json_objects(stdout: str) -> list:
+    """Walk stdout with json.JSONDecoder.raw_decode and return every
+    top-level JSON object concatenated in the stream. Empty list if
+    the stream doesn't start with a valid JSON value at all. Leading
+    non-JSON text (debug lines before any JSON) terminates extraction
+    rather than scanning ahead — the per-line fallback handles that
+    case."""
+    decoder = json.JSONDecoder()
+    objects: list = []
+    idx = 0
+    n = len(stdout)
+    while idx < n:
+        while idx < n and stdout[idx].isspace():
+            idx += 1
+        if idx >= n:
+            break
+        try:
+            obj, end = decoder.raw_decode(stdout, idx)
+        except json.JSONDecodeError:
+            break
+        objects.append(obj)
+        idx = end
+    return objects
+
+
+def _select_payload(objects: list):
+    """From a list of JSON objects extracted from stdout, pick the
+    one most likely to be the script's data payload.
+
+    Preference: the first dict with at least one key OUTSIDE
+    _ENVELOPE_ONLY_KEYS (that's a data object). If every dict is an
+    envelope-only shape (or the list contains non-dict values), fall
+    back to the last object so envelope-only output still round-trips.
+    """
+    for obj in objects:
+        if isinstance(obj, dict) and (set(obj.keys()) - _ENVELOPE_ONLY_KEYS):
+            return obj
+    return objects[-1] if objects else None
+
+
+def parse_script_stdout(stdout: str):
+    """Parse a contract-compliant script's stdout into a single JSON
+    value. Handles three shapes:
+
+      1. A single JSON object/array (pre-2026-04-18 scripts and
+         scripts whose main() never prints anything of its own).
+      2. A data object followed by a trailing `{"status": "ok"}`
+         envelope (the SCRIPT_CONTRACT __main__ tail pattern).
+      3. A few debug lines followed by a final JSON object (the
+         pre-contract fallback the helper has always supported).
+
+    Returns the parsed value on success, or None if stdout contains
+    no parseable JSON. Exposed at module level so callers that can't
+    use run_json_script (because they need custom subprocess plumbing,
+    like fetch-and-rank.py's LinkedIn scraper call) can reuse the
+    same parsing logic.
+    """
+    if not stdout:
+        return None
+    stripped = stdout.strip()
+    if not stripped:
+        return None
+
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        pass
+
+    objects = _extract_json_objects(stripped)
+    if objects:
+        payload = _select_payload(objects)
+        if payload is not None:
+            return payload
+
+    lines = [ln for ln in stripped.splitlines() if ln.strip()]
+    if lines:
+        try:
+            return json.loads(lines[-1])
+        except json.JSONDecodeError:
+            pass
+
+    return None
 
 
 def run_json_script(
@@ -101,18 +201,8 @@ def run_json_script(
     if not stdout:
         return _error(f"{script_path} produced empty stdout")
 
-    try:
-        return json.loads(stdout)
-    except json.JSONDecodeError:
-        pass
-
-    # Fallback: some scripts print debug lines before the final JSON.
-    # Try parsing the last non-empty line.
-    lines = [ln for ln in stdout.splitlines() if ln.strip()]
-    if lines:
-        try:
-            return json.loads(lines[-1])
-        except json.JSONDecodeError:
-            pass
+    parsed = parse_script_stdout(stdout)
+    if parsed is not None:
+        return parsed
 
     return _error(f"{script_path} stdout not JSON: {stdout[:200]}")

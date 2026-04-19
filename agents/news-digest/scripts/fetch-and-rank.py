@@ -38,6 +38,7 @@ for _p in Path(__file__).resolve().parents:
 
 from agents.shared import llm
 from agents.shared.scan_fields import scan_fields  # noqa: E402
+from agents.shared.subprocess_helpers import parse_script_stdout  # noqa: E402
 
 WORKSPACE = Path(os.path.expanduser("~/.clawford/news-digest-workspace"))
 CACHE_DIR = WORKSPACE / "cache"
@@ -492,9 +493,15 @@ def fetch_linkedin_browser():
             stderr = result.stderr[:200] if result.stderr else "unknown error"
             return [], {"source": "LinkedIn", "error": stderr}
 
-        output = json.loads(result.stdout)
-        if output.get("status") != "ok":
-            return [], {"source": "LinkedIn", "error": output.get("message", "scrape failed")}
+        # linkedin-scrape emits a big data object then a contract-
+        # envelope line. Single json.loads chokes on the two
+        # concatenated objects with "Extra data: …" (exactly how the
+        # 2026-04-18 contract rollout silently broke the LinkedIn
+        # source). Use the helper that tolerates both shapes.
+        output = parse_script_stdout(result.stdout)
+        if not isinstance(output, dict) or output.get("status") != "ok":
+            err = output.get("message") if isinstance(output, dict) else None
+            return [], {"source": "LinkedIn", "error": err or "scrape failed"}
 
     except subprocess.TimeoutExpired:
         return [], {"source": "LinkedIn", "error": "scraper timed out"}
