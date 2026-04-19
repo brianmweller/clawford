@@ -171,10 +171,16 @@ _STUB_TEMPLATE = """# {name}
 - **email:** {email}
 - **phone:** —
 - **platforms:** email
-- **last_interaction:**
+- **last_interaction:** {date}
 - **context_notes:**
 - **notes:** Seeded by holiday-card-reclassify.py on {date}
 """
+# last_interaction seeds to the stub creation date so the stub lands
+# in `healthy` initially and ages into `overdue` at the 7-day
+# professional-inner cadence. Without this, an empty field gave
+# days_since=999 and every stub crowded out real-signal entries
+# like Drew Branden (51d since last contact) at the top of the
+# overdue list — exactly the wrong order for the operator's morning.
 
 
 def _write_stub(people_dir: Path, slug: str, name: str, email: str) -> Path:
