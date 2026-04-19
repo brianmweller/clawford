@@ -230,9 +230,19 @@ def render_report(policies, findings):
     lines = [f"🦊🔧 Security Audit — {today}", ""]
 
     lines.append("🔒 Exec Policies")
-    for agent, policy in policies:
+    errors = [(a, p) for a, p in policies if a.startswith("(")]
+    outliers = [(a, p) for a, p in policies if not a.startswith("(") and p != "full"]
+    full_count = len(policies) - len(errors) - len(outliers)
+    for agent, policy in errors:
         lines.append(f"• {agent}: {policy}")
-    lines.append("(All agents policy=full is intentional — see KNOWN_ISSUES.md)")
+    for agent, policy in outliers:
+        lines.append(f"• {agent}: {policy}")
+    if full_count and not outliers and not errors:
+        lines.append(
+            f"• {full_count} agents: policy=full (intentional — see KNOWN_ISSUES.md)"
+        )
+    elif full_count:
+        lines.append(f"• …and {full_count} other agents: policy=full")
     lines.append("")
 
     total_findings = sum(len(v) for v in findings.values())

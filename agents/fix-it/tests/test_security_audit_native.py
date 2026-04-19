@@ -287,7 +287,47 @@ def test_render_report_clean(security_audit_module):
     policies = [("fix-it", "full")]
     report = security_audit_module.render_report(policies, findings)
     assert "Security audit clean" in report
-    assert "fix-it" in report
+
+
+def test_render_report_collapses_uniform_full_policies(security_audit_module):
+    """All agents on policy=full → one summary line, no per-agent enumeration."""
+    findings = {"CRITICAL": [], "HIGH": [], "MEDIUM": [], "LOW": []}
+    policies = [
+        ("connector", "full"),
+        ("fix-it", "full"),
+        ("main", "full"),
+        ("shopping", "full"),
+    ]
+    report = security_audit_module.render_report(policies, findings)
+    # Summary line present
+    assert "4 agents" in report and "policy=full" in report
+    # Individual agent names NOT enumerated under the header
+    for name in ("connector", "fix-it", "main", "shopping"):
+        assert f"• {name}: full" not in report, f"{name} should be collapsed"
+
+
+def test_render_report_surfaces_outlier_policy(security_audit_module):
+    """Any agent off policy=full is listed explicitly; rest are summarized."""
+    findings = {"CRITICAL": [], "HIGH": [], "MEDIUM": [], "LOW": []}
+    policies = [
+        ("fix-it", "full"),
+        ("main", "full"),
+        ("shopping", "restricted"),
+    ]
+    report = security_audit_module.render_report(policies, findings)
+    assert "• shopping: restricted" in report
+    # The two full agents are summarized, not listed
+    assert "• fix-it: full" not in report
+    assert "• main: full" not in report
+
+
+def test_render_report_surfaces_approvals_error(security_audit_module):
+    """If approvals file couldn't be read, the error line is still shown."""
+    findings = {"CRITICAL": [], "HIGH": [], "MEDIUM": [], "LOW": []}
+    policies = [("(error)", "approvals file not found at /nope")]
+    report = security_audit_module.render_report(policies, findings)
+    assert "(error)" in report
+    assert "approvals file not found" in report
 
 
 def test_render_report_with_critical_finding(security_audit_module):
