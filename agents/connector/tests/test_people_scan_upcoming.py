@@ -424,9 +424,11 @@ def test_run_tolerates_malformed_snoozes_file(stub_brain):
 
 def test_run_auto_snoozes_slugs_shown_yesterday_without_action(stub_brain):
     """Any slug listed in last-shown-<yesterday>.json that has NO
-    entry in snoozes.json gets auto-snoozed 14 days forward. This
+    entry in snoozes.json gets auto-snoozed 3 days forward. This
     prevents the same list resurfacing every morning when the operator
-    doesn't press any button."""
+    doesn't press any button, while keeping the hide-window shorter
+    than the professional-inner cadence (7d) so the contact can
+    re-surface later the same week."""
     _write_person(stub_brain.people, "unactioned-friend", email="u@x.com",
                   last_interaction=_days_ago_iso(50),
                   circles="friends-close")
@@ -446,8 +448,8 @@ def test_run_auto_snoozes_slugs_shown_yesterday_without_action(stub_brain):
         snoozes = json.load(f)
     assert "unactioned-friend" in snoozes
     assert snoozes["unactioned-friend"]["status"] == "auto_snoozed"
-    # Until-date is ~14 days in the future.
-    expected = (datetime.now(timezone.utc).date() + timedelta(days=14)).isoformat()
+    # Until-date is 3 days in the future (shortened from 14 on 2026-04-19).
+    expected = (datetime.now(timezone.utc).date() + timedelta(days=3)).isoformat()
     assert snoozes["unactioned-friend"]["until"] == expected
 
 

@@ -270,7 +270,71 @@ def compute_score(c, config):
     return round(base * recency, 1)
 
 
-def auto_circle(c, config):
+HOLIDAY_CARD_PINS_CSV = (
+    os.path.dirname(os.path.abspath(__file__)) + "/../holiday-card-pins.csv"
+)
+
+
+def _pinned_slugify(name):
+    """Name-slug used for pin matching. Strips roman/honorific suffixes
+    before the standard name_to_slug pass. Kept in-sync with
+    holiday-card-reclassify.py::slugify so matchers agree across the
+    two sides of the pipeline."""
+    if not name:
+        return ""
+    s = re.sub(
+        r"\s+(?:(?:[IVX]{1,5})|(?:jr\.?)|(?:sr\.?)|(?:ii)|(?:iii)|(?:iv))\b",
+        "",
+        name.strip(),
+        flags=re.IGNORECASE,
+    )
+    return name_to_slug(s)
+
+
+def load_pinned_contacts(csv_path=None):
+    """Load the holiday-card pin list into a {emails, name_slugs} tuple.
+
+    Returns empty sets on missing file or parse error — the aggregator
+    must still run if the CSV gets renamed/deleted. This makes the
+    auto_circle pin short-circuit a pure additive rule."""
+    if csv_path is None:
+        csv_path = HOLIDAY_CARD_PINS_CSV
+    result = {"emails": set(), "name_slugs": set()}
+    try:
+        import csv as _csv
+        with open(csv_path, encoding="utf-8-sig", newline="") as f:
+            reader = _csv.DictReader(f)
+            for row in reader:
+                email = (row.get("email") or row.get("Email") or "").strip().lower()
+                name = (row.get("name") or row.get("Name") or "").strip()
+                if email:
+                    result["emails"].add(email)
+                slug = _pinned_slugify(name)
+                if slug:
+                    result["name_slugs"].add(slug)
+    except (FileNotFoundError, OSError):
+        return result
+    return result
+
+
+def auto_circle(c, config, pinned=None):
+    """Assign a circle to a merged contact.
+
+    Pin-list short-circuit (2026-04-19): contacts whose email or
+    name-slug appears in holiday-card-pins.csv go straight to
+    `professional-inner`, regardless of meeting count or recency. This
+    makes the manual reclassification durable — future mining runs on
+    a new ex-colleague contact (zero meetings post-Example Corp) still land
+    them in the right bucket on first ingest.
+    """
+    if pinned:
+        email_norm = (c.get("email", "") or "").lower().strip()
+        name_slug = _pinned_slugify(c.get("name", "") or "")
+        if email_norm and email_norm in pinned.get("emails", set()):
+            return "professional-inner"
+        if name_slug and name_slug in pinned.get("name_slugs", set()):
+            return "professional-inner"
+
     rules = config.get("circle_rules", {})
     now = datetime.now(timezone.utc).date()
     meetings = c.get("meeting_count", 0) or 0

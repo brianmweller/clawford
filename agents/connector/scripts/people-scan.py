@@ -110,13 +110,18 @@ def _write_snoozes(data: dict) -> None:
     os.replace(tmp, SNOOZES_FILE)
 
 
-def _apply_auto_snooze(today, auto_snooze_days: int = 14) -> None:
+def _apply_auto_snooze(today, auto_snooze_days: int = 3) -> None:
     """If a last-shown-<yesterday>.json file exists, auto-snooze any
     slug in it that doesn't already have an entry in snoozes.json.
 
     Rationale: the morning nudge shouldn't repeat yesterday's entries
     when the operator silent-ignores them — pressing no button should mean
-    'not now, hide for two weeks'.
+    'not now, hide for a few days'. 2026-04-19: shortened from 14d to
+    3d because 14 days exceeded the professional-inner cadence (7d),
+    which meant a single silent ignore guaranteed a contact would
+    never re-surface. 3d is short enough to let a stale colleague
+    come back later the same week, long enough to avoid same-day
+    re-pings.
     """
     from datetime import timedelta as _td
     yesterday = (today - _td(days=1)).isoformat()
