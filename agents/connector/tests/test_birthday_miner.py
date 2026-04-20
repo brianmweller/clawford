@@ -278,6 +278,39 @@ def test_manual_entries_are_upserted_directly(miner, tmp_path, monkeypatch):
     assert "1950-09-15" in content
 
 
+def test_manual_entry_wins_over_calendar_collision(miner, tmp_path, monkeypatch):
+    """When manual and calendar both target the same slug, the operator-
+    supplied date wins — calendar's next-recurrence year would otherwise
+    overwrite real birth years."""
+    brain_root = tmp_path / "brain"
+    (brain_root / "people").mkdir(parents=True)
+    (brain_root / "people" / "marcia-sokolanderson.md").write_text(
+        "# Marcia Sokol-Anderson\n\n- **slug:** marcia-sokolanderson\n- **circles:** family-extended\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(brain_root))
+    for mod in list(sys.modules):
+        if mod in ("brain",):
+            del sys.modules[mod]
+
+    # Calendar says 2026-07-27 (next recurrence); manual says 1954-07-27 (real year).
+    aliases = {
+        "manual_birthdays": {"marcia-sokolanderson": "1954-07-27"},
+    }
+    events = [{"summary": "Aunt Marcia's birthday", "start": {"date": "2026-07-27"}}]
+
+    summary = miner.process_events(
+        events, facts_dir=brain_root / "facts", aliases_cfg=aliases,
+    )
+    # Manual writes first (new), calendar collides and is skipped
+    assert summary["updated"] == 1
+    assert summary["skipped"] == 1
+    month_file = list((brain_root / "facts").glob("*.md"))[0]
+    content = month_file.read_text(encoding="utf-8")
+    assert "1954-07-27" in content
+    assert "2026-07-27" not in content
+
+
 def test_manual_entries_are_idempotent(miner, tmp_path, monkeypatch):
     brain_root = tmp_path / "brain"
     (brain_root / "people").mkdir(parents=True)

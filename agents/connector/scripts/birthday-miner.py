@@ -217,7 +217,33 @@ def process_events(
     skipped = 0
     now = datetime.now(timezone.utc).isoformat()
 
-    # Pass 1: Google Calendar events
+    # Pass 1: manual entries in birthday-aliases.json — operator knowledge,
+    # runs FIRST so it wins any collision with calendar-derived dates.
+    # Calendar entries often show the NEXT recurrence date (e.g. 2026-07-27)
+    # rather than the person's actual birth year (1954-07-27); when the
+    # operator supplies the real year via manual_birthdays, it must take
+    # precedence over whatever the calendar pass would have written.
+    for slug, date_str in (aliases_cfg.get("manual_birthdays") or {}).items():
+        if not slug or not date_str:
+            continue
+        result = upsert_fact(
+            facts_dir=facts_dir,
+            subject=slug,
+            category="identity",
+            content=f"Birthday: {date_str}",
+            source_agent=SOURCE_AGENT,
+            source_type="operator",
+            source_detail="birthday-miner/manual",
+            confidence=1.0,
+            idempotency_key="birthday",
+            recorded_at=now,
+        )
+        if result["status"] == "created":
+            updated += 1
+        else:
+            skipped += 1
+
+    # Pass 2: Google Calendar events — fills in anything manual didn't cover.
     for event in events:
         scanned += 1
         title = event.get("summary") or ""
@@ -241,27 +267,6 @@ def process_events(
             source_type="derived",
             source_detail=f"birthday-miner/calendar/{title}",
             confidence=0.9,
-            idempotency_key="birthday",
-            recorded_at=now,
-        )
-        if result["status"] == "created":
-            updated += 1
-        else:
-            skipped += 1
-
-    # Pass 2: manual entries in birthday-aliases.json
-    for slug, date_str in (aliases_cfg.get("manual_birthdays") or {}).items():
-        if not slug or not date_str:
-            continue
-        result = upsert_fact(
-            facts_dir=facts_dir,
-            subject=slug,
-            category="identity",
-            content=f"Birthday: {date_str}",
-            source_agent=SOURCE_AGENT,
-            source_type="operator",
-            source_detail="birthday-miner/manual",
-            confidence=1.0,
             idempotency_key="birthday",
             recorded_at=now,
         )
