@@ -90,12 +90,14 @@ def main() -> int:
     ap.add_argument("--person-slug", required=True)
     ap.add_argument("--inbound", required=True)
     ap.add_argument("--history")
+    ap.add_argument("--facts-dir", help="Override brain/facts path (for dry-run testing)")
     ap.add_argument("--print-prompt-only", action="store_true")
     ap.add_argument("--llm-backend", default="claude-cli", choices=["claude-cli", "stdout"])
     args = ap.parse_args()
 
     person = load_person(args.person_slug)
-    facts = load_facts_for_subject(args.person_slug, BRAIN_ROOT / "facts")
+    facts_dir = Path(args.facts_dir) if args.facts_dir else BRAIN_ROOT / "facts"
+    facts = load_facts_for_subject(args.person_slug, facts_dir)
     inbound = json.loads(Path(args.inbound).read_text(encoding="utf-8"))
     history = json.loads(Path(args.history).read_text(encoding="utf-8")) if args.history else []
 
