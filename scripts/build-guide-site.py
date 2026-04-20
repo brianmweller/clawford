@@ -116,7 +116,9 @@ def stage():
             if inner.startswith(("guide-v2/", "docs/")):
                 return f"[{label}]({inner})"
             return m.group(0)
-        if target.endswith(".md"):
+        # Accept both plain `.md` targets and `.md#anchor` fragments.
+        path_part = target.split("#", 1)[0]
+        if path_part.endswith(".md"):
             return f"[{label}](guide-v3/{target})"
         return m.group(0)
 

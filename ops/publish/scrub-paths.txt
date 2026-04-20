@@ -1,0 +1,62 @@
+# Machine-readable scrub list for git filter-repo --invert-paths
+# --paths-from-file. One path per line. Comments allowed.
+#
+# This file is the derived flat list; the human-readable planning doc
+# with Sections A/B/C rationale lives at SCRUB_PATHS.txt at the repo
+# root. Keep them in sync when adding paths.
+
+# --- Hilda Hippo: entire agent (Costco + Amazon S&S) ---
+agents/shopping/
+
+# --- WhatsApp-Baileys: connector mining ---
+agents/connector/scripts/mine/whatsapp-probe.js
+agents/connector/scripts/mine/whatsapp-click-probe.js
+agents/connector/scripts/mine/whatsapp-extract.js
+agents/connector/scripts/mine/whatsapp-mine.py
+
+# --- WhatsApp-Baileys: family-calendar delivery + schedule parser ---
+agents/family-calendar/scripts/whatsapp-chat-alert.py
+agents/family-calendar/scripts/whatsapp-schedule-post.py
+agents/family-calendar/scripts/chat-parse-schedule.py
+agents/family-calendar/tests/test_whatsapp_chat_alert.py
+agents/family-calendar/tests/test_whatsapp_schedule_post.py
+agents/family-calendar/tests/fixtures/morning-briefing/whatsapp-messages.json
+
+# --- LinkedIn: news-digest scripts and extractors ---
+agents/news-digest/scripts/linkedin-auth.py
+agents/news-digest/scripts/linkedin-keepalive.py
+agents/news-digest/scripts/linkedin-scrape.py
+agents/news-digest/scripts/linkedin-extract.js
+agents/news-digest/scripts/linkedin-notifs-extract.js
+agents/news-digest/scripts/linkedin-messages-extract.js
+agents/news-digest/scripts/linkedin-messages-fetch-thread.js
+agents/news-digest/scripts/linkedin-viewers-extract.js
+agents/news-digest/tests/test_linkedin_summary.py
+agents/news-digest/tests/test_linkedin_messages_extract.py
+agents/news-digest/tests/test_linkedin_viewers_extract.py
+agents/news-digest/tests/test_profile_view_summary.py
+
+# --- Costco: host-side ops files ---
+ops/costco-cli-wrapper.go
+ops/scripts/costco-token-refresh-host.sh
+ops/scripts/costco-keepalive-warmup-host.sh
+ops/systemd/costco-socks-tunnel.service
+ops/laptop/costco-wake-kick.ps1
+ops/laptop/costco-wake-kick.task.xml
+
+# --- Top-level vendor-specific tests ---
+tests/test-amazon-parsing.py
+tests/test-costco-parsing.py
+tests/test-grocery.py
+
+# --- Guide chapters excluded from public nav (keep in private) ---
+guide-v3/11-lowly-worm-social.md
+guide-v3/15-hilda-hippo.md
+
+# --- Archived guides (not in public repo) ---
+guide-v1/
+guide-v2/
+
+# --- Planning artifacts (private-only) ---
+SCRUB_PATHS.txt
+REPLACEMENTS.txt

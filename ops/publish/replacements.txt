@@ -1,0 +1,36 @@
+***REMOVED***
+replacement` per line. Comments via leading '#' + space==>replacement` per line. Comments via leading '#'.
+#
+***REMOVED***
+***REMOVED***
+
+***REMOVED***
+sam.smith@example.com==>sam.smith@example.com
+sam.smith+backup@example.com==>sam.smith+backup@example.com
+sam.smith+work@example.com==>sam.smith+work@example.com
+sam@clawford.example==>sam@clawford.example
+
+***REMOVED***
+Sam M. Smith==>Sam M. Smith
+Sam M Smith==>Sam M Smith
+Sam Smith==>Sam Smith
+S Smith==>S Smith
+samsmith==>samsmith
+
+***REMOVED***
+Alex Rivera==>Alex Rivera
+Priya Rivera==>Priya Rivera
+Priya Rivera==>Priya Rivera
+Ravi Rivera==>Ravi Rivera
+Marcus Rivera==>Marcus Rivera
+Kiran Rivera==>Kiran Rivera
+placeholder.parent==>placeholder.parent
+placeholder.parent@example.com==>placeholder.parent@example.com
+placeholder.parent2==>placeholder.parent2
+placeholder.sibling==>placeholder.sibling
+
+***REMOVED***
+203.0.113.10==>203.0.113.10
+111111111==>111111111
+<your-tailscale-host>==><your-tailscale-host>
+openclaw@<your-tailscale-host>==>ops@<your-tailscale-host>
