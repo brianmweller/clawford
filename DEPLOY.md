@@ -143,12 +143,12 @@ Each agent has `agents/<agent_id>/manifest.json`. Minimal example:
 
 ```json
 {
-  "agent_id": "shopping",
-  "display_name": "Hilda Hippo",
-  "workspace": "~/.clawford/shopping-workspace",
+  "agent_id": "family-calendar",
+  "display_name": "Mistress Mouse",
+  "workspace": "~/.clawford/family-calendar-workspace",
   "telegram": {
-    "account": "shopping",
-    "bot_token_env": "SHOPPING_BOT_TOKEN"
+    "account": "family-calendar",
+    "bot_token_env": "FAMILYCAL_BOT_TOKEN"
   },
   "config_files": [
     {"src": "SOUL.md", "immutable": true},
@@ -160,20 +160,20 @@ Each agent has `agents/<agent_id>/manifest.json`. Minimal example:
     {"src": "MEMORY.md"},
     {"src": "CRONS.md"}
   ],
-  "scripts": ["scripts/amazon-orders.py", "scripts/costco-orders.py"],
+  "scripts": ["scripts/morning-briefing.py", "scripts/reminder-check.py"],
   "state_files": [
     {
-      "path": "grocery-list.json",
-      "seed_if_absent": {"updated_at": null, "items": []}
+      "path": "sent-reminders.json",
+      "seed_if_absent": {"sent": []}
     }
   ],
   "crons": [
     {
-      "name": "delivery-digest",
-      "cron": "0 14 * * *",
+      "name": "morning-briefing",
+      "cron": "30 10 * * *",
       "announce": true,
       "no_deliver": false,
-      "message": "Generate the daily delivery report. ..."
+      "message": "Compose today's briefing. ..."
     }
   ],
   "smoke_test": {
