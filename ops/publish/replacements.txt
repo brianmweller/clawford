@@ -82,7 +82,17 @@ future corporate roles==>future corporate roles
 example.webex.com==>example.webex.com
 
 ***REMOVED***
-# Bare 'Priya' (tests + comments), Kai Rivera, Sam M Smith.
-Priya==>Priya
+# Longest/most-specific first. Case-specific variants follow.
 Kai Rivera==>Kai Rivera
 Sam M Smith==>Sam M Smith
+Robin Rivera==>Robin Rivera
+PRIYA-RIVERA==>PRIYA-RIVERA
+robin-rivera==>robin-rivera
+priya@example.com==>priya@example.com
+priya@example.com==>priya@example.com
+regex:\bLeslie\b==>Priya
+regex:\bleslie\b==>priya
+
+***REMOVED***
+***REMOVED***
+regex:\bBRIAN\b==>OPERATOR
