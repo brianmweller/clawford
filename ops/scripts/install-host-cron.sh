@@ -34,9 +34,9 @@
 #   */30 * * * *  connector-inbox-triage                → CONNECTOR_BOT_TOKEN  (2026-04-20 — scans recent inbound, queues known-sender threads)
 #   5,35 * * * *  connector-auto-compose                → CONNECTOR_BOT_TOKEN  (2026-04-20 — processes queue, creates threaded Gmail drafts + Telegram pings)
 #   0 7 * * *     connector-gmail-watch-renew           → CONNECTOR_BOT_TOKEN  (2026-04-20 — daily re-call of users.watch() to keep Pub/Sub push alive; listener runs as clawford-huckle-push.service)
-#   0 9 * * *     connector-gmail-facts-mine            → CONNECTOR_BOT_TOKEN  (2026-04-20 — item #9 miner: Gmail → brain/facts with audience_scope)
-#   30 9 * * *    connector-workflowy-facts-mine        → CONNECTOR_BOT_TOKEN  (2026-04-20 — item #9 miner: Workflowy /nodes-export → brain/facts; degraded if WORKFLOWY_API_KEY unset)
-#   15 9 * * *    meetings-coach-krisp-facts-mine       → MEETINGS_BOT_TOKEN   (2026-04-20 — item #9 miner: Krisp transcripts → brain/facts; >6 attendees filtered)
+#   0  4,10,16,22 * * *   connector-gmail-facts-mine        → CONNECTOR_BOT_TOKEN  (2026-04-20 — 6h miner; Gmail → brain/facts with audience_scope; reinforcement bumps confidence on re-observe)
+#   30 4,10,16,22 * * *   connector-workflowy-facts-mine    → CONNECTOR_BOT_TOKEN  (2026-04-20 — 6h miner; Workflowy /nodes-export → brain/facts; degraded if WORKFLOWY_API_KEY unset)
+#   15 4,10,16,22 * * *   meetings-coach-krisp-facts-mine   → MEETINGS_BOT_TOKEN   (2026-04-20 — 6h miner; Krisp transcripts → brain/facts; >6 attendees filtered)
 #   30 10 * * *   meetings-coach-morning-meeting-brief  → MEETINGS_BOT_TOKEN   (Phase 4 — daily brief for 5 AM PT fleet; Monday fold replaces weekly-review)
 #   */30 * * * *  meetings-coach-pre-meeting-alert      → MEETINGS_BOT_TOKEN   (Phase 4 — 15-45 min lookahead, sent-alerts.json dedup)
 #   15,45 * * * * meetings-coach-post-meeting-scan      → MEETINGS_BOT_TOKEN   (Phase 4 — Krisp transcript scan + LLM coaching; preserves 74c726c idempotency)
@@ -152,8 +152,13 @@ CONTRACT_ENTRIES=(
   #   - Workflowy miner: walks Workflowy /nodes-export, matches whole-word
   #     person-name mentions, extracts from those nodes. Degrades silently
   #     if WORKFLOWY_API_KEY is not set.
-  "0 9 * * *|connector-gmail-facts-mine|/home/openclaw/.clawford/connector-workspace/scripts/gmail-facts-mine.py|CONNECTOR_BOT_TOKEN|900"
-  "30 9 * * *|connector-workflowy-facts-mine|/home/openclaw/.clawford/connector-workspace/scripts/workflowy-facts-mine.py|CONNECTOR_BOT_TOKEN|900"
+  # 6h cadence (2026-04-20): fires at 04/10/16/22 UTC = 20/02/08/14 PT.
+  # Keeps the pre-brief 2:00 AM PT slot + adds three more across the day
+  # so newly observed facts become available within hours, not overnight.
+  # Reinforcement + 6h firings cheaply bump confidence on re-observation
+  # rather than producing skipped_dup work.
+  "0 4,10,16,22 * * *|connector-gmail-facts-mine|/home/openclaw/.clawford/connector-workspace/scripts/gmail-facts-mine.py|CONNECTOR_BOT_TOKEN|900"
+  "30 4,10,16,22 * * *|connector-workflowy-facts-mine|/home/openclaw/.clawford/connector-workspace/scripts/workflowy-facts-mine.py|CONNECTOR_BOT_TOKEN|900"
   "30 10 * * *|meetings-coach-morning-meeting-brief|/home/openclaw/.clawford/meetings-coach-workspace/scripts/morning-meeting-brief.py|MEETINGS_BOT_TOKEN|300"
   "*/30 * * * *|meetings-coach-pre-meeting-alert|/home/openclaw/.clawford/meetings-coach-workspace/scripts/pre-meeting-alert.py|MEETINGS_BOT_TOKEN|180"
   "15,45 * * * *|meetings-coach-post-meeting-scan|/home/openclaw/.clawford/meetings-coach-workspace/scripts/post-meeting-scan.py|MEETINGS_BOT_TOKEN|300"
@@ -161,7 +166,7 @@ CONTRACT_ENTRIES=(
   # Krisp facts miner (item #9, 2026-04-20): extracts durable facts from
   # pending Krisp debriefs into brain/facts. Lives in meetings-coach so
   # the pending-debrief-*.json read is in-workspace (bwrap-safe).
-  "15 9 * * *|meetings-coach-krisp-facts-mine|/home/openclaw/.clawford/meetings-coach-workspace/scripts/krisp-facts-mine.py|MEETINGS_BOT_TOKEN|900"
+  "15 4,10,16,22 * * *|meetings-coach-krisp-facts-mine|/home/openclaw/.clawford/meetings-coach-workspace/scripts/krisp-facts-mine.py|MEETINGS_BOT_TOKEN|900"
   "0 */6 * * *|fix-it-brain-validation|/home/openclaw/.clawford/fix-it-workspace/scripts/brain-validation-check.py|TELEGRAM_BOT_TOKEN|120"
   "0 */2 * * *|fix-it-conflict-scan|/home/openclaw/.clawford/fix-it-workspace/scripts/conflict-scan.py|TELEGRAM_BOT_TOKEN|120"
   "0 12 * * *|fix-it-file-size-monitor|/home/openclaw/.clawford/fix-it-workspace/scripts/file-size-monitor.py|TELEGRAM_BOT_TOKEN|120"
