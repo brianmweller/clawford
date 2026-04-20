@@ -90,6 +90,17 @@ def call_claude_cli(prompt: str, timeout: int = 180) -> str:
     return result.stdout
 
 
+def call_codex(prompt: str, timeout: int = 180) -> str:
+    """Call the OpenClaw Codex broker via agents/shared/llm.py. This is
+    the production path — runs on the VPS via ChatGPT subscription's
+    codex endpoint, no API keys needed."""
+    from agents.shared.llm import infer
+    result = infer(prompt=prompt, json_mode=True, timeout=timeout)
+    if not result.ok:
+        return json.dumps({"error": f"codex infer failed: {result.error}"})
+    return result.text
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--person-slug", required=True)
@@ -104,7 +115,9 @@ def main() -> int:
     ap.add_argument("--gmail-token", default="~/.clawford/connector-workspace/token.json")
     ap.add_argument("--gmail-creds", default="~/.clawford/connector-workspace/credentials.json")
     ap.add_argument("--print-prompt-only", action="store_true")
-    ap.add_argument("--llm-backend", default="claude-cli", choices=["claude-cli", "stdout"])
+    ap.add_argument("--llm-backend", default="codex",
+                    choices=["codex", "claude-cli", "stdout"],
+                    help="codex (production, via agents/shared/llm.py) | claude-cli (local dev) | stdout (skip LLM)")
     args = ap.parse_args()
 
     person = load_person(args.person_slug)
@@ -235,9 +248,12 @@ def main() -> int:
 
     print()
     print("=" * 72)
-    print("CALLING LLM (claude -p)")
+    print(f"CALLING LLM ({args.llm_backend})")
     print("=" * 72)
-    llm_text = call_claude_cli(prompt)
+    if args.llm_backend == "codex":
+        llm_text = call_codex(prompt)
+    else:
+        llm_text = call_claude_cli(prompt)
     print(llm_text)
 
     shareable_ids = {f["id"] for f in ctx.facts_shareable}
