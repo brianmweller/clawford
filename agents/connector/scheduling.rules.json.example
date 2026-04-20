@@ -1,0 +1,36 @@
+{
+  "timezone": "America/Los_Angeles",
+  "working_hours": {
+    "mon": ["09:00", "18:00"],
+    "tue": ["09:00", "18:00"],
+    "wed": ["09:00", "18:00"],
+    "thu": ["09:00", "18:00"],
+    "fri": ["09:00", "18:00"],
+    "sat": null,
+    "sun": null
+  },
+  "blackout_windows": [
+    {
+      "label": "morning focus block",
+      "days": ["mon", "tue", "wed", "thu", "fri"],
+      "start": "09:00",
+      "end": "10:30"
+    },
+    {
+      "label": "lunch",
+      "days": ["mon", "tue", "wed", "thu", "fri"],
+      "start": "12:00",
+      "end": "13:00"
+    },
+    {
+      "label": "family dinner",
+      "days": ["mon", "tue", "wed", "thu", "fri"],
+      "start": "17:30",
+      "end": "19:30"
+    }
+  ],
+  "weekend_policy": "family_only",
+  "min_buffer_minutes": 15,
+  "preferred_meeting_days": ["tue", "wed", "thu"],
+  "hard_no_days": []
+}
