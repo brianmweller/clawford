@@ -497,8 +497,8 @@ def test_deliver_nudge_sends_one_message_per_item(fake_fleet):
     assert sent_args[0]["reply_markup"] is None  # overview
     assert sent_args[1]["reply_markup"] is None  # family header
     # Person messages have nudge buttons
-    assert sent_args[2]["reply_markup"] is not None  # Arnold
-    assert sent_args[3]["reply_markup"] is not None  # Robin
+    assert sent_args[2]["reply_markup"] is not None  # family person 1
+    assert sent_args[3]["reply_markup"] is not None  # family person 2
     assert sent_args[4]["reply_markup"] is None  # friends header
     assert sent_args[5]["reply_markup"] is not None  # Alice
 
