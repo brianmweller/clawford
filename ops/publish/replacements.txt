@@ -111,7 +111,14 @@ alex.rivera@example.com==>alex.rivera@example.com
 priya.lee@example.com==>priya.lee@example.com
 @example.com==>@example.com
 @EXAMPLE.COM==>@EXAMPLE.COM
+example.com==>example.com
 Example Corp==>Example Corp
 ex-Example Corp==>ex-employer
 post-Example Corp==>post-employer
 left Example Corp==>left the company
+
+***REMOVED***
+Alex Rivera==>Alex Rivera
+alex-rivera==>alex-rivera
+Alex's==>Alex's
+regex:\bLinda\b==>Alex
