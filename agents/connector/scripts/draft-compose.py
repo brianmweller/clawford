@@ -178,8 +178,8 @@ def main() -> int:
             ],
         )
         thread = fetch_thread(service, args.gmail_thread_id)
-        operator_emails = {"sam.smith@example.com", "sam.smith+backup@example.com", "sam.smith+work@example.com"}
-        inbound, history = thread_to_compose_inputs(thread, operator_emails)
+        from agents.shared.operator import load_operator
+        inbound, history = thread_to_compose_inputs(thread, load_operator().emails)
     else:
         raise SystemExit("Need --inbound (fixture JSON) or --gmail-thread-id (Gmail fetch).")
 

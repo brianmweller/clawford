@@ -22,8 +22,17 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import unicodedata
 from pathlib import Path
+
+for _p in Path(__file__).resolve().parents:
+    if (_p / "agents" / "shared").is_dir():
+        if str(_p) not in sys.path:
+            sys.path.insert(0, str(_p))
+        break
+
+from agents.shared.operator import load_operator  # noqa: E402
 
 
 _EMAIL_FIELD_RE = re.compile(r"^\s*-\s*\*\*email(?::\*\*|\*\*:)\s*(.+?)\s*$")
@@ -191,14 +200,6 @@ _SERVICE_NAME_KEYWORDS = (
     "newsletter", "notification",
 )
 
-_BRIAN_OWN_ADDRESSES = (
-    "sam.smith@example.com",
-    "sam.smith+backup@example.com",
-    "sam.smith+work@example.com",
-    "sam@clawford.example",
-)
-
-
 def is_likely_service_account(email: str | None, subject_name: str | None) -> bool:
     """Return True if the (email, name) pair looks like a service account
     or mailing list rather than a human the operator knows personally."""
@@ -208,7 +209,7 @@ def is_likely_service_account(email: str | None, subject_name: str | None) -> bo
     if "@" not in addr:
         # "dropbox" literal or other bare tokens — not a person
         return True
-    if addr in _BRIAN_OWN_ADDRESSES:
+    if addr in load_operator().emails:
         return True
     local, _, domain = addr.partition("@")
     if local in _SERVICE_LOCAL_EXACT:
@@ -229,10 +230,6 @@ def is_likely_service_account(email: str | None, subject_name: str | None) -> bo
     return False
 
 
-_SELF_NAME_VARIANTS = {
-    "sam smith", "operator m weller", "operator m. weller",
-    "b weller", "operator",
-}
 
 _NON_PERSON_FIRST_TOKENS = {
     # Brand names that commonly appear as Flux subject prefixes for
@@ -268,7 +265,7 @@ _NON_PERSON_NAME_KEYWORDS = (
 
 
 def is_self_subject(subject_name: str | None) -> bool:
-    return (subject_name or "").lower().strip() in _SELF_NAME_VARIANTS
+    return (subject_name or "").lower().strip() in load_operator().name_variants
 
 
 def is_person_name(name: str | None) -> bool:

@@ -42,15 +42,7 @@ VALID_SCOPE_TAGS: set[str] = {
 MIN_CONFIDENCE: float = 0.3
 REVIEW_CONFIDENCE: float = 0.6
 
-_SELF_SLUGS: set[str] = {"sam-smith", "operator", "operator-m-weller"}
-
-# Mirrors flux_import_lib._SELF_NAME_VARIANTS — kept local so this module
-# doesn't import from an agent-specific lib (would break under bwrap if the
-# connector workspace isn't bound).
-_SELF_NAME_VARIANTS: set[str] = {
-    "sam smith", "operator m weller", "operator m. weller",
-    "b weller", "operator",
-}
+from agents.shared.operator import load_operator as _load_operator
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +206,7 @@ def _normalize_fact(
     subject_slug = str(raw.get("subject_slug") or "").strip()
     if not subject_slug or subject_slug not in candidate_slugs:
         return None
-    if subject_slug in _SELF_SLUGS:
+    if subject_slug in _load_operator().slugs:
         return None
 
     content = str(raw.get("content") or "").strip()

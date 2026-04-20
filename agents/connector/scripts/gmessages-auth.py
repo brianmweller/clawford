@@ -12,20 +12,20 @@ Flow:
      dir under the connector workspace, so cookies/localStorage
      survive across runs (the periodic mine reads the same dir).
   2. Navigate to messages.google.com → click Sign In.
-  3. Fill email (hard-coded to sam.smith@example.com — the
+  3. Fill email (from operator.json google_email — the
      account linked to the operator's Android Messages app).
   4. Fill password from $GMESSAGES_GOOGLE_PASSWORD or stdin getpass.
   5. Screenshot the 2FA page (number-match prompt) so the operator can
-     confirm on his phone.
+     confirm on their phone.
   6. Poll the page URL every 3s for up to 4 minutes — exits as soon
      as it lands on /web/conversations.
 
-Run interactively (or via stored env var):
+Run interactively (or via stored env var) from the VPS over Tailscale:
 
-    ssh -i ~/.ssh/id_ed25519 openclaw@203.0.113.10
+    ssh <user>@<your-tailscale-host>
     cd ~/openclaw
     docker compose exec openclaw-gateway \\
-        python3 /home/openclaw/.clawford/connector-workspace/scripts/gmessages-auth.py
+        python3 /home/<user>/.clawford/connector-workspace/scripts/gmessages-auth.py
 
 Profile path:        ~/.clawford/connector-workspace/gmessages-profile/
 2FA screenshot path: ~/Dropbox/openclaw-backup/tmp/gmessages-2fa.png
@@ -56,7 +56,6 @@ TFA_SCREENSHOT = Path(
     os.path.expanduser("~/Dropbox/openclaw-backup/tmp/gmessages-2fa.png")
 )
 SUCCESS_URL_FRAGMENT = "/conversations"  # matches /web/conversations and /web/u/0/conversations
-GOOGLE_EMAIL = "sam.smith@example.com"
 SIGNIN_LANDING = "https://messages.google.com/web/welcome"
 PAGE_LOAD_TIMEOUT_MS = 60_000
 PASSWORD_SETTLE_MS = 4_000
@@ -65,6 +64,7 @@ POLL_TIMEOUT_SEC = 240
 
 
 def _read_password() -> str:
+    from agents.shared.operator import load_operator
     pw_env = os.environ.get("GMESSAGES_GOOGLE_PASSWORD")
     if pw_env:
         return pw_env
@@ -73,7 +73,7 @@ def _read_password() -> str:
             "No GMESSAGES_GOOGLE_PASSWORD env var and no TTY for getpass; "
             "run interactively under `docker compose exec`."
         )
-    return getpass.getpass(f"Google password for {GOOGLE_EMAIL}: ")
+    return getpass.getpass(f"Google password for {load_operator().google_email}: ")
 
 
 def run() -> dict:
@@ -123,7 +123,8 @@ def run() -> dict:
         print("Filling email...", file=sys.stderr)
 
         try:
-            page.fill('input[type="email"]', GOOGLE_EMAIL, timeout=10_000)
+            from agents.shared.operator import load_operator
+            page.fill('input[type="email"]', load_operator().google_email, timeout=10_000)
             page.press('input[type="email"]', "Enter")
         except Exception as e:
             try:

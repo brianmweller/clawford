@@ -39,18 +39,12 @@ for _p in Path(__file__).resolve().parents:
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from agents.shared.brain import dropbox_brain_root                  # noqa: E402
+from agents.shared.operator import load_operator                    # noqa: E402
 from flux_import_lib import build_email_to_slug_map                 # noqa: E402
 from inbox_triage_lib import (                                      # noqa: E402
     classify_thread_for_triage,
     upsert_thread_in_queue,
 )
-
-
-BRIAN_ADDRESSES = {
-    "sam.smith@example.com",
-    "sam.smith+backup@example.com",
-    "sam.smith+work@example.com",
-}
 
 DEFAULT_TOKEN = Path(os.path.expanduser("~/.clawford/connector-workspace/token.json"))
 DEFAULT_CREDS = Path(os.path.expanduser("~/.clawford/connector-workspace/credentials.json"))
@@ -134,7 +128,7 @@ def main() -> int:
         thread = _fetch_thread_metadata(service, args.thread_id)
         result = classify_thread_for_triage(
             thread,
-            operator_emails=BRIAN_ADDRESSES,
+            operator_emails=load_operator().emails,
             email_to_slug=email_to_slug,
         )
         print(f"  classified: {result['status']}")
@@ -179,7 +173,7 @@ def main() -> int:
     for t in threads:
         result = classify_thread_for_triage(
             t,
-            operator_emails=BRIAN_ADDRESSES,
+            operator_emails=load_operator().emails,
             email_to_slug=email_to_slug,
         )
         buckets[result["status"]] = buckets.get(result["status"], 0) + 1
