@@ -1,21 +1,24 @@
-"""Gmail API helpers for Huckle Cat's threaded-draft creation.
+"""Gmail API helpers for Huckle Cat's threaded-draft creation and
+thread-content fetching.
 
 Uses google-api-python-client. OAuth via agents/shared/google_oauth.py with
 gmail.compose scope (caller is responsible for never calling send — our
-code only exposes draft creation).
+code only exposes draft creation and readonly fetch).
 
 Production deploy path: auth runs locally (gcal-auth.py), token.json is
 SCP'd to the VPS per the fleet's existing Google pattern (memory:
 reference_google_oauth).
 
-Pure helper (build_raw_message) is testable without network or auth; the
-service wrappers (build_gmail_service, create_threaded_draft) are thin
-and exercise the real Gmail API when invoked.
+Pure helpers (build_raw_message, extract_plain_body, thread_to_compose_inputs)
+are testable without network or auth; the service wrappers
+(build_gmail_service, create_threaded_draft, fetch_inbound_message_id,
+fetch_thread) are thin and exercise the real Gmail API when invoked.
 """
 from __future__ import annotations
 
 import base64
 from email.message import EmailMessage
+from email.utils import parseaddr
 
 
 # Never include gmail.send, gmail.modify, gmail.readonly here. The caller
@@ -93,6 +96,110 @@ def create_threaded_draft(
         }
     }
     return service.users().drafts().create(userId="me", body=body_dict).execute()
+
+
+def fetch_thread(service, thread_id: str) -> dict:
+    """Fetch a Gmail thread in format=full (bodies + headers included)."""
+    return service.users().threads().get(userId="me", id=thread_id, format="full").execute()
+
+
+def _decode_b64url(data: str) -> str:
+    padded = data + "=" * (-len(data) % 4)
+    return base64.urlsafe_b64decode(padded).decode("utf-8", errors="replace")
+
+
+def _header_value(message: dict, name: str) -> str:
+    for h in message.get("payload", {}).get("headers", []):
+        if h.get("name", "").lower() == name.lower():
+            return h.get("value", "") or ""
+    return ""
+
+
+def extract_plain_body(message: dict) -> str:
+    """Walk a Gmail message payload and return the plain-text body.
+    Prefers text/plain parts over text/html for multipart messages."""
+    payload = message.get("payload", {})
+
+    # Simple case: body directly on payload
+    body = payload.get("body", {}) or {}
+    if body.get("data"):
+        if payload.get("mimeType", "").startswith("text/plain") or not payload.get("parts"):
+            return _decode_b64url(body["data"])
+
+    # Multipart: prefer text/plain at any depth
+    def _walk(parts):
+        for part in parts:
+            if part.get("mimeType") == "text/plain":
+                data = (part.get("body") or {}).get("data")
+                if data:
+                    return _decode_b64url(data)
+            sub = part.get("parts") or []
+            if sub:
+                found = _walk(sub)
+                if found:
+                    return found
+        return None
+
+    result = _walk(payload.get("parts") or [])
+    return result or ""
+
+
+def thread_to_compose_inputs(thread: dict, operator_emails: set[str]) -> tuple[dict, list[dict]]:
+    """Convert a Gmail threads.get(format=full) response into the
+    (inbound, history) shape draft-compose.py consumes from its fixture
+    JSON files.
+
+    The "latest inbound" is the most recent message whose From is NOT
+    one of operator_emails. History is every message BEFORE that one,
+    in chronological order.
+
+    Raises ValueError if the thread is empty or has no inbound message.
+    """
+    messages = thread.get("messages") or []
+    if not messages:
+        raise ValueError("thread has no messages")
+
+    brian_lower = {a.lower() for a in operator_emails}
+
+    # Find latest inbound message (walking from the end)
+    latest_inbound = None
+    latest_index = -1
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        from_raw = _header_value(m, "From")
+        _, addr = parseaddr(from_raw or "")
+        from_email = (addr or "").lower()
+        if from_email and "@" in from_email and from_email not in brian_lower:
+            latest_inbound = m
+            latest_index = i
+            break
+
+    if latest_inbound is None:
+        raise ValueError("thread has no inbound message (only the operator's own)")
+
+    from_raw = _header_value(latest_inbound, "From")
+    from_name, from_email = parseaddr(from_raw or "")
+    inbound = {
+        "from_name": from_name or "",
+        "from_email": from_email or "",
+        "subject": _header_value(latest_inbound, "Subject"),
+        "received_at": _header_value(latest_inbound, "Date"),
+        "body": extract_plain_body(latest_inbound),
+    }
+
+    history: list[dict] = []
+    for m in messages[:latest_index]:
+        from_raw = _header_value(m, "From")
+        name, addr = parseaddr(from_raw or "")
+        addr_lower = (addr or "").lower()
+        who = "the operator" if addr_lower in brian_lower else (name or addr or "?")
+        history.append({
+            "from": who,
+            "date": _header_value(m, "Date"),
+            "body": extract_plain_body(m),
+        })
+
+    return inbound, history
 
 
 def fetch_inbound_message_id(service, thread_id: str) -> str | None:

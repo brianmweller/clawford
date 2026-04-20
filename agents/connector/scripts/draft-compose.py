@@ -93,8 +93,8 @@ def call_claude_cli(prompt: str, timeout: int = 180) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--person-slug", required=True)
-    ap.add_argument("--inbound", required=True)
-    ap.add_argument("--history")
+    ap.add_argument("--inbound", help="Path to JSON fixture; if omitted, --gmail-thread-id is used to fetch")
+    ap.add_argument("--history", help="Path to JSON fixture of prior messages; ignored when fetching from Gmail")
     ap.add_argument("--facts-dir", help="Override brain/facts path (for dry-run testing)")
     ap.add_argument("--scheduling-rules", help="Path to scheduling.rules.json")
     ap.add_argument("--search-window", help="ISO start/end/tz for availability window, e.g. 2026-04-13T16:00/2026-04-17T18:00/America/Los_Angeles")
@@ -110,8 +110,27 @@ def main() -> int:
     person = load_person(args.person_slug)
     facts_dir = Path(args.facts_dir) if args.facts_dir else BRAIN_ROOT / "facts"
     facts = load_facts_for_subject(args.person_slug, facts_dir)
-    inbound = json.loads(Path(args.inbound).read_text(encoding="utf-8"))
-    history = json.loads(Path(args.history).read_text(encoding="utf-8")) if args.history else []
+
+    if args.inbound:
+        inbound = json.loads(Path(args.inbound).read_text(encoding="utf-8"))
+        history = json.loads(Path(args.history).read_text(encoding="utf-8")) if args.history else []
+    elif args.gmail_thread_id:
+        from agents.shared.gmail_api import build_gmail_service, fetch_thread, thread_to_compose_inputs
+        token = Path(args.gmail_token).expanduser()
+        creds = Path(args.gmail_creds).expanduser()
+        service = build_gmail_service(
+            str(token), str(creds),
+            scopes=[
+                "https://www.googleapis.com/auth/calendar.readonly",
+                "https://www.googleapis.com/auth/gmail.readonly",
+                "https://www.googleapis.com/auth/gmail.compose",
+            ],
+        )
+        thread = fetch_thread(service, args.gmail_thread_id)
+        operator_emails = {"sam.smith@example.com", "sam.smith+backup@example.com", "sam.smith+work@example.com"}
+        inbound, history = thread_to_compose_inputs(thread, operator_emails)
+    else:
+        raise SystemExit("Need --inbound (fixture JSON) or --gmail-thread-id (Gmail fetch).")
 
     ctx = build_recipient_context(
         recipient_person=person,
