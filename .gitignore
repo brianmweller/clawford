@@ -71,3 +71,6 @@ agents/fix-it/KNOWN_ISSUES.md
 agents/fix-it/probation.md
 agents/connector/scripts/mine/family_map.py
 agents/connector/scripts/mine/mining-config.json
+
+# Local scratch / worksheets (not committed)
+scratch/
