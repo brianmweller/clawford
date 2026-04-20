@@ -12,9 +12,15 @@
 # SysV shared memory crashes under the default bwrap profile.
 # See script-contract-host.sh line 62 for the mechanism.
 #
+# DO NOT add crons that write to `brain/facts/`, `brain/people/`,
+# `brain/commitments/`, or `brain/queues/` until the bwrap profile
+# binds those subdirs RW. Today the profile only RW-binds
+# `brain/agents/<agent_id>/`; writes to any other brain path hit
+# EROFS. `daily-refresh` already shows this regression in its host
+# log (2026-04-18 onward). Until isolation.py is widened, keep the
+# fact miners off this list — they mine into brain/facts/.
+#
 # Lines starting with '#' or empty are ignored by the installer.
 
-# Item #9 fact miners — pure LLM + file I/O, no browser. Safe under bwrap.
-connector-gmail-facts-mine
-connector-workflowy-facts-mine
-meetings-coach-krisp-facts-mine
+# (Item #9 fact miners removed 2026-04-20 pending bwrap brain-write fix.
+#  Reinstate after isolation.py binds brain/facts/ RW.)
