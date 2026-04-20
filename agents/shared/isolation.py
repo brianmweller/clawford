@@ -144,6 +144,18 @@ def bwrap_command(
     cmd += ["--ro-bind-try", str(Path.home() / ".codex"),
             str(Path.home() / ".codex")]
 
+    # Operator identity config (~/.clawford/operator.json) — RO-bound
+    # so agents/shared/operator.py::load_operator resolves inside the
+    # namespace. Added 2026-04-20 when operator.py shipped: agents
+    # that were happy under the old BRIAN_ADDRESSES constant started
+    # failing with "Operator config not found" until this bind landed.
+    # The parent ~/.clawford/ dir is already per-agent; we only want
+    # the JSON file exposed, not the whole directory (which contains
+    # other agents' workspaces).
+    cmd += ["--ro-bind-try",
+            str(Path.home() / ".clawford" / "operator.json"),
+            str(Path.home() / ".clawford" / "operator.json")]
+
     # Operator's --user pip install dir (~/.local/) — RO-bound so
     # user-installed Python packages and CLI tools (pip-audit,
     # google-auth, camoufox, etc.) resolve inside the namespace.

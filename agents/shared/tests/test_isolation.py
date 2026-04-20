@@ -241,6 +241,18 @@ def test_bwrap_command_brain_memory_stays_read_only(tmp_path: Path) -> None:
     )
 
 
+def test_bwrap_command_binds_operator_config_readonly() -> None:
+    """Operator identity at ~/.clawford/operator.json must be
+    RO-bound; agents/shared/operator.py::load_operator fails with
+    'Operator config not found' otherwise. Using --ro-bind-try so CI
+    and fresh dev machines (no operator.json) don't crash."""
+    cmd = isolation.bwrap_command(
+        agent_id="x", workspace=Path("/tmp/x"),
+    )
+    operator_json = str(Path.home() / ".clawford" / "operator.json")
+    assert _has_triple(cmd, "--ro-bind-try", operator_json, operator_json)
+
+
 def test_bwrap_command_binds_codex_auth_readonly() -> None:
     """Codex OAuth token lives at ~/.codex/auth.json; bwrap must bind
     it RO so agents/shared/llm.py::infer can read it. Missing pre-
