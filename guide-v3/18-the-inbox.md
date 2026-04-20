@@ -1,6 +1,6 @@
 # The inbox: making agents conversational
 
-*Last updated: 2026-04-17 · Reading time: ~20 min · Difficulty: moderate*
+*Last updated: 2026-04-19 · Reading time: ~20 min · Difficulty: moderate*
 
 > **TL;DR.** Every agent chapter up to this point describes **outbound** behavior — crons that fire, scripts that compose, Telegram messages that push to the operator. This chapter is the **inbound** side. A single inbox daemon long-polls all six Telegram bots concurrently, routes each incoming message to the right agent, hands it to an LLM with a tool manifest the agent defines, lets the LLM call read tools (no side effects) or producer tools (which stage a pending action with inline buttons), and waits for the operator to tap **Confirm** or **Cancel** before anything mutates state. The result is that every agent in the fleet is conversational — the operator can message Hilda Hippo and say "reorder the Kirkland water" and get a `[Add to cart]` `[Skip]` button pair without a single line of Hilda-specific dispatcher code. The architecture is ~1200 lines of shared Python, a `tools.py` file per agent, and a systemd user unit on the VPS. This chapter covers all five components, the tools.py pattern, the inline-button UX, the deployment story, and the pitfalls.
 
@@ -117,15 +117,15 @@ The confirm executor is the piece that makes the pending-action flow safe. The L
 | Agent | Read tools | Producer tools | Confirm executors |
 |-------|-----------|---------------|-------------------|
 | [Mr Fixit 🦊🔧](09-mr-fixit.md) | `get_fleet_health`, `get_morning_status`, `get_known_issues` | `propose_remember` | `confirm_remember` |
-| [Lowly Worm 🐛📰](10-lowly-worm-newsfeed.md) | `get_todays_digest`, `get_topic_weights`, `recent_engagements` | `record_engagement` (also via like/dislike/more buttons), `propose_remember` | `confirm_remember` |
+| [Lowly Worm 🐛📰](10-lowly-worm-newsfeed.md) | `get_todays_digest`, `get_topic_weights`, `recent_engagements`, `ask_topic` | `record_engagement` (also via like/dislike/more buttons), `propose_remember` | `confirm_remember` |
 | [Mistress Mouse 🐭📅](12-mistress-mouse.md) | `get_events_for_day`, `get_week`, `get_configured_calendars`, `get_recent_reminders_sent` | `propose_event_add`, `propose_event_move`, `propose_event_cancel`, `propose_remember` | `confirm_calendar_add`, `confirm_calendar_move`, `confirm_calendar_cancel`, `confirm_remember` |
-| [Sergeant Murphy 🐷🔍](13-sergeant-murphy.md) | `get_meetings_for_day`, `get_week_meetings`, `get_commitment_status`, `get_coaching_config`, `get_recent_coaching_entries` | `list_pending_action_items`, `confirm_action_item`, `dismiss_action_item`, `propose_remember` | `confirm_remember` |
-| [Huckle Cat 🐱🤝](14-huckle-cat.md) | `get_morning_nudge`, `get_upcoming_meetings`, `get_pending_triage`, `get_checkin_log`, `get_config_summary` | `mark_checkin`, `snooze_reminder`, `propose_remember` | `confirm_remember` |
-| [Hilda Hippo 🦛🛒](15-hilda-hippo.md) | `get_delivery_digest`, `get_recent_orders`, `get_grocery_list`, `get_pending_actions`, `find_amazon_item`, `find_costco_item` | `propose_reorder`, `add_to_grocery`, `remove_from_grocery`, `propose_remember` | `confirm_reorder`, `confirm_remember` |
+| [Sergeant Murphy 🐷🔍](13-sergeant-murphy.md) | `get_meetings_for_day`, `get_week_meetings`, `get_commitment_status`, `get_coaching_config`, `get_recent_coaching_entries`, `force_prep`, `force_debrief` | `list_pending_action_items`, `confirm_action_item`, `dismiss_action_item`, `propose_coaching_toggle`, `propose_coaching_area_add`, `propose_coaching_area_remove`, `propose_remember` | `confirm_coaching_toggle`, `confirm_coaching_area_add`, `confirm_coaching_area_remove`, `confirm_remember` |
+| [Huckle Cat 🐱🤝](14-huckle-cat.md) | `get_morning_nudge`, `get_upcoming_meetings`, `get_pending_triage`, `get_checkin_log`, `get_config_summary`, `get_person`, `get_commitments`, `force_nudge`, `force_triage`, `draft_reply` | `mark_checkin`, `snooze_reminder`, `dismiss_triage_n`, `propose_add_note`, `propose_add_person`, `propose_remember` | `confirm_add_note`, `confirm_add_person`, `confirm_remember` |
+| [Hilda Hippo 🦛🛒](15-hilda-hippo.md) | `get_delivery_digest`, `get_recent_orders`, `get_grocery_list`, `get_pending_actions`, `find_amazon_item`, `find_costco_item` | `propose_reorder`, `add_to_grocery`, `remove_from_grocery`, `propose_clear_grocery`, `propose_clear_grocery_except`, `propose_skip_sns`, `propose_modify_sns`, `propose_remember` | `confirm_reorder`, `confirm_clear_grocery`, `confirm_clear_grocery_except`, `confirm_skip_sns`, `confirm_modify_sns`, `confirm_remember` |
 
 Every agent has `propose_remember` / `confirm_remember` — the self-learning memory surface added in the 2026-04 brain migration. Saying "from now on X" to any agent stages the rule with `[💾 Remember] [Skip]` inline buttons; tapping Remember appends to that agent's `MEMORY.md` (Dropbox-brain-synced), which is then loaded into every future system prompt.
 
-Mr Fixit is otherwise read-only on its domain (no fleet-mutation tools yet — that's a future addition). Hilda Hippo has the richest tool surface — ten LLM-callable tools plus two confirm executors.
+Mr Fixit is otherwise read-only on its domain (no fleet-mutation tools yet — that's a future addition). Huckle Cat now carries the richest tool surface — sixteen LLM-callable tools plus three confirm executors, covering relationship lookups (`get_person`, `get_commitments`), on-demand re-runs of the morning cron (`force_nudge`, `force_triage`), draft composition (`draft_reply`), note and person-file creation (`propose_add_note`, `propose_add_person`), and inbox triage dismissal (`dismiss_triage_n`).
 
 ## The inline button UX
 

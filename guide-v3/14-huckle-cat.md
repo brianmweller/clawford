@@ -1,6 +1,6 @@
 # Huckle Cat 🐱🤝 — the connector agent
 
-*Last updated: 2026-04-17 · Reading time: ~20 min · Difficulty: hard*
+*Last updated: 2026-04-19 · Reading time: ~23 min · Difficulty: hard*
 
 > **TL;DR.** Huckle Cat is the relationship agent — the one that inverts the usual shape of a Clawford agent. Instead of wrapping a single external API the way Mr Fixit wraps the fleet's own heartbeat or Hilda Hippo wraps two retailers, Huckle Cat is built **around the shared brain itself**. His input is seven disparate data sources (Gmail, Google Calendar, Google Contacts, Google Messages, WhatsApp, meeting transcripts, and Workflowy) and his output is a relationship intelligence layer: ~280 people files in the brain with names, emails, phones, circles, last-interaction timestamps, enriched context notes, and facts pulled from email signatures. He composes a morning relationship nudge at 5 AM PT (overdue / approaching / healthy), triages a shared notes inbox twice a day, and keeps `last_interaction` fresh via a daily re-mining pass. He was the last agent in the fleet to deploy, and he is the only one where the [mining pipeline](#the-mining-pipeline) runs **before** the first cron fires — by design.
 
@@ -122,7 +122,7 @@ Three second-order details fell out:
 
 ## Current state
 
-As of 2026-04-15, Huckle Cat runs four host crons off `~/.clawford/connector-workspace/`.
+As of 2026-04-19, Huckle Cat runs five host crons off `~/.clawford/connector-workspace/`.
 
 **Host cron surface.** Registered via `ops/scripts/install-host-cron.sh`:
 
@@ -132,6 +132,7 @@ As of 2026-04-15, Huckle Cat runs four host crons off `~/.clawford/connector-wor
 | `daily-refresh` | `0 10 * * *` | Re-mines 14-day Gmail + GCal + GMessages window; updates `last_interaction` in people files; writes `cache/upcoming-meetings.json` |
 | `morning-relationship-nudge` | `30 10 * * *` | Calls `people-scan.py`, groups by overdue / approaching / healthy, writes `cache/morning-brief-ready.txt` for fleet-deliver at `0 12 UTC` |
 | `notes-triage-alert` | `0 8,20 * * *` | Reads `notes/inbox.md`, LLM-classifies new entries into `{fact, commitment, task, shopping, unclear}`, sends twice-daily Telegram digest with inline `/confirm N` + `/dismiss N` |
+| `birthday-miner` | `0 6 * * 0` | Weekly: scans Google Calendar for recurring birthday events, resolves event titles to person slugs, upserts identity facts so `/people [name]` surfaces a birthday line |
 
 **Workspace layout** under `~/.clawford/connector-workspace/`:
 
@@ -159,6 +160,59 @@ scripts/
 ```
 
 **Brain state** lives outside the workspace, in the shared brain on Dropbox — this is the point of Huckle Cat. After the initial mining run, the operator's shared brain contains `~280` people files under `people/` and `~240` durable facts under `facts/`, all enriched from the mining pipeline.
+
+## The conversational surface
+
+The morning nudge and notes-triage are the **outbound** behaviors — crons that fire on a schedule and deliver to Telegram. Huckle Cat's **inbound** surface is the tools manifest in `agents/connector/tools.py` that the inbox daemon loads whenever I message the bot. The daemon is covered end-to-end in [Ch 18 — The inbox](18-the-inbox.md); this section enumerates only what Huckle Cat exposes.
+
+Ten read tools and six producer tools (plus three confirm executors the LLM never sees). The usable commands, as I type them on Telegram:
+
+| Command | What it does | Backing |
+|---------|--------------|---------|
+| `/people <name>` | Full record for one person — circle, tone, last_interaction, visible facts (birthday, health, relationship context) | `get_person` → `brain.get_person` with first-name fallback |
+| `/commitments` | Unified open-commitment view across every agent (Murphy's, Hilda's, Mouse's) with overdue / approaching flags | `get_commitments` → shells `scripts/commitment-scan.py` |
+| `/nudge` | Force the morning relationship scan on-demand (without overwriting the 5 AM PT delivery cache) | `force_nudge` → shells `scripts/people-scan.py` |
+| `/triage` | Force notes-inbox triage on-demand | `force_triage` → shells `scripts/notes-triage.py` |
+| `/draft <name> [text]` | Compose a check-in (no arg) or reply (with inbound text) using the recipient's facts, tone, and voice profile | `draft_reply` → shells `scripts/draft-compose.py` |
+| `/note <text>` | Quick-add to `notes/inbox.md` with propose/confirm buttons | `propose_add_note` → `brain.append_inbox_note` on confirm |
+| `/add <name> <circle>` | Create a new person file with frontmatter and duplicate-slug guard | `propose_add_person` → `brain.create_person_file` on confirm |
+| `/checkin <name>` | Record that I talked to someone (resets their overdue timer) | `mark_checkin` (direct mutator, no confirm gate) |
+| `/dismiss N` | Skip the N-th item in a pending-triage batch | `dismiss_triage_n` |
+| free-text | "who haven't I talked to in the family circle?" → LLM combines `get_morning_nudge` + `get_checkin_log` + `get_config_summary` into an answer | Any combination of read tools |
+
+The asymmetry between `mark_checkin` (direct mutator, callable by the LLM without a confirm button) and `propose_add_note` / `propose_add_person` (staged behind a confirm button) is deliberate. A check-in is a reversible low-stakes signal — if the LLM misreads "just talked to Priya" it's a stale `last_interaction` date, which the next `daily-refresh` will correct. A note or a new person file writes to the shared brain's canonical surface; I want my thumb on the send button for those.
+
+The tools resolve shared state through `agents/shared/brain.py`, which grew five helpers in the 2026-04 slash-command-wiring pass to back this surface: `get_person` (with first-name fallback for ambiguous lookups), `list_persons`, `append_inbox_note` (atomic append with ISO timestamp + triaged flag), `create_person_file` (duplicate-slug guard), and `upsert_fact` (idempotent on `(source_agent, subject, idempotency_key)` — used by the birthday miner described below). The helpers are in [Ch 16 — The shared brain](16-shared-brain.md); the tool-manifest pattern is in [Ch 18 — The inbox](18-the-inbox.md).
+
+## Passive ingestion: birthdays without a command
+
+The first cut of the conversational surface had a `/birthday [name]` command. I pruned it during the 2026-04-19 review pass — not because birthdays don't matter but because the command was the wrong shape of answer to the question. If I have to *ask* for someone's birthday, the fact isn't really in the shared brain yet; it's in my head. The pattern I wanted was the reverse: birthdays land as identity facts on the person file, and `/people [name]` surfaces them alongside everything else I might want to know about a contact.
+
+That meant building an ingestion path. `scripts/birthday-miner.py` runs weekly (`0 6 * * 0` UTC) and does three things:
+
+1. **Fetch** — query Google Calendar for events matching a `birthday|b-?day|🎂` regex in the window `-30 days … +365 days` (one recurrence per yearly event, which is all the miner needs).
+2. **Resolve** — for each event, extract the owner's name from the title via a regex pipeline: strip to-do prefixes (`Get / Bring / Buy / Order / Remember <X> birthday card`) and generic greetings (`Happy birthday!`), strip relational titles (`Aunt Marcia` → `Marcia`, `Mama Yao` → `Yao`), then either (a) match the `aliases` map in `birthday-aliases.json` (operator-forced), (b) fall back to `brain.get_person` with the first-name-unique heuristic, or (c) skip silently.
+3. **Upsert** — call `facts.upsert_fact(subject, category="identity", content=f"Birthday: {date}", idempotency_key="birthday")`. The idempotency key means re-runs are cheap and non-destructive.
+
+The resolver's heuristics are deliberately loose. A typical calendar has eighteen events matching the regex, of which maybe four are parse-clean (`Priya's Birthday`, `Jeanette's birthday`), six are to-do cards (`Get Dad birthday card`), three are relational titles (`Aunt Marcia's birthday`, `Mama Yao's birthday!`), one or two are joke entries (`OliMom's fake birthday!`), and the rest are ambiguous (`Emily's birthday` when I have three Emilys in people/). The miner gets the parse-clean and relational cases right automatically. For everything else, there's a companion file at `~/.clawford/connector-workspace/birthday-aliases.json`:
+
+```json
+{
+  "aliases": {
+    "Mom": "priya-rivera",
+    "Emily": "emily-bruemmer",
+    "Mama Yao": "nicole-yao"
+  },
+  "manual_birthdays": {
+    "marcia-sokolanderson": "1954-07-27",
+    "david-yao": "1958-12-17"
+  }
+}
+```
+
+The `aliases` map is operator-forced — it short-circuits the heuristic. `manual_birthdays` takes the other path: operator-supplied slug + ISO date, written as a fact directly, bypassing the calendar entirely. Useful for birthdays I know but don't have on any calendar, and useful for birthdays where the calendar shows the next recurrence date (`2026-07-27`) rather than the person's actual birth year (`1954-07-27`). The manual pass runs **first** inside `process_events`, so operator-supplied dates win any collision with calendar-derived ones. I got this ordering wrong on the first pass — calendar pass ran first, wrote `2026-07-27` under `idempotency_key="birthday"`, and then the manual entry with `1954-07-27` was deduped out. The test that now pins the ordering (`test_manual_entry_wins_over_calendar_collision`) exists because of that specific failure.
+
+The broader pattern this instantiates: **passive ingestion over conversational lookup.** Anything that can be derived from the calendar, the email archive, or the message history should flow into the brain as a fact, so the conversational surface stays focused on what I actually want to do (draft a reply, check who's overdue, stage a note). A `/birthday` command would have been another hand-crafted LLM path for something that's really just a fact on a person file. The miner is fifty lines of pure-function orchestration plus a GCal fetch wrapper — half of it is regex hygiene — and it makes the `/people` command carry more for free.
 
 ## Deployment walkthrough
 
