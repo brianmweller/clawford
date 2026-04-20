@@ -96,3 +96,13 @@ regex:\bleslie\b==>priya
 ***REMOVED***
 ***REMOVED***
 regex:\bBRIAN\b==>OPERATOR
+
+***REMOVED***
+***REMOVED***
+# turns 'Sam.M.Smith' into 'the operator.M.Weller'.
+Sam.M.Smith==>Sam.M.Smith
+Sam M. Smith's list==>Sam M. Smith's list
+alex.rivera@example.com==>alex.rivera@example.com
+priya.lee@example.com==>priya.lee@example.com
+@example.com==>@example.com
+example.com==>example.com

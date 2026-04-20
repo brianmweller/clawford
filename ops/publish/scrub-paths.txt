@@ -68,3 +68,10 @@ REPLACEMENTS.txt
 # plus the real-name → placeholder mapping. None of it is useful
 # outside the private authoring workflow.
 .claude/
+
+# --- Real-contact bulk-PII CSV (132 real colleague names + emails) ---
+# Drives a private holiday-card cron; the scripts that reference it
+# (holiday-card-reclassify.py, mine/contact-aggregator.py) will fail
+# gracefully on missing CSV, which is fine — those scripts are dev
+# tooling the operator runs, not public-facing code.
+agents/connector/scripts/holiday-card-pins.csv
