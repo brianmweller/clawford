@@ -37,8 +37,9 @@ family-calendar-calendar-index-build
 family-calendar-tasks-sync
 family-calendar-whatsapp-chat-alert
 
-# Phase 1d Stage B — browser-driven crons. Requires --tmpfs /dev/shm
-# (landed 2026-04-20 in isolation.py). Added after 24h Stage A soak.
-# connector-gmessages-mine
-# linkedin-keepalive
+# Phase 1d Stage B — browser-driven crons. Enabled 2026-04-20 after
+# --tmpfs /dev/shm landed in isolation.py. Both crons launch Playwright/
+# Camoufox and need shared memory for browser→worker IPC.
+connector-gmessages-mine
+linkedin-keepalive
 
