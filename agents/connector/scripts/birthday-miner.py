@@ -37,41 +37,119 @@ from agents.shared.facts import upsert_fact  # noqa: E402
 
 
 SOURCE_AGENT = "connector"
+ALIASES_REL = "birthday-aliases.json"
+
+# Title prefixes that indicate a to-do / reminder event, NOT a birthday
+# date itself. "Get Dad birthday card" is a reminder to buy a card, not
+# the day Dad was born. Match case-insensitive at the start of the title.
+_TODO_PREFIXES = ("get ", "bring ", "buy ", "order ", "remember ", "need ")
+
+# Relational prefixes we strip before slug lookup. "Aunt Marcia" → "Marcia";
+# person files are keyed on the actual first name, not the relational role.
+_RELATIONAL_PREFIXES = (
+    "aunt ", "uncle ", "mama ", "papa ", "mom ", "dad ",
+    "grandma ", "grandpa ", "nana ", "granny ", "gramps ",
+)
 
 # "Priya's Birthday", "Priya's B-day", "Mom's bday", "🎂 Priya", "Birthday: Alex"
 # Capture one plausible name token before or after the birthday keyword.
 _NAME_RE_POSS = re.compile(
-    r"^\s*(?P<name>[A-Za-z][A-Za-z '\-]*?)(?:'s|s')?\s+(?:birthday|b-?day|🎂)\b",
+    r"^\s*(?P<name>[A-Za-z][A-Za-z \-]*?)(?:'s|s')?\s+(?:birthday|b-?day|🎂)\b",
     re.IGNORECASE,
 )
 _NAME_RE_COLON = re.compile(
-    r"(?:birthday|b-?day|🎂)\s*[:\-–]\s*(?P<name>[A-Za-z][A-Za-z '\-]*)",
+    r"(?:birthday|b-?day|🎂)\s*[:\-–]\s*(?P<name>[A-Za-z][A-Za-z \-]*)",
     re.IGNORECASE,
 )
 _NAME_RE_CAKE_PREFIX = re.compile(
-    r"^\s*🎂\s*(?P<name>[A-Za-z][A-Za-z '\-]*)",
+    r"^\s*🎂\s*(?P<name>[A-Za-z][A-Za-z \-]*)",
 )
 
 
 def extract_name_from_title(title: str) -> str | None:
     """Best-effort parse of the birthday-owner name from a GCal event title.
 
-    Returns the raw display name (not slug). Whitespace-trimmed. None if
-    no plausible name is found. This is a heuristic — a miss is fine;
-    the miner will skip silently and the operator can edit the event title.
+    Returns the raw display name (not slug). Whitespace-trimmed. None if:
+      - the title is a to-do reminder ("Get X birthday card"),
+      - the title is a generic greeting ("Happy birthday!"),
+      - or no plausible name anchors the regex.
+
+    This is a heuristic — a miss is fine; the miner will skip silently
+    and the operator can add an explicit entry in birthday-aliases.json.
     """
     if not title:
         return None
     t = title.strip()
+    t_lower = t.lower()
+
+    # Filter to-do / reminder events early. These mention "birthday" but
+    # the event date is when the operator needs to buy a card, not the B-day.
+    for prefix in _TODO_PREFIXES:
+        if t_lower.startswith(prefix):
+            return None
+
+    # Skip event titles that don't anchor the name before the keyword —
+    # "Happy birthday!" / "Birthday Party at X".
+    if t_lower.startswith("happy birthday") or t_lower.startswith("birthday party"):
+        return None
+
+    # Parties without a person name before "birthday" are ambiguous —
+    # if the word "party" appears and the pre-keyword name didn't
+    # survive the regex cleanly, skip. We still allow "Violet's Birthday"
+    # (without "party") to land.
+    if " birthday party" in t_lower:
+        return None
+
     for regex in (_NAME_RE_POSS, _NAME_RE_COLON, _NAME_RE_CAKE_PREFIX):
         m = regex.search(t)
         if m:
-            name = m.group("name").strip().rstrip("'s").strip()
-            # Reject the literal "Birthday" as a name
-            if name.lower() in {"birthday", "b-day", "bday"}:
+            name = m.group("name").strip()
+            # Remove the LITERAL "'s" or "s'" suffix if the regex didn't
+            # already consume it (rstrip would strip char-class members
+            # and eat legitimate trailing letters like the final 's' of
+            # "Phyllis" — use removesuffix instead).
+            name = name.removesuffix("'s").removesuffix("s'").strip()
+            # Reject the literal "Birthday" or bare greeting words
+            if name.lower() in {"birthday", "b-day", "bday", "happy"}:
                 continue
             return name
     return None
+
+
+def strip_relational_prefix(name: str | None) -> str | None:
+    """'Aunt Marcia' → 'Marcia'. Idempotent; plain names pass through."""
+    if not name:
+        return name
+    stripped = name.strip()
+    lower = stripped.lower()
+    for prefix in _RELATIONAL_PREFIXES:
+        if lower.startswith(prefix):
+            return stripped[len(prefix):].strip()
+    return stripped
+
+
+def load_aliases_cfg(path: Path) -> dict:
+    """Load operator-supplied alias map + manual birthday entries.
+
+    Shape:
+        {
+          "aliases": {"Mom": "priya-rivera", ...},
+          "manual_birthdays": {"slug": "YYYY-MM-DD", ...}
+        }
+
+    Missing file returns empty cfg (degrades gracefully to GCal-only).
+    """
+    default = {"aliases": {}, "manual_birthdays": {}}
+    if not path.exists():
+        return default
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return default
+    return {
+        "aliases": dict(data.get("aliases") or {}),
+        "manual_birthdays": dict(data.get("manual_birthdays") or {}),
+    }
 
 
 def _birthday_date_from_event(event: dict) -> str | None:
@@ -91,26 +169,63 @@ def _birthday_date_from_event(event: dict) -> str | None:
     return None
 
 
-def process_events(events: list[dict], *, facts_dir: Path) -> dict:
+def _resolve_slug(name: str, aliases_cfg: dict) -> str | None:
+    """Map an extracted calendar-event name to a person slug, trying:
+      1. aliases dict under the raw extracted name
+      2. aliases dict under the relational-prefix-stripped name
+      3. brain.get_person(stripped name)
+      4. brain.get_person(raw name)
+    Returns None if nothing resolves."""
+    alias_map = aliases_cfg.get("aliases") or {}
+    if name in alias_map:
+        return alias_map[name]
+
+    stripped = strip_relational_prefix(name)
+    if stripped and stripped != name and stripped in alias_map:
+        return alias_map[stripped]
+
+    if stripped and stripped != name:
+        person = brain.get_person(stripped)
+        if person is not None:
+            return person["slug"]
+
+    person = brain.get_person(name)
+    if person is not None:
+        return person["slug"]
+    return None
+
+
+def process_events(
+    events: list[dict],
+    *,
+    facts_dir: Path,
+    aliases_cfg: dict | None = None,
+) -> dict:
     """Iterate GCal events, resolve owners to person files, upsert facts.
+
+    Also processes ``manual_birthdays`` from aliases_cfg — operator-
+    supplied slug→date entries that bypass GCal entirely (useful for
+    birthdays the operator knows but doesn't have on a calendar).
 
     Returns a summary dict with counters. Scoped so the cron entrypoint
     and the test harness can share the same orchestration.
     """
+    aliases_cfg = aliases_cfg or {"aliases": {}, "manual_birthdays": {}}
     scanned = 0
     matched = 0
     updated = 0
     skipped = 0
     now = datetime.now(timezone.utc).isoformat()
 
+    # Pass 1: Google Calendar events
     for event in events:
         scanned += 1
         title = event.get("summary") or ""
         name = extract_name_from_title(title)
         if not name:
             continue
-        person = brain.get_person(name)
-        if person is None:
+        slug = _resolve_slug(name, aliases_cfg)
+        if slug is None:
             continue
         date_str = _birthday_date_from_event(event)
         if not date_str:
@@ -119,13 +234,34 @@ def process_events(events: list[dict], *, facts_dir: Path) -> dict:
         matched += 1
         result = upsert_fact(
             facts_dir=facts_dir,
-            subject=person["slug"],
+            subject=slug,
             category="identity",
             content=f"Birthday: {date_str}",
             source_agent=SOURCE_AGENT,
             source_type="derived",
             source_detail=f"birthday-miner/calendar/{title}",
             confidence=0.9,
+            idempotency_key="birthday",
+            recorded_at=now,
+        )
+        if result["status"] == "created":
+            updated += 1
+        else:
+            skipped += 1
+
+    # Pass 2: manual entries in birthday-aliases.json
+    for slug, date_str in (aliases_cfg.get("manual_birthdays") or {}).items():
+        if not slug or not date_str:
+            continue
+        result = upsert_fact(
+            facts_dir=facts_dir,
+            subject=slug,
+            category="identity",
+            content=f"Birthday: {date_str}",
+            source_agent=SOURCE_AGENT,
+            source_type="operator",
+            source_detail="birthday-miner/manual",
+            confidence=1.0,
             idempotency_key="birthday",
             recorded_at=now,
         )
@@ -220,11 +356,22 @@ def _fetch_birthday_events(service, bootstrap: bool) -> list[dict]:
 
 
 def run(bootstrap: bool) -> dict:
+    import os
+
     service = _build_gcal_service()
     events = _fetch_birthday_events(service, bootstrap=bootstrap)
     facts_dir = brain.dropbox_brain_root() / "facts"
-    summary = process_events(events, facts_dir=facts_dir)
-    return {"status": "ok", **summary, "bootstrap": bootstrap}
+    aliases_path = Path(
+        os.path.expanduser("~/.clawford/connector-workspace") ) / ALIASES_REL
+    aliases_cfg = load_aliases_cfg(aliases_path)
+    summary = process_events(events, facts_dir=facts_dir, aliases_cfg=aliases_cfg)
+    return {
+        "status": "ok",
+        **summary,
+        "bootstrap": bootstrap,
+        "aliases_loaded": len(aliases_cfg.get("aliases", {})),
+        "manual_loaded": len(aliases_cfg.get("manual_birthdays", {})),
+    }
 
 
 def main() -> int:
