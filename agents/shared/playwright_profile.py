@@ -1,9 +1,8 @@
 """playwright_profile — persistent Chromium profile launcher.
 
 Consolidates the scaffolding around persistent-profile Chromium used
-by the LinkedIn scanner, the LinkedIn keepalive, and any future
-stock-Playwright consumer (connector/WhatsApp Web if that stops using
-Baileys). Exposes:
+by the Google Messages Web scraper and any future stock-Playwright
+consumer that needs cookies-live / tokens-refresh semantics. Exposes:
 
   cleanup_profile_lock(profile_dir) -> list[str]
       Remove Chromium's SingletonLock / SingletonCookie / SingletonSocket

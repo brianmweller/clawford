@@ -437,10 +437,10 @@ TOOLS: list[dict] = [
         "name": "propose_refresh_session",
         "description": (
             "Stage a headless session refresh for an external service. "
-            "Sources: 'costco' (Hilda Hippo's Costco JWT) or 'google' "
-            "(family-calendar + meetings-coach OAuth tokens). Use when "
-            "fleet-health.json or a recent alert points to an expired "
-            "session. Verify the symptom with get_fleet_health first."
+            "Source: 'google' (family-calendar + meetings-coach + "
+            "connector OAuth tokens). Use when fleet-health.json or a "
+            "recent alert points to an expired session. Verify the "
+            "symptom with get_fleet_health first."
         ),
         "parameters": {
             "type": "object",
