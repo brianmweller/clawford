@@ -8,19 +8,20 @@
 # `install-bwrap-allowlist.sh` merges the entries below into it
 # idempotently (append-only, dedupe, no destructive rewrite).
 #
-# DO NOT add browser-driven crons (Camoufox, Playwright, Firefox) —
-# SysV shared memory crashes under the default bwrap profile.
-# See script-contract-host.sh line 62 for the mechanism.
+# Browser-driven crons (Camoufox, Playwright, Firefox) were previously
+# excluded because SysV shared memory crashes under the pre-widening
+# profile. As of 2026-04-20 the profile adds `--tmpfs /dev/shm`, which
+# fixes browser-cron launch under bwrap. They're eligible now; see
+# Phase 1d of the brain-improvements plan for staged rollout.
 #
-# DO NOT add crons that write to `brain/facts/`, `brain/people/`,
-# `brain/commitments/`, or `brain/queues/` until the bwrap profile
-# binds those subdirs RW. Today the profile only RW-binds
-# `brain/agents/<agent_id>/`; writes to any other brain path hit
-# EROFS. `daily-refresh` already shows this regression in its host
-# log (2026-04-18 onward). Until isolation.py is widened, keep the
-# fact miners off this list — they mine into brain/facts/.
+# Brain writes: as of 2026-04-20, the profile RW-whitelists
+# `brain/{facts,people,commitments,queues}/` (isolation.py). Fact
+# miners, daily-refresh, and any other brain-write cron are safe to
+# list here. Writes to other brain paths (`brain/memory/`,
+# `brain/status/`, etc.) still hit EROFS — by design.
 #
 # Lines starting with '#' or empty are ignored by the installer.
 
-# (Item #9 fact miners removed 2026-04-20 pending bwrap brain-write fix.
-#  Reinstate after isolation.py binds brain/facts/ RW.)
+connector-gmail-facts-mine
+connector-workflowy-facts-mine
+meetings-coach-krisp-facts-mine
