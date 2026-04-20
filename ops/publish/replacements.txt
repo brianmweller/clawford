@@ -62,3 +62,16 @@ priya rivera==>priya rivera
 ***REMOVED***
 ***REMOVED***
 regex:\bbrian\b==>operator
+
+***REMOVED***
+***REMOVED***
+***REMOVED***
+***REMOVED***
+the operator's==>the operator's
+regex:\bBrian\b==>the operator
+
+# ---------- Employer name in prompts + test fixtures ----------
+# 'Anthropic' appears in compose_lib prompt template + test fixtures as
+# the operator's (former) employer. Not PII per se but identifying.
+Anthropic==>Example Corp
+anthropic.com==>example.com
