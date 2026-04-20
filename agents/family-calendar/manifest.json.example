@@ -83,7 +83,7 @@
       "enabled": false
     },
     {
-      "name": "activity-email-check",
+      "name": "activity-email-alert",
       "cron": "15 */2 * * *",
       "message": "DISABLED — replaced by ops/scripts/install-host-cron.sh entry family-calendar-activity-email-alert, which runs agents/family-calendar/scripts/activity-email-alert.py on host cron at 15 */2 * * * (LLM classifies provider emails, sends per-item Telegram alerts). Kept here for Phase 4 rollback reference.",
       "announce": false,
@@ -91,7 +91,7 @@
       "enabled": false
     },
     {
-      "name": "gmail-invite-check",
+      "name": "gmail-invite-alert",
       "cron": "30 */3 * * *",
       "message": "DISABLED — replaced by ops/scripts/install-host-cron.sh entry family-calendar-gmail-invite-alert, which runs agents/family-calendar/scripts/gmail-invite-alert.py on host cron at 30 */3 * * * (formats + sends per-invite Telegram alerts). Kept here for Phase 4 rollback reference.",
       "announce": false,
@@ -107,7 +107,7 @@
       "enabled": false
     },
     {
-      "name": "whatsapp-chat-scan",
+      "name": "whatsapp-chat-alert",
       "cron": "45 */2 * * *",
       "message": "DISABLED — replaced by ops/scripts/install-host-cron.sh entry family-calendar-whatsapp-chat-alert, which runs agents/family-calendar/scripts/whatsapp-chat-alert.py on host cron at 45 */2 * * * (LLM classifies WhatsApp messages via the existing Baileys-backed chat-parse-schedule.py script). Kept here for Phase 4 rollback reference.",
       "announce": false,
