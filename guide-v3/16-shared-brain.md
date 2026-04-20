@@ -1,6 +1,6 @@
 # The shared brain
 
-*Last updated: 2026-04-20 · Reading time: ~12 min · Difficulty: moderate*
+*Last updated: 2026-04-20 · Reading time: ~15 min · Difficulty: moderate*
 
 **TL;DR**
 
@@ -50,12 +50,26 @@ IDs are globally unique. Format: `<agent-name>-<YYYY-MM-DD>-<seq>`, where `seq` 
 
 Every entry in the brain falls into one of four shapes. The schema is intentionally narrow, because every additional shape is one more thing every agent has to know how to read.
 
-- **Facts.** Things known to be true at a point in time. Each fact carries a `decay` field — `never` for identity facts (someone's name, their relationship to the household), `7d` for logistics (someone's travel plans, where a delivery is), `14d` for soft signal (a rumour, an inferred preference). The decay is a hint to readers, not a hard expiry — facts past their decay date are still readable but flagged as stale, and the agent that wrote the fact is responsible for refreshing it if it still applies. Facts also carry an `audience_scope` field (see below) that gates which recipient circles a fact can surface in — a family fact never reaches a professional draft.
+- **Facts.** Things known to be true at a point in time. Each fact carries a `decay` field — `never` for identity facts (someone's name, their relationship to the household), `7d` for logistics (someone's travel plans, where a delivery is), `14d` for soft signal (a rumour, an inferred preference). The decay is a hint to readers, not a hard expiry — facts past their decay date are still readable but flagged as stale, and the agent that wrote the fact is responsible for refreshing it if it still applies. Facts also carry an `audience_scope` field (see below) that gates which recipient circles a fact can surface in — a family fact never reaches a professional draft. Since 2026-04-20, facts also carry an optional `last_reinforced_at` timestamp; a re-observation of the same idempotency key bumps this value and nudges `confidence` up by 0.05 (capped at 0.95) rather than silently skipping the second write. Absent the field, readers treat it as equal to `recorded_at` (the fact has never been reinforced).
 - **Commitments.** Promises with a resolution date. "I told Sam I'd send the photos by Friday" is a commitment. Commitments have status `open`, `done`, or `dropped`. The agent that opened a commitment is responsible for resolving it, but anyone with the right ID can mark it done.
 - **Tasks.** Action items the human needs to do. Lighter than a commitment — no external party promised, no resolution date required. Used by the meeting agent to surface follow-ups, by the news agent to flag things worth following up on, etc.
 - **Notes.** Raw inputs that haven't been triaged into one of the above yet. The connector agent dumps everything here first, then promotes individual entries to facts/commitments/tasks during its triage pass.
 
 The full schema with field tables, half-lives, and access matrix lives alongside the brain directory itself, with validators that enforce it. It only makes sense in the context of what an agent is trying to say — so write the agent first, then read the schema when you're about to write to the brain for the first time.
+
+## The subject index — a hint, not a source of truth
+
+At 600 facts across three monthly `facts/YYYY-MM.md` files, the brain is still small enough that `load_facts_for_subject("sarah-chen")` can scan every file on every call without feeling it. Past a thousand facts the re-parse starts to show up in compose latency, and the 6h miner cadence is going to push past a thousand before the end of the quarter.
+
+The brain grew a sidecar for this: `facts/_index.json`, a subject → `[[month, fact_id], …]` map that a nightly cron rebuilds. Readers that want per-subject facts consult the index, open only the monthly files that actually contain the subject's entries, and skip the rest. The underscore prefix sorts the file to the top of a directory listing, the same convention `_pending_review.md` already uses.
+
+The index is a **hint**, not a source of truth. Three invariants keep it honest:
+
+1. **Staleness detection.** The loader compares the index's `built_at_epoch` against the mtime of every monthly `*.md` file. If any monthly file has been modified since the index was built — which is the common case during the day, between nightly rebuilds — the loader silently falls back to the full-scan path for that call.
+2. **Corruption tolerance.** A malformed `_index.json` returns `None` from the loader instead of crashing. The full-scan path kicks in; the nightly rebuild heals the file.
+3. **Writer independence.** Miners and other fact writers never update the index in place. The authoritative shape of the brain is always the `*.md` files; the index derives from them. If the index ever diverges, deleting it is a safe operation — the next rebuild produces a fresh one.
+
+The rebuild runs at 2:45 AM PT under Mr Fixit, slotted between the last pre-dawn miner firing and the morning brief-gen so readers during the compose cycle hit a freshly-rebuilt index. It's a Mr Fixit cron because he's exempt from bubblewrap and already owns fleet brain hygiene (`monthly-archival`, `workspace-snapshot-check`, `brain-validation-check`). Rebuild time for 600 facts is about 6 ms; the whole file is a few KB and checks in to Dropbox like any other brain artifact.
 
 ## Audience scope on facts
 
@@ -64,6 +78,16 @@ Every fact carries an `audience_scope` field — a list of up to three tags draw
 The motivating story is in [Ch 14 — The correspondence layer](14-huckle-cat.md#audience-scope-the-thing-that-makes-drafts-read-like-me): a colleague's draft accidentally cited a family-medical fact pulled from an unrelated thread, and the fix was to gate fact visibility at the recipient circle rather than trusting prompt-engineering alone. The implementation is two-phase: a one-time LLM batch pass retroactively tagged 257 pre-existing facts via `facts-scope-augment.py`, and every miner that writes a new fact now emits an `audience_scope` at write time through `upsert_fact()`. The scope-augment script stays as a belt-and-suspenders re-tagger for facts that slip through unscoped.
 
 The vocabulary interoperates across projects — a parallel cognitive-exoskeleton project uses the same tags on 7,090 facts, and a one-time importer reads those facts through `upsert_fact()` with scope preserved, so 352 pre-tagged facts landed in the Huckle brain on day one with no translation layer. Scope-at-write-time is the durable pattern; retroactive tagging is the escape hatch.
+
+## Person cards as a surfacing layer for facts
+
+People cards (`brain/people/<slug>.md`) are the human-readable summary of who a person is — slug, circles, relationship, `last_interaction`, tone, short context notes. They're what [Ch 14 — Huckle Cat](14-huckle-cat.md) reads when composing a reply, and what the morning relationship nudge reads when deciding who's overdue.
+
+The cards drifted apart from the fact stream for most of the first year — facts accumulated in `brain/facts/YYYY-MM.md` and nothing surfaced them on the corresponding card. A draft would cite a fact the model pulled from the monthly file, but a glance at the person's card gave no indication the fact existed. The fix is an append-only `## Recent observations` section on each card, populated by the miners themselves. A fact mined at confidence ≥ 0.7 triggers a one-line bullet on the subject's card with the date, the content, and the source pointer (`gmail:<msg-id>`, `krisp:<event-id>`, `workflowy:<node-id>`). The section is trimmed to the ten most recent bullets so the card stays scannable.
+
+The rule of thumb is the same one that governs the `voice-profiles/` cache: **don't duplicate durable state.** The fact file is authoritative; the card's recent-observations section is a surfacing layer that exists because scanning three monthly files to answer "what's new about Sarah" is friction nobody should pay. Delete the section and the worst outcome is that the card stops surfacing recent signal — the facts themselves stay intact.
+
+Miners skip the append silently when the target card doesn't exist. Creating a new card from a single mined fact is the wrong default — the fact extractor's confidence floor is there precisely so a single observation isn't authoritative evidence a new subject should enter the brain.
 
 ## Voice profiles — brain-adjacent, not brain-native
 

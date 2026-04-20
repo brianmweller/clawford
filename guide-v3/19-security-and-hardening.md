@@ -1,6 +1,6 @@
 # Security and hardening
 
-*Last updated: 2026-04-17 · Reading time: ~25 min · Difficulty: hard*
+*Last updated: 2026-04-20 · Reading time: ~30 min · Difficulty: hard*
 
 > **TL;DR.** A Clawford fleet is a personal single-operator runtime, and the threat model reflects that: the failures that actually happen are **drift** (an agent slowly learning the wrong behavior), **accident** (a cron that sends a message to the wrong chat), **trust erosion** (a cron fires at 3 AM PT with output that makes the operator stop trusting the fleet), and **promptware** (a malicious calendar invite or LinkedIn DM carries an injection that the agent reads and follows). Seven defense layers line up against those threats: (1) **OS-level immutability** on every file that encodes agent identity, (2) a **script contract + forensic envelope** that makes every cron-invoked script return JSON on stdout, exit 0, and tag itself with a `trace_id` so the whole call chain greps as one unit, (3) **deterministic Python guards** in the deploy tool that refuse to deploy anything that would break the contract, (4) a **regex + LLM-classifier inbound scanner** in front of every external-content ingest path, (5) an **LLM-classifier outbound reviewer** in front of every Telegram send, calendar write, and shopping mutation, (6) a **deterministic rate limiter + dedup** that catches the *quantitative* anomalies the reviewer doesn't (the canonical "the same message went out five times" class), and (7) **process-level isolation** via bubblewrap so a compromised agent can't read another agent's tokens. Credentials are covered in [Ch 17 — Auth architectures](17-auth-architectures.md); this chapter is about the surface around the credentials.
 
@@ -162,24 +162,30 @@ Default mode is `--report-only` (no Telegram alerts) so the rollout week gathers
 
 ## Defense layer 7 — Process-level isolation (P1.2)
 
-Per-agent opt-in: each cron-invoked script can wrap its subprocess in `bubblewrap` so the agent runs inside an unprivileged user namespace. A compromised agent can no longer read another agent's workspace files at the OS layer.
+Every cron-invoked script runs inside a `bubblewrap` unprivileged user namespace unless it belongs to Mr Fixit. A compromised agent can no longer read another agent's workspace files at the OS layer.
 
-Helper: `agents/shared/isolation.py:bwrap_command(agent_id, workspace, brain_root, repo_root)` returns the bwrap argv prefix. Default profile:
+The opt-in mechanism is file-based. `~/.clawford/bwrap-allowlist.txt` lists the cron log-names that get `CLAWFORD_ISOLATION_MODE=bwrap` exported before the script runs; the host-cron wrapper reads it. As of 2026-04-20 the default allowlist ships with every non-Fixit fleet cron enabled — browser-driven crons included.
 
-- RO bindings: `/usr`, `/etc`, `/lib`, `/lib64`, `/bin`, `/sbin`, the repo, the brain root
-- RW bindings: the agent's own workspace, the agent's own brain subdir
-- Tmpfs `/tmp` + `/var/tmp` per invocation
-- `--share-net` (Telegram + LLM + browser network all work)
-- `--die-with-parent` (no zombie sandboxes)
-- Deliberately NO `--unshare-pid` / `--unshare-ipc` — Camoufox/Firefox use SysV shared memory and would crash. Theoretical sandboxing that breaks browser automation is the anti-pattern to avoid.
+Helper: `agents/shared/isolation.py:bwrap_command(agent_id, workspace, brain_root, repo_root)` returns the bwrap argv prefix. Default profile, as it stands today:
 
-Mr Fixit is hard-coded as exempt (`isolation.ISOLATION_EXEMPT_AGENTS = {"fix-it"}`). The fleet operator reads every other agent's brain + workspace, runs `validate.py`, proposes remediations across the fleet — a locked-down profile silently breaks all of that. The exemption is structural (in code), not just convention (in docs), so a manifest typo can't sneak fix-it into a broken-but-running state.
+- **RO bindings:** `/usr`, `/etc`, `/lib`, `/lib64`, `/bin`, `/sbin`, `/run` (for DNS symlink resolution), `~/.local` (user-pip deps), the repo, the brain root, `~/.codex/` (Codex OAuth token), `~/.clawford/operator.json` (operator identity loader).
+- **RW bindings:** the agent's own workspace, the agent's own `brain/agents/<agent_id>/` subdir, plus a whitelist of shared write targets — `brain/facts/`, `brain/people/`, `brain/commitments/`, `brain/queues/`. Every other path under `brain/` stays RO.
+- **Tmpfs:** `/tmp`, `/var/tmp`, and `/dev/shm` — per invocation.
+- `--share-net` (Telegram + LLM + browser network all work).
+- `--die-with-parent` (no zombie sandboxes).
+- Deliberately NO `--unshare-pid` / `--unshare-ipc` — Camoufox/Firefox use SysV shared memory and would crash.
 
-Enable per agent by setting `CLAWFORD_ISOLATION_MODE=bwrap` on its host cron line. The wrapper checks for bwrap availability and falls back to unwrapped execution with a stderr warning if missing — devcontainer / non-Linux laptops never block the operator. On Ubuntu 24.04, `kernel.apparmor_restrict_unprivileged_userns=0` must be set (handled by `ops/scripts/install-host-system-deps.sh`).
+Three of those bindings were absent on initial rollout and each caused a specific regression before it landed:
 
-Recommended rollout order: low-risk text-only agents first (Sergeant Murphy meeting-prep, Lowly Worm digest), browser agents last (Hilda Costco/Amazon, Lowly Worm LinkedIn scrape) — Camoufox/Playwright are the most fragile under wrapping, validate carefully before flipping each.
+- **`/dev/shm` tmpfs.** Pre-widening, the default profile had no `/dev/shm` mount. Camoufox and Playwright allocate SysV shared-memory segments there for IPC between the browser master process and its workers; without a `/dev/shm` inside the namespace every browser launch crashed immediately. The earlier version of this chapter recommended keeping browser crons off the allowlist as a workaround. A per-invocation tmpfs at `/dev/shm` fixes the crash and makes the "browser under bwrap" case first-class.
+- **`~/.codex/` RO bind.** The Codex OAuth token lives at `~/.codex/auth.json`. Pre-widening the path wasn't bound into the namespace, so every bwrap'd call through `agents/shared/llm.py::infer` failed with "auth.json not found." The fix is a single `--ro-bind-try` line.
+- **Brain RW whitelist.** The original profile RW-bound only `<brain>/agents/<agent_id>/`. Any script that wrote to `brain/facts/`, `brain/people/`, `brain/commitments/`, or `brain/queues/` — which is most brain-writing crons in the fleet — hit EROFS silently. The whitelist widens the RW surface to those four subdirs explicitly; everything else under `brain/` stays RO so the cross-agent read protection the layer exists for stays intact.
 
-Per-agent brain subdirs are RW-bound for the agent that owns them; every other agent's subdir is RO. The `<brain>/agents/` directory itself is RO — no agent writes sibling files there. The isolation goal (protecting workspace cache with tokens, conversation history, secrets) is preserved because per-agent brain subdirs are still RO unless explicitly the agent's own.
+Mr Fixit is hard-coded as exempt (`isolation.ISOLATION_EXEMPT_AGENTS = {"fix-it"}`). The fleet operator reads every other agent's brain + workspace, runs `validate.py`, proposes remediations across the fleet — a locked-down profile silently breaks all of that. The exemption is structural (in code), not just convention (in docs), so a manifest typo can't sneak fix-it into a broken-but-running state. This is why this chapter treats the Fixit carve-out as a defense of the layer's usefulness, not a gap in its coverage.
+
+Enable per cron by editing the allowlist and re-running `install-bwrap-allowlist.sh` on the VPS. The wrapper checks for bwrap availability and falls back to unwrapped execution with a stderr warning if missing — devcontainer / non-Linux laptops never block the operator. On Ubuntu 24.04, `kernel.apparmor_restrict_unprivileged_userns=0` must be set (handled by `install-host-system-deps.sh`).
+
+The 2026-04-20 rollout went in two stages — non-browser crons first for a short soak, browser crons (Costco Camoufox, LinkedIn Playwright, Google Messages DevTools) second once the brain-write and SHM fixes had a clean smoke. The staging made it cheap to isolate any regression to the browser variable specifically. It's the right sequence for any future profile change that touches the same hot paths.
 
 ## Credential storage
 
@@ -242,6 +248,8 @@ Name the gaps so the operator knows where to spend the next marginal hour of har
 > 🧨 **Pitfall.** Forgetting that the reviewer + scanner + rate limiter are warn-mode by default. **Why:** they don't actually block until the operator flips `CLAWFORD_REVIEWER_MODE=enforce` / `CLAWFORD_INBOUND_SCANNER_MODE=enforce` / `CLAWFORD_RATE_LIMIT_MODE=enforce`. Until then, the protection is *visibility*, not *blocking*. The misread to avoid: "the reviewer is wired in, so the fleet is safe" — the wiring alone doesn't refuse anything. **How to avoid:** review the per-mode env vars before declaring victory on any layer, and treat the rollout week as a daily-log-review obligation, not a fire-and-forget.
 
 > 🧨 **Pitfall.** Putting Mr Fixit in a bubblewrap profile. **Why:** the fleet operator reads every other agent's brain + workspace, runs `validate.py` against the entire brain, and proposes remediations against other agents' state via `propose_rerun_cron` / `propose_snooze_alert` / `propose_refresh_session`. A locked-down profile silently breaks all of that — and "silently" is the worst kind of break, because Mr Fixit's job is to be the first one to notice silent breaks. **How to avoid:** the exemption is hard-coded in `agents/shared/isolation.py:ISOLATION_EXEMPT_AGENTS = {"fix-it"}` so a manifest typo can't sneak fix-it into a wrapped state. If you ever want to wrap fix-it, add a bind-everything operator profile first; never run fix-it under the default agent profile.
+
+> 🧨 **Pitfall.** Adding a new brain-writing cron to the bwrap allowlist without updating the RW whitelist. **Why:** the default profile RW-binds only `brain/{facts,people,commitments,queues}/`. A cron that writes to any other path under `brain/` (say, a new `brain/briefs/` subdir) will hit EROFS silently — the SCRIPT_CONTRACT envelope comes back as `error` with an OSError somewhere in the traceback. The `daily-refresh` cron carried exactly this regression for two days in April 2026, writing to `brain/people/*.md` against a profile that only bound `brain/agents/<agent_id>/` RW. **How to avoid:** before allowlisting a new cron, grep its source for write paths under `brain/`. If any land outside the four-subdir RW whitelist, widen the profile first and re-run smokes under `CLAWFORD_ISOLATION_MODE=bwrap`; don't add the cron until the writes land cleanly.
 
 ## See also
 

@@ -165,10 +165,11 @@ color-coded: <span class="d-tag d-easy">easy</span>
 
     ---
 
-    `hard` · ~20 min
+    `hard` · ~35 min
 
-    Relationship memory across seven sources. The only agent where the
-    mining pipeline runs **before** the first cron — by design.
+    Relationship memory across seven sources plus an email correspondence
+    layer. The only agent where the mining pipeline runs **before** the
+    first cron — by design.
     { .d-hard }
 
 -   __[15 — Hilda Hippo 🦛🛒](15-hilda-hippo.md)__
@@ -191,10 +192,10 @@ color-coded: <span class="d-tag d-easy">easy</span>
 
     ---
 
-    `moderate` · ~10 min
+    `moderate` · ~15 min
 
     The git + Dropbox directory that turns a pile of agents into a
-    fleet. Four primitives, two halves, all appends.
+    fleet. Four primitives, two halves, a per-subject index, all appends.
     { .d-moderate }
 
 -   __[17 — Auth architectures](17-auth-architectures.md)__
@@ -222,10 +223,11 @@ color-coded: <span class="d-tag d-easy">easy</span>
 
     ---
 
-    `hard` · ~25 min
+    `hard` · ~30 min
 
     Seven defense layers against drift, accident, credential leak,
-    trust erosion, promptware, and active attack.
+    trust erosion, promptware, and active attack. Bubblewrap profile
+    covers every non-Fixit cron.
     { .d-hard }
 
 </div>

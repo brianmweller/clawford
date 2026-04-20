@@ -136,8 +136,8 @@ As of 2026-04-20, Huckle Cat runs ten host crons off `~/.clawford/connector-work
 | `inbox-triage` | `*/30 * * * *` | Scans recent inbound threads, filters service senders + self, queues known-sender threads for drafting in `cache/triage-queue.json` |
 | `auto-compose` | `5,35 * * * *` | Drains the triage queue — one draft (or FYI) per thread, idempotent via processed-log, caps at 5 threads per run |
 | `gmail-watch-renew` | `0 7 * * *` | Daily re-call of `users.watch()` to keep the Pub/Sub push path alive (the real-time triage listener is a sibling story) |
-| `gmail-facts-mine` | `0 9 * * *` | Mines durable facts from the last 24h of inbound + sent mail; writes upserts into `brain/facts/YYYY-MM.md` |
-| `workflowy-facts-mine` | `30 9 * * *` | Pulls the Workflowy export, extracts facts from nodes that mention a known-person full-name, upserts into `brain/facts/` |
+| `gmail-facts-mine` | `0 4,10,16,22 * * *` | Mines durable facts from the rolling inbound + sent window; writes upserts into `brain/facts/YYYY-MM.md` |
+| `workflowy-facts-mine` | `30 4,10,16,22 * * *` | Pulls the Workflowy export, extracts facts from nodes that mention a known-person full-name, upserts into `brain/facts/` |
 
 **Workspace layout** under `~/.clawford/connector-workspace/`:
 
@@ -292,9 +292,9 @@ The fix: three daily miners that extract durable facts from three sources and wr
 
 | Miner | Source | Cron (UTC) | Subject inference |
 |---|---|---|---|
-| `gmail-facts-mine.py` | Gmail inbox + sent, last 24h | `0 9` | `From` / `To` / `Cc` emails mapped against `people/*.md`'s `email:` field |
-| `transcript-facts-mine.py` | Meeting-transcript debriefs (meetings-coach-side) | `15 9` | Attendee emails on the pending debrief; all-hands (>6 attendees) dropped |
-| `workflowy-facts-mine.py` | Workflowy tree via `/nodes-export` | `30 9` | Whole-word full-name mentions against `people/*.md`'s `full_name:` field |
+| `gmail-facts-mine.py` | Gmail inbox + sent, rolling window from cursor | `0 4,10,16,22` | `From` / `To` / `Cc` emails mapped against `people/*.md`'s `email:` field |
+| `krisp-facts-mine.py` | Meeting-transcript debriefs (meetings-coach-side) | `15 4,10,16,22` | Attendee emails on the pending debrief; all-hands (>6 attendees) dropped |
+| `workflowy-facts-mine.py` | Workflowy tree via `/nodes-export` | `30 4,10,16,22` | Whole-word full-name mentions against `people/*.md`'s `full_name:` field |
 
 The transcript miner lives in the `meetings-coach-workspace/` rather than the `connector-workspace/`. That's deliberate — the pending-debrief JSONs are already in the meetings-coach workspace, and reading them from the connector would require a cross-workspace file access that doesn't survive process-level isolation. Placing the miner in its own agent's workspace keeps the read in-bounds.
 
@@ -305,7 +305,15 @@ Shared design rules, all enforced in `fact_extraction.py`:
 - **Confidence floor.** Facts with `confidence < 0.3` are dropped silently. Facts in `[0.3, 0.6)` are still written to `brain/facts/` — the Flux-style pattern — but also flagged for review (see next section).
 - **Scope required.** A fact with no `audience_scope` (or an entirely-invalid scope list) is dropped. The rule is that miners don't produce untagged facts.
 
-The three cron times sit in a pre-dawn 30-minute window because the fleet's morning brief generates at `30 10 UTC` (3:30 AM PT); mining an hour earlier means any new fact lands in the brain before the next day's drafts compose against it. That scheduling rule matters more for the email-facing miners than it would for something like the birthday miner.
+The three miners fire every six hours — 04/10/16/22 UTC, which is 20/02/08/14 Pacific. The 10 UTC slot (2 AM PT) is the pre-brief one: any fact mined in that slot lands in the brain before the `30 10 UTC` brief-gen composes against it, keeping the Fleet 5 AM PT rule intact. The other three slots are about responsiveness through the workday — a fact extracted from a morning Gmail reply is available in the brain by early afternoon, not the next morning. Each miner's cursor advances across runs so the same message isn't re-extracted; re-observations of an already-known fact feed the reinforcement loop below instead of silently no-op'ing.
+
+### Reinforcement on re-observation
+
+The first cut of `upsert_fact()` returned `status: skipped` when it saw a duplicate idempotency key — a fact it had already written with the same `(source_agent, subject, key)` triple. That's correct for idempotency ("don't double-write the same entry") but it throws away a real signal: *this fact just got observed again.* A fact seen three times across three different emails is stronger evidence than the same fact seen once.
+
+The current behavior, landed 2026-04-20, is Flux-style reinforcement. On idempotency collision, the fact's `confidence` bumps by 0.05 (capped at 0.95 so reinforcement asymptotes below 1.0 — "I've seen this a lot" stays semantically distinct from "this is a verified truth") and its `last_reinforced_at` field updates to the incoming timestamp. The miner envelope gains a `facts_reinforced` counter alongside `facts_minted`. Recency-sorted brain readers — "what's been observed about this person lately?" — get a real answer instead of the `recorded_at` timestamp frozen on first-write.
+
+The dedup invariant still holds. No matter how many times the same email gets reprocessed by a re-run, there's still exactly one fact block on disk for that idempotency key. Reinforcement rewrites that block in place; it never appends.
 
 ### Low-confidence flagging
 
@@ -313,7 +321,11 @@ The mining pipeline writes everything at `confidence ≥ 0.3`, which is delibera
 
 The compromise mirrors the parallel project's pattern: facts at `[0.3, 0.6)` land in `brain/facts/YYYY-MM.md` with their real confidence value AND get a one-line pointer appended to `brain/facts/_pending_review.md` — a separate file the operator can skim periodically to confirm or delete low-confidence entries. The review pointer captures the fact id, confidence, source (`gmail:<msg-id>`, `krisp:<event-id>`, `workflowy:<node-id>`), the LLM's stated reason, and the content. Writes to the review file are atomic and idempotent on fact id; re-running the miner over the same window doesn't duplicate review entries.
 
-The parallel effect is that the composer can filter on a higher confidence threshold (default `≥ 0.6`) so low-confidence facts don't leak into drafts until the operator confirms them. Facts that survive review get their confidence bumped; facts that don't get deleted from both the month file and the review tracker. The plumbing for the composer-side threshold is in place; the review-pass UX is still a manual-file workflow and may become a conversational surface in a later pass.
+The composer-side gate is wired up: `load_facts_for_subject(..., min_confidence=0.6)` is the signature every compose path uses, and facts below the threshold never land in the recipient context. Facts that survive review get their confidence bumped over time through the reinforcement path above; facts that don't get deleted from both the month file and the review tracker. The review-pass UX is still a manual-file workflow and may become a conversational surface in a later pass.
+
+### Person cards as a surfacing layer
+
+High-confidence facts (≥ 0.7) also append a one-line observation to the subject's `brain/people/<slug>.md` under a `## Recent observations` section — append-only, trimmed to ten entries. The card is not a second source of truth; the fact file stays authoritative. The appended line is a surfacing mechanism so a glance at the card tells the operator what's new about Sarah, without having to scan the monthly fact files. Miners skip the append silently when no card exists yet — the fact itself still writes — because a single mined observation shouldn't be enough to conjure a new subject into the brain. The durable-storage pattern lives in [Ch 16 — The shared brain](16-shared-brain.md); this paragraph is the miner's use of it.
 
 ### Real-time triage (deferred to the next chapter)
 
@@ -321,21 +333,15 @@ A twin pipeline, landing in a sibling session, replaces the half-hour polling of
 
 The polling path above stays in place as belt-and-suspenders. The push path is faster for responsive inbounds ("can you call in ten minutes?") but can miss events under Pub/Sub edge cases and systemd restarts; the poll loop guarantees eventual delivery. The full architecture lives in [Ch 18 — The inbox](18-the-inbox.md).
 
-### The bubblewrap beat — a gap, honestly surfaced
+### The bubblewrap beat
 
-The three new fact miners were intended to run under process-level isolation — the first agents outside Mr Fixit to adopt the P1.2 bubblewrap profile documented in [Ch 19 — Security and hardening](19-security-and-hardening.md). The file-based opt-in pattern already existed: a line per cron log-name in `~/.clawford/bwrap-allowlist.txt`, read by the host-cron wrapper, triggers the `CLAWFORD_ISOLATION_MODE=bwrap` handoff before the script runs.
+The three fact miners run under process-level isolation — the first brain-writing crons to adopt the P1.2 bubblewrap profile documented in [Ch 19 — Security and hardening](19-security-and-hardening.md). The file-based opt-in pattern: a line per cron log-name in `~/.clawford/bwrap-allowlist.txt`, read by the host-cron wrapper, triggers the `CLAWFORD_ISOLATION_MODE=bwrap` handoff before the script runs.
 
-The smoke test surfaced a pre-existing gap in the profile. The default bwrap binds expose:
+The initial rollout surfaced a real gap in the profile. The pre-widening default bound `brain/agents/<agent_id>/` RW and left everything else under `brain/` read-only. The miners write to `brain/facts/`. The `daily-refresh` cron writes to `brain/people/`. The meetings-coach debrief path writes to `brain/commitments/`. Under the old profile, every one of those writes hit EROFS silently, and the `daily-refresh` host log had been carrying exactly that error for two days before the miners flagged it.
 
-- The agent's own workspace — read-write.
-- The shared brain's `agents/<agent_id>/` subdir — read-write.
-- Everything else under `brain/` — read-only.
+The right fix was to widen the profile, not to keep the miners exempt. The 2026-04-20 pass added three things to the bwrap default: an RW whitelist for `brain/{facts,people,commitments,queues}/` (the shared write targets; every other path under `brain/` stays RO), an RO bind for `~/.codex/` (so the Codex token loader resolves inside the namespace), and a tmpfs at `/dev/shm` (so SysV shared memory works and browser-driven crons can join the allowlist too). The three miners went on the allowlist in the same commit, and within a day every non-Fixit cron in the fleet followed. The profile widening is covered end-to-end in Ch 19's Defense Layer 7.
 
-That third bullet is the problem. The miners write to `brain/facts/`. `daily-refresh` writes to `brain/people/`. Sergeant Murphy's debriefs write to `brain/commitments/`. Under the current bwrap profile, every one of those writes is EROFS, and the `daily-refresh` host log has been carrying exactly that error since 2026-04-18 on the crons that already opted in.
-
-The honest resolution was to pull the three fact miners off the bubblewrap allowlist until the profile is widened to bind the common writable brain subdirs (or until the brain's write layout is inverted — writable by default, read-only exceptions). The miners are deployed and running today *without* bwrap, same as the rest of the brain-writing crons. Reinstating them is two lines: uncomment the three entries in `ops/bwrap-allowlist.default.txt` and re-run the allowlist installer on the VPS.
-
-> 🧨 **Pitfall.** Opting a cron into bubblewrap without checking what directories it writes. **Why:** the default P1.2 profile binds `brain/agents/<agent_id>/` read-write and everything else under `brain/` read-only. Any cron that writes to `brain/facts/`, `brain/people/`, `brain/commitments/`, or `brain/queues/` will EROFS silently (the SCRIPT_CONTRACT envelope will come back as `error` with an OSError in the traceback). **How to avoid:** before adding a cron to the allowlist, grep its source for `brain/` write paths. If any land outside the agent's own subdir, the allowlist entry stays out until the profile is widened.
+> 🔦 **Tip.** When a new brain-writing cron joins the fleet, check whether its write target is already in the RW whitelist. If it isn't, widen the profile first — don't carve out a per-cron exception. The whitelist is explicit by design so it stays a short, auditable list.
 
 ## Deployment walkthrough
 
