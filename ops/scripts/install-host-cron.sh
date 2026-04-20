@@ -30,6 +30,7 @@
 #   0 10 * * *    connector-daily-refresh               → CONNECTOR_BOT_TOKEN  (Phase 4 — runs 30 min before morning-relationship-nudge at 30 10 UTC so people-scan sees fresh last_interaction)
 #   30 10 * * *   connector-morning-relationship-nudge  → CONNECTOR_BOT_TOKEN  (Phase 4 — daily nudge for 5 AM PT fleet; Monday recap folds weekly-review)
 #   0 8,20 * * *  connector-notes-triage-alert          → CONNECTOR_BOT_TOKEN  (Phase 4 — LLM classifies inbox notes twice daily)
+#   0 6 * * 0     connector-birthday-miner              → CONNECTOR_BOT_TOKEN  (2026-04-19 — weekly passive GCal scan → identity facts)
 #   30 10 * * *   meetings-coach-morning-meeting-brief  → MEETINGS_BOT_TOKEN   (Phase 4 — daily brief for 5 AM PT fleet; Monday fold replaces weekly-review)
 #   */30 * * * *  meetings-coach-pre-meeting-alert      → MEETINGS_BOT_TOKEN   (Phase 4 — 15-45 min lookahead, sent-alerts.json dedup)
 #   15,45 * * * * meetings-coach-post-meeting-scan      → MEETINGS_BOT_TOKEN   (Phase 4 — Krisp transcript scan + LLM coaching; preserves 74c726c idempotency)
@@ -126,6 +127,7 @@ CONTRACT_ENTRIES=(
   "0 10 * * *|connector-daily-refresh|/home/openclaw/.clawford/connector-workspace/scripts/daily-refresh.py|CONNECTOR_BOT_TOKEN|600"
   "30 10 * * *|connector-morning-relationship-nudge|/home/openclaw/.clawford/connector-workspace/scripts/morning-relationship-nudge.py|CONNECTOR_BOT_TOKEN|300"
   "0 8,20 * * *|connector-notes-triage-alert|/home/openclaw/.clawford/connector-workspace/scripts/notes-triage-alert.py|CONNECTOR_BOT_TOKEN|180"
+  "0 6 * * 0|connector-birthday-miner|/home/openclaw/.clawford/connector-workspace/scripts/birthday-miner.py|CONNECTOR_BOT_TOKEN|300"
   "30 10 * * *|meetings-coach-morning-meeting-brief|/home/openclaw/.clawford/meetings-coach-workspace/scripts/morning-meeting-brief.py|MEETINGS_BOT_TOKEN|300"
   "*/30 * * * *|meetings-coach-pre-meeting-alert|/home/openclaw/.clawford/meetings-coach-workspace/scripts/pre-meeting-alert.py|MEETINGS_BOT_TOKEN|180"
   "15,45 * * * *|meetings-coach-post-meeting-scan|/home/openclaw/.clawford/meetings-coach-workspace/scripts/post-meeting-scan.py|MEETINGS_BOT_TOKEN|300"
