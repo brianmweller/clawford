@@ -45,7 +45,6 @@ from agents.shared.fact_extraction import (                        # noqa: E402
 from agents.shared.facts import upsert_fact                        # noqa: E402
 from agents.shared.people import append_observation                # noqa: E402
 from agents.shared.gmail_api import extract_plain_body             # noqa: E402
-from agents.shared.operator import load_operator                   # noqa: E402
 from flux_import_lib import build_email_to_slug_map                # noqa: E402
 from gmail_facts_mine_lib import (                                 # noqa: E402
     build_candidate_slugs,
@@ -54,6 +53,12 @@ from gmail_facts_mine_lib import (                                 # noqa: E402
     message_metadata,
     save_cursor,
 )
+
+BRIAN_ADDRESSES = {
+    "sam.smith@example.com",
+    "sam.smith+backup@example.com",
+    "sam.smith+work@example.com",
+}
 
 DEFAULT_TOKEN = Path(os.path.expanduser("~/.clawford/connector-workspace/token.json"))
 DEFAULT_CREDS = Path(os.path.expanduser("~/.clawford/connector-workspace/credentials.json"))
@@ -148,7 +153,7 @@ def run(
         slugs = build_candidate_slugs(
             msg,
             email_to_slug=email_to_slug,
-            operator_emails=load_operator().emails,
+            operator_emails=BRIAN_ADDRESSES,
         )
         if not slugs:
             stats["messages_skipped_no_candidates"] += 1
@@ -159,7 +164,7 @@ def run(
             stats["messages_skipped_no_candidates"] += 1
             continue
 
-        meta = message_metadata(msg, operator_emails=load_operator().emails)
+        meta = message_metadata(msg, operator_emails=BRIAN_ADDRESSES)
         try:
             facts = extract_facts_from_text(
                 text=body,

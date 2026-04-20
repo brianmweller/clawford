@@ -44,7 +44,6 @@ from agents.shared.fact_extraction import (                        # noqa: E402
 )
 from agents.shared.facts import upsert_fact                        # noqa: E402
 from agents.shared.people import append_observation                # noqa: E402
-from agents.shared.operator import load_operator                   # noqa: E402
 from krisp_facts_mine_lib import (                                 # noqa: E402
     build_candidate_slugs,
     chunk_transcript,
@@ -60,6 +59,12 @@ DEFAULT_CURSOR = Path(os.path.expanduser(
 ))
 
 TRANSCRIPT_CHUNK_CHARS = 8000
+
+BRIAN_ADDRESSES = {
+    "sam.smith@example.com",
+    "sam.smith+backup@example.com",
+    "sam.smith+work@example.com",
+}
 
 
 def _build_email_to_slug_map(people_dir: Path) -> dict[str, str]:
@@ -138,7 +143,7 @@ def run(
 
         slugs = build_candidate_slugs(
             d, email_to_slug=email_to_slug,
-            operator_emails=load_operator().emails,
+            operator_emails=BRIAN_ADDRESSES,
         )
         if not slugs:
             stats["transcripts_skipped_no_candidates"] += 1
