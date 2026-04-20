@@ -31,8 +31,11 @@ import sys
 from pathlib import Path
 
 
-_REPO = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(_REPO))
+for _p in Path(__file__).resolve().parents:
+    if (_p / "agents" / "shared").is_dir():
+        if str(_p) not in sys.path:
+            sys.path.insert(0, str(_p))
+        break
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from agents.shared.brain import dropbox_brain_root                  # noqa: E402

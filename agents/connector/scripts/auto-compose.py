@@ -41,8 +41,11 @@ from pathlib import Path
 
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent
-_REPO = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(_REPO))
+for _p in Path(__file__).resolve().parents:
+    if (_p / "agents" / "shared").is_dir():
+        if str(_p) not in sys.path:
+            sys.path.insert(0, str(_p))
+        break
 
 DEFAULT_QUEUE = Path(os.path.expanduser("~/.clawford/connector-workspace/cache/triage-queue.json"))
 DEFAULT_LOG = Path(os.path.expanduser("~/.clawford/connector-workspace/cache/auto-compose-log.json"))

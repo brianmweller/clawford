@@ -153,13 +153,22 @@ def test_cron_message_is_hygienic(agent_id: str, cron_name: str, msg: str) -> No
 # but the soft `test_script_is_natively_compliant` test marks them xfail
 # until converted. Add a reason when listing a script.
 NATIVE_COMPLIANCE_XFAIL: set[str] = {
-    # (Cleared 2026-04-18 — all 41 prior entries converted via the
-    # contract-envelope tail pattern. Some entries were stale references
-    # to renamed/removed scripts: shopping/reauth_retry_policy.py,
-    # shopping/costco-keepalive.py, fix-it/diagnose-approval.py.
-    # If a script legitimately cannot satisfy the native contract
-    # (e.g., genuinely requires >20s of work on any invocation), add
-    # its rel key with a one-line reason.)
+    # Compose-pipeline libraries — not executable, import-only. Added to
+    # manifest for deploy.py sync but aren't meant to run bare.
+    "connector/compose_lib.py",
+    "connector/inbox_triage_lib.py",
+    "connector/flux_import_lib.py",
+    "connector/voice_profile_lib.py",
+    # Compose-pipeline CLIs — require args (--person-slug, --gmail-thread-id,
+    # --circle, etc.) or a live Gmail token; bare invocation can't produce
+    # the contract envelope without side effects. Invoked by cron with
+    # explicit args, never bare.
+    "connector/draft-compose.py",
+    "connector/inbox-triage.py",
+    "connector/auto-compose.py",
+    "connector/voice-profile-build.py",
+    "connector/facts-import-flux.py",
+    "connector/people-expand-from-flux.py",
 }
 
 

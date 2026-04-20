@@ -29,9 +29,15 @@ import sys
 from pathlib import Path
 
 
-# Make agents.* imports work
-_REPO = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(_REPO))
+# Make agents.* imports work on both repo layout
+# (.../Clawford/agents/connector/scripts/) and VPS workspace layout
+# (.../connector-workspace/scripts/ with agents/shared mirrored under
+# .../connector-workspace/agents/shared/)
+for _p in Path(__file__).resolve().parents:
+    if (_p / "agents" / "shared").is_dir():
+        if str(_p) not in sys.path:
+            sys.path.insert(0, str(_p))
+        break
 # Sibling compose_lib.py
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
