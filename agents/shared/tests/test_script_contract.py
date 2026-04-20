@@ -73,12 +73,23 @@ def _all_scripts() -> list[tuple[str, Path]]:
 
     Non-.py files (e.g. retire.sh) are excluded — the contract only
     applies to Python scripts invoked by cron LLM sessions.
+
+    *_lib.py files are excluded too. Naming convention: files ending in
+    _lib.py are import-only modules (compose_lib, inbox_triage_lib,
+    flux_import_lib, voice_profile_lib, the miner libs, etc.) listed in
+    manifests so deploy.py copies them to the workspace, but they
+    aren't callable as scripts. Running them bare or wrapped produces
+    nothing meaningful. Before 2026-04-20 each _lib.py was listed
+    manually in NATIVE_COMPLIANCE_XFAIL; the naming convention already
+    carries the signal, so we filter them here instead.
     """
     out: list[tuple[str, Path]] = []
     for agent_id, mf in _load_manifests():
         agent_dir = AGENTS_DIR / agent_id
         for rel in mf.get("scripts") or []:
             if not rel.endswith(".py"):
+                continue
+            if rel.endswith("_lib.py") or "_lib.py" in Path(rel).name:
                 continue
             out.append((agent_id, (agent_dir / rel).resolve()))
     return out
@@ -122,6 +133,20 @@ def _message_violations(msg: str) -> list[str]:
     return [p for p in FORBIDDEN_PATTERNS if p in msg]
 
 
+def test_all_scripts_excludes_lib_files() -> None:
+    """*_lib.py files are import-only helpers; they should not appear
+    in the script-contract parametrize lists (neither the native nor
+    the wrapper test can exercise them meaningfully). Regression guard
+    for the 2026-04-20 convention switch from a manually-maintained
+    xfail list to naming-based exclusion."""
+    scripts = _all_scripts()
+    lib_paths = [p for _, p in scripts if p.name.endswith("_lib.py")]
+    assert lib_paths == [], (
+        "_lib.py files leaked into the compliance test list: "
+        f"{[p.name for p in lib_paths]}"
+    )
+
+
 @pytest.mark.parametrize(
     "agent_id,cron_name,msg",
     _all_cron_messages(),
@@ -153,15 +178,8 @@ def test_cron_message_is_hygienic(agent_id: str, cron_name: str, msg: str) -> No
 # but the soft `test_script_is_natively_compliant` test marks them xfail
 # until converted. Add a reason when listing a script.
 NATIVE_COMPLIANCE_XFAIL: set[str] = {
-    # Compose-pipeline libraries — not executable, import-only. Added to
-    # manifest for deploy.py sync but aren't meant to run bare.
-    "connector/compose_lib.py",
-    "connector/inbox_triage_lib.py",
-    "connector/flux_import_lib.py",
-    "connector/voice_profile_lib.py",
-    "connector/gmail_facts_mine_lib.py",
-    "connector/workflowy_facts_mine_lib.py",
-    "meetings-coach/krisp_facts_mine_lib.py",
+    # (2026-04-20) *_lib.py files are filtered at parametrize time via
+    # _all_scripts() naming convention — no longer listed here.
     # Compose-pipeline CLIs — require args (--person-slug, --gmail-thread-id,
     # --circle, etc.) or a live Gmail token; bare invocation can't produce
     # the contract envelope without side effects. Invoked by cron with
