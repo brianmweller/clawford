@@ -24,7 +24,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -50,6 +49,7 @@ from agents.shared.context_builder import build_recipient_context  # noqa: E402
 from agents.shared.facts import load_facts_for_subject             # noqa: E402
 from agents.shared.voice import compose_voice_guidance             # noqa: E402
 from compose_lib import build_compose_prompt, parse_compose_result  # noqa: E402
+from inbound_act_lib import classify_inbound_act                   # noqa: E402
 
 
 BRAIN_ROOT = dropbox_brain_root()
@@ -111,17 +111,6 @@ def _load_voice_profile_for_person(person: dict) -> dict | None:
     return None
 
 
-def call_claude_cli(prompt: str, timeout: int = 180) -> str:
-    result = subprocess.run(
-        ["claude", "-p"],
-        input=prompt,
-        capture_output=True, text=True, timeout=timeout, encoding="utf-8",
-    )
-    if result.returncode != 0:
-        return json.dumps({"error": f"claude cli exited {result.returncode}: {result.stderr.strip()[:500]}"})
-    return result.stdout
-
-
 def call_codex(prompt: str, timeout: int = 180) -> str:
     """Call the OpenClaw Codex broker via agents/shared/llm.py. This is
     the production path — runs on the VPS via ChatGPT subscription's
@@ -151,8 +140,8 @@ def main() -> int:
     ap.add_argument("--json-out", type=Path, help="Write full parsed result + metadata to this path as JSON")
     ap.add_argument("--print-prompt-only", action="store_true")
     ap.add_argument("--llm-backend", default="codex",
-                    choices=["codex", "claude-cli", "stdout"],
-                    help="codex (production, via agents/shared/llm.py) | claude-cli (local dev) | stdout (skip LLM)")
+                    choices=["codex", "stdout"],
+                    help="codex (production, via agents/shared/llm.py) | stdout (skip LLM for prompt preview)")
     args = ap.parse_args()
 
     person = load_person(args.person_slug)
@@ -186,18 +175,17 @@ def main() -> int:
         email_history=history,
     )
 
-    # Hardcoded dimensions for dry-run; production will come from an LLM
-    # pre-pass classifier (agents/shared/inbound_act.py — not yet built).
-    inbound_act = {
-        "intent": "thank",
-        "imposition": 0.1,
-        "audience_shape": "one_to_one",
-        "thread_position": "replying",
-        "expected_response": "fyi_only",
-        "sensitivity": "personal",
-        "emotional_valence": "sensitive",
-        "time_pressure": "late_reply",
-    }
+    # Classify the inbound's pragmatic dimensions before voice calibration
+    # runs. Structural fields (audience_shape, thread_position, time_pressure)
+    # are computed mechanically; subjective fields (intent, imposition, etc.)
+    # come from a small LLM pre-pass. Falls through to sensible defaults if
+    # the LLM backend fails.
+    def _classifier_llm(prompt: str) -> str:
+        if args.llm_backend == "codex":
+            return call_codex(prompt, timeout=60)
+        return "{}"   # stdout backend — let classifier fall through to defaults
+
+    inbound_act = classify_inbound_act(inbound, history, llm_fn=_classifier_llm)
 
     voice_profile = _load_voice_profile_for_person(person)
     voice = compose_voice_guidance(
@@ -252,6 +240,13 @@ def main() -> int:
     print(f"  facts_blocked:     {len(ctx.facts_blocked)}")
     print()
     print("=" * 72)
+    print("INBOUND ACT")
+    print("=" * 72)
+    for k in ("intent", "imposition", "audience_shape", "thread_position",
+              "expected_response", "sensitivity", "emotional_valence", "time_pressure"):
+        print(f"  {k}: {inbound_act.get(k)}")
+    print()
+    print("=" * 72)
     print("VOICE CALIBRATION")
     print("=" * 72)
     for k in ("register", "politeness_strategy", "politeness_weight",
@@ -287,10 +282,7 @@ def main() -> int:
     print("=" * 72)
     print(f"CALLING LLM ({args.llm_backend})")
     print("=" * 72)
-    if args.llm_backend == "codex":
-        llm_text = call_codex(prompt)
-    else:
-        llm_text = call_claude_cli(prompt)
+    llm_text = call_codex(prompt)
     print(llm_text)
 
     shareable_ids = {f["id"] for f in ctx.facts_shareable}

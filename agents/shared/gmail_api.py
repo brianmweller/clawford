@@ -179,9 +179,22 @@ def thread_to_compose_inputs(thread: dict, operator_emails: set[str]) -> tuple[d
 
     from_raw = _header_value(latest_inbound, "From")
     from_name, from_email = parseaddr(from_raw or "")
+
+    def _split_addrs(header: str) -> list[str]:
+        """Split a To/Cc header into individual email addresses."""
+        if not header:
+            return []
+        return [
+            parseaddr(part)[1]
+            for part in header.split(",")
+            if parseaddr(part)[1]
+        ]
+
     inbound = {
         "from_name": from_name or "",
         "from_email": from_email or "",
+        "to": _split_addrs(_header_value(latest_inbound, "To")),
+        "cc": _split_addrs(_header_value(latest_inbound, "Cc")),
         "subject": _header_value(latest_inbound, "Subject"),
         "received_at": _header_value(latest_inbound, "Date"),
         "body": extract_plain_body(latest_inbound),

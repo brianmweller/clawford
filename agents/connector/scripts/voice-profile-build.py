@@ -31,7 +31,6 @@ import base64
 import json
 import os
 import random
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -111,18 +110,6 @@ def fetch_message_sample(service, message_id: str) -> dict | None:
     }
 
 
-def call_claude_cli(prompt: str, timeout: int = 240) -> str:
-    result = subprocess.run(
-        ["claude", "-p"],
-        input=prompt,
-        capture_output=True, text=True, timeout=timeout, encoding="utf-8",
-        errors="replace",
-    )
-    if result.returncode != 0:
-        return json.dumps({"error": f"claude cli exited {result.returncode}: {(result.stderr or '').strip()[:500]}"})
-    return result.stdout or ""
-
-
 def call_codex(prompt: str, timeout: int = 240) -> str:
     from agents.shared.llm import infer
     result = infer(prompt=prompt, json_mode=True, timeout=timeout)
@@ -177,7 +164,7 @@ def build_profile_for_circle(
         print(f"[{circle}] prompt size: {len(prompt)} chars")
 
     print(f"[{circle}] calling LLM ({llm_backend})...")
-    llm_text = call_codex(prompt) if llm_backend == "codex" else call_claude_cli(prompt)
+    llm_text = call_codex(prompt)
     profile = parse_profile_response(llm_text)
     if "error" in profile:
         return {"error": profile["error"], "raw": llm_text[:2000], "circle": circle}
@@ -200,8 +187,8 @@ def main() -> int:
     ap.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE)
     ap.add_argument("--token", type=Path, default=DEFAULT_TOKEN)
     ap.add_argument("--creds", type=Path, default=DEFAULT_CREDS)
-    ap.add_argument("--llm-backend", default="claude-cli",
-                    choices=["claude-cli", "codex"])
+    ap.add_argument("--llm-backend", default="codex",
+                    choices=["codex"])
     ap.add_argument("--dry-run", action="store_true",
                     help="Print what would be built but skip LLM and writes")
     ap.add_argument("--verbose", action="store_true")
