@@ -99,10 +99,19 @@ regex:\bBRIAN\b==>OPERATOR
 
 ***REMOVED***
 ***REMOVED***
-# turns 'Sam.M.Smith' into 'the operator.M.Weller'.
+***REMOVED***
+***REMOVED***
+***REMOVED***
+***REMOVED***
 Sam.M.Smith==>Sam.M.Smith
+Sam.Smith==>Sam.Smith
+sam.smith==>sam.smith
 Sam M. Smith's list==>Sam M. Smith's list
 alex.rivera@example.com==>alex.rivera@example.com
 priya.lee@example.com==>priya.lee@example.com
 @example.com==>@example.com
-example.com==>example.com
+@EXAMPLE.COM==>@EXAMPLE.COM
+Example Corp==>Example Corp
+ex-Example Corp==>ex-employer
+post-Example Corp==>post-employer
+left Example Corp==>left the company
