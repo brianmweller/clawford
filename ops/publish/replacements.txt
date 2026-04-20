@@ -86,18 +86,22 @@ example.webex.com==>example.webex.com
 ***REMOVED***
 ***REMOVED***
 ***REMOVED***
+***REMOVED***
+***REMOVED***
+***REMOVED***
+***REMOVED***
 priya@example.com==>priya@example.com
 priya@example.com==>priya@example.com
+Priya-Rivera==>Priya-Rivera
+Priya Rivera==>Priya Rivera
 PRIYA-RIVERA==>PRIYA-RIVERA
-regex:\bLeslie\b==>Priya
-regex:\bleslie\b==>priya
 Kai Rivera==>Kai Rivera
 Sam M Smith==>Sam M Smith
 Robin Rivera==>Robin Rivera
-Priya-Weller==>Priya-Rivera
-Priya Weller==>Priya Rivera
 robin-rivera==>robin-rivera
 Robin-Rivera==>Robin-Rivera
+regex:\bLeslie\b==>Priya
+regex:\bleslie\b==>priya
 
 ***REMOVED***
 ***REMOVED***
