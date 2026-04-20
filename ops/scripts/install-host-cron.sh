@@ -170,6 +170,10 @@ CONTRACT_ENTRIES=(
   "30 3 * * *|fix-it-workspace-snapshot-check|/home/openclaw/.clawford/fix-it-workspace/scripts/workspace-snapshot-check.py|TELEGRAM_BOT_TOKEN|600"
   "0 3 1 * *|fix-it-monthly-archival|/home/openclaw/.clawford/fix-it-workspace/scripts/monthly-archival.py|TELEGRAM_BOT_TOKEN|600"
   "0 16 25 4 *|fix-it-probation-end-reminder|/home/openclaw/.clawford/fix-it-workspace/scripts/probation-end-reminder.py|TELEGRAM_BOT_TOKEN|60"
+  # 45 9 UTC = 2:45 AM PT — after the miner window's last pre-brief
+  # slot (2:00 AM PT) and before the morning brief-gen (3:30 AM PT),
+  # so readers hit a fresh index during the morning compose cycle.
+  "45 9 * * *|fix-it-brain-index-rebuild|/home/openclaw/.clawford/fix-it-workspace/scripts/brain-index-rebuild.py|TELEGRAM_BOT_TOKEN|120"
   # P0.2 — Doctor Agent / cognitive heartbeat. Every 30 min, scans
   # every agent's SOUL + MEMORY + fleet-health probe block for drift
   # signals; appends to ~/Dropbox/openclaw-backup/fix-it/drift-audit.md.

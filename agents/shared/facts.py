@@ -102,14 +102,69 @@ def load_facts_for_subject(
     Callers who need the full set (audit tools, triage UIs, the pending-
     review loop itself) can pass ``min_confidence=0.0`` to disable the
     filter.
+
+    Fast path: when ``brain/facts/_index.json`` is present AND fresh (no
+    monthly file has been modified since the index was built), only the
+    months that actually contain facts for the subject are parsed. Falls
+    back to a full scan when the index is absent, stale, or corrupt.
     """
     if not facts_dir.exists():
         return []
     target = subject_slug.lower()
+
+    # Fast path — via index.
+    try:
+        from agents.shared import brain_index as _bi
+    except ImportError:
+        _bi = None  # type: ignore
+    if _bi is not None:
+        index = _bi.load_index(facts_dir)
+        if _bi.is_fresh(facts_dir, index):
+            return _load_via_index(
+                target=target,
+                facts_dir=facts_dir,
+                index=index,
+                min_confidence=min_confidence,
+            )
+
+    # Slow path — full scan. Skip operator-internal files
+    # (_pending_review.md, _index.json-like scratch) so low-confidence
+    # entries quarantined in _pending_review.md don't leak back into
+    # the composer via this loader.
     out: list[dict] = []
     for path in sorted(facts_dir.glob("*.md")):
+        if path.name.startswith("_"):
+            continue
         for fact in parse_facts_file(path):
             if fact["subject"].lower() != target:
+                continue
+            if fact["confidence"] < min_confidence:
+                continue
+            out.append(fact)
+    return out
+
+
+def _load_via_index(
+    *,
+    target: str,
+    facts_dir: Path,
+    index: dict,
+    min_confidence: float,
+) -> list[dict]:
+    """Fast-path helper: parse only the monthly files listed in the
+    index for this subject; apply the confidence filter; return."""
+    entries = (index.get("by_subject") or {}).get(target, [])
+    if not entries:
+        return []
+    months_needed: set[str] = {month for month, _fid in entries}
+    want_ids: set[str] = {fid for _month, fid in entries}
+    out: list[dict] = []
+    for month in sorted(months_needed):
+        path = facts_dir / f"{month}.md"
+        if not path.exists():
+            continue
+        for fact in parse_facts_file(path):
+            if fact["id"] not in want_ids:
                 continue
             if fact["confidence"] < min_confidence:
                 continue

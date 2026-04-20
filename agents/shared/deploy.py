@@ -1196,6 +1196,7 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "audience.py",           # 2026-04-19 — Flux-ported audience-visibility filter for draft-compose
     "availability.py",       # 2026-04-19 — free-slot calculator for draft-compose
     "brain.py",
+    "brain_index.py",         # 2026-04-20 — per-subject _index.json for fast fact lookup
     "brain_tasks.py",         # 2026-04-18 — task-queue parser + in-place editors for Mouse
     "camoufox_proxy.py",
     "context_builder.py",     # 2026-04-19 — RecipientContext assembler for draft-compose

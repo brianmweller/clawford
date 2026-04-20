@@ -204,6 +204,85 @@ def test_load_facts_for_subject_custom_min_confidence(tmp_path: Path):
     assert [f["id"] for f in facts] == ["very-high"]
 
 
+def test_load_facts_for_subject_uses_index_when_fresh(tmp_path: Path):
+    """With a fresh brain_index present, the loader uses the fast
+    path and returns the same set it would have via full scan."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import brain_index as brain_index_mod
+
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "2026-04.md").write_text(SAMPLE_FACTS, encoding="utf-8")
+    idx = brain_index_mod.rebuild_index(facts_dir)
+    brain_index_mod.save_index(facts_dir, idx)
+
+    facts = load_facts_for_subject("priya-rivera", facts_dir, min_confidence=0.0)
+    assert [f["id"] for f in facts] == ["f-001"]
+
+
+def test_load_facts_for_subject_falls_back_when_index_stale(tmp_path: Path):
+    """If a miner writes a new fact after the last index rebuild, the
+    index is stale for that month. Loader must detect and fall back to
+    the slow path so the new fact is still visible."""
+    import sys
+    import time
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import brain_index as brain_index_mod
+
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "2026-04.md").write_text(SAMPLE_FACTS, encoding="utf-8")
+    idx = brain_index_mod.rebuild_index(facts_dir)
+    brain_index_mod.save_index(facts_dir, idx)
+
+    # Simulate a miner appending a new fact for priya after index build.
+    time.sleep(0.01)
+    with open(facts_dir / "2026-04.md", "a", encoding="utf-8") as f:
+        f.write(
+            "\n---\n"
+            "- **id:** f-new\n"
+            "- **content:** Fresh fact\n"
+            "- **subject:** priya-rivera\n"
+            "- **confidence:** 0.9\n"
+            "- **category:** identity\n"
+            "- **recorded_at:** 2026-04-20\n"
+            "- **source_agent:** connector\n"
+        )
+
+    facts = load_facts_for_subject("priya-rivera", facts_dir, min_confidence=0.0)
+    ids = {f["id"] for f in facts}
+    # Slow-path fallback must include the fresh fact AND the pre-existing
+    # one.
+    assert "f-new" in ids
+    assert "f-001" in ids
+
+
+def test_load_facts_for_subject_ignores_underscore_files(tmp_path: Path):
+    """Slow-path glob should skip _pending_review.md and similar
+    operator-internal files. Regression guard: those don't hold
+    regular fact blocks and including them was a silent bug before
+    the Phase 2c rewrite."""
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "2026-04.md").write_text(SAMPLE_FACTS, encoding="utf-8")
+    (facts_dir / "_pending_review.md").write_text(
+        "- **id:** pending-001\n"
+        "- **content:** Low-conf flagged\n"
+        "- **subject:** priya-rivera\n"
+        "- **confidence:** 0.45\n"
+        "- **category:** identity\n"
+        "- **recorded_at:** 2026-04-10\n"
+        "- **source_agent:** connector\n",
+        encoding="utf-8",
+    )
+    # No index → slow path.
+    facts = load_facts_for_subject("priya-rivera", facts_dir, min_confidence=0.0)
+    ids = {f["id"] for f in facts}
+    assert "pending-001" not in ids
+    assert "f-001" in ids
+
+
 def test_load_facts_for_subject_is_case_insensitive(tmp_path: Path):
     facts_dir = tmp_path / "facts"
     facts_dir.mkdir()

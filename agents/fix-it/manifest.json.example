@@ -31,6 +31,7 @@
     "scripts/obsidian-briefing-check.py",
     "scripts/workspace-snapshot-check.py",
     "scripts/doctor-audit.py",
+    "scripts/brain-index-rebuild.py",
     "retire.sh"
   ],
   "state_files": [],
@@ -111,6 +112,14 @@
       "enabled": false,
       "cron": "30 3 * * *",
       "message": "⚡ EXEC DISCIPLINE: run any `python3 <path>` command exactly as written — a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Run: python3 /home/node/repo/agents/shared/workspace-snapshot.py. This tars each agent's workspace to ~/Dropbox/openclaw-backup/workspace-snapshots/<agent>-<date>.tar.gz with 14-day retention. Dropbox syncs the result off-VPS for regression recovery. If the script exits 0, return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. If it exits non-zero: send a Telegram alert with the error. Do NOT use python3 -c. Do NOT use heredocs.",
+      "announce": false,
+      "no_deliver": true
+    },
+    {
+      "name": "brain-index-rebuild",
+      "enabled": false,
+      "cron": "45 9 * * *",
+      "message": "⚡ EXEC DISCIPLINE: run any `python3 <path>` command exactly as written — a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. Run: python3 ~/.clawford/fix-it-workspace/scripts/brain-index-rebuild.py. Rebuilds brain/facts/_index.json so agents/shared/facts::load_facts_for_subject can take the fast-path per-subject lookup. Silent on status=ok. If status=error: send a Telegram alert with the error.",
       "announce": false,
       "no_deliver": true
     },
