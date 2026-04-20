@@ -41,6 +41,7 @@ _REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from agents.shared.brain import dropbox_brain_root  # noqa: E402
 from agents.shared.facts import upsert_fact, parse_facts_file  # noqa: E402
 from flux_import_lib import (  # noqa: E402
     build_email_to_slug_map,
@@ -49,7 +50,7 @@ from flux_import_lib import (  # noqa: E402
 
 
 DEFAULT_FLUX_DB = Path("E:/Dropbox/Startup/Flux/data/flux.db")
-BRAIN_ROOT = Path.home() / "Dropbox" / "openclaw-backup"
+BRAIN_ROOT = dropbox_brain_root()
 
 
 def iter_flux_facts(db_path: Path, max_rows: int | None = None):

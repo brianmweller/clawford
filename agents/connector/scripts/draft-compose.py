@@ -35,13 +35,14 @@ sys.path.insert(0, str(_REPO))
 # Sibling compose_lib.py
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from agents.shared.brain import dropbox_brain_root                  # noqa: E402
 from agents.shared.context_builder import build_recipient_context  # noqa: E402
 from agents.shared.facts import load_facts_for_subject             # noqa: E402
 from agents.shared.voice import compose_voice_guidance             # noqa: E402
 from compose_lib import build_compose_prompt, parse_compose_result  # noqa: E402
 
 
-BRAIN_ROOT = Path.home() / "Dropbox" / "openclaw-backup"
+BRAIN_ROOT = dropbox_brain_root()
 
 _FIELD_RE = re.compile(r"^\s*-\s*\*\*([\w_]+)(?::\*\*|\*\*:)\s*(.*)$")
 
