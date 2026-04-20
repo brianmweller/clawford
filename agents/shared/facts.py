@@ -44,13 +44,20 @@ def parse_facts_file(path: Path) -> list[dict]:
         except ValueError:
             confidence = 0.0
 
+        recorded_at = fields.get("recorded_at", "")
         facts.append({
             "id": fields["id"],
             "content": fields.get("content", ""),
             "subject": fields.get("subject", ""),
             "confidence": confidence,
             "category": fields.get("category", ""),
-            "recorded_at": fields.get("recorded_at", ""),
+            "recorded_at": recorded_at,
+            # Missing last_reinforced_at defaults to recorded_at so
+            # readers that sort by "how recently was this seen" get
+            # a sensible value on pre-reinforcement facts. The
+            # reinforcement path (upsert_fact) stamps the field
+            # explicitly when it bumps.
+            "last_reinforced_at": fields.get("last_reinforced_at", recorded_at),
             "source_agent": fields.get("source_agent", ""),
             "audience_scope": _parse_audience_scope(fields.get("audience_scope")),
             "raw": raw_block,
@@ -101,6 +108,89 @@ _FACT_TEMPLATE = (
 )
 
 
+CONFIDENCE_REINFORCEMENT_BUMP = 0.05
+CONFIDENCE_REINFORCEMENT_CAP = 0.95
+
+
+def _reinforce_fact_in_file(
+    *,
+    path: Path,
+    fact_id: str,
+    current_confidence: float,
+    reinforced_at: str,
+) -> float:
+    """Rewrite the fact block with matching id in-place: bump confidence
+    (capped) and set last_reinforced_at to reinforced_at. Returns the
+    new confidence. Atomic via tmp+replace."""
+    new_conf = round(
+        min(current_confidence + CONFIDENCE_REINFORCEMENT_BUMP,
+            CONFIDENCE_REINFORCEMENT_CAP),
+        4,
+    )
+    # Render enough precision to survive parse/format roundtrip; trim
+    # a trailing .0 so "0.75" reads cleanly (avoid "0.7500").
+    new_conf_str = f"{new_conf:.4f}".rstrip("0").rstrip(".")
+    if not new_conf_str:
+        new_conf_str = "0"
+
+    text = path.read_text(encoding="utf-8")
+    blocks = text.split("\n---\n")
+    rewritten: list[str] = []
+    touched = False
+    for block in blocks:
+        if f"- **id:** {fact_id}" in block and not touched:
+            rewritten.append(_rewrite_block_reinforcement(
+                block, new_conf_str, reinforced_at,
+            ))
+            touched = True
+        else:
+            rewritten.append(block)
+    new_text = "\n---\n".join(rewritten)
+
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(new_text, encoding="utf-8")
+    tmp.replace(path)
+    return new_conf
+
+
+_CONFIDENCE_LINE_RE = re.compile(
+    r"^(\s*-\s*\*\*confidence:\*\*\s*).*$", re.MULTILINE,
+)
+_LAST_REINFORCED_LINE_RE = re.compile(
+    r"^\s*-\s*\*\*last_reinforced_at:\*\*\s*.*$", re.MULTILINE,
+)
+
+
+def _rewrite_block_reinforcement(
+    block: str, new_confidence_str: str, reinforced_at: str,
+) -> str:
+    # Update confidence line.
+    block = _CONFIDENCE_LINE_RE.sub(
+        rf"\g<1>{new_confidence_str}", block, count=1,
+    )
+    # Replace an existing last_reinforced_at line, or insert one after
+    # the recorded_at line.
+    if _LAST_REINFORCED_LINE_RE.search(block):
+        block = _LAST_REINFORCED_LINE_RE.sub(
+            f"- **last_reinforced_at:** {reinforced_at}", block, count=1,
+        )
+    else:
+        # Insert after recorded_at. Fall back to end-of-block if that
+        # line is somehow missing.
+        inserted = False
+        lines = block.splitlines()
+        out: list[str] = []
+        for ln in lines:
+            out.append(ln)
+            if not inserted and ln.lstrip().startswith("- **recorded_at:"):
+                out.append(f"- **last_reinforced_at:** {reinforced_at}")
+                inserted = True
+        if not inserted:
+            out.append(f"- **last_reinforced_at:** {reinforced_at}")
+        block = "\n".join(out)
+    return block
+
+
 def upsert_fact(
     *,
     facts_dir: Path,
@@ -118,14 +208,21 @@ def upsert_fact(
     """Append a fact to ``facts/YYYY-MM.md`` (derived from ``recorded_at``),
     idempotent on ``(source_agent, subject, idempotency_key)``.
 
-    If ``idempotency_key`` is provided, scans every ``facts/*.md`` for a
-    fact whose id already matches ``{source_agent}-{subject}-{idempotency_key}``
-    and skips the write if found. Callers that don't want dedup can pass
-    ``idempotency_key=None`` to always append — but in that case they must
-    supply their own collision-safe id scheme.
+    On idempotency collision — a fact with the same id already on disk —
+    the existing fact is REINFORCED: its confidence bumps by
+    ``CONFIDENCE_REINFORCEMENT_BUMP`` (capped at ``CONFIDENCE_REINFORCEMENT_CAP``)
+    and ``last_reinforced_at`` is set to the incoming ``recorded_at``. This
+    Flux-style pattern preserves the "seen multiple times" signal that was
+    thrown away pre-2026-04-20 when collisions just returned ``skipped``.
 
-    Returns ``{"id", "status", "path"}`` where ``status`` is ``"created"`` or
-    ``"skipped"``.
+    If ``idempotency_key`` is None, the caller must supply a collision-safe
+    id scheme — the function falls back to ``{source_agent}-{subject}-{recorded_at}``.
+
+    Returns ``{"id", "status", "path"}`` where ``status`` is one of
+    ``"created"`` (new fact), ``"reinforced"`` (confidence bumped), or
+    ``"skipped"`` (rare — only when idempotency_key is None and the timestamp
+    collides). When ``status == "reinforced"`` the dict also carries
+    ``new_confidence``.
     """
     if idempotency_key is not None:
         fact_id = f"{source_agent}-{subject}-{idempotency_key}"
@@ -133,10 +230,17 @@ def upsert_fact(
             for existing_path in facts_dir.glob("*.md"):
                 for fact in parse_facts_file(existing_path):
                     if fact["id"] == fact_id:
+                        new_conf = _reinforce_fact_in_file(
+                            path=existing_path,
+                            fact_id=fact_id,
+                            current_confidence=fact["confidence"],
+                            reinforced_at=recorded_at,
+                        )
                         return {
                             "id": fact_id,
-                            "status": "skipped",
+                            "status": "reinforced",
                             "path": str(existing_path),
+                            "new_confidence": new_conf,
                         }
     else:
         fact_id = f"{source_agent}-{subject}-{recorded_at}"

@@ -437,7 +437,11 @@ def test_run_idempotent_dup_counts_separately(miner, tmp_path, monkeypatch):
 
     r2 = miner.run(**kwargs)
     assert r2["facts_minted"] == 0
-    assert r2["skipped_dup"] == 1
+    # Post-reinforcement (2026-04-20): second observation reinforces
+    # instead of silently skipping, so the counter lands in
+    # facts_reinforced rather than skipped_dup.
+    assert r2["facts_reinforced"] == 1
+    assert r2["skipped_dup"] == 0
 
 
 def test_run_skips_messages_with_no_candidates(miner, tmp_path, monkeypatch):

@@ -177,7 +177,11 @@ def test_upsert_fact_appends_to_existing_month_file(tmp_path: Path):
 
 
 def test_upsert_fact_is_idempotent_on_key(tmp_path: Path):
-    """Repeated calls with the same (subject, idempotency_key) don't duplicate."""
+    """Repeated calls with the same (subject, idempotency_key) don't
+    duplicate. Post-reinforcement (2026-04-20): the second+ calls
+    return status=reinforced instead of skipped, but the
+    no-duplication invariant still holds — only one fact block on
+    disk regardless of how many times we upsert."""
     facts_dir = tmp_path / "facts"
     for _ in range(3):
         result = upsert_fact(
@@ -189,12 +193,150 @@ def test_upsert_fact_is_idempotent_on_key(tmp_path: Path):
             idempotency_key="birthday",
             recorded_at="2026-04-19T12:00:00Z",
         )
-    # Last two calls should have status=skipped
-    assert result["status"] == "skipped"
-    # Only one fact entry on disk
+    assert result["status"] == "reinforced"
+    # Only one fact entry on disk.
     facts = parse_facts_file(facts_dir / "2026-04.md")
     birthday_facts = [f for f in facts if f["subject"] == "priya-rivera"]
     assert len(birthday_facts) == 1
+
+
+def test_upsert_fact_reinforces_on_collision_bumps_confidence(tmp_path: Path):
+    """Flux-style reinforcement: re-observing the same fact bumps
+    confidence and updates last_reinforced_at. Regression for the
+    old 'skipped on idempotency collision' behavior that threw away
+    the signal that a fact was seen multiple times."""
+    facts_dir = tmp_path / "facts"
+    # First write: confidence 0.7.
+    first = upsert_fact(
+        facts_dir=facts_dir,
+        subject="priya-rivera",
+        category="identity",
+        content="She's moving to Austin in June",
+        source_agent="connector",
+        idempotency_key="austin-move",
+        recorded_at="2026-04-19T12:00:00Z",
+        confidence=0.7,
+    )
+    assert first["status"] == "created"
+    # Re-observation: same idempotency_key, later timestamp.
+    second = upsert_fact(
+        facts_dir=facts_dir,
+        subject="priya-rivera",
+        category="identity",
+        content="She's moving to Austin in June",
+        source_agent="connector",
+        idempotency_key="austin-move",
+        recorded_at="2026-04-20T09:00:00Z",
+        confidence=0.7,
+    )
+    assert second["status"] == "reinforced"
+    assert second["new_confidence"] == pytest.approx(0.75)
+    # On-disk: confidence bumped, last_reinforced_at updated.
+    text = (facts_dir / "2026-04.md").read_text(encoding="utf-8")
+    assert "- **confidence:** 0.75" in text
+    assert "- **last_reinforced_at:** 2026-04-20T09:00:00Z" in text
+    # Still only one fact block (not appended).
+    facts = parse_facts_file(facts_dir / "2026-04.md")
+    assert len(facts) == 1
+
+
+def test_upsert_fact_reinforcement_caps_confidence_at_0_95(tmp_path: Path):
+    """Repeated reinforcement must asymptote, not run away past 1.0.
+    Cap at 0.95 — a ceiling below 1.0 leaves room for 'this is a
+    verified/certain fact' to remain semantically distinct from
+    'I've seen this a lot'."""
+    facts_dir = tmp_path / "facts"
+    upsert_fact(
+        facts_dir=facts_dir,
+        subject="priya-rivera",
+        category="identity",
+        content="Birthday: 1953-09-15",
+        source_agent="connector",
+        idempotency_key="birthday",
+        recorded_at="2026-04-19T12:00:00Z",
+        confidence=0.93,  # Already near cap.
+    )
+    # Re-observe three times.
+    for i in range(3):
+        result = upsert_fact(
+            facts_dir=facts_dir,
+            subject="priya-rivera",
+            category="identity",
+            content="Birthday: 1953-09-15",
+            source_agent="connector",
+            idempotency_key="birthday",
+            recorded_at=f"2026-04-{20+i:02d}T12:00:00Z",
+            confidence=0.93,
+        )
+    # 0.93 → 0.95 (capped) → 0.95 → 0.95.
+    assert result["new_confidence"] == pytest.approx(0.95)
+    assert result["status"] == "reinforced"
+
+
+def test_upsert_fact_reinforcement_finds_fact_in_prior_month(tmp_path: Path):
+    """Reinforcement must work even when the fact was originally
+    written in a different monthly file. The bump-and-update must
+    rewrite the ORIGINAL file, not create a duplicate in the new
+    month."""
+    facts_dir = tmp_path / "facts"
+    # Seed in March.
+    upsert_fact(
+        facts_dir=facts_dir,
+        subject="priya-rivera",
+        category="identity",
+        content="Old fact",
+        source_agent="connector",
+        idempotency_key="old",
+        recorded_at="2026-03-15T12:00:00Z",
+        confidence=0.6,
+    )
+    # Re-observe in April.
+    result = upsert_fact(
+        facts_dir=facts_dir,
+        subject="priya-rivera",
+        category="identity",
+        content="Old fact",
+        source_agent="connector",
+        idempotency_key="old",
+        recorded_at="2026-04-05T12:00:00Z",
+        confidence=0.6,
+    )
+    assert result["status"] == "reinforced"
+    # April file should NOT exist.
+    assert not (facts_dir / "2026-04.md").exists()
+    # March file should have the bumped confidence + new last_reinforced_at.
+    text = (facts_dir / "2026-03.md").read_text(encoding="utf-8")
+    assert "- **confidence:** 0.65" in text
+    assert "- **last_reinforced_at:** 2026-04-05T12:00:00Z" in text
+
+
+def test_parse_facts_file_reads_last_reinforced_at(tmp_path: Path):
+    """Back-compat: parse_facts_file yields last_reinforced_at when
+    present; absent when the field isn't written yet."""
+    p = tmp_path / "2026-04.md"
+    p.write_text(
+        "- **id:** f-001\n"
+        "- **content:** X\n"
+        "- **subject:** priya-rivera\n"
+        "- **confidence:** 0.8\n"
+        "- **category:** identity\n"
+        "- **recorded_at:** 2026-04-10\n"
+        "- **last_reinforced_at:** 2026-04-19T12:00:00Z\n"
+        "- **source_agent:** connector\n"
+        "---\n"
+        "- **id:** f-002\n"
+        "- **content:** Y\n"
+        "- **subject:** aaron-nuti\n"
+        "- **confidence:** 0.7\n"
+        "- **category:** work\n"
+        "- **recorded_at:** 2026-04-12\n"
+        "- **source_agent:** connector\n",
+        encoding="utf-8",
+    )
+    facts = parse_facts_file(p)
+    assert facts[0]["last_reinforced_at"] == "2026-04-19T12:00:00Z"
+    # Missing field → defaults to recorded_at (treat as "not yet reinforced").
+    assert facts[1]["last_reinforced_at"] == "2026-04-12"
 
 
 def test_upsert_fact_idempotency_scans_all_months(tmp_path: Path):
@@ -212,7 +354,7 @@ def test_upsert_fact_idempotency_scans_all_months(tmp_path: Path):
         "- **source_agent:** connector\n",
         encoding="utf-8",
     )
-    # Now upsert in April — should skip
+    # Now upsert in April — should reinforce the March fact in place.
     result = upsert_fact(
         facts_dir=facts_dir,
         subject="priya-rivera",
@@ -222,6 +364,7 @@ def test_upsert_fact_idempotency_scans_all_months(tmp_path: Path):
         idempotency_key="birthday",
         recorded_at="2026-04-19T12:00:00Z",
     )
-    assert result["status"] == "skipped"
-    # April file should not exist
+    assert result["status"] == "reinforced"
+    # April file should still not exist — reinforcement rewrites the
+    # original monthly file, not the current-month one.
     assert not (facts_dir / "2026-04.md").exists()

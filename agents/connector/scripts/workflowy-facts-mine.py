@@ -123,6 +123,7 @@ def run(
         "nodes_scanned": 0,
         "nodes_skipped_no_mentions": 0,
         "facts_minted": 0,
+        "facts_reinforced": 0,
         "skipped_dup": 0,
         "facts_flagged_low_conf": 0,
         "extract_errors": 0,
@@ -181,6 +182,9 @@ def run(
                     recorded_at=now_iso,
                     audience_scope=f["audience_scope"],
                 )
+                if result["status"] == "reinforced":
+                    stats["facts_reinforced"] += 1
+                    continue
                 if result["status"] == "skipped":
                     stats["skipped_dup"] += 1
                     continue
