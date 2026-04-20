@@ -1,6 +1,6 @@
 # Huckle Cat 🐱🤝 — the connector agent
 
-*Last updated: 2026-04-19 · Reading time: ~23 min · Difficulty: hard*
+*Last updated: 2026-04-20 · Reading time: ~35 min · Difficulty: hard*
 
 > **TL;DR.** Huckle Cat is the relationship agent — the one that inverts the usual shape of a Clawford agent. Instead of wrapping a single external API the way Mr Fixit wraps the fleet's own heartbeat or Hilda Hippo wraps two retailers, Huckle Cat is built **around the shared brain itself**. His input is seven disparate data sources (Gmail, Google Calendar, Google Contacts, Google Messages, WhatsApp, meeting transcripts, and Workflowy) and his output is a relationship intelligence layer: ~280 people files in the brain with names, emails, phones, circles, last-interaction timestamps, enriched context notes, and facts pulled from email signatures. He composes a morning relationship nudge at 5 AM PT (overdue / approaching / healthy), triages a shared notes inbox twice a day, and keeps `last_interaction` fresh via a daily re-mining pass. He was the last agent in the fleet to deploy, and he is the only one where the [mining pipeline](#the-mining-pipeline) runs **before** the first cron fires — by design.
 
@@ -122,7 +122,7 @@ Three second-order details fell out:
 
 ## Current state
 
-As of 2026-04-19, Huckle Cat runs five host crons off `~/.clawford/connector-workspace/`.
+As of 2026-04-20, Huckle Cat runs ten host crons off `~/.clawford/connector-workspace/`.
 
 **Host cron surface.** Registered via `ops/scripts/install-host-cron.sh`:
 
@@ -133,6 +133,11 @@ As of 2026-04-19, Huckle Cat runs five host crons off `~/.clawford/connector-wor
 | `morning-relationship-nudge` | `30 10 * * *` | Calls `people-scan.py`, groups by overdue / approaching / healthy, writes `cache/morning-brief-ready.txt` for fleet-deliver at `0 12 UTC` |
 | `notes-triage-alert` | `0 8,20 * * *` | Reads `notes/inbox.md`, LLM-classifies new entries into `{fact, commitment, task, shopping, unclear}`, sends twice-daily Telegram digest with inline `/confirm N` + `/dismiss N` |
 | `birthday-miner` | `0 6 * * 0` | Weekly: scans Google Calendar for recurring birthday events, resolves event titles to person slugs, upserts identity facts so `/people [name]` surfaces a birthday line |
+| `inbox-triage` | `*/30 * * * *` | Scans recent inbound threads, filters service senders + self, queues known-sender threads for drafting in `cache/triage-queue.json` |
+| `auto-compose` | `5,35 * * * *` | Drains the triage queue — one draft (or FYI) per thread, idempotent via processed-log, caps at 5 threads per run |
+| `gmail-watch-renew` | `0 7 * * *` | Daily re-call of `users.watch()` to keep the Pub/Sub push path alive (the real-time triage listener is a sibling story) |
+| `gmail-facts-mine` | `0 9 * * *` | Mines durable facts from the last 24h of inbound + sent mail; writes upserts into `brain/facts/YYYY-MM.md` |
+| `workflowy-facts-mine` | `30 9 * * *` | Pulls the Workflowy export, extracts facts from nodes that mention a known-person full-name, upserts into `brain/facts/` |
 
 **Workspace layout** under `~/.clawford/connector-workspace/`:
 
@@ -159,7 +164,7 @@ scripts/
   notes-triage-alert.py   # the triage orchestrator
 ```
 
-**Brain state** lives outside the workspace, in the shared brain on Dropbox — this is the point of Huckle Cat. After the initial mining run, the operator's shared brain contains `~280` people files under `people/` and `~240` durable facts under `facts/`, all enriched from the mining pipeline.
+**Brain state** lives outside the workspace, in the shared brain on Dropbox — this is the point of Huckle Cat. After the initial mining run plus the correspondence-layer fact import (see below), the operator's shared brain carries `~400` people files under `people/` and `~600` durable facts under `facts/`, every fact tagged with an `audience_scope` that gates which kinds of recipient will see it surface in a draft.
 
 ## The conversational surface
 
@@ -213,6 +218,124 @@ The resolver's heuristics are deliberately loose. A typical calendar has eightee
 The `aliases` map is operator-forced — it short-circuits the heuristic. `manual_birthdays` takes the other path: operator-supplied slug + ISO date, written as a fact directly, bypassing the calendar entirely. Useful for birthdays I know but don't have on any calendar, and useful for birthdays where the calendar shows the next recurrence date (`2026-07-27`) rather than the person's actual birth year (`1954-07-27`). The manual pass runs **first** inside `process_events`, so operator-supplied dates win any collision with calendar-derived ones. I got this ordering wrong on the first pass — calendar pass ran first, wrote `2026-07-27` under `idempotency_key="birthday"`, and then the manual entry with `1954-07-27` was deduped out. The test that now pins the ordering (`test_manual_entry_wins_over_calendar_collision`) exists because of that specific failure.
 
 The broader pattern this instantiates: **passive ingestion over conversational lookup.** Anything that can be derived from the calendar, the email archive, or the message history should flow into the brain as a fact, so the conversational surface stays focused on what I actually want to do (draft a reply, check who's overdue, stage a note). A `/birthday` command would have been another hand-crafted LLM path for something that's really just a fact on a person file. The miner is fifty lines of pure-function orchestration plus a GCal fetch wrapper — half of it is regex hygiene — and it makes the `/people` command carry more for free.
+
+## The correspondence layer
+
+The one-sentence ask from the operator: *start drafting my email replies.* The thirty-five-commit answer is the correspondence layer — a pipeline that reads a Gmail thread, classifies what the inbound message is actually asking for, picks a voice, composes a reply, and stages it as a Gmail draft (never sent). It runs on the same `~/.clawford/connector-workspace/` surface as the nudges but exercises a different slice of the shared brain: `people/`, `facts/`, `voice/`, `commitments/`. Everything below landed on 2026-04-19 and 2026-04-20 in about two days of elapsed time.
+
+### Per-circle voice profiles
+
+A draft to a family member cannot sound like a draft to a VC. The first real problem the correspondence layer had to solve was what "voice" even means when the operator writes to five different kinds of recipient. The answer: `scripts/voice-profile-build.py` reads the last two years of sent mail, groups the operator's messages by the recipient's circle, and extracts a per-circle style fingerprint — opening phrase patterns, closing phrase patterns, typical sentence length, emoji density, signature block.
+
+Five circle profiles came out clean on the first pass: `family-inner`, `family-extended`, `friends-close`, `professional-inner`, `professional-outer`. A sixth — `holiday-card` — was attempted and abandoned. The operator writes to the `holiday-card` circle maybe eight times a year, and eight sent messages is not enough signal to model a voice against; the exclusive-circle sampling guard in `voice-profile-build.py` hard-stops at a minimum-sample floor and the `holiday-card` profile never got built. The drafts for that circle fall back to `family-extended` voice, which is close enough. A sixth guardrail became a sixth rule: if there aren't enough sent messages for a voice, don't pretend there are.
+
+Per-person overrides layer on top. A person file can carry a `voice_overrides` block that points at a specific prior thread ("write to this person the way you wrote on 2026-03-02") or forces a particular register. Useful for the handful of people whose relationship doesn't fit cleanly into a circle — the college friend who works in the operator's industry, the former boss who's now a family friend. The override is read at compose time and mixed into the circle fingerprint before the LLM call.
+
+### The four-step composition loop
+
+The first cut of `draft-compose.py` was a one-shot prompt: *here's the thread, here's the recipient's people file, write a polite reply.* The output was correct, responsive, and useless — it answered every question but proposed nothing, surfaced no operator-specific context, and read like a competent intern drafting on someone else's behalf. Which, technically, it was.
+
+The rewrite broke compose into an explicit four-step loop, each step one LLM call:
+
+1. **Intent.** What is the inbound message actually asking for? The answer is one of a short enum: *needs reply (scheduling)*, *needs reply (decision)*, *needs reply (acknowledgement)*, *FYI only*, *no action*. The classification lives in `inbound_act_lib.py` and was peeled off into its own module precisely so it could be unit-tested without running a compose.
+2. **State and gap.** What does the brain already know about the recipient and this thread, and what's missing? Pull their facts filtered by `audience_scope`, pull recent commitments involving them, pull the last two outbound messages. Write a one-paragraph summary of *what I already know* and *what this inbound is adding to it*.
+3. **Leverage.** What concrete assets exist for the response? A pending commitment the recipient cares about. A calendar slot the operator could offer. A prior thread that explains the context the inbound missed. The compose model is explicitly told that if it can't identify at least one concrete asset, the reply is probably just an acknowledgement — which is a valid outcome.
+4. **Strategy.** Given the intent, the state/gap, and the leverage, what's the shape of the reply? Decide the register (circle voice + per-person overrides), pick the concrete asset to lead with, sketch the key sentences. Only then compose prose.
+
+Four LLM calls per draft isn't free, but the steps are short — the whole chain takes under thirty seconds and costs a few cents. The quality delta vs. the one-shot prompt is the difference between "I received your email" and "I can grab thirty minutes on Thursday afternoon — does 2:00 PT or 3:30 PT work better?"
+
+### The emotional transaction
+
+Three named beats forced the shape of the recipient-modeling step.
+
+A *friend checking in after a rough quarter* wrote the operator a long, personal update. The first draft was correct and professional; it missed the thing the friend actually wanted, which was to feel heard. The fix: every reply now carries an explicit "what emotional outcome does the sender want" field in the strategy step. Gift-givers want appreciation. Advice-givers want usefulness. Catch-up-after-a-gap messages want presence and reciprocity. The LLM is instructed to identify this outcome before writing the reply and to make sure the reply delivers on it.
+
+*The operator's father*, after a long thread about a grandkid learning to read, got a reply that answered every question in the inbound. It read correctly and it was wrong — the thing the operator's father wanted was the operator to engage with the grandkid-reading image, not to volley back a clean answer. Now the voice profile for `family-inner` has an explicit instruction to linger on the emotional content of the inbound before pivoting to logistics. One line in the prompt; noticeable effect on the drafts.
+
+*An external contact requesting a pre-meeting slot* got a reply that said "happy to jump on a call if you're around this week." That is not a proposal. It is a vague gesture in the direction of a proposal, and it puts the scheduling work back on the recipient. The fix went into the prompt as a hard rule.
+
+### The concrete-proposals rule
+
+For scheduling replies, propose at least one specific day plus at least one specific time. Never "happy to if you're around," never "let me know what works for you." If the inbound proposed a window, either accept a specific slot inside that window or counter with a specific slot outside it. If the inbound proposed nothing, pull the operator's availability via `agents/shared/availability.py` (the free-slot calculator reads the calendar index and returns the next N business-hour slots), and propose the top two or three.
+
+The rule is load-bearing enough that it's encoded in the strategy prompt and re-verified at the end of compose:
+
+> ⚠️ **Warning.** A scheduling reply without a specific day+time is not a reply — it's a non-response that costs the recipient another round. If the brain has zero calendar signal for this person (no prior meetings, no availability access), offer three daypart windows ("Tue morning, Thu afternoon, or Fri before lunch") rather than falling back to open-ended language.
+
+The open-ended language is what the model defaults to if the rule isn't in the prompt. It takes one correction to fix and it never stays fixed if the rule drops out — every compose-prompt iteration that tries to trim tokens by removing the specificity hint gets caught the next time the operator reviews a draft and sees the words "happy to" appear.
+
+### Reply-needed triage
+
+Not every inbound thread needs a drafted reply. A newsletter doesn't. A calendar invitation doesn't. A forwarded FYI from a colleague often doesn't. The auto-compose cron runs the four-step loop on every queued thread, but the step-1 intent classifier can emit `reply_needed: false`, at which point the pipeline short-circuits.
+
+When `reply_needed` is false, the outcome is a Telegram message rather than a Gmail draft: `"🐱🤝 FYI from <sender>: <one-line summary>"`. The thread is logged in the processed-log (so the same FYI doesn't re-fire on the next half-hour) and no draft is created.
+
+The triage decision is not a pre-filter — it's an output of the same composition pipeline, made after the model has read the thread and the recipient's context. Pre-filtering inbound on heuristics (sender domain, subject keywords) was the first cut and it got newsletters right and real messages wrong. Letting the model decide *after* reading the content is slower and more accurate; it also lets the model handle ambiguous cases ("this reads like an FYI but the sender is a family member, so surface it to the operator even if no reply is needed").
+
+> 🔦 **Tip.** The Telegram FYI ping is the cheapest way to answer the question "did anything important happen while I was in meetings?" without opening Gmail. The operator's 1:1 with a colleague just shifted by an hour — Huckle has already pinged the summary, no draft needed, no Gmail context-switch.
+
+### Audience scope — the thing that makes drafts read like me
+
+Facts in the brain are not equally sharable. The fact that a family member is in chemotherapy must not appear in a draft to a colleague. The fact that the operator is fundraising must not appear in a draft to a family member who doesn't know yet. Before the correspondence layer, the brain had no concept of audience — facts were simply facts, and the only gate on what appeared in a draft was whichever facts happened to land in the prompt's context window.
+
+The fix: every fact in `brain/facts/YYYY-MM.md` now carries an `audience_scope` field — a list of up to three tags drawn from `{professional, personal, family, friends, academic, financial, legal, genealogy, internal, public}`. A fact tagged `["family"]` surfaces in drafts to family-circle recipients only. A fact tagged `["professional"]` surfaces in drafts to professional-circle recipients only. A fact tagged `["personal", "family"]` is visible to both. Absence of a scope means "visible to all," which is the conservative default for facts imported before the tagging system existed.
+
+The implementation is two-phase. Phase one was a one-time retroactive pass — `scripts/facts-scope-augment.py` batch-classified 257 Huckle-native facts via a single LLM call that returned a JSON map from fact-id to scope tags, and rewrote the fact files in place with the new scope lines. Phase two — the durable pattern — is scope-at-write-time. Every miner that lands a new fact emits an `audience_scope` on the fact dict before `upsert_fact()` writes it. The scope-augment script still exists as a belt-and-suspenders re-tagger for any fact that slips through unscoped, but the intent is that it stays idle.
+
+The interop payoff: a parallel cognitive-exoskeleton project carries the same audience-scope concept on 7,090 facts about 288 subjects. A one-time importer reads that project's SQLite and writes the facts through `upsert_fact()` with the original `audience_scope` preserved, adding 352 pre-scoped facts to the Huckle brain on day one. The tags interoperate without translation — same vocabulary, same semantics — which means the scope-at-write-time rule is now shared across two independent projects.
+
+### The mining epic — brain learns on its own
+
+Up until 2026-04-20, Huckle's brain was a frozen snapshot. The one-time mining pipeline from step 0 produced the initial seed; the parallel-project fact import added 352 pre-scoped facts; a retroactive scope pass tagged the Huckle-native 257. Total: 596 facts, none of them updating. If the operator told a colleague over email "I'm raising a Series B next quarter," that fact never landed in the brain, and a draft to a different colleague three days later had no way to reference it.
+
+The fix: three daily miners that extract durable facts from three sources and write them through `upsert_fact()` with audience-scope tagging done at write time. All three share a single helper, `agents/shared/fact_extraction.py`, that handles the LLM call, parses the response, and applies a handful of hard filters.
+
+| Miner | Source | Cron (UTC) | Subject inference |
+|---|---|---|---|
+| `gmail-facts-mine.py` | Gmail inbox + sent, last 24h | `0 9` | `From` / `To` / `Cc` emails mapped against `people/*.md`'s `email:` field |
+| `transcript-facts-mine.py` | Meeting-transcript debriefs (meetings-coach-side) | `15 9` | Attendee emails on the pending debrief; all-hands (>6 attendees) dropped |
+| `workflowy-facts-mine.py` | Workflowy tree via `/nodes-export` | `30 9` | Whole-word full-name mentions against `people/*.md`'s `full_name:` field |
+
+The transcript miner lives in the `meetings-coach-workspace/` rather than the `connector-workspace/`. That's deliberate — the pending-debrief JSONs are already in the meetings-coach workspace, and reading them from the connector would require a cross-workspace file access that doesn't survive process-level isolation. Placing the miner in its own agent's workspace keeps the read in-bounds.
+
+Shared design rules, all enforced in `fact_extraction.py`:
+
+- **Self-filter.** Facts with `subject_slug == sam-smith` (or any of the known self-name variants) are dropped. The brain tracks others.
+- **Unknown-slug filter.** If the LLM returns a subject slug not in the candidate set (which is derived from message attendees / node mentions), the fact is dropped. The model sometimes invents subjects to satisfy the JSON schema; silently dropping them keeps the brain clean.
+- **Confidence floor.** Facts with `confidence < 0.3` are dropped silently. Facts in `[0.3, 0.6)` are still written to `brain/facts/` — the Flux-style pattern — but also flagged for review (see next section).
+- **Scope required.** A fact with no `audience_scope` (or an entirely-invalid scope list) is dropped. The rule is that miners don't produce untagged facts.
+
+The three cron times sit in a pre-dawn 30-minute window because the fleet's morning brief generates at `30 10 UTC` (3:30 AM PT); mining an hour earlier means any new fact lands in the brain before the next day's drafts compose against it. That scheduling rule matters more for the email-facing miners than it would for something like the birthday miner.
+
+### Low-confidence flagging
+
+The mining pipeline writes everything at `confidence ≥ 0.3`, which is deliberately lower than the threshold the composer uses. A fact at `confidence = 0.5` might read plausibly on the person file — *she's possibly moving to Austin in June* — and would be overconfident to surface in a draft. Dropping it entirely loses information that might get reinforced on the next mining pass.
+
+The compromise mirrors the parallel project's pattern: facts at `[0.3, 0.6)` land in `brain/facts/YYYY-MM.md` with their real confidence value AND get a one-line pointer appended to `brain/facts/_pending_review.md` — a separate file the operator can skim periodically to confirm or delete low-confidence entries. The review pointer captures the fact id, confidence, source (`gmail:<msg-id>`, `krisp:<event-id>`, `workflowy:<node-id>`), the LLM's stated reason, and the content. Writes to the review file are atomic and idempotent on fact id; re-running the miner over the same window doesn't duplicate review entries.
+
+The parallel effect is that the composer can filter on a higher confidence threshold (default `≥ 0.6`) so low-confidence facts don't leak into drafts until the operator confirms them. Facts that survive review get their confidence bumped; facts that don't get deleted from both the month file and the review tracker. The plumbing for the composer-side threshold is in place; the review-pass UX is still a manual-file workflow and may become a conversational surface in a later pass.
+
+### Real-time triage (deferred to the next chapter)
+
+A twin pipeline, landing in a sibling session, replaces the half-hour polling of `inbox-triage` with a Gmail Pub/Sub push path: Google sends a notification when a thread changes, a persistent listener on the VPS reads the notification, fires `inbox-triage --thread-id <id>`, and then `auto-compose` picks the thread up on the next cycle with seconds of latency instead of minutes. That work rides on a separate auth grant (Pub/Sub scope), a systemd daemon (`clawford-huckle-push.service`), and a daily `gmail-watch-renew` cron to keep the Gmail-side watch alive past its seven-day expiry.
+
+The polling path above stays in place as belt-and-suspenders. The push path is faster for responsive inbounds ("can you call in ten minutes?") but can miss events under Pub/Sub edge cases and systemd restarts; the poll loop guarantees eventual delivery. The full architecture lives in [Ch 18 — The inbox](18-the-inbox.md).
+
+### The bubblewrap beat — a gap, honestly surfaced
+
+The three new fact miners were intended to run under process-level isolation — the first agents outside Mr Fixit to adopt the P1.2 bubblewrap profile documented in [Ch 19 — Security and hardening](19-security-and-hardening.md). The file-based opt-in pattern already existed: a line per cron log-name in `~/.clawford/bwrap-allowlist.txt`, read by the host-cron wrapper, triggers the `CLAWFORD_ISOLATION_MODE=bwrap` handoff before the script runs.
+
+The smoke test surfaced a pre-existing gap in the profile. The default bwrap binds expose:
+
+- The agent's own workspace — read-write.
+- The shared brain's `agents/<agent_id>/` subdir — read-write.
+- Everything else under `brain/` — read-only.
+
+That third bullet is the problem. The miners write to `brain/facts/`. `daily-refresh` writes to `brain/people/`. Sergeant Murphy's debriefs write to `brain/commitments/`. Under the current bwrap profile, every one of those writes is EROFS, and the `daily-refresh` host log has been carrying exactly that error since 2026-04-18 on the crons that already opted in.
+
+The honest resolution was to pull the three fact miners off the bubblewrap allowlist until the profile is widened to bind the common writable brain subdirs (or until the brain's write layout is inverted — writable by default, read-only exceptions). The miners are deployed and running today *without* bwrap, same as the rest of the brain-writing crons. Reinstating them is two lines: uncomment the three entries in `ops/bwrap-allowlist.default.txt` and re-run the allowlist installer on the VPS.
+
+> 🧨 **Pitfall.** Opting a cron into bubblewrap without checking what directories it writes. **Why:** the default P1.2 profile binds `brain/agents/<agent_id>/` read-write and everything else under `brain/` read-only. Any cron that writes to `brain/facts/`, `brain/people/`, `brain/commitments/`, or `brain/queues/` will EROFS silently (the SCRIPT_CONTRACT envelope will come back as `error` with an OSError in the traceback). **How to avoid:** before adding a cron to the allowlist, grep its source for `brain/` write paths. If any land outside the agent's own subdir, the allowlist entry stays out until the profile is widened.
 
 ## Deployment walkthrough
 
