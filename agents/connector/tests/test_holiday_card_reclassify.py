@@ -97,7 +97,7 @@ def test_match_by_alt_email(rc, people_dir, tmp_path):
 
 
 def test_match_by_name_slug_when_emails_differ(rc, people_dir, tmp_path):
-    # .md has personal gmail, CSV has airbnb — common mining-vs-holiday-card split.
+    # .md has personal gmail, CSV has work email — common mining-vs-holiday-card split.
     _write_person(people_dir, "dan-zylberglejd", email="danzylber@gmail.com")
     pins = _write_pins(tmp_path, [{"name": "Dan Zylberglejd", "email": "dan.zylberglejd@example.com"}])
     report = rc.run(pins_csv=pins, people_dir=people_dir, write=True)

@@ -151,7 +151,7 @@ def test_topic_subjects_are_filtered():
 def test_single_word_names_are_filtered():
     # Single-word names almost always signal brand/topic in Flux's data
     assert not is_person_name("Madonna")
-    assert not is_person_name("UChicago")
+    assert not is_person_name("Acme")
 
 
 def test_empty_and_junk_are_filtered():

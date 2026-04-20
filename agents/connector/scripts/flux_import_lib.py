@@ -280,7 +280,7 @@ def is_person_name(name: str | None) -> bool:
     if any(c.isdigit() for c in name):
         return False
     words = name.split()
-    # Need at least first + last — filters "UChicago", "Madonna", brand singletons
+    # Need at least first + last — filters "Madonna", brand singletons
     if len(words) < 2 or len(words) > 4:
         return False
     # Every word must start uppercase (filters "AI in sales" — "in" is lowercase)

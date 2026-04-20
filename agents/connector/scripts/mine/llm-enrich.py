@@ -107,9 +107,8 @@ relationship_type — pick exactly ONE:
                chat, shared interests. High message volume ALONE is NOT
                sufficient; many SMS-heavy contacts are former colleagues
                or family.
-  colleague    Current or former work relationship. Work domains (example.com,
-               kellogg.edu, duke.edu, uchicago.edu), meeting-heavy, project
-               language.
+  colleague    Current or former work relationship. Corporate or .edu
+               domains, meeting-heavy, project language.
   client       Someone paying Sam for services (or vice versa).
                Engagement/proposal/contract/invoice language.
   recruiter    Hiring/opportunity/role outreach; usually few meetings.
