@@ -35,6 +35,47 @@ repo. If you're considering building your own fleet: decide whether
 your use case justifies the ToS risk before reaching for those
 patterns.
 
+## 📖 The Guide
+
+**Start here: [guide-v3/index.md](guide-v3/index.md)** — twenty-one
+chapters, written as scar-tissue. The README is an orientation map;
+the guide is the field manual.
+
+**Overview**
+
+- [01 — What is Clawford?](guide-v3/01-what-is-clawford.md) — A personal fleet on a $30/mo VPS; the Busytown premise.
+- [02 — What Isn't Clawford?](guide-v3/02-what-isnt-clawford.md) — Why Clawford left the OpenClaw platform.
+
+**Setup**
+
+- [03 — Before you start](guide-v3/03-before-you-start.md) — One-way-door decisions: dedicated VPS, Telegram channel, Mr Fixit first.
+- [04 — VPS setup](guide-v3/04-vps-setup.md) — Terraform-provisioned Hetzner box, SSH-hardened, Tailscale overlay, `codex` installed.
+- [05 — Dev setup](guide-v3/05-dev-setup.md) — Claude Code as the dev environment; red-green TDD for infra.
+- [06 — Infra setup](guide-v3/06-infra-setup.md) — Three-tier shared library, shared brain (git + Dropbox), host-cron runtime, ten deploy safeguards.
+
+**Agents**
+
+- [07 — Intro to agents](guide-v3/07-intro-to-agents.md) — The anatomy of a Clawford agent: workspace files, manifest, script contract, LLM-vs-deterministic line.
+- [08 — Your first agent](guide-v3/08-your-first-agent.md) — The seven-step first-deploy arc every agent inherits.
+- [09 — Mr Fixit 🦊🔧](guide-v3/09-mr-fixit.md) — The infrastructure fox. Fleet-health canary, brain validator, conflict-scanner.
+- [10 — Lowly Worm 🐛📰](guide-v3/10-lowly-worm-newsfeed.md) — A personalized morning news digest that learns from your thumbs.
+- [12 — Mistress Mouse 🐭📅](guide-v3/12-mistress-mouse.md) — Family logistics; first Google OAuth agent.
+- [13 — Sergeant Murphy 🐷🔍](guide-v3/13-sergeant-murphy.md) — Meeting prep, transcript-driven debrief, commitment tracking, coaching.
+- [14 — Huckle Cat 🐱🤝](guide-v3/14-huckle-cat.md) — Relationship memory across seven sources.
+
+**Architecture**
+
+- [16 — The shared brain](guide-v3/16-shared-brain.md) — The git + Dropbox directory that turns a pile of agents into a fleet.
+- [17 — Auth architectures](guide-v3/17-auth-architectures.md) — Six auth shapes across the fleet, three cross-cutting idioms.
+- [18 — The inbox](guide-v3/18-the-inbox.md) — One async daemon polls six bots, routes each message, stages every mutation behind a Confirm button.
+- [19 — Security and hardening](guide-v3/19-security-and-hardening.md) — Seven defense layers; bubblewrap profile covers every non-Fixit cron.
+
+**Reference**
+
+- [20 — Scripts and configs](guide-v3/20-scripts-and-configs.md) — The catalog. A lookup, not a read-through.
+- [21 — Glossary](guide-v3/21-glossary.md) — Every Clawford-specific term, alphabetically.
+- [Bonus — The Ballad of Mr Fixit](guide-v3/ballad-of-mr-fixit.md) — A five-act tragedy covering just the first day of setup.
+
 ## The Agents
 
 | Character | Agent | Role | Bot |
@@ -46,25 +87,6 @@ patterns.
 | 🐱🤝 **Huckle Cat** | connector | Relationship memory, daily nudges, notes triage | `@…_huckle_cat_bot` |
 
 *If anything breaks catastrophically: **Mr Frumble** is waiting in the wings.*
-
-## Architecture
-
-- **Runtime:** plain host crons on the VPS, invoking Python scripts via
-  `/usr/bin/python3` directly. No container, no LLM cron scheduler.
-- **VPS:** Hetzner cpx31 class, Terraform-provisioned. Workspace root
-  at `~/.clawford/`.
-- **LLM:** OpenAI Codex via `codex infer`, riding a ChatGPT Plus
-  subscription (zero marginal cost per call). Wrapped by
-  `agents/shared/llm.py`.
-- **Shared brain:** a Dropbox-synced markdown tree — facts, people,
-  commitments, tasks, notes — accessible from VPS and workstation with
-  180-day version history.
-- **Messaging:** one Telegram bot per agent, plus a fleet-wide direct
-  bot for Mr Fixit's alerts.
-- **Deploys:** `agents/shared/deploy.py` — file sync + 10 safeguards
-  including pre-deploy backup, source-cleanliness gate, drift
-  detection, and config-source resolution. SSH to the VPS, `git pull`,
-  run `deploy.py <agent>`.
 
 ## Telegram Relay
 
@@ -99,16 +121,9 @@ clawford/
 │   │                      # fleet-health.py, deploy helpers
 │   └── brain/             # git-tracked brain config + scripts
 ├── telegram-relay/        # Local Telegram ↔ Claude Code bot
-├── guide-v3/              # Field guide (setup, operation, hardening)
-├── docs/                  # Design docs, migration notes
+├── guide-v3/              # Field guide (setup, operation, hardening) + Ballad
 └── tests/                 # Test harness
 ```
-
-## Setup Guide
-
-Start here: **[guide-v3/index.md](guide-v3/index.md)** — the field
-manual. Covers VPS provisioning, codex auth, shared brain, Dropbox
-sync, agent deployment, host-cron runtime, testing, and hardening.
 
 ## First-time setup: populate local config files
 
@@ -172,9 +187,3 @@ bot tokens, OpenAI API key, VPS host, etc.).
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
-
-## Lore
-
-- **[The Ballad of Mr Fixit](docs/ballad-of-mr-fixit.md)** — A play in
-  five acts. A fox terraformed three times, possessed by dark magic,
-  and installed in the chair of a murdered pig. Based on true events.

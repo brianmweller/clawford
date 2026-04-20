@@ -97,10 +97,6 @@ def stage():
     if stylesheets_src.is_dir():
         shutil.copytree(stylesheets_src, SRC / "stylesheets")
 
-    docs_out = SRC / "docs"
-    docs_out.mkdir()
-    shutil.copy2(ROOT / "docs" / "ballad-of-mr-fixit.md", docs_out / "ballad-of-mr-fixit.md")
-
     # Home page = Ch 01 content. A duplicate of 01-what-is-clawford.md
     # staged at the site root. The TOC lives at /guide-v3/ (served by
     # guide-v3/index.md).

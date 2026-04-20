@@ -80,7 +80,7 @@ One last practical note: the fastest way to write these files well is to **brief
 
 Most of the discipline rules are in earlier chapters: red/green TDD for anything in `scripts/` ([Ch 05](05-dev-setup.md)), no on-VPS development ([Ch 04](04-vps-setup.md)), the `.example` template pattern ([Ch 03](03-before-you-start.md)), the script contract ([Ch 07](07-intro-to-agents.md)), the deploy-tool safeguards ([Ch 06](06-infra-setup.md)). One more is specific to Ch 07 territory:
 
-- **Never test an experimental feature on a live agent's channel.** A new cron schedule, an unfamiliar shared-library module, an untested LLM prompt, a new MFA flow — all of these go on a scratch bot bound to a scratch agent id, not on a production one. Early in Clawford's life, a new channel-protocol feature was enabled on Mr Fixit's live Telegram channel as a "quick test." It hijacked the channel for several hours and took an emergency intervention to untangle. There's a five-act tragedy about this in [`docs/ballad-of-mr-fixit.md`](../docs/ballad-of-mr-fixit.md) — recommended reading the first time you're tempted to skip this rule.
+- **Never test an experimental feature on a live agent's channel.** A new cron schedule, an unfamiliar shared-library module, an untested LLM prompt, a new MFA flow — all of these go on a scratch bot bound to a scratch agent id, not on a production one. Early in Clawford's life, a new channel-protocol feature was enabled on Mr Fixit's live Telegram channel as a "quick test." It hijacked the channel for several hours and took an emergency intervention to untangle. There's a five-act tragedy about this in [The Ballad of Mr Fixit](ballad-of-mr-fixit.md) — recommended reading the first time you're tempted to skip this rule.
 
 ## What the per-agent chapters cover
 
@@ -111,4 +111,4 @@ Ch 17 is the one exception to the template: it's a cross-cutting chapter on auth
 - [Ch 07 — Intro to agents](07-intro-to-agents.md) — the manifest shape, the script contract, the canonical SSH+pull+deploy path every per-agent deployment is built on.
 - [Ch 09 — Mr Fixit](09-mr-fixit.md) — the first-deploy-minefield war story. Read before deploying, not after.
 - [Ch 17 — Auth architectures](17-auth-architectures.md) — the cross-cutting reference for OAuth-then-SCP, Camoufox + MFA, and Chrome DevTools patterns.
-- [docs/ballad-of-mr-fixit.md](../docs/ballad-of-mr-fixit.md) — for when the deployment arc starts feeling overwhelming.
+- [The Ballad of Mr Fixit](ballad-of-mr-fixit.md) — for when the deployment arc starts feeling overwhelming.

@@ -9,7 +9,7 @@
 - Clawford is a personal fleet of LLM agents running on a cheap VPS. Each agent is a teleported Busytown character — yes, the Richard Scarry ones — and each has a narrow job.
 - This guide is the scar-tissue version — what I'd tell a friend over beers, not a pitch deck. Most of it is written because something bit me first.
 - It's aimed at people who want *multiple* agents sharing infrastructure, not one standalone bot.
-- If you want the myth version before the manual version, read [docs/ballad-of-mr-fixit.md](../docs/ballad-of-mr-fixit.md) first.
+- If you want the myth version before the manual version, read [The Ballad of Mr Fixit](ballad-of-mr-fixit.md) first.
 - Start with [Ch 03 — Before you start](03-before-you-start.md) when you're ready to move.
 
 ## A fox named Mr Fixit
@@ -113,4 +113,4 @@ If you find something here that's wrong, assume I'd like to know.
 
 - [The full table of contents](index.md) for this guide.
 - [Ch 02 — What Isn't Clawford?](02-what-isnt-clawford.md) — the decision doc that explains why the runtime looks like this and not like the platform it used to sit on top of.
-- [docs/ballad-of-mr-fixit.md](../docs/ballad-of-mr-fixit.md) — a five-act tragedy covering just the first day of setup. A lot more has gone wrong since; the ballad is the overture, not the opera. Read it when you want the lore instead of the manual.
+- [The Ballad of Mr Fixit](ballad-of-mr-fixit.md) — a five-act tragedy covering just the first day of setup. A lot more has gone wrong since; the ballad is the overture, not the opera. Read it when you want the lore instead of the manual.

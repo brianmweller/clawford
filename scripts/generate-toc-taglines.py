@@ -203,7 +203,7 @@ def render_toc(chapters: dict[str, ChapterMeta], taglines: dict[str, str]) -> st
     out.append("")
     out.append('<div class="grid cards" markdown>')
     out.append("")
-    out.append("-   **[The Ballad of Mr Fixit](../docs/ballad-of-mr-fixit.md)**")
+    out.append("-   **[The Ballad of Mr Fixit](ballad-of-mr-fixit.md)**")
     out.append("")
     out.append("    ---")
     out.append("")

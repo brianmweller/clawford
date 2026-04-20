@@ -166,4 +166,4 @@ Every design choice in this guide is downstream of that assumption. Mr Fixit as 
 - [Ch 05 — Dev setup](05-dev-setup.md) — Claude Code as the dev environment, and the four things it gets wrong.
 - [Ch 09 — Mr Fixit](09-mr-fixit.md) — the first-deploy-minefield war story that motivates "deploy Mr Fixit first."
 - [Ch 17 — Auth architectures](17-auth-architectures.md) — the automated re-auth patterns the spicy take above is pointing at.
-- [docs/ballad-of-mr-fixit.md](../docs/ballad-of-mr-fixit.md) — for when this chapter starts feeling too dry.
+- [The Ballad of Mr Fixit](ballad-of-mr-fixit.md) — for when this chapter starts feeling too dry.
