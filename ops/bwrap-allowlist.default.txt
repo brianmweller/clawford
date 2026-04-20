@@ -1,0 +1,20 @@
+# Default bwrap allowlist — fleet-curated list of cron log-names that
+# opt into P1.2 process-level isolation. `script-contract-host.sh`
+# reads ~/.clawford/bwrap-allowlist.txt; any LOGNAME matching a line
+# here runs under CLAWFORD_ISOLATION_MODE=bwrap.
+#
+# To flip a cron in or out, edit the installed file on the VPS:
+#   ~/.clawford/bwrap-allowlist.txt
+# `install-bwrap-allowlist.sh` merges the entries below into it
+# idempotently (append-only, dedupe, no destructive rewrite).
+#
+# DO NOT add browser-driven crons (Camoufox, Playwright, Firefox) —
+# SysV shared memory crashes under the default bwrap profile.
+# See script-contract-host.sh line 62 for the mechanism.
+#
+# Lines starting with '#' or empty are ignored by the installer.
+
+# Item #9 fact miners — pure LLM + file I/O, no browser. Safe under bwrap.
+connector-gmail-facts-mine
+connector-workflowy-facts-mine
+meetings-coach-krisp-facts-mine

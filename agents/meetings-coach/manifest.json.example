@@ -22,7 +22,9 @@
     "scripts/morning-meeting-brief.py",
     "scripts/pre-meeting-alert.py",
     "scripts/post-meeting-scan.py",
-    "scripts/commitment-follow-up.py"
+    "scripts/commitment-follow-up.py",
+    "scripts/krisp_facts_mine_lib.py",
+    "scripts/krisp-facts-mine.py"
   ],
   "state_files": [
     {

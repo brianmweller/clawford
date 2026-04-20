@@ -31,7 +31,11 @@
     "scripts/voice-profile-build.py",
     "scripts/gmail-auth.py",
     "scripts/gmail-watch-renew.py",
-    "scripts/gmail-push-listener.py"
+    "scripts/gmail-push-listener.py",
+    "scripts/gmail_facts_mine_lib.py",
+    "scripts/gmail-facts-mine.py",
+    "scripts/workflowy_facts_mine_lib.py",
+    "scripts/workflowy-facts-mine.py"
   ],
   "state_files": [
     {
