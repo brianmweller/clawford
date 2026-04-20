@@ -114,6 +114,7 @@ def main() -> int:
     ap.add_argument("--gmail-thread-id", help="If set + reply_needed=true, create a threaded Gmail draft via gmail_api")
     ap.add_argument("--gmail-token", default="~/.clawford/connector-workspace/token.json")
     ap.add_argument("--gmail-creds", default="~/.clawford/connector-workspace/credentials.json")
+    ap.add_argument("--json-out", type=Path, help="Write full parsed result + metadata to this path as JSON")
     ap.add_argument("--print-prompt-only", action="store_true")
     ap.add_argument("--llm-backend", default="codex",
                     choices=["codex", "claude-cli", "stdout"],
@@ -308,6 +309,7 @@ def main() -> int:
             )
             print()
             print(f"GMAIL DRAFT CREATED: id={draft_resource.get('id')} threadId={args.gmail_thread_id}")
+            parsed["gmail_draft_id"] = draft_resource.get("id")
     else:
         print("VERDICT: reply_needed=FALSE — no Gmail draft, Telegram FYI only")
         print("=" * 72)
@@ -319,6 +321,22 @@ def main() -> int:
         print("TELEGRAM FYI:")
         print("-" * 72)
         print(parsed["no_reply_fyi"])
+
+    if args.json_out:
+        out = {
+            **parsed,
+            "person_slug": args.person_slug,
+            "from_email": inbound.get("from_email"),
+            "from_name": inbound.get("from_name"),
+            "subject": inbound.get("subject"),
+            "gmail_thread_id": args.gmail_thread_id,
+            "llm_backend": args.llm_backend,
+        }
+        if parsed.get("reply_needed") and args.gmail_thread_id:
+            # Capture draft id when we created one (set above in the branch)
+            pass
+        args.json_out.parent.mkdir(parents=True, exist_ok=True)
+        args.json_out.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
     return 0
 
 

@@ -35,13 +35,18 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent
+_REPO = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(_REPO))
+
 DEFAULT_QUEUE = Path(os.path.expanduser("~/.clawford/connector-workspace/cache/triage-queue.json"))
 DEFAULT_LOG = Path(os.path.expanduser("~/.clawford/connector-workspace/cache/auto-compose-log.json"))
+CONNECTOR_TOKEN_ENV = "CONNECTOR_BOT_TOKEN"
 
 
 def load_log(path: Path) -> dict:
@@ -60,43 +65,90 @@ def save_log(path: Path, log: dict) -> None:
     tmp.replace(path)
 
 
-def run_draft_compose(thread_id: str, slug: str, llm_backend: str) -> tuple[int, str]:
-    cmd = [
-        sys.executable,
-        str(_SCRIPTS_DIR / "draft-compose.py"),
-        "--person-slug", slug,
-        "--gmail-thread-id", thread_id,
-        "--llm-backend", llm_backend,
-    ]
-    env = os.environ.copy()
-    # Ensure the brain root env var is set for the child process
-    if "CLAWFORD_BRAIN_DROPBOX_ROOT" not in env:
-        # Best-effort default; child will error if mismatched
-        pass
-    result = subprocess.run(cmd, capture_output=True, text=True, env=env,
-                            encoding="utf-8", errors="replace", timeout=600)
-    stdout = result.stdout or ""
-    stderr = result.stderr or ""
-    combined = stdout + (f"\n---STDERR---\n{stderr}" if stderr else "")
-    return result.returncode, combined
+def run_draft_compose(thread_id: str, slug: str, llm_backend: str) -> tuple[int, str, dict]:
+    """Run draft-compose, capturing the parsed JSON result via --json-out.
+    Returns (exit_code, stdout, parsed_result_dict)."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as tf:
+        json_out = Path(tf.name)
+    try:
+        cmd = [
+            sys.executable,
+            str(_SCRIPTS_DIR / "draft-compose.py"),
+            "--person-slug", slug,
+            "--gmail-thread-id", thread_id,
+            "--llm-backend", llm_backend,
+            "--json-out", str(json_out),
+        ]
+        env = os.environ.copy()
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env,
+                                encoding="utf-8", errors="replace", timeout=600)
+        stdout = result.stdout or ""
+        stderr = result.stderr or ""
+        combined = stdout + (f"\n---STDERR---\n{stderr}" if stderr else "")
+        parsed = {}
+        if json_out.exists() and json_out.stat().st_size > 0:
+            try:
+                parsed = json.loads(json_out.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                parsed = {}
+        return result.returncode, combined, parsed
+    finally:
+        try:
+            json_out.unlink()
+        except OSError:
+            pass
 
 
-def parse_compose_output(stdout: str) -> dict:
-    """Scrape the already-printed VERDICT and draft-id lines to summarize."""
-    reply_needed = None
-    gmail_draft_id = None
-    for line in stdout.splitlines():
-        if line.startswith("VERDICT: reply_needed=TRUE"):
-            reply_needed = True
-        elif line.startswith("VERDICT: reply_needed=FALSE"):
-            reply_needed = False
-        elif line.startswith("GMAIL DRAFT CREATED:"):
-            # "GMAIL DRAFT CREATED: id=r-5525 threadId=..."
-            for tok in line.split():
-                if tok.startswith("id="):
-                    gmail_draft_id = tok.split("=", 1)[1]
-                    break
-    return {"reply_needed": reply_needed, "gmail_draft_id": gmail_draft_id}
+def _format_telegram(parsed: dict) -> str | None:
+    """Return a short Telegram message for a compose result, or None if
+    the parsed result is malformed and nothing meaningful to ping."""
+    if not parsed:
+        return None
+    name = parsed.get("from_name") or parsed.get("from_email") or parsed.get("person_slug", "?")
+    subject = parsed.get("subject", "(no subject)")
+    if parsed.get("reply_needed") is True:
+        draft_id = parsed.get("gmail_draft_id") or "?"
+        objective = (parsed.get("objective") or "").strip()
+        strategy = (parsed.get("strategy") or "").strip()
+        return (
+            f"📧 Draft ready for {name}\n"
+            f"Subject: {subject}\n"
+            f"Objective: {objective}\n"
+            f"Strategy: {strategy}\n"
+            f"Gmail Drafts (id={draft_id})"
+        )
+    if parsed.get("reply_needed") is False:
+        fyi = (parsed.get("no_reply_fyi") or "").strip()
+        return (
+            f"📬 No reply needed — {name}\n"
+            f"Subject: {subject}\n"
+            f"{fyi}"
+        )
+    return None
+
+
+def _maybe_send_telegram(parsed: dict, dry_run: bool) -> str:
+    """Return a status string: 'sent', 'skipped_no_token', 'skipped_dry_run',
+    'skipped_malformed', or 'error:<msg>'. Never raises."""
+    if dry_run:
+        return "skipped_dry_run"
+    msg = _format_telegram(parsed)
+    if not msg:
+        return "skipped_malformed"
+    try:
+        from agents.shared.telegram_api import resolve_credentials, send_message
+    except ImportError as e:
+        return f"error:import:{e}"
+    try:
+        token, chat_id = resolve_credentials(token_env=CONNECTOR_TOKEN_ENV)
+    except RuntimeError:
+        return "skipped_no_token"
+    try:
+        send_message(token, chat_id, msg, agent_id="connector",
+                     role_summary="draft-review")
+        return "sent"
+    except Exception as e:   # noqa: BLE001
+        return f"error:send:{e}"
 
 
 def main() -> int:
@@ -108,6 +160,8 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--force", help="Re-process this thread ID even if logged")
     ap.add_argument("--max", type=int, help="Cap on number of threads to process")
+    ap.add_argument("--no-telegram", action="store_true",
+                    help="Skip Telegram ping (defaults to on when token env is present)")
     args = ap.parse_args()
 
     try:
@@ -162,25 +216,35 @@ def main() -> int:
         tid = item["thread_id"]
         slug = item["slug"]
         print(f"COMPOSING [{tid}] {slug} ...")
-        rc, output = run_draft_compose(tid, slug, args.llm_backend)
-        summary = parse_compose_output(output)
+        rc, output, parsed = run_draft_compose(tid, slug, args.llm_backend)
+
+        reply_needed = parsed.get("reply_needed") if parsed else None
+        gmail_draft_id = parsed.get("gmail_draft_id") if parsed else None
+        verdict = (
+            "ERROR" if rc != 0 else
+            "DRAFT" if reply_needed is True else
+            "FYI" if reply_needed is False else
+            "UNKNOWN"
+        )
+
+        telegram_status = _maybe_send_telegram(parsed, dry_run=args.no_telegram) if rc == 0 else "skipped_compose_error"
+
         log[tid] = {
             "at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "slug": slug,
-            "reply_needed": summary["reply_needed"],
-            "gmail_draft_id": summary["gmail_draft_id"],
+            "reply_needed": reply_needed,
+            "gmail_draft_id": gmail_draft_id,
             "exit_code": rc,
             "subject": item.get("subject", ""),
+            "telegram": telegram_status,
         }
         save_log(args.log_json, log)
-        verdict = (
-            "ERROR" if rc != 0 else
-            "DRAFT" if summary["reply_needed"] else
-            "FYI" if summary["reply_needed"] is False else
-            "UNKNOWN"
-        )
-        print(f"  → {verdict}  gmail_draft={summary['gmail_draft_id']}  rc={rc}")
-        results.append({"thread_id": tid, "verdict": verdict, **summary})
+        print(f"  → {verdict}  gmail_draft={gmail_draft_id}  rc={rc}  telegram={telegram_status}")
+        results.append({
+            "thread_id": tid, "verdict": verdict,
+            "reply_needed": reply_needed, "gmail_draft_id": gmail_draft_id,
+            "telegram": telegram_status,
+        })
 
     print()
     print("=" * 64)
