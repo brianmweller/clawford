@@ -1193,9 +1193,12 @@ def sync_scripts(
 # contract_wrap.py, tests/, SCRIPT_CONTRACT.md, fleet-manifest.json,
 # …). Expand as new shared modules ship.
 SHARED_RUNTIME_MODULES: tuple[str, ...] = (
+    "audience.py",           # 2026-04-19 — Flux-ported audience-visibility filter for draft-compose
+    "availability.py",       # 2026-04-19 — free-slot calculator for draft-compose
     "brain.py",
     "brain_tasks.py",         # 2026-04-18 — task-queue parser + in-place editors for Mouse
     "camoufox_proxy.py",
+    "facts.py",              # 2026-04-19 — fact-file reader + upsert_fact for birthday miner
     "fleet_health_types.py",
     "google_oauth.py",
     "heartbeat_base.py",
@@ -1214,6 +1217,7 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "scan_fields.py",        # P0.4 — wire-in helper (per-agent ingest)
     "subprocess_helpers.py",
     "telegram_api.py",
+    "voice.py",              # 2026-04-19 — B&L politeness + register model for draft-compose
     # Non-.py runtime data files (the sync uses literal filenames, no
     # extension check) — included here so load-from-workspace lookups
     # resolve without assuming the repo layout.
