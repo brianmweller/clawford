@@ -55,6 +55,27 @@ def _rmtree_retrying(path: Path, attempts: int = 6, delay: float = 0.5):
             time.sleep(delay * (i + 1))
 
 
+def _write_text_retrying(path: Path, text: str, attempts: int = 6, delay: float = 0.5):
+    """Retry writer for Dropbox-lock races.
+
+    When the repo itself lives under a Dropbox-synced path (Windows
+    operator workflow), Dropbox can briefly lock a freshly-staged file
+    while indexing it for sync. The write then fails with Errno 22
+    (EINVAL on Windows). Back off and retry — the lock releases within
+    a second or two. PermissionError is the same class of transient.
+    Unrelated OSErrors (disk full, bad path) still surface immediately
+    after the retry budget is spent.
+    """
+    for i in range(attempts):
+        try:
+            path.write_text(text, encoding="utf-8")
+            return
+        except (OSError, PermissionError):
+            if i == attempts - 1:
+                raise
+            time.sleep(delay * (i + 1))
+
+
 def stage():
     if SRC.exists():
         _rmtree_retrying(SRC)
@@ -130,7 +151,7 @@ def _rewrite_guide_v2_dead_links():
         text = md_path.read_text(encoding="utf-8")
         new_text = pattern.sub(_fix, text)
         if new_text != text:
-            md_path.write_text(new_text, encoding="utf-8")
+            _write_text_retrying(md_path, new_text)
 
 
 def _rewrite_out_of_tree_links():
