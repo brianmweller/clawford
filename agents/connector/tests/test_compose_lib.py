@@ -168,6 +168,22 @@ def test_prompt_recipient_model_covers_emotional_dimension():
     assert found >= 2, f"expected at least 2 emotional-pattern examples, found {found}"
 
 
+def test_prompt_requires_concrete_scheduling_proposal():
+    prompt = build_compose_prompt(_ctx(), _voice(), _inbound())
+    # The SCHEDULING RULE must appear so drafts don't round-trip decisions
+    assert "SCHEDULING RULE" in prompt
+    # Must explicitly reject the "happy to if you're around" failure mode
+    assert "if you're around" in prompt.lower() or "defer" in prompt.lower()
+    # Must mention freehand fallback when OPEN SLOTS don't match
+    assert "FREEHAND" in prompt or "freehand" in prompt
+
+
+def test_prompt_instructs_date_reanchoring_for_stale_inbounds():
+    prompt = build_compose_prompt(_ctx(), _voice(), _inbound())
+    # Stale relative dates ("next week") must re-anchor to reply date
+    assert "re-anchor" in prompt.lower() or "reanchor" in prompt.lower()
+
+
 def test_prompt_includes_recipient_name():
     prompt = build_compose_prompt(_ctx(), _voice(), _inbound())
     assert "Priya Rivera" in prompt

@@ -226,8 +226,30 @@ TASK
   literally — if the operator is terse and uses contractions there, the draft
   should too. Don't re-explain anything already covered in the thread.
   Only reference facts from "WHAT YOU MAY REFERENCE" — do not invent.
-  If the sender asked to schedule and OPEN SLOTS are listed, propose
-  them. Every sentence must serve a concrete move from the strategy.
+  Every sentence must serve a concrete move from the strategy.
+
+  SCHEDULING RULE: if the sender asked about timing (explicitly or
+  implicitly — "free?", "when works?", "catch up?", "meet?"), the
+  draft MUST end with a CONCRETE time proposal. Specific day(s) +
+  time range. Never end with a conditional that defers commitment
+  ("happy to if you're around," "let me know what works"). Two
+  sources of times, in order:
+    (a) Prefer OPEN SLOTS if listed AND they match the sender's
+        constraints (e.g., if the sender said "after 4pm" and the
+        slots are morning, they DO NOT match).
+    (b) If no OPEN SLOTS match, propose FREEHAND based on the operator's
+        typical preferences and the sender's constraints. Never
+        emit no proposal at all. "Tuesday or Thursday 5-7pm works —
+        want to book one?" beats "happy to grab dinner if you're
+        around" every time.
+
+  DATE RE-ANCHORING: if the inbound is stale (sent days or weeks ago)
+  and references relative dates like "next week," re-anchor those to
+  TODAY. "Next week" means the week starting Monday from today's
+  perspective, not from the inbound's perspective. Stale references
+  are not a reason to drop scheduling — they're a reason to quietly
+  translate and propose a fresh window.
+
   If reply_needed=false, populate no_reply_fyi with one short sentence
   summarizing what arrived and why no reply is needed; leave draft_text
   empty.
