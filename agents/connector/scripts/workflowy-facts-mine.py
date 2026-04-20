@@ -43,6 +43,7 @@ from agents.shared.fact_extraction import (                        # noqa: E402
     extract_facts_from_text,
 )
 from agents.shared.facts import upsert_fact                        # noqa: E402
+from agents.shared.people import append_observation                # noqa: E402
 from workflowy_facts_mine_lib import (                             # noqa: E402
     build_name_to_slug_index,
     find_mentioned_slugs,
@@ -126,6 +127,7 @@ def run(
         "facts_reinforced": 0,
         "skipped_dup": 0,
         "facts_flagged_low_conf": 0,
+        "observations_appended": 0,
         "extract_errors": 0,
     }
 
@@ -195,6 +197,17 @@ def run(
                         {**f, "id": result["id"]},
                     )
                     stats["facts_flagged_low_conf"] += 1
+                # High-confidence facts surface on the person card too.
+                if f["confidence"] >= 0.7:
+                    obs = append_observation(
+                        people_dir=people_dir,
+                        slug=f["subject"],
+                        content=f["content"],
+                        source=f.get("source_detail") or "workflowy",
+                        timestamp=now_iso[:10],
+                    )
+                    if obs["status"] == "appended":
+                        stats["observations_appended"] += 1
             else:
                 stats["facts_minted"] += 1
                 if f.get("needs_review"):

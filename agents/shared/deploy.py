@@ -1202,6 +1202,7 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "context_builder.py",     # 2026-04-19 — RecipientContext assembler for draft-compose
     "fact_extraction.py",    # 2026-04-20 — shared miner LLM extractor (Gmail/Krisp/Workflowy)
     "facts.py",              # 2026-04-19 — fact-file reader + upsert_fact for birthday miner
+    "people.py",             # 2026-04-20 — append_observation helper for people-card nudges
     "gmail_api.py",          # 2026-04-19 — Gmail threaded-draft creation + thread_to_compose_inputs
     "gmail_watch.py",        # 2026-04-20 — users.watch() wrapper + WatchState for real-time triage
     "pubsub_pull.py",        # 2026-04-20 — Pub/Sub pull/ack helpers for gmail-push-listener

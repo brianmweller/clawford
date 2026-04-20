@@ -43,19 +43,14 @@ from agents.shared.fact_extraction import (                        # noqa: E402
     extract_facts_from_text,
 )
 from agents.shared.facts import upsert_fact                        # noqa: E402
+from agents.shared.people import append_observation                # noqa: E402
+from agents.shared.operator import load_operator                   # noqa: E402
 from krisp_facts_mine_lib import (                                 # noqa: E402
     build_candidate_slugs,
     chunk_transcript,
     is_all_hands,
     load_debriefs,
 )
-
-
-BRIAN_ADDRESSES = {
-    "sam.smith@example.com",
-    "sam.smith+backup@example.com",
-    "sam.smith+work@example.com",
-}
 
 DEFAULT_CACHE = Path(os.path.expanduser(
     "~/.clawford/meetings-coach-workspace/cache"
@@ -130,6 +125,7 @@ def run(
         "facts_reinforced": 0,
         "skipped_dup": 0,
         "facts_flagged_low_conf": 0,
+        "observations_appended": 0,
         "extract_errors": 0,
     }
 
@@ -142,7 +138,7 @@ def run(
 
         slugs = build_candidate_slugs(
             d, email_to_slug=email_to_slug,
-            operator_emails=BRIAN_ADDRESSES,
+            operator_emails=load_operator().emails,
         )
         if not slugs:
             stats["transcripts_skipped_no_candidates"] += 1
@@ -208,6 +204,17 @@ def run(
                             {**f, "id": result["id"]},
                         )
                         stats["facts_flagged_low_conf"] += 1
+                    # High-conf facts surface on the person card too.
+                    if f["confidence"] >= 0.7:
+                        obs = append_observation(
+                            people_dir=people_dir,
+                            slug=f["subject"],
+                            content=f["content"],
+                            source=f.get("source_detail") or "krisp",
+                            timestamp=now_iso[:10],
+                        )
+                        if obs["status"] == "appended":
+                            stats["observations_appended"] += 1
                 else:
                     stats["facts_minted"] += 1
                     if f.get("needs_review"):
