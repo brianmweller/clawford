@@ -80,3 +80,54 @@ def test_record_engagement_multiple_appends(tools_mod):
 
 def test_record_engagement_in_executors(tools_mod):
     assert "record_engagement" in tools_mod.EXECUTORS
+
+
+# ---------------------------------------------------------------------------
+# ask_topic — /ask [topic] shells out to on-demand.py
+# ---------------------------------------------------------------------------
+
+
+def test_ask_topic_invokes_on_demand_script(tools_mod, monkeypatch):
+    captured = {}
+
+    def fake_run(script_path, *args, **kwargs):
+        captured["script"] = script_path
+        captured["args"] = list(args)
+        return {
+            "status": "ok",
+            "query": "chip export controls",
+            "results": [{"title": "NYT: ...", "url": "..."}],
+        }
+
+    import subprocess_helpers  # type: ignore
+    monkeypatch.setattr(subprocess_helpers, "run_json_script", fake_run)
+    monkeypatch.setattr(subprocess_helpers, "is_subprocess_error", lambda r: False)
+
+    result = tools_mod.ask_topic("chip export controls")
+    assert result["status"] == "ok"
+    assert captured["script"].endswith("on-demand.py")
+    # Topic is passed as a positional arg, not a flag
+    assert "chip export controls" in captured["args"]
+
+
+def test_ask_topic_empty_input_is_error(tools_mod):
+    result = tools_mod.ask_topic("   ")
+    assert result["status"] == "error"
+
+
+def test_ask_topic_surfaces_script_error(tools_mod, monkeypatch):
+    import subprocess_helpers  # type: ignore
+    monkeypatch.setattr(
+        subprocess_helpers, "run_json_script",
+        lambda *a, **k: {"__error__": "feed unreachable"},
+    )
+    monkeypatch.setattr(
+        subprocess_helpers, "is_subprocess_error", lambda r: "__error__" in r,
+    )
+    result = tools_mod.ask_topic("chip export controls")
+    assert result["status"] == "error"
+    assert "feed" in result["error"]
+
+
+def test_ask_topic_in_executors(tools_mod):
+    assert "ask_topic" in tools_mod.EXECUTORS

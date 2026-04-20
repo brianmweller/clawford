@@ -11,7 +11,10 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import brain  # type: ignore
 import memory_writer  # type: ignore
+import pending_actions  # type: ignore
+import subprocess_helpers  # type: ignore
 
 AGENT_ID = "connector"
 
@@ -153,6 +156,159 @@ def snooze_reminder(person_name: str, days: int = 7) -> dict:
     }
 
 
+def get_person(name_or_slug: str) -> dict:
+    """Look up a person file by name or slug. Returns the parsed frontmatter
+    plus the raw markdown so the LLM can surface any field the operator asks
+    about (tone, last_interaction, circles, birthday, etc.)."""
+    hit = brain.get_person(name_or_slug)
+    if hit is None:
+        return {"status": "not_found", "query": name_or_slug}
+    return {
+        "status": "found",
+        "slug": hit["slug"],
+        "name": hit["name"],
+        "fields": hit["fields"],
+        "raw": hit["raw"],
+    }
+
+
+_SCRIPTS_DIR = Path(__file__).resolve().parent / "scripts"
+_COMMITMENT_SCAN = str(_SCRIPTS_DIR / "commitment-scan.py")
+_PEOPLE_SCAN = str(_SCRIPTS_DIR / "people-scan.py")
+_NOTES_TRIAGE = str(_SCRIPTS_DIR / "notes-triage.py")
+_DRAFT_COMPOSE = str(_SCRIPTS_DIR / "draft-compose.py")
+
+
+def get_commitments() -> dict:
+    """Return the unified open-commitment view across all agents by shelling
+    out to scripts/commitment-scan.py. The script aggregates from
+    ~/Dropbox/openclaw-backup/commitments/active.md and enriches with
+    overdue / approaching flags."""
+    result = subprocess_helpers.run_json_script(_COMMITMENT_SCAN, timeout=30)
+    if subprocess_helpers.is_subprocess_error(result):
+        return {"status": "error", "error": result.get("__error__", "script error")}
+    return result
+
+
+def force_nudge() -> dict:
+    """Run people-scan.py on demand and return the overdue/approaching
+    breakdown. Used for `/nudge` — the LLM then renders the scan data
+    into a human-readable summary. Does NOT overwrite the 5 AM PT
+    morning-brief-ready.txt delivery file."""
+    result = subprocess_helpers.run_json_script(_PEOPLE_SCAN, timeout=60)
+    if subprocess_helpers.is_subprocess_error(result):
+        return {"status": "error", "error": result.get("__error__", "script error")}
+    # people-scan.py returns {overdue, approaching, healthy, summary}
+    return {"status": "ok", **result}
+
+
+def draft_reply(name: str, inbound_text: str | None = None) -> dict:
+    """Generate a draft message for a person: check-in if no inbound_text,
+    reply otherwise. Shells out to scripts/draft-compose.py which loads the
+    recipient's facts, filters by audience, composes voice guidance, and
+    asks the LLM for a draft.
+
+    The draft is for the operator to review — nothing is sent."""
+    name = (name or "").strip()
+    if not name:
+        return {"status": "error", "error": "name is required"}
+
+    args = ["--recipient", name]
+    if inbound_text:
+        args.extend(["--inbound-text", inbound_text])
+
+    result = subprocess_helpers.run_json_script(_DRAFT_COMPOSE, *args, timeout=120)
+    if subprocess_helpers.is_subprocess_error(result):
+        return {"status": "error", "error": result.get("__error__", "script error")}
+    return result
+
+
+def force_triage() -> dict:
+    """Run notes-triage.py on demand and return untriaged notes. Used
+    for `/triage`. The LLM then classifies each entry and stages them
+    for confirmation."""
+    result = subprocess_helpers.run_json_script(_NOTES_TRIAGE, timeout=30)
+    if subprocess_helpers.is_subprocess_error(result):
+        return {"status": "error", "error": result.get("__error__", "script error")}
+    return {"status": "ok", **result}
+
+
+def propose_add_note(text: str, triaged: bool = False) -> dict:
+    """Stage a note for the operator's confirmation. On /confirm the note is
+    appended to notes/inbox.md with timestamp + triaged flag."""
+    text = (text or "").strip()
+    if not text:
+        return {"status": "error", "error": "empty note text"}
+    return pending_actions.stage(
+        AGENT_ID,
+        "add_note",
+        {"text": text, "triaged": bool(triaged)},
+        f"Add note: {text[:80]}{'…' if len(text) > 80 else ''}",
+    )
+
+
+def confirm_add_note(text: str, triaged: bool = False) -> dict:
+    """Append the staged note to notes/inbox.md (executor for
+    add_note pending action)."""
+    result = brain.append_inbox_note(AGENT_ID, text, triaged=bool(triaged))
+    return {"status": "ok", "id": result["id"], "path": result["path"]}
+
+
+def propose_add_person(name: str, circle: str, **extras: str) -> dict:
+    """Stage the creation of a new person file. On /confirm a markdown
+    file is written under people/<slug>.md with the given frontmatter."""
+    name = (name or "").strip()
+    circle = (circle or "").strip()
+    if not name or not circle:
+        return {"status": "error", "error": "name and circle are required"}
+    payload = {"name": name, "circle": circle, **extras}
+    return pending_actions.stage(
+        AGENT_ID,
+        "add_person",
+        payload,
+        f"Create person '{name}' in circle '{circle}'",
+    )
+
+
+def confirm_add_person(name: str, circle: str, **extras: str) -> dict:
+    """Create the person file (executor for add_person pending action)."""
+    try:
+        result = brain.create_person_file(name, circle, **extras)
+    except FileExistsError as exc:
+        return {"status": "error", "error": str(exc)}
+    return {"status": "ok", "slug": result["slug"], "path": result["path"]}
+
+
+def dismiss_triage_n(n: int) -> dict:
+    """Remove the N-th item (1-indexed) from pending-triage.json. Used when
+    the operator types `/dismiss 2` to skip a staged triage item without committing
+    it to the brain."""
+    try:
+        index = int(n) - 1
+    except (TypeError, ValueError):
+        return {"status": "error", "error": f"not an integer: {n!r}"}
+
+    data = _read_json(PENDING_TRIAGE_PATH, default=None)
+    if not data or not isinstance(data, dict):
+        return {"status": "error", "error": "no pending triage items"}
+    items = data.get("items", [])
+    if not items:
+        return {"status": "error", "error": "no pending triage items"}
+    if index < 0 or index >= len(items):
+        return {
+            "status": "error",
+            "error": f"index out of range: {n} (have {len(items)})",
+        }
+
+    dismissed = items.pop(index)
+    data["items"] = items
+    tmp = PENDING_TRIAGE_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, PENDING_TRIAGE_PATH)
+    return {"status": "ok", "dismissed": dismissed, "remaining": len(items)}
+
+
 TOOLS: list[dict] = [
     {
         "type": "function",
@@ -261,6 +417,134 @@ TOOLS: list[dict] = [
             "required": ["rule"],
         },
     },
+    {
+        "type": "function",
+        "name": "get_person",
+        "description": (
+            "Look up a person file by name or slug. Returns the parsed "
+            "frontmatter (circles, tone, last_interaction, email, etc.) "
+            "plus the raw markdown. Call for `/people [name]` and whenever "
+            "the operator asks about a specific contact by name."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name_or_slug": {
+                    "type": "string",
+                    "description": "Display name (e.g. 'Priya Rivera') or slug ('priya-rivera')",
+                },
+            },
+            "required": ["name_or_slug"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_commitments",
+        "description": (
+            "Return the unified open-commitment view across ALL agents "
+            "(connector, meetings-coach, shopping, family-calendar, etc.), "
+            "enriched with overdue and approaching flags. Use for "
+            "`/commitments`, 'what do I owe people', 'what's overdue'."
+        ),
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "type": "function",
+        "name": "dismiss_triage_n",
+        "description": (
+            "Skip the N-th item (1-indexed) from the pending triage queue "
+            "without committing to the shared brain. Use when the operator types "
+            "`/dismiss 2` in response to a triage prompt."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "n": {"type": "integer", "description": "1-indexed item number"},
+            },
+            "required": ["n"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "draft_reply",
+        "description": (
+            "Generate a draft message for a person. With no inbound text, "
+            "composes a check-in — uses their context_notes, tone, visible "
+            "facts, and recent interactions to write something natural-sounding. "
+            "With inbound_text, drafts a reply to that message. The draft is "
+            "for the operator to review and edit — nothing is sent. Use for `/draft "
+            "[name]` or when the operator asks 'help me write back to X'."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Recipient name or slug"},
+                "inbound_text": {
+                    "type": "string",
+                    "description": "The message the operator is replying to (omit for a fresh check-in)",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "force_nudge",
+        "description": (
+            "Run the relationship scan on demand and return the overdue / "
+            "approaching / healthy breakdown. Use for `/nudge` — then render "
+            "a human-readable summary (same style as the morning nudge). "
+            "Does NOT overwrite the morning-brief-ready.txt delivery file."
+        ),
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "type": "function",
+        "name": "force_triage",
+        "description": (
+            "Run notes triage on demand, returning untriaged notes from "
+            "inbox.md. Use for `/triage`. Then classify each entry and "
+            "stage a confirmation for the operator."
+        ),
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "type": "function",
+        "name": "propose_add_note",
+        "description": (
+            "Stage a new note for the operator's confirmation. Use when the operator says "
+            "'add a note: ...', 'remind me to ...', or types `/note [text]`. "
+            "The note is only written to inbox.md after the operator taps Confirm."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "The note content"},
+                "triaged": {"type": "boolean", "description": "Pre-mark as triaged (default false)"},
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "propose_add_person",
+        "description": (
+            "Stage the creation of a new person file. Use when the operator says "
+            "'add [name] to my close friends', 'start tracking Sarah', or "
+            "types `/add [name] [circle]`. Circle is one of: family-inner, "
+            "family-extended, close, friends, work, professional, acquaintance."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Display name (e.g. 'Sarah Chen')"},
+                "circle": {"type": "string", "description": "Circle tag"},
+                "tone": {"type": "string", "description": "Optional tone (warm, professional, etc.)"},
+                "email": {"type": "string", "description": "Optional email address"},
+            },
+            "required": ["name", "circle"],
+        },
+    },
 ]
 
 
@@ -319,4 +603,14 @@ EXECUTORS: dict = {
     "propose_remember": propose_remember,
     "confirm_remember": confirm_remember,
     "handle_nudge_action": handle_nudge_action,
+    "get_person": get_person,
+    "get_commitments": get_commitments,
+    "dismiss_triage_n": dismiss_triage_n,
+    "propose_add_note": propose_add_note,
+    "confirm_add_note": confirm_add_note,
+    "propose_add_person": propose_add_person,
+    "confirm_add_person": confirm_add_person,
+    "force_nudge": force_nudge,
+    "force_triage": force_triage,
+    "draft_reply": draft_reply,
 }

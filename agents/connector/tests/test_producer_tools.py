@@ -133,3 +133,366 @@ def test_handle_nudge_action_preserves_other_slugs(nudge_tools):
 
 def test_handle_nudge_action_in_executors(nudge_tools):
     assert "handle_nudge_action" in nudge_tools.EXECUTORS
+
+
+# ---------------------------------------------------------------------------
+# get_person (delegates to brain.get_person)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def brain_sandboxed_tools(tmp_path, monkeypatch):
+    """Point both brain and tools.py at a sandboxed dropbox root."""
+    brain_root = tmp_path / "brain-root"
+    brain_root.mkdir()
+    (brain_root / "people").mkdir()
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(brain_root))
+
+    for mod in list(sys.modules):
+        if mod in ("tools", "brain"):
+            del sys.modules[mod]
+    import tools
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    monkeypatch.setattr(tools, "WORKSPACE", str(workspace))
+    monkeypatch.setattr(tools, "PENDING_TRIAGE_PATH", str(workspace / "pending-triage.json"))
+    return tools, brain_root
+
+
+def test_get_person_found_by_slug(brain_sandboxed_tools):
+    tools, brain_root = brain_sandboxed_tools
+    (brain_root / "people" / "priya-rivera.md").write_text(
+        "# Priya Rivera\n\n"
+        "- **slug:** priya-rivera\n"
+        "- **circles:** family-inner\n"
+        "- **tone:** warm\n"
+        "- **last_interaction:** 2026-02-11\n",
+        encoding="utf-8",
+    )
+    result = tools.get_person("priya-rivera")
+    assert result["status"] == "found"
+    assert result["slug"] == "priya-rivera"
+    assert result["fields"]["tone"] == "warm"
+
+
+def test_get_person_found_by_display_name(brain_sandboxed_tools):
+    tools, brain_root = brain_sandboxed_tools
+    (brain_root / "people" / "priya-rivera.md").write_text(
+        "# Priya Rivera\n\n- **slug:** priya-rivera\n- **circles:** family-inner\n",
+        encoding="utf-8",
+    )
+    result = tools.get_person("Priya Rivera")
+    assert result["status"] == "found"
+
+
+def test_get_person_not_found(brain_sandboxed_tools):
+    tools, _ = brain_sandboxed_tools
+    result = tools.get_person("does-not-exist")
+    assert result["status"] == "not_found"
+
+
+def test_get_person_in_executors(brain_sandboxed_tools):
+    tools, _ = brain_sandboxed_tools
+    assert "get_person" in tools.EXECUTORS
+
+
+# ---------------------------------------------------------------------------
+# get_commitments (invokes commitment-scan.py via run_json_script)
+# ---------------------------------------------------------------------------
+
+
+def test_get_commitments_shells_out_to_script(brain_sandboxed_tools, monkeypatch):
+    tools, _ = brain_sandboxed_tools
+    called = {}
+
+    def fake_run(script_path, *args, **kwargs):
+        called["script"] = script_path
+        called["args"] = list(args)
+        return {
+            "status": "ok",
+            "commitments": [{"id": "c-1", "who": "Alice"}],
+            "summary": {"total": 1, "open": 1, "overdue": 0, "approaching": 0},
+        }
+
+    import subprocess_helpers  # type: ignore
+    monkeypatch.setattr(subprocess_helpers, "run_json_script", fake_run)
+    monkeypatch.setattr(subprocess_helpers, "is_subprocess_error", lambda r: False)
+
+    result = tools.get_commitments()
+    assert result["status"] == "ok"
+    assert len(result["commitments"]) == 1
+    assert called["script"].endswith("commitment-scan.py")
+
+
+def test_get_commitments_surfaces_script_error(brain_sandboxed_tools, monkeypatch):
+    tools, _ = brain_sandboxed_tools
+    import subprocess_helpers  # type: ignore
+    monkeypatch.setattr(
+        subprocess_helpers, "run_json_script",
+        lambda *a, **k: {"__error__": "timed out"},
+    )
+    monkeypatch.setattr(
+        subprocess_helpers, "is_subprocess_error",
+        lambda r: "__error__" in r,
+    )
+    result = tools.get_commitments()
+    assert result["status"] == "error"
+    assert "timed out" in result["error"]
+
+
+def test_get_commitments_in_executors(brain_sandboxed_tools):
+    tools, _ = brain_sandboxed_tools
+    assert "get_commitments" in tools.EXECUTORS
+
+
+# ---------------------------------------------------------------------------
+# dismiss_triage_n (removes item N from pending-triage.json)
+# ---------------------------------------------------------------------------
+
+
+def test_dismiss_triage_n_removes_nth_item(brain_sandboxed_tools):
+    tools, _ = brain_sandboxed_tools
+    Path(tools.PENDING_TRIAGE_PATH).write_text(json.dumps({
+        "items": [
+            {"id": "t-1", "content": "first"},
+            {"id": "t-2", "content": "second"},
+            {"id": "t-3", "content": "third"},
+        ],
+    }), encoding="utf-8")
+    result = tools.dismiss_triage_n(2)
+    assert result["status"] == "ok"
+    assert result["dismissed"]["id"] == "t-2"
+
+    with open(tools.PENDING_TRIAGE_PATH, encoding="utf-8") as f:
+        data = json.load(f)
+    remaining = [i["id"] for i in data["items"]]
+    assert remaining == ["t-1", "t-3"]
+
+
+def test_dismiss_triage_n_out_of_range_is_error(brain_sandboxed_tools):
+    tools, _ = brain_sandboxed_tools
+    Path(tools.PENDING_TRIAGE_PATH).write_text(json.dumps({
+        "items": [{"id": "t-1"}],
+    }), encoding="utf-8")
+    result = tools.dismiss_triage_n(5)
+    assert result["status"] == "error"
+
+
+def test_dismiss_triage_n_empty_file_is_error(brain_sandboxed_tools):
+    tools, _ = brain_sandboxed_tools
+    result = tools.dismiss_triage_n(1)
+    assert result["status"] == "error"
+
+
+def test_dismiss_triage_n_in_executors(brain_sandboxed_tools):
+    tools, _ = brain_sandboxed_tools
+    assert "dismiss_triage_n" in tools.EXECUTORS
+
+
+# ---------------------------------------------------------------------------
+# /note flow — propose_add_note / confirm_add_note
+# ---------------------------------------------------------------------------
+
+
+def test_propose_add_note_stages_pending_action(brain_sandboxed_tools, monkeypatch, tmp_path):
+    tools, _ = brain_sandboxed_tools
+    monkeypatch.setenv("CLAWFORD_WORKSPACE_ROOT", str(tmp_path))
+    result = tools.propose_add_note("call mom next week")
+    assert "__pending_action__" in result
+    assert "note" in result["summary"].lower()
+
+
+def test_confirm_add_note_writes_to_inbox(brain_sandboxed_tools):
+    tools, brain_root = brain_sandboxed_tools
+    result = tools.confirm_add_note("call mom next week")
+    assert result["status"] == "ok"
+    inbox = (brain_root / "notes" / "inbox.md").read_text(encoding="utf-8")
+    assert "call mom next week" in inbox
+    assert "- **agent:** connector" in inbox
+    assert "- **triaged:** false" in inbox
+
+
+def test_confirm_add_note_honors_triaged_flag(brain_sandboxed_tools):
+    tools, brain_root = brain_sandboxed_tools
+    tools.confirm_add_note("already triaged", triaged=True)
+    inbox = (brain_root / "notes" / "inbox.md").read_text(encoding="utf-8")
+    assert "- **triaged:** true" in inbox
+
+
+def test_add_note_executors_wired(brain_sandboxed_tools):
+    tools, _ = brain_sandboxed_tools
+    assert "propose_add_note" in tools.EXECUTORS
+    assert "confirm_add_note" in tools.EXECUTORS
+
+
+# ---------------------------------------------------------------------------
+# /add flow — propose_add_person / confirm_add_person
+# ---------------------------------------------------------------------------
+
+
+def test_propose_add_person_stages_pending_action(brain_sandboxed_tools, monkeypatch, tmp_path):
+    tools, _ = brain_sandboxed_tools
+    monkeypatch.setenv("CLAWFORD_WORKSPACE_ROOT", str(tmp_path))
+    result = tools.propose_add_person("Sarah Example", "friends")
+    assert "__pending_action__" in result
+    assert "Sarah" in result["summary"]
+
+
+def test_confirm_add_person_creates_file(brain_sandboxed_tools):
+    tools, brain_root = brain_sandboxed_tools
+    result = tools.confirm_add_person("Sarah Example", "friends", tone="warm")
+    assert result["status"] == "ok"
+    path = brain_root / "people" / "sarah-example.md"
+    assert path.exists()
+    content = path.read_text(encoding="utf-8")
+    assert "# Sarah Example" in content
+    assert "- **circles:** friends" in content
+    assert "- **tone:** warm" in content
+
+
+def test_confirm_add_person_duplicate_is_error(brain_sandboxed_tools):
+    tools, _ = brain_sandboxed_tools
+    tools.confirm_add_person("Sarah Example", "friends")
+    result = tools.confirm_add_person("Sarah Example", "friends")
+    assert result["status"] == "error"
+
+
+def test_add_person_executors_wired(brain_sandboxed_tools):
+    tools, _ = brain_sandboxed_tools
+    assert "propose_add_person" in tools.EXECUTORS
+    assert "confirm_add_person" in tools.EXECUTORS
+
+
+# ---------------------------------------------------------------------------
+# force_nudge / force_triage (on-demand scripts)
+# ---------------------------------------------------------------------------
+
+
+def test_force_nudge_invokes_people_scan(brain_sandboxed_tools, monkeypatch):
+    tools, _ = brain_sandboxed_tools
+    captured = {}
+
+    def fake_run(script_path, *args, **kwargs):
+        captured["script"] = script_path
+        return {
+            "overdue": [{"slug": "priya-rivera", "days_since": 67}],
+            "approaching": [],
+            "healthy": [],
+            "summary": {"total": 1, "overdue": 1, "approaching": 0, "skipped": 0},
+        }
+
+    import subprocess_helpers  # type: ignore
+    monkeypatch.setattr(subprocess_helpers, "run_json_script", fake_run)
+    monkeypatch.setattr(subprocess_helpers, "is_subprocess_error", lambda r: False)
+
+    result = tools.force_nudge()
+    assert result["status"] == "ok"
+    assert captured["script"].endswith("people-scan.py")
+    assert len(result["overdue"]) == 1
+
+
+def test_force_nudge_surfaces_script_error(brain_sandboxed_tools, monkeypatch):
+    tools, _ = brain_sandboxed_tools
+    import subprocess_helpers  # type: ignore
+    monkeypatch.setattr(
+        subprocess_helpers, "run_json_script",
+        lambda *a, **k: {"__error__": "boom"},
+    )
+    monkeypatch.setattr(
+        subprocess_helpers, "is_subprocess_error",
+        lambda r: "__error__" in r,
+    )
+    result = tools.force_nudge()
+    assert result["status"] == "error"
+
+
+def test_force_triage_invokes_notes_triage_script(brain_sandboxed_tools, monkeypatch):
+    tools, _ = brain_sandboxed_tools
+    captured = {}
+
+    def fake_run(script_path, *args, **kwargs):
+        captured["script"] = script_path
+        return {"untriaged": [], "count": 0, "already_triaged": 0}
+
+    import subprocess_helpers  # type: ignore
+    monkeypatch.setattr(subprocess_helpers, "run_json_script", fake_run)
+    monkeypatch.setattr(subprocess_helpers, "is_subprocess_error", lambda r: False)
+
+    result = tools.force_triage()
+    assert result["status"] == "ok"
+    assert captured["script"].endswith("notes-triage.py")
+
+
+def test_force_script_tools_in_executors(brain_sandboxed_tools):
+    tools, _ = brain_sandboxed_tools
+    assert "force_nudge" in tools.EXECUTORS
+    assert "force_triage" in tools.EXECUTORS
+
+
+# ---------------------------------------------------------------------------
+# draft_reply (/draft [name])
+# ---------------------------------------------------------------------------
+
+
+def test_draft_reply_invokes_draft_compose_script(brain_sandboxed_tools, monkeypatch):
+    tools, _ = brain_sandboxed_tools
+    captured = {}
+
+    def fake_run(script_path, *args, **kwargs):
+        captured["script"] = script_path
+        captured["args"] = list(args)
+        return {
+            "status": "ok",
+            "recipient": {"slug": "priya-rivera", "name": "Priya Rivera"},
+            "draft": "Hi Mom,\n\nJust wanted to check in...\n\nLove,\nBrian",
+            "voice": {"register": "informal_personal"},
+        }
+
+    import subprocess_helpers  # type: ignore
+    monkeypatch.setattr(subprocess_helpers, "run_json_script", fake_run)
+    monkeypatch.setattr(subprocess_helpers, "is_subprocess_error", lambda r: False)
+
+    result = tools.draft_reply("Priya Rivera")
+    assert result["status"] == "ok"
+    assert "Mom" in result["draft"]
+    assert captured["script"].endswith("draft-compose.py")
+    assert "--recipient" in captured["args"]
+
+
+def test_draft_reply_passes_inbound_text_when_supplied(brain_sandboxed_tools, monkeypatch):
+    tools, _ = brain_sandboxed_tools
+    captured = {}
+
+    def fake_run(script_path, *args, **kwargs):
+        captured["args"] = list(args)
+        return {"status": "ok", "draft": "..."}
+
+    import subprocess_helpers  # type: ignore
+    monkeypatch.setattr(subprocess_helpers, "run_json_script", fake_run)
+    monkeypatch.setattr(subprocess_helpers, "is_subprocess_error", lambda r: False)
+
+    tools.draft_reply("Priya", inbound_text="When can you come over for dinner?")
+    assert "--inbound-text" in captured["args"]
+    idx = captured["args"].index("--inbound-text")
+    assert captured["args"][idx + 1] == "When can you come over for dinner?"
+
+
+def test_draft_reply_surfaces_script_error(brain_sandboxed_tools, monkeypatch):
+    tools, _ = brain_sandboxed_tools
+    import subprocess_helpers  # type: ignore
+    monkeypatch.setattr(
+        subprocess_helpers, "run_json_script",
+        lambda *a, **k: {"__error__": "llm timeout"},
+    )
+    monkeypatch.setattr(
+        subprocess_helpers, "is_subprocess_error",
+        lambda r: "__error__" in r,
+    )
+    result = tools.draft_reply("Priya")
+    assert result["status"] == "error"
+    assert "llm timeout" in result["error"]
+
+
+def test_draft_reply_in_executors(brain_sandboxed_tools):
+    tools, _ = brain_sandboxed_tools
+    assert "draft_reply" in tools.EXECUTORS

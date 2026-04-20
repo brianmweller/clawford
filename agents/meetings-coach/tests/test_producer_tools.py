@@ -108,3 +108,176 @@ def test_confirm_invalid_item_id(tools_mod):
 def test_confirm_missing_debrief(tools_mod):
     result = tools_mod.confirm_action_item("nonexistent:0")
     assert result["status"] == "error"
+
+
+# ---------------------------------------------------------------------------
+# force_prep / force_debrief (on-demand script invocation)
+# ---------------------------------------------------------------------------
+
+
+def test_force_prep_shells_out_with_meeting_id(tools_mod, monkeypatch):
+    captured = {}
+
+    def fake_run(script_path, *args, **kwargs):
+        captured["script"] = script_path
+        captured["args"] = list(args)
+        return {"status": "ok", "meeting_id": "abc123", "prep": "..."}
+
+    import subprocess_helpers  # type: ignore
+    monkeypatch.setattr(subprocess_helpers, "run_json_script", fake_run)
+    monkeypatch.setattr(subprocess_helpers, "is_subprocess_error", lambda r: False)
+
+    result = tools_mod.force_prep("abc123")
+    assert result["status"] == "ok"
+    assert captured["script"].endswith("meeting-prep.py")
+    assert "--meeting-id" in captured["args"]
+    idx = captured["args"].index("--meeting-id")
+    assert captured["args"][idx + 1] == "abc123"
+
+
+def test_force_prep_surfaces_error(tools_mod, monkeypatch):
+    import subprocess_helpers  # type: ignore
+    monkeypatch.setattr(
+        subprocess_helpers, "run_json_script",
+        lambda *a, **k: {"__error__": "not found"},
+    )
+    monkeypatch.setattr(
+        subprocess_helpers, "is_subprocess_error", lambda r: "__error__" in r,
+    )
+    result = tools_mod.force_prep("missing")
+    assert result["status"] == "error"
+
+
+def test_force_debrief_shells_out(tools_mod, monkeypatch):
+    captured = {}
+
+    def fake_run(script_path, *args, **kwargs):
+        captured["script"] = script_path
+        return {"status": "ok", "transcripts_processed": 1, "debriefs_sent": 1}
+
+    import subprocess_helpers  # type: ignore
+    monkeypatch.setattr(subprocess_helpers, "run_json_script", fake_run)
+    monkeypatch.setattr(subprocess_helpers, "is_subprocess_error", lambda r: False)
+
+    result = tools_mod.force_debrief()
+    assert result["status"] == "ok"
+    assert captured["script"].endswith("post-meeting-scan.py")
+
+
+def test_force_tools_in_executors(tools_mod):
+    assert "force_prep" in tools_mod.EXECUTORS
+    assert "force_debrief" in tools_mod.EXECUTORS
+
+
+# ---------------------------------------------------------------------------
+# /coaching on / off — propose_coaching_toggle / confirm_coaching_toggle
+# ---------------------------------------------------------------------------
+
+
+def _seed_config(tools_mod, coaching_block=None):
+    cfg = {"calendars": []}
+    if coaching_block is not None:
+        cfg["coaching"] = coaching_block
+    with open(tools_mod.CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(cfg, f)
+
+
+def test_propose_coaching_toggle_stages_pending_action(tools_mod, monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAWFORD_WORKSPACE_ROOT", str(tmp_path))
+    _seed_config(tools_mod, {"enabled": True})
+    result = tools_mod.propose_coaching_toggle(False)
+    assert "__pending_action__" in result
+    assert "off" in result["summary"].lower() or "disable" in result["summary"].lower()
+
+
+def test_confirm_coaching_toggle_flips_flag(tools_mod):
+    _seed_config(tools_mod, {"enabled": True, "growth_areas": []})
+    result = tools_mod.confirm_coaching_toggle(False)
+    assert result["status"] == "ok"
+    with open(tools_mod.CONFIG_PATH, encoding="utf-8") as f:
+        cfg = json.load(f)
+    assert cfg["coaching"]["enabled"] is False
+
+
+def test_confirm_coaching_toggle_creates_coaching_block_if_absent(tools_mod):
+    _seed_config(tools_mod, None)
+    result = tools_mod.confirm_coaching_toggle(True)
+    assert result["status"] == "ok"
+    with open(tools_mod.CONFIG_PATH, encoding="utf-8") as f:
+        cfg = json.load(f)
+    assert cfg["coaching"]["enabled"] is True
+
+
+def test_coaching_toggle_executors_wired(tools_mod):
+    assert "propose_coaching_toggle" in tools_mod.EXECUTORS
+    assert "confirm_coaching_toggle" in tools_mod.EXECUTORS
+
+
+# ---------------------------------------------------------------------------
+# /coaching add {id} {description} — propose + confirm
+# ---------------------------------------------------------------------------
+
+
+def test_confirm_coaching_area_add_appends_to_growth_areas(tools_mod):
+    _seed_config(tools_mod, {"enabled": True, "growth_areas": [
+        {"id": "clarity", "label": "Clarity"},
+    ]})
+    result = tools_mod.confirm_coaching_area_add("brevity", "Keep intros under 60s")
+    assert result["status"] == "ok"
+    with open(tools_mod.CONFIG_PATH, encoding="utf-8") as f:
+        cfg = json.load(f)
+    ids = [a["id"] for a in cfg["coaching"]["growth_areas"]]
+    assert "brevity" in ids
+    brevity = next(a for a in cfg["coaching"]["growth_areas"] if a["id"] == "brevity")
+    assert brevity["label"] == "Keep intros under 60s"
+
+
+def test_confirm_coaching_area_add_rejects_duplicate_id(tools_mod):
+    _seed_config(tools_mod, {"enabled": True, "growth_areas": [
+        {"id": "clarity", "label": "Clarity"},
+    ]})
+    result = tools_mod.confirm_coaching_area_add("clarity", "Different label")
+    assert result["status"] == "error"
+
+
+def test_confirm_coaching_area_remove_drops_by_id(tools_mod):
+    _seed_config(tools_mod, {"enabled": True, "growth_areas": [
+        {"id": "clarity", "label": "Clarity"},
+        {"id": "brevity", "label": "Be concise"},
+    ]})
+    result = tools_mod.confirm_coaching_area_remove("clarity")
+    assert result["status"] == "ok"
+    with open(tools_mod.CONFIG_PATH, encoding="utf-8") as f:
+        cfg = json.load(f)
+    ids = [a["id"] for a in cfg["coaching"]["growth_areas"]]
+    assert ids == ["brevity"]
+
+
+def test_confirm_coaching_area_remove_missing_id_is_error(tools_mod):
+    _seed_config(tools_mod, {"enabled": True, "growth_areas": [
+        {"id": "clarity", "label": "Clarity"},
+    ]})
+    result = tools_mod.confirm_coaching_area_remove("nonexistent")
+    assert result["status"] == "error"
+
+
+def test_propose_coaching_area_add_stages_pending_action(tools_mod, monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAWFORD_WORKSPACE_ROOT", str(tmp_path))
+    _seed_config(tools_mod, {"enabled": True, "growth_areas": []})
+    result = tools_mod.propose_coaching_area_add("brevity", "Keep intros under 60s")
+    assert "__pending_action__" in result
+
+
+def test_propose_coaching_area_remove_stages_pending_action(tools_mod, monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAWFORD_WORKSPACE_ROOT", str(tmp_path))
+    _seed_config(tools_mod, {"enabled": True, "growth_areas": [{"id": "clarity", "label": "Clarity"}]})
+    result = tools_mod.propose_coaching_area_remove("clarity")
+    assert "__pending_action__" in result
+
+
+def test_coaching_area_executors_wired(tools_mod):
+    for name in (
+        "propose_coaching_area_add", "confirm_coaching_area_add",
+        "propose_coaching_area_remove", "confirm_coaching_area_remove",
+    ):
+        assert name in tools_mod.EXECUTORS, f"{name} missing from EXECUTORS"

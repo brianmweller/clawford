@@ -17,7 +17,8 @@
     "scripts/daily-refresh.py",
     "scripts/gmessages-mine.py",
     "scripts/gmessages-auth.py",
-    "scripts/morning-relationship-nudge.py"
+    "scripts/morning-relationship-nudge.py",
+    "scripts/birthday-miner.py"
   ],
   "state_files": [
     {
@@ -125,6 +126,14 @@
       "name": "notes-triage",
       "cron": "0 8,20 * * *",
       "message": "⚡ EXEC DISCIPLINE: run any `python3 <path>` command exactly as written — a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. openclaw 2026.4.11 rejects complex shell invocations before they run. Triage untriaged notes from the inbox. Run: python3 ~/.clawford/connector-workspace/scripts/notes-triage.py. Read the JSON output. If no untriaged notes, return EXACTLY the empty string (zero bytes, no narration — not even \"NO output\", \"Done\", \"all clear\", or a status summary). Any text you emit is logged and charges tokens even when no Telegram message is sent. If untriaged notes exist: read pending-triage.json to skip already-presented notes. For each new note, categorize it (fact/commitment/task/shopping/unclear). Present up to 10 on Telegram with categories and '/confirm to save · /dismiss N to skip item N'. Record presented note IDs in pending-triage.json.",
+      "announce": false,
+      "no_deliver": true,
+      "enabled": false
+    },
+    {
+      "name": "birthday-miner",
+      "cron": "0 6 * * 0",
+      "message": "⚡ EXEC DISCIPLINE: run any `python3 <path>` command exactly as written — a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. Weekly passive scan: mine Google Calendar for recurring birthday events and write them as identity facts on the matching person files. Run: python3 ~/.clawford/connector-workspace/scripts/birthday-miner.py. If status is 'ok' and updated==0, return EXACTLY the empty string. If updated>0, send '🎂 Synced N birthdays.' on Telegram.",
       "announce": false,
       "no_deliver": true,
       "enabled": false

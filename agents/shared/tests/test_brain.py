@@ -238,3 +238,157 @@ def test_read_git_json_uses_git_root(sandboxed_brain):
     (sandboxed_brain["git"] / "schemas.json").write_text('{"v": 1}', encoding="utf-8")
 
     assert brain.read_git_json("schemas.json") == {"v": 1}
+
+
+# ---------------------------------------------------------------------------
+# People helpers (get_person, list_persons, create_person_file)
+# ---------------------------------------------------------------------------
+
+
+def _write_person(root: Path, slug: str, name: str, circles: str, **extra) -> None:
+    lines = [f"# {name}", "", f"- **slug:** {slug}", f"- **circles:** {circles}"]
+    for k, v in extra.items():
+        lines.append(f"- **{k}:** {v}")
+    (root / "people").mkdir(exist_ok=True)
+    (root / "people" / f"{slug}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_get_person_by_slug_returns_fields(sandboxed_brain):
+    brain = _reload_brain()
+    _write_person(
+        sandboxed_brain["dropbox"], "priya-rivera", "Priya Rivera",
+        "family-inner", email="priya@example.com", tone="warm",
+    )
+
+    p = brain.get_person("priya-rivera")
+    assert p is not None
+    assert p["slug"] == "priya-rivera"
+    assert p["name"] == "Priya Rivera"
+    assert p["fields"]["email"] == "priya@example.com"
+    assert p["fields"]["circles"] == "family-inner"
+    assert p["fields"]["tone"] == "warm"
+    assert p["path"].endswith("priya-rivera.md")
+
+
+def test_get_person_by_display_name_slugifies(sandboxed_brain):
+    """Callers pass "Priya Rivera" — helper slugifies to priya-rivera."""
+    brain = _reload_brain()
+    _write_person(sandboxed_brain["dropbox"], "priya-rivera", "Priya Rivera", "family-inner")
+
+    p = brain.get_person("Priya Rivera")
+    assert p is not None
+    assert p["slug"] == "priya-rivera"
+
+
+def test_get_person_returns_none_on_miss(sandboxed_brain):
+    brain = _reload_brain()
+    (sandboxed_brain["dropbox"] / "people").mkdir()
+
+    assert brain.get_person("nonexistent-person") is None
+
+
+def test_get_person_first_name_fallback_single_match(sandboxed_brain):
+    """'Priya' should resolve to priya-rivera when that's the only match."""
+    brain = _reload_brain()
+    _write_person(sandboxed_brain["dropbox"], "priya-rivera", "Priya Rivera", "family-inner")
+    _write_person(sandboxed_brain["dropbox"], "mike-chen", "Mike Chen", "work")
+
+    p = brain.get_person("Priya")
+    assert p is not None
+    assert p["slug"] == "priya-rivera"
+
+
+def test_get_person_first_name_fallback_ambiguous_returns_none(sandboxed_brain):
+    """Two Alices → ambiguous → None; caller must disambiguate."""
+    brain = _reload_brain()
+    _write_person(sandboxed_brain["dropbox"], "alice-johnson", "Alice Johnson", "work")
+    _write_person(sandboxed_brain["dropbox"], "alice-wong", "Alice Wong", "friends")
+
+    assert brain.get_person("Alice") is None
+
+
+def test_list_persons_all_circles(sandboxed_brain):
+    brain = _reload_brain()
+    _write_person(sandboxed_brain["dropbox"], "a-one", "A One", "family-inner")
+    _write_person(sandboxed_brain["dropbox"], "b-two", "B Two", "work")
+    _write_person(sandboxed_brain["dropbox"], "c-three", "C Three", "family-extended")
+
+    persons = brain.list_persons()
+    slugs = {p["slug"] for p in persons}
+    assert slugs == {"a-one", "b-two", "c-three"}
+
+
+def test_list_persons_filtered_by_circle(sandboxed_brain):
+    brain = _reload_brain()
+    _write_person(sandboxed_brain["dropbox"], "a-one", "A One", "family-inner")
+    _write_person(sandboxed_brain["dropbox"], "b-two", "B Two", "work, friends")
+    _write_person(sandboxed_brain["dropbox"], "c-three", "C Three", "family-inner, close")
+
+    inner = brain.list_persons(circle="family-inner")
+    slugs = {p["slug"] for p in inner}
+    assert slugs == {"a-one", "c-three"}
+
+
+def test_list_persons_empty_dir(sandboxed_brain):
+    brain = _reload_brain()
+    assert brain.list_persons() == []
+
+
+def test_create_person_file_writes_frontmatter(sandboxed_brain):
+    brain = _reload_brain()
+    result = brain.create_person_file(
+        "Sarah Example", "friends", tone="warm", email="sarah@example.com",
+    )
+    assert result["slug"] == "sarah-example"
+    path = sandboxed_brain["dropbox"] / "people" / "sarah-example.md"
+    assert path.exists()
+    content = path.read_text(encoding="utf-8")
+    assert "# Sarah Example" in content
+    assert "- **slug:** sarah-example" in content
+    assert "- **circles:** friends" in content
+    assert "- **tone:** warm" in content
+    assert "- **email:** sarah@example.com" in content
+
+
+def test_create_person_file_raises_on_duplicate(sandboxed_brain):
+    brain = _reload_brain()
+    brain.create_person_file("Sarah Example", "friends")
+    with pytest.raises(FileExistsError):
+        brain.create_person_file("Sarah Example", "friends")
+
+
+# ---------------------------------------------------------------------------
+# Inbox notes
+# ---------------------------------------------------------------------------
+
+
+def test_append_inbox_note_creates_file_with_entry(sandboxed_brain):
+    brain = _reload_brain()
+    result = brain.append_inbox_note("connector", "call mom next week")
+    path = sandboxed_brain["dropbox"] / "notes" / "inbox.md"
+    assert path.exists()
+    content = path.read_text(encoding="utf-8")
+    assert "- **content:** call mom next week" in content
+    assert "- **agent:** connector" in content
+    assert "- **triaged:** false" in content
+    assert "- **id:** connector-" in content
+    assert result["id"].startswith("connector-")
+
+
+def test_append_inbox_note_appends_multiple_entries(sandboxed_brain):
+    brain = _reload_brain()
+    r1 = brain.append_inbox_note("connector", "first note")
+    r2 = brain.append_inbox_note("connector", "second note")
+    assert r1["id"] != r2["id"]
+    content = (sandboxed_brain["dropbox"] / "notes" / "inbox.md").read_text(encoding="utf-8")
+    assert "first note" in content
+    assert "second note" in content
+    # Entries are separated by --- dividers
+    assert content.count("---") >= 1
+
+
+def test_append_inbox_note_respects_triaged_flag(sandboxed_brain):
+    brain = _reload_brain()
+    brain.append_inbox_note("connector", "already triaged", triaged=True)
+    content = (sandboxed_brain["dropbox"] / "notes" / "inbox.md").read_text(encoding="utf-8")
+    assert "- **triaged:** true" in content

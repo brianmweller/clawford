@@ -1,10 +1,14 @@
 """agents/news-digest/tools.py — Lowly Worm's tool manifest.
 
 Read-only tools that expose the news digest state the operator accumulates
-each morning. All tools are cache-only: they read files written by
+each morning. Most tools are cache-only: they read files written by
 the scheduled crons (morning-edition.py, deliver-digest.py,
 engagement-poller.py, update-preferences.py) and return structured
-data. No network, no LLM, no subprocess.
+data.
+
+Exception: ``ask_topic`` shells out to scripts/on-demand.py to fulfill
+`/ask [topic]` queries. That's the single tool that touches the network
+(via the script's RSS + Google News + Brave fetches).
 """
 from __future__ import annotations
 
@@ -14,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import memory_writer  # type: ignore
+import subprocess_helpers  # type: ignore
 
 AGENT_ID = "news-digest"
 
@@ -166,6 +171,25 @@ def record_engagement(article_id: str, action: str) -> dict:
     return {"status": "ok", "article_id": article_id, "action": action}
 
 
+_ON_DEMAND = str(
+    Path(__file__).resolve().parent / "scripts" / "on-demand.py"
+)
+
+
+def ask_topic(topic: str) -> dict:
+    """Answer a current-events query by shelling out to on-demand.py, which
+    searches today's RSS cache + Google News RSS + Brave Search in parallel
+    and returns ranked results. The LLM synthesizes a briefing from the
+    results."""
+    topic = (topic or "").strip()
+    if not topic:
+        return {"status": "error", "error": "empty topic"}
+    result = subprocess_helpers.run_json_script(_ON_DEMAND, topic, timeout=30)
+    if subprocess_helpers.is_subprocess_error(result):
+        return {"status": "error", "error": result.get("__error__", "script error")}
+    return result
+
+
 TOOLS: list[dict] = [
     {
         "type": "function",
@@ -249,6 +273,27 @@ TOOLS: list[dict] = [
             "required": ["rule"],
         },
     },
+    {
+        "type": "function",
+        "name": "ask_topic",
+        "description": (
+            "Search current news for a topic and return ranked results. "
+            "Shells out to on-demand.py which queries today's RSS cache, "
+            "Google News RSS, and Brave Search in parallel. Use for `/ask "
+            "[topic]` or when the operator asks 'what's happening with X'. Then "
+            "synthesize a 3-5 sentence briefing with source attribution."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": "The topic or free-text question",
+                },
+            },
+            "required": ["topic"],
+        },
+    },
 ]
 
 
@@ -259,4 +304,5 @@ EXECUTORS: dict = {
     "record_engagement": record_engagement,
     "propose_remember": propose_remember,
     "confirm_remember": confirm_remember,
+    "ask_topic": ask_topic,
 }

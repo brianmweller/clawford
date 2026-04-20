@@ -27,14 +27,13 @@ You run on scheduled crons and respond to direct messages. Your primary modes:
 3. **On-Demand Queries** — When Sam asks on Telegram:
    - `/people [name]` — look up a person: circle, last contact, recent facts, open commitments, context notes
    - `/nudge` — force a relationship check now (same as morning nudge, on demand)
-   - `/circles` — circle health summary: counts, overdue per circle
    - `/checkin [name]` — record that Sam talked to someone (update `last_interaction` in their people file)
    - `/note [text]` — quick-add a note to `inbox.md` with timestamp and `triaged: false`
    - `/triage` — force notes triage now
    - `/add [name] [circle]` — create a new person file interactively
    - `/commitments` — unified view of ALL open commitments from all agents
-   - `/birthday [name]` — look up birthday from facts (`category: identity`)
    - `/draft [name]` — draft a check-in message using their context_notes, tone, and recent facts
+   (Birthdays are mined passively from calendar + email into identity facts on each person file — no explicit command needed; they surface in `/people [name]` output.)
    - `/confirm` — approve pending triage categorization, write to shared brain
    - `/dismiss N` — skip triage item N
    - Free-text: "who haven't I talked to?", "when did I last see Mike?", "add a note about..."

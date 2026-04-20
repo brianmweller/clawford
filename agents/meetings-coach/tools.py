@@ -15,6 +15,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import memory_writer  # type: ignore
+import pending_actions  # type: ignore
+import subprocess_helpers  # type: ignore
 
 
 def _load_post_meeting_scan():
@@ -334,6 +336,137 @@ def dismiss_action_item(item_id: str) -> dict:
     return {"status": "ok", "item_id": item_id, "dismissed": True}
 
 
+# ---------------------------------------------------------------------------
+# Force-run scripts (/prep, /debrief)
+# ---------------------------------------------------------------------------
+
+
+_SCRIPTS_DIR = Path(__file__).resolve().parent / "scripts"
+_MEETING_PREP = str(_SCRIPTS_DIR / "meeting-prep.py")
+_POST_MEETING_SCAN = str(_SCRIPTS_DIR / "post-meeting-scan.py")
+
+
+def force_prep(meeting_id: str) -> dict:
+    """Run meeting-prep.py for a specific event on demand. Returns the
+    prep bundle: attendees, facts, open commitments. Use for `/prep
+    [meeting]` — the LLM then formats the prep for the operator."""
+    meeting_id = (meeting_id or "").strip()
+    if not meeting_id:
+        return {"status": "error", "error": "meeting_id is required"}
+    result = subprocess_helpers.run_json_script(
+        _MEETING_PREP, "--meeting-id", meeting_id, timeout=60,
+    )
+    if subprocess_helpers.is_subprocess_error(result):
+        return {"status": "error", "error": result.get("__error__", "script error")}
+    return result
+
+
+def force_debrief() -> dict:
+    """Run post-meeting-scan.py on demand — processes any recently-ended
+    meetings with transcripts, stages debriefs, sends Telegram messages.
+    Use for `/debrief` — the cron runs periodically, but this forces a
+    check now (e.g. right after a meeting ends)."""
+    result = subprocess_helpers.run_json_script(
+        _POST_MEETING_SCAN, timeout=120,
+    )
+    if subprocess_helpers.is_subprocess_error(result):
+        return {"status": "error", "error": result.get("__error__", "script error")}
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Coaching config mutators (/coaching on, off, add, remove)
+# ---------------------------------------------------------------------------
+
+
+def _read_meeting_config() -> dict:
+    cfg = _read_json(CONFIG_PATH, default={})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    return cfg
+
+
+def _write_meeting_config(cfg: dict) -> None:
+    tmp = CONFIG_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, CONFIG_PATH)
+
+
+def propose_coaching_toggle(enabled: bool) -> dict:
+    """Stage a toggle of coaching.enabled in meeting-config.json."""
+    label = "ON" if enabled else "OFF"
+    return pending_actions.stage(
+        AGENT_ID,
+        "coaching_toggle",
+        {"enabled": bool(enabled)},
+        f"Turn coaching {label}",
+    )
+
+
+def confirm_coaching_toggle(enabled: bool) -> dict:
+    """Flip coaching.enabled, creating the coaching block if absent."""
+    cfg = _read_meeting_config()
+    coaching = cfg.setdefault("coaching", {})
+    coaching["enabled"] = bool(enabled)
+    coaching.setdefault("growth_areas", [])
+    _write_meeting_config(cfg)
+    return {"status": "ok", "enabled": bool(enabled)}
+
+
+def propose_coaching_area_add(area_id: str, description: str) -> dict:
+    """Stage the addition of a new growth area to coaching.growth_areas."""
+    area_id = (area_id or "").strip()
+    description = (description or "").strip()
+    if not area_id or not description:
+        return {"status": "error", "error": "area_id and description are required"}
+    return pending_actions.stage(
+        AGENT_ID,
+        "coaching_area_add",
+        {"area_id": area_id, "description": description},
+        f"Add coaching area '{area_id}': {description[:80]}",
+    )
+
+
+def confirm_coaching_area_add(area_id: str, description: str) -> dict:
+    """Append a growth area. Rejects duplicate ids."""
+    cfg = _read_meeting_config()
+    coaching = cfg.setdefault("coaching", {})
+    areas = coaching.setdefault("growth_areas", [])
+    existing_ids = {a.get("id") for a in areas}
+    if area_id in existing_ids:
+        return {"status": "error", "error": f"growth area already exists: {area_id!r}"}
+    areas.append({"id": area_id, "label": description})
+    _write_meeting_config(cfg)
+    return {"status": "ok", "area_id": area_id}
+
+
+def propose_coaching_area_remove(area_id: str) -> dict:
+    """Stage removal of a growth area by id."""
+    area_id = (area_id or "").strip()
+    if not area_id:
+        return {"status": "error", "error": "area_id is required"}
+    return pending_actions.stage(
+        AGENT_ID,
+        "coaching_area_remove",
+        {"area_id": area_id},
+        f"Remove coaching area '{area_id}'",
+    )
+
+
+def confirm_coaching_area_remove(area_id: str) -> dict:
+    """Remove a growth area by id. Returns error if not found."""
+    cfg = _read_meeting_config()
+    coaching = cfg.setdefault("coaching", {})
+    areas = coaching.setdefault("growth_areas", [])
+    before = len(areas)
+    coaching["growth_areas"] = [a for a in areas if a.get("id") != area_id]
+    if len(coaching["growth_areas"]) == before:
+        return {"status": "error", "error": f"growth area not found: {area_id!r}"}
+    _write_meeting_config(cfg)
+    return {"status": "ok", "area_id": area_id}
+
+
 TOOLS: list[dict] = [
     {
         "type": "function",
@@ -495,6 +628,85 @@ TOOLS: list[dict] = [
             "required": ["rule"],
         },
     },
+    {
+        "type": "function",
+        "name": "force_prep",
+        "description": (
+            "Run meeting-prep.py for a specific calendar event on demand. "
+            "Returns attendees, facts about them, and open commitments. "
+            "Use for `/prep [meeting name or id]` or when the operator asks "
+            "'what do I need to know before my 3pm with Alice'."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "meeting_id": {
+                    "type": "string",
+                    "description": "GCal event id from today's meetings cache",
+                },
+            },
+            "required": ["meeting_id"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "force_debrief",
+        "description": (
+            "Run the post-meeting scan on demand — processes any recently-"
+            "ended meetings with Krisp transcripts, stages debriefs. Use "
+            "for `/debrief` or when the operator just got out of a meeting and "
+            "wants the debrief now instead of waiting for the cron."
+        ),
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "type": "function",
+        "name": "propose_coaching_toggle",
+        "description": (
+            "Stage a toggle of coaching.enabled in meeting-config.json. Use "
+            "for `/coaching on` or `/coaching off`. the operator will confirm or cancel."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "enabled": {"type": "boolean", "description": "New coaching state"},
+            },
+            "required": ["enabled"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "propose_coaching_area_add",
+        "description": (
+            "Stage the addition of a new growth area to coaching.growth_areas. "
+            "Use for `/coaching add {id} {description}`. area_id is a short "
+            "identifier like 'brevity' or 'closing'; description is a 1-2 "
+            "sentence anchor like 'Keep intros under 60s.'"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "area_id": {"type": "string"},
+                "description": {"type": "string"},
+            },
+            "required": ["area_id", "description"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "propose_coaching_area_remove",
+        "description": (
+            "Stage removal of a growth area by id. Use for `/coaching "
+            "remove {id}`."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "area_id": {"type": "string"},
+            },
+            "required": ["area_id"],
+        },
+    },
 ]
 
 
@@ -512,4 +724,12 @@ EXECUTORS: dict = {
     "save_debrief": save_debrief,
     "dismiss_debrief": dismiss_debrief,
     "replace_action_items": replace_action_items,
+    "force_prep": force_prep,
+    "force_debrief": force_debrief,
+    "propose_coaching_toggle": propose_coaching_toggle,
+    "confirm_coaching_toggle": confirm_coaching_toggle,
+    "propose_coaching_area_add": propose_coaching_area_add,
+    "confirm_coaching_area_add": confirm_coaching_area_add,
+    "propose_coaching_area_remove": propose_coaching_area_remove,
+    "confirm_coaching_area_remove": confirm_coaching_area_remove,
 }
