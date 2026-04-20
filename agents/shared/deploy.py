@@ -1257,6 +1257,8 @@ MANIFEST_STRUCTURAL_FIELDS: tuple[str, ...] = (
 def sync_manifest_structure(
     actual_path: Path | str,
     example_path: Path | str,
+    *,
+    force_delete: bool = False,
 ) -> dict:
     """Copy structural fields from manifest.json.example to manifest.json
     while preserving operator-private fields (crons with PII, approvals).
@@ -1269,6 +1271,15 @@ def sync_manifest_structure(
 
     If manifest.json doesn't exist yet, bootstraps it from .example as a
     fresh copy (operator will fill in crons next).
+
+    Guard: when the sync would REMOVE one or more scripts, config_files,
+    or state_files from the live manifest (meaning the entry exists in
+    actual but is missing from example), the sync refuses to write and
+    returns status=blocked with the removal list in the diff. The
+    operator must re-run with force_delete=True after inspecting. This
+    guard was added 2026-04-20 after a sync silently dropped three
+    legitimate scripts that were present in the live manifest but
+    missing from .example.
 
     Returns a dict with status + diff description so callers can log
     what changed.
@@ -1324,6 +1335,28 @@ def sync_manifest_structure(
             diff["state_files_removed"] = [p for p in before_paths if p not in after_paths]
 
         actual[field] = after
+
+    # Silent-delete guard. If any structural field would lose entries
+    # on sync and force_delete wasn't passed, refuse to write. Returning
+    # status=blocked leaves the operator's manifest untouched so they
+    # can inspect the removal list and decide whether to re-sync with
+    # --force-delete or patch .example first. Bootstraps skip the guard
+    # (no existing data to protect).
+    removals = (
+        diff.get("scripts_removed", [])
+        + diff.get("config_files_removed", [])
+        + diff.get("state_files_removed", [])
+    )
+    if removals and not force_delete and not bootstrapped:
+        return {
+            **diff,
+            "status": "blocked",
+            "error": (
+                "sync would remove entries present in the live manifest "
+                "but missing from .example — re-run with --force-delete "
+                "to proceed"
+            ),
+        }
 
     try:
         actual_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1778,7 +1811,17 @@ def main() -> int:
             "Sync structural fields (config_files, scripts, state_files) from "
             "manifest.json.example to manifest.json, preserving operator-private "
             "fields (crons with PII, approvals). Use this when a git pull brings "
-            "in structural manifest changes. Does not run a deploy."
+            "in structural manifest changes. Does not run a deploy. Refuses to "
+            "remove entries silently — re-run with --force-delete after "
+            "inspecting the reported removal list."
+        ),
+    )
+    ap.add_argument(
+        "--force-delete", action="store_true",
+        help=(
+            "Allow --sync-manifest to remove entries from the live manifest "
+            "that are missing from .example. Use only after inspecting the "
+            "removal list in a prior blocked sync."
         ),
     )
     ap.add_argument(
@@ -1814,10 +1857,26 @@ def main() -> int:
         def _sync_one(agent_id: str) -> int:
             actual = REPO_ROOT / "agents" / agent_id / "manifest.json"
             example = REPO_ROOT / "agents" / agent_id / "manifest.json.example"
-            result = sync_manifest_structure(actual, example)
+            result = sync_manifest_structure(
+                actual, example, force_delete=args.force_delete,
+            )
             if result.get("status") == "error":
                 log(f"{agent_id}: sync failed — {result.get('error')}", "err")
                 return 1
+            if result.get("status") == "blocked":
+                parts = []
+                for key in ("scripts_removed", "config_files_removed",
+                            "state_files_removed"):
+                    vals = result.get(key, [])
+                    if vals:
+                        parts.append(f"{key}={vals}")
+                log(
+                    f"{agent_id}: sync BLOCKED — would remove {', '.join(parts)}. "
+                    "Re-run with --force-delete after confirming the removals "
+                    "are intentional (the usual fix is to update .example).",
+                    "err",
+                )
+                return 2
             parts = []
             for key in ("config_files_added", "config_files_removed",
                         "scripts_added", "scripts_removed",
