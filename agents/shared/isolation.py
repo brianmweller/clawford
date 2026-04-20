@@ -91,11 +91,12 @@ def bwrap_command(
         + libs + DNS + certs)
       - RO-binds the repo (so deploy-time copies of shared-lib
         modules, prompts, fixtures resolve)
-      - RO-binds the brain root (everyone can read brain;
-        per-agent sub-dirs flip RW below)
+      - RO-binds the brain root + per-agent-subdir RW + RW-whitelists
+        brain/{facts,people,commitments,queues} for shared writes
+      - RO-binds ~/.codex (Codex OAuth token)
       - RW-binds the agent's own workspace
-      - RW-binds the agent's own brain subdir
       - tmpfs /tmp + /var/tmp for per-invocation scratch
+      - tmpfs /dev/shm for browser SysV shared-memory IPC
       - --share-net keeps the network stack so Telegram + LLM +
         browser calls work
       - --die-with-parent so a wrapper crash doesn't leave zombies
@@ -113,6 +114,13 @@ def bwrap_command(
         # Scratch space — per-invocation tmpfs avoids cross-cron leakage.
         "--tmpfs", "/tmp",
         "--tmpfs", "/var/tmp",
+        # /dev/shm — SysV shared-memory backing. Camoufox/Playwright/
+        # Firefox use this for IPC between browser master and worker
+        # processes; without a mount inside the namespace, the browser
+        # crashes immediately on launch. Per-invocation tmpfs keeps
+        # shm segments isolated and auto-cleans on namespace exit.
+        # Added 2026-04-20 when bwrap rollout extended to browser crons.
+        "--tmpfs", "/dev/shm",
     ]
 
     # System libs — read-only.
@@ -127,6 +135,14 @@ def bwrap_command(
     # www.googleapis.com" was the regression on the first live test).
     if Path("/run").is_dir():
         cmd += ["--ro-bind-try", "/run", "/run"]
+
+    # Codex OAuth token (~/.codex/auth.json) — RO-bound so
+    # agents/shared/llm.py::infer can read the token. Every bwrap'd
+    # LLM call failed with 'auth.json not found' until this bind was
+    # added 2026-04-20. --ro-bind-try so the flag is safe on a machine
+    # without Codex installed (CI / fresh dev laptop).
+    cmd += ["--ro-bind-try", str(Path.home() / ".codex"),
+            str(Path.home() / ".codex")]
 
     # Operator's --user pip install dir (~/.local/) — RO-bound so
     # user-installed Python packages and CLI tools (pip-audit,
@@ -145,13 +161,15 @@ def bwrap_command(
         if repo.exists():
             cmd += ["--ro-bind", str(repo), str(repo)]
 
-    # Brain — RO at the root.
-    #
-    # Single RW exception for the agent's own writes:
-    #   <brain>/agents/<agent_id>/  — RW so memory_writer.py can
-    #   append to the agent's own MEMORY.md. Everything else under
-    #   <brain>/agents/ stays RO (inherited from the brain-root bind);
-    #   no agent writes sibling files there post status.md retirement.
+    # Brain — RO at the root, with a RW whitelist for shared write
+    # targets. Pre-widening (2026-04-20) only <brain>/agents/<agent_id>/
+    # was RW-bound; every other brain-path write hit EROFS silently.
+    # daily-refresh surfaced this on brain/people/*.md starting
+    # 2026-04-18, and the new fact miners would have hit the same wall
+    # on brain/facts/YYYY-MM.md. The whitelist is explicit: facts,
+    # people, commitments, queues — the four shared write targets.
+    # brain/memory/ stays RO (agents write their own memory via
+    # <brain>/agents/<agent_id>/, not the fleet memory root).
     if brain_root is not None:
         brain = Path(_expand(str(brain_root))).resolve()
         if brain.exists():
@@ -159,6 +177,11 @@ def bwrap_command(
             agent_brain = brain / "agents" / agent_id
             if agent_brain.exists():
                 cmd += ["--bind", str(agent_brain), str(agent_brain)]
+            # Shared RW whitelist. --bind-try so a brain root without
+            # one of these subdirs yet (fresh deploy) doesn't crash.
+            for sub in ("facts", "people", "commitments", "queues"):
+                sub_path = brain / sub
+                cmd += ["--bind-try", str(sub_path), str(sub_path)]
 
     # Workspace — read-write.
     if workspace.exists():

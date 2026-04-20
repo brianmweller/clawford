@@ -172,6 +172,103 @@ def test_bwrap_command_own_brain_subdir_is_read_write(tmp_path: Path) -> None:
     assert _has_triple(cmd, "--bind", str(agent_brain), str(agent_brain))
 
 
+def test_bwrap_command_binds_brain_facts_rw(tmp_path: Path) -> None:
+    """brain/facts/ must be RW-bound so fact miners running under bwrap
+    can write to brain/facts/YYYY-MM.md. Pre-widening (2026-04-20) the
+    default profile RO-bound all of brain/ except brain/agents/<id>/,
+    which silently broke fact miners with EROFS and was the reason
+    `daily-refresh` was hitting EROFS on brain/people/*.md."""
+    brain = tmp_path / "brain"
+    (brain / "facts").mkdir(parents=True)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    cmd = isolation.bwrap_command(
+        agent_id="shopping", workspace=workspace, brain_root=brain,
+    )
+    facts_dir = brain / "facts"
+    assert _has_triple(cmd, "--bind-try", str(facts_dir), str(facts_dir))
+
+
+def test_bwrap_command_binds_brain_people_rw(tmp_path: Path) -> None:
+    """brain/people/ must be RW-bound so miners' recent-observations
+    appends land. Regression for the 2026-04-18 EROFS on people/*.md."""
+    brain = tmp_path / "brain"
+    (brain / "people").mkdir(parents=True)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    cmd = isolation.bwrap_command(
+        agent_id="shopping", workspace=workspace, brain_root=brain,
+    )
+    people_dir = brain / "people"
+    assert _has_triple(cmd, "--bind-try", str(people_dir), str(people_dir))
+
+
+def test_bwrap_command_binds_brain_commitments_and_queues_rw(tmp_path: Path) -> None:
+    brain = tmp_path / "brain"
+    (brain / "commitments").mkdir(parents=True)
+    (brain / "queues").mkdir(parents=True)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    cmd = isolation.bwrap_command(
+        agent_id="shopping", workspace=workspace, brain_root=brain,
+    )
+    for sub in ("commitments", "queues"):
+        p = brain / sub
+        assert _has_triple(cmd, "--bind-try", str(p), str(p)), (
+            f"brain/{sub}/ must be RW-bound"
+        )
+
+
+def test_bwrap_command_brain_memory_stays_read_only(tmp_path: Path) -> None:
+    """The RW whitelist is explicit: facts, people, commitments, queues.
+    Everything else under brain/ stays RO. brain/memory/ — where
+    MEMORY.md and long-term context live — must NOT flip to RW; an
+    agent's writes go to brain/agents/<agent_id>/MEMORY.md, not the
+    fleet-level memory root."""
+    brain = tmp_path / "brain"
+    memory = brain / "memory"
+    memory.mkdir(parents=True)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    cmd = isolation.bwrap_command(
+        agent_id="shopping", workspace=workspace, brain_root=brain,
+    )
+    assert not _has_triple(cmd, "--bind", str(memory), str(memory)), (
+        "brain/memory/ must remain RO"
+    )
+    assert not _has_triple(cmd, "--bind-try", str(memory), str(memory)), (
+        "brain/memory/ must not appear in the RW whitelist"
+    )
+
+
+def test_bwrap_command_binds_codex_auth_readonly() -> None:
+    """Codex OAuth token lives at ~/.codex/auth.json; bwrap must bind
+    it RO so agents/shared/llm.py::infer can read it. Missing pre-
+    widening (2026-04-20); every bwrap'd LLM call failed with
+    'auth.json not found' until this bind was added. Using --ro-bind-try
+    so the flag is safe on a machine where Codex isn't installed
+    (CI, fresh dev laptop)."""
+    cmd = isolation.bwrap_command(
+        agent_id="x", workspace=Path("/tmp/x"),
+    )
+    codex = str(Path.home() / ".codex")
+    assert _has_triple(cmd, "--ro-bind-try", codex, codex)
+
+
+def test_bwrap_command_provides_tmpfs_for_dev_shm() -> None:
+    """SysV shared memory lives at /dev/shm. Camoufox/Playwright/Firefox
+    allocate shm segments there for IPC between the browser master
+    process and its workers. Without a /dev/shm mount inside the
+    namespace, the browser crashes immediately on launch. Per-invocation
+    tmpfs keeps shm segments isolated and auto-cleans on namespace
+    exit. Regression cover for the 'DO NOT add browser-driven crons'
+    pre-widening allowlist comment."""
+    cmd = isolation.bwrap_command(
+        agent_id="x", workspace=Path("/tmp/x"),
+    )
+    assert _has_pair(cmd, "--tmpfs", "/dev/shm")
+
+
 def test_bwrap_command_agents_dir_is_read_only(tmp_path: Path) -> None:
     """Post status.md retirement, the only writes inside <brain>/agents/
     come from each agent's own subdir (MEMORY.md via memory_writer,
