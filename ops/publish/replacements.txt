@@ -82,19 +82,22 @@ future corporate roles==>future corporate roles
 example.webex.com==>example.webex.com
 
 ***REMOVED***
-# Longest/most-specific first. Case-specific variants follow.
+***REMOVED***
+***REMOVED***
+***REMOVED***
+***REMOVED***
+priya@example.com==>priya@example.com
+priya@example.com==>priya@example.com
+PRIYA-RIVERA==>PRIYA-RIVERA
+regex:\bLeslie\b==>Priya
+regex:\bleslie\b==>priya
 Kai Rivera==>Kai Rivera
 Sam M Smith==>Sam M Smith
 Robin Rivera==>Robin Rivera
-PRIYA-RIVERA==>PRIYA-RIVERA
 Priya-Weller==>Priya-Rivera
 Priya Weller==>Priya Rivera
 robin-rivera==>robin-rivera
 Robin-Rivera==>Robin-Rivera
-priya@example.com==>priya@example.com
-priya@example.com==>priya@example.com
-regex:\bLeslie\b==>Priya
-regex:\bleslie\b==>priya
 
 ***REMOVED***
 ***REMOVED***
