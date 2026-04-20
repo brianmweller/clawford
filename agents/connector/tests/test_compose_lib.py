@@ -150,6 +150,24 @@ def test_prompt_labels_history_as_voice_anchor():
     assert "HISTORY WINS" in prompt
 
 
+def test_prompt_flags_voice_anchors_as_context_specific():
+    # Prevents the "use most-recent anchor regardless of context" failure
+    # that shipped "she likes flipping through it" in reply to a gift offer.
+    prompt = build_compose_prompt(_ctx(), _voice(), _inbound())
+    assert "CONTEXT-SPECIFIC" in prompt or "context-specific" in prompt
+
+
+def test_prompt_recipient_model_covers_emotional_dimension():
+    prompt = build_compose_prompt(_ctx(), _voice(), _inbound())
+    # Must explicitly name the emotional-outcome dimension, not just task
+    assert "emotional" in prompt.lower()
+    # Must name at least one concrete emotional-pattern example so the LLM
+    # has anchors beyond the abstract label
+    examples = ["gift-giver", "advice-giver", "well-wisher", "closeout-sender"]
+    found = sum(1 for e in examples if e.lower() in prompt.lower())
+    assert found >= 2, f"expected at least 2 emotional-pattern examples, found {found}"
+
+
 def test_prompt_includes_recipient_name():
     prompt = build_compose_prompt(_ctx(), _voice(), _inbound())
     assert "Priya Rivera" in prompt
