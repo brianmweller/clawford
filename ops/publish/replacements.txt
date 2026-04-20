@@ -87,7 +87,10 @@ Kai Rivera==>Kai Rivera
 Sam M Smith==>Sam M Smith
 Robin Rivera==>Robin Rivera
 PRIYA-RIVERA==>PRIYA-RIVERA
+Priya-Weller==>Priya-Rivera
+Priya Weller==>Priya Rivera
 robin-rivera==>robin-rivera
+Robin-Rivera==>Robin-Rivera
 priya@example.com==>priya@example.com
 priya@example.com==>priya@example.com
 regex:\bLeslie\b==>Priya
