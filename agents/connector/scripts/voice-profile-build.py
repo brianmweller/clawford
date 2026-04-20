@@ -46,8 +46,13 @@ from agents.shared.gmail_api import extract_plain_body              # noqa: E402
 from voice_profile_lib import (                                     # noqa: E402
     bucket_people_by_circle,
     build_profile_extraction_prompt,
+    exclusive_emails_for_circle,
     parse_profile_response,
 )
+
+
+EXCLUSIVE_FALLBACK_THRESHOLD = 5   # if circle-exclusive emails < this, fall back to all
+MIN_SAMPLES_FOR_PROFILE = 15       # below this, voice inference is too noisy — skip
 
 
 DEFAULT_CACHE = Path(os.path.expanduser("~/.clawford/connector-workspace/cache/voice-profiles"))
@@ -156,6 +161,14 @@ def build_profile_for_circle(
     if not samples:
         return {"error": f"no usable samples for {circle}"}
 
+    if len(samples) < MIN_SAMPLES_FOR_PROFILE:
+        return {
+            "error": f"only {len(samples)} samples (need >= {MIN_SAMPLES_FOR_PROFILE}); "
+                     f"voice inference from too few messages is unreliable — skipping "
+                     f"profile. draft-compose will fall through to register calibration.",
+            "circle": circle,
+        }
+
     prompt = build_profile_extraction_prompt(circle, samples)
     if verbose:
         print(f"[{circle}] prompt size: {len(prompt)} chars")
@@ -236,8 +249,18 @@ def main() -> int:
 
     args.cache_dir.mkdir(parents=True, exist_ok=True)
     for circle in target_circles:
+        # Prefer circle-exclusive emails to avoid cross-circle voice bleed.
+        # Fall back to all emails only if exclusive is too thin.
+        exclusive = exclusive_emails_for_circle(buckets, circle)
+        if len(exclusive) >= EXCLUSIVE_FALLBACK_THRESHOLD:
+            emails_for_circle = exclusive
+            source_label = f"exclusive ({len(exclusive)} of {len(buckets[circle])})"
+        else:
+            emails_for_circle = buckets[circle]
+            source_label = f"all ({len(buckets[circle])}; only {len(exclusive)} exclusive < threshold)"
+        print(f"[{circle}] sampling pool: {source_label}")
         result = build_profile_for_circle(
-            circle, buckets[circle], service,
+            circle, emails_for_circle, service,
             sample_size=args.sample_size,
             llm_backend=args.llm_backend,
             verbose=args.verbose,

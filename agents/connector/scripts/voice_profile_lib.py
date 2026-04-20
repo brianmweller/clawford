@@ -30,6 +30,19 @@ REQUIRED_PROFILE_FIELDS = (
 )
 
 
+def exclusive_emails_for_circle(buckets: dict[str, list[str]], circle: str) -> list[str]:
+    """Return emails in `circle` that belong to NO other circle in
+    `buckets`. Used to build voice profiles without cross-circle
+    contamination (a holiday-card contact who's also family-extended
+    would bias the holiday-card voice toward family voice)."""
+    target = set(buckets.get(circle, []))
+    others: set[str] = set()
+    for c, emails in buckets.items():
+        if c != circle:
+            others.update(emails)
+    return sorted(target - others)
+
+
 def bucket_people_by_circle(people_dir: Path) -> dict[str, list[str]]:
     """Read every people/*.md (skipping _template.md etc.) and return a
     dict of circle → sorted unique list of emails in that circle.

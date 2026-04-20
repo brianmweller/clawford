@@ -17,8 +17,31 @@ sys.path.insert(0, str(_SCRIPTS_DIR))
 from voice_profile_lib import (  # type: ignore
     bucket_people_by_circle,
     build_profile_extraction_prompt,
+    exclusive_emails_for_circle,
     parse_profile_response,
 )
+
+
+# --- exclusive_emails_for_circle ---
+
+def test_exclusive_filters_cross_circle_emails():
+    buckets = {
+        "holiday-card": ["shared@ex.com", "holiday-only@ex.com"],
+        "family-extended": ["shared@ex.com", "family-only@ex.com"],
+    }
+    assert exclusive_emails_for_circle(buckets, "holiday-card") == ["holiday-only@ex.com"]
+
+
+def test_exclusive_returns_all_when_no_overlap():
+    buckets = {
+        "circle-a": ["a1@ex.com", "a2@ex.com"],
+        "circle-b": ["b1@ex.com"],
+    }
+    assert exclusive_emails_for_circle(buckets, "circle-a") == ["a1@ex.com", "a2@ex.com"]
+
+
+def test_exclusive_empty_when_circle_missing():
+    assert exclusive_emails_for_circle({"x": ["a@ex.com"]}, "y") == []
 
 
 # --- bucket_people_by_circle ---
