@@ -5,10 +5,16 @@ replacement` per line. Comments via leading '#' + space==>replacement` per line.
 ***REMOVED***
 
 ***REMOVED***
+***REMOVED***
+***REMOVED***
+***REMOVED***
 sam.smith@example.com==>sam.smith@example.com
 sam.smith+backup@example.com==>sam.smith+backup@example.com
 sam.smith+work@example.com==>sam.smith+work@example.com
 sam@clawford.example==>sam@clawford.example
+sam.smith==>sam.smith
+sam.smith.backup==>sam.smith.backup
+samsmith==>samsmith
 
 ***REMOVED***
 Sam M. Smith==>Sam M. Smith
