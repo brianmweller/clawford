@@ -309,7 +309,7 @@ def main():
         if "whatsapp" in contact.get("platforms", []):
             preferred = "WhatsApp"
         elif "sms" in contact.get("platforms", []):
-            preferred = "iMessage"
+            preferred = "Messages"
 
         # Numeric metrics (Step 2b)
         metrics = compute_relationship_metrics(contact, config)

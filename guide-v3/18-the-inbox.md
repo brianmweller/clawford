@@ -116,7 +116,7 @@ The confirm executor is the piece that makes the pending-action flow safe. The L
 
 | Agent | Read tools | Producer tools | Confirm executors |
 |-------|-----------|---------------|-------------------|
-| [Mr Fixit 🦊🔧](09-mr-fixit.md) | `get_fleet_health`, `get_morning_status`, `get_known_issues` | `propose_remember` | `confirm_remember` |
+| [Mr Fixit 🦊🔧](09-mr-fixit.md) | `get_fleet_health`, `get_morning_status`, `get_known_issues` | `propose_snooze_alert`, `propose_refresh_session`, `propose_rerun_cron`, `propose_remember` | `confirm_snooze_alert`, `confirm_refresh_session`, `confirm_rerun_cron`, `confirm_remember` |
 | [Lowly Worm 🐛📰](10-lowly-worm-newsfeed.md) | `get_todays_digest`, `get_topic_weights`, `recent_engagements`, `ask_topic` | `record_engagement` (also via like/dislike/more buttons), `propose_remember` | `confirm_remember` |
 | [Mistress Mouse 🐭📅](12-mistress-mouse.md) | `get_events_for_day`, `get_week`, `get_configured_calendars`, `get_recent_reminders_sent` | `propose_event_add`, `propose_event_move`, `propose_event_cancel`, `propose_remember` | `confirm_calendar_add`, `confirm_calendar_move`, `confirm_calendar_cancel`, `confirm_remember` |
 | [Sergeant Murphy 🐷🔍](13-sergeant-murphy.md) | `get_meetings_for_day`, `get_week_meetings`, `get_commitment_status`, `get_coaching_config`, `get_recent_coaching_entries`, `force_prep`, `force_debrief` | `list_pending_action_items`, `confirm_action_item`, `dismiss_action_item`, `propose_coaching_toggle`, `propose_coaching_area_add`, `propose_coaching_area_remove`, `propose_remember` | `confirm_coaching_toggle`, `confirm_coaching_area_add`, `confirm_coaching_area_remove`, `confirm_remember` |
@@ -125,7 +125,7 @@ The confirm executor is the piece that makes the pending-action flow safe. The L
 
 Every agent has `propose_remember` / `confirm_remember` — the self-learning memory surface added in the 2026-04 brain migration. Saying "from now on X" to any agent stages the rule with `[💾 Remember] [Skip]` inline buttons; tapping Remember appends to that agent's `MEMORY.md` (Dropbox-brain-synced), which is then loaded into every future system prompt.
 
-Mr Fixit is otherwise read-only on its domain (no fleet-mutation tools yet — that's a future addition). Huckle Cat now carries the richest tool surface — sixteen LLM-callable tools plus three confirm executors, covering relationship lookups (`get_person`, `get_commitments`), on-demand re-runs of the morning cron (`force_nudge`, `force_triage`), draft composition (`draft_reply`), note and person-file creation (`propose_add_note`, `propose_add_person`), and inbox triage dismissal (`dismiss_triage_n`).
+Mr Fixit's three producer tools are the operational ones: `propose_snooze_alert` mutes a noisy alert for a specified window, `propose_refresh_session` kicks the relevant auth/session-refresh script (Krisp tokens, Costco cookies, etc.), `propose_rerun_cron` re-fires a cron that missed or errored. Each stages behind a confirm button for the same reason Huckle Cat's note flow does — these mutate shared state (fleet-health entries, session files, cron run-history) and I want the button in the loop. Huckle Cat now carries the richest tool surface — sixteen LLM-callable tools plus three confirm executors, covering relationship lookups (`get_person`, `get_commitments`), on-demand re-runs of the morning cron (`force_nudge`, `force_triage`), draft composition (`draft_reply`), note and person-file creation (`propose_add_note`, `propose_add_person`), and inbox triage dismissal (`dismiss_triage_n`).
 
 ## The inline button UX
 

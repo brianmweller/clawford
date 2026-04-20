@@ -226,7 +226,7 @@ Emails received:        {contact.get("gmail_received", 0)}
 Calendar meetings:      {contact.get("meeting_count", 0)}
 Krisp-recorded calls:   {contact.get("krisp_meetings", 0)}
 WhatsApp messages:      {contact.get("whatsapp_messages", 0)}
-SMS/iMessage:           {contact.get("sms_messages", 0)}
+SMS/Messages:           {contact.get("sms_messages", 0)}
 
 RECENT CONTEXT (up to {samples["n"]} most-recent samples per channel)
 
