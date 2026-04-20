@@ -5,6 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=openclaw
+Group=openclaw
 EnvironmentFile=/home/openclaw/clawford/.env
 ExecStartPre=/usr/bin/test ! -f /home/openclaw/.clawford/huckle-push-disabled
 ExecStart=/usr/bin/python3 /home/openclaw/.clawford/connector-workspace/scripts/gmail-push-listener.py
