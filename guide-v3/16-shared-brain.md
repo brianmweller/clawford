@@ -1,6 +1,6 @@
 # The shared brain
 
-*Last updated: 2026-04-18 · Reading time: ~10 min · Difficulty: moderate*
+*Last updated: 2026-04-20 · Reading time: ~12 min · Difficulty: moderate*
 
 **TL;DR**
 
@@ -50,12 +50,28 @@ IDs are globally unique. Format: `<agent-name>-<YYYY-MM-DD>-<seq>`, where `seq` 
 
 Every entry in the brain falls into one of four shapes. The schema is intentionally narrow, because every additional shape is one more thing every agent has to know how to read.
 
-- **Facts.** Things known to be true at a point in time. Each fact carries a `decay` field — `never` for identity facts (someone's name, their relationship to the household), `7d` for logistics (someone's travel plans, where a delivery is), `14d` for soft signal (a rumour, an inferred preference). The decay is a hint to readers, not a hard expiry — facts past their decay date are still readable but flagged as stale, and the agent that wrote the fact is responsible for refreshing it if it still applies.
+- **Facts.** Things known to be true at a point in time. Each fact carries a `decay` field — `never` for identity facts (someone's name, their relationship to the household), `7d` for logistics (someone's travel plans, where a delivery is), `14d` for soft signal (a rumour, an inferred preference). The decay is a hint to readers, not a hard expiry — facts past their decay date are still readable but flagged as stale, and the agent that wrote the fact is responsible for refreshing it if it still applies. Facts also carry an `audience_scope` field (see below) that gates which recipient circles a fact can surface in — a family fact never reaches a professional draft.
 - **Commitments.** Promises with a resolution date. "I told Sam I'd send the photos by Friday" is a commitment. Commitments have status `open`, `done`, or `dropped`. The agent that opened a commitment is responsible for resolving it, but anyone with the right ID can mark it done.
 - **Tasks.** Action items the human needs to do. Lighter than a commitment — no external party promised, no resolution date required. Used by the meeting agent to surface follow-ups, by the news agent to flag things worth following up on, etc.
 - **Notes.** Raw inputs that haven't been triaged into one of the above yet. The connector agent dumps everything here first, then promotes individual entries to facts/commitments/tasks during its triage pass.
 
 The full schema with field tables, half-lives, and access matrix lives alongside the brain directory itself, with validators that enforce it. It only makes sense in the context of what an agent is trying to say — so write the agent first, then read the schema when you're about to write to the brain for the first time.
+
+## Audience scope on facts
+
+Every fact carries an `audience_scope` field — a list of up to three tags drawn from `{professional, personal, family, friends, academic, financial, legal, genealogy, internal, public}`. A fact tagged `["family"]` surfaces in drafts to family-circle recipients only. A fact tagged `["personal", "family"]` is visible to both. Absence of a scope means "visible to all," which is the conservative default for facts imported before the tagging system existed.
+
+The motivating story is in [Ch 14 — The correspondence layer](14-huckle-cat.md#audience-scope--the-thing-that-makes-drafts-read-like-me): a colleague's draft accidentally cited a family-medical fact pulled from an unrelated thread, and the fix was to gate fact visibility at the recipient circle rather than trusting prompt-engineering alone. The implementation is two-phase: a one-time LLM batch pass retroactively tagged 257 pre-existing facts via `facts-scope-augment.py`, and every miner that writes a new fact now emits an `audience_scope` at write time through `upsert_fact()`. The scope-augment script stays as a belt-and-suspenders re-tagger for facts that slip through unscoped.
+
+The vocabulary interoperates across projects — a parallel cognitive-exoskeleton project uses the same tags on 7,090 facts, and a one-time importer reads those facts through `upsert_fact()` with scope preserved, so 352 pre-tagged facts landed in the Huckle brain on day one with no translation layer. Scope-at-write-time is the durable pattern; retroactive tagging is the escape hatch.
+
+## Voice profiles — brain-adjacent, not brain-native
+
+Huckle's correspondence layer mines the operator's sent mail to produce per-circle voice fingerprints — opening phrase patterns, closing phrase patterns, typical sentence length, emoji density, signature block — for five of the six circles defined in the connector's cadence config (`family-inner`, `family-extended`, `friends-close`, `professional-inner`, `professional-outer`; the sixth, `holiday-card`, didn't meet the minimum-sample floor and falls back to `family-extended` voice). The profiles are consumed by `draft-compose.py` to calibrate the register + politeness for each new reply.
+
+They live in `cache/voice-profiles/` in the connector's workspace rather than in the shared brain proper. Two reasons. First, they're large enough — a per-circle profile is a few KB of extracted style features — that Dropbox sync costs are meaningful if they churn. Second, voice profiles are a Huckle-specific asset today; no other agent reads or writes them. Holding them as agent-workspace state rather than brain state lets Huckle rebuild or invalidate them without coordinating with the rest of the fleet.
+
+That's the rule of thumb for the brain/workspace boundary: **share state that two or more agents need to agree on. Keep agent-private state in the agent's workspace.** Voice profiles are derivative — they're computed from sent mail — so recomputation is cheap and cross-agent agreement isn't required. Facts are authoritative truth about people, so they live in the brain.
 
 ## What the brain is *not*
 
