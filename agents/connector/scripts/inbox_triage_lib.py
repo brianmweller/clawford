@@ -10,6 +10,12 @@ the operator's own addresses, and returns {status, ...} where status is one of:
   - skipped_service         — latest sender matches service-account heuristic
   - skipped_unknown_sender  — latest sender not in email_to_slug
 
+upsert_thread_in_queue: merge a single classified-thread result into an
+existing triage queue dict. Used by inbox-triage.py's --thread-id mode,
+which processes one thread in isolation (fired by gmail-push-listener
+on a Pub/Sub notification) and must not clobber the rest of the queue
+produced by the 30-min polling cron.
+
 No network calls; the script layer fetches threads and feeds them in.
 """
 from __future__ import annotations
@@ -87,3 +93,38 @@ def classify_thread_for_triage(
         return {**base, "status": "skipped_unknown_sender"}
 
     return {**base, "slug": slug, "status": "queued"}
+
+
+def upsert_thread_in_queue(queue: dict | None, classified: dict) -> dict:
+    """Return a new queue dict with `classified` merged in.
+
+    Rules:
+      * Any existing queued entry matching classified["thread_id"] is
+        removed first (fresh classification wins).
+      * If classified["status"] == "queued", the entry is appended.
+      * Otherwise (skipped_*), the entry is NOT added — a non-queued
+        thread is simply absent from the queue.
+      * Other entries in the queue are preserved untouched (so the
+        30-min polling scan's output isn't clobbered by a single-
+        thread push-listener invocation).
+
+    Safe on an empty/missing queue — pass None or {} to start fresh.
+    """
+    base = queue if isinstance(queue, dict) else {}
+    existing = list(base.get("queued") or [])
+
+    tid = classified.get("thread_id")
+    filtered = [e for e in existing if e.get("thread_id") != tid] if tid else existing
+
+    if classified.get("status") == "queued":
+        # Pass through only the fields auto-compose reads; stripping
+        # transient classifier diagnostics keeps the queue tidy.
+        entry = {
+            k: classified[k] for k in (
+                "thread_id", "slug", "from_email", "from_header",
+                "subject", "date", "snippet", "in_reply_to_message_id",
+            ) if k in classified
+        }
+        filtered.append(entry)
+
+    return {**base, "queued": filtered}

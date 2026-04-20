@@ -1,0 +1,18 @@
+[Unit]
+Description=Clawford Huckle Cat — Gmail push listener (Pub/Sub pull)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/home/openclaw/clawford/.env
+ExecStartPre=/usr/bin/test ! -f /home/openclaw/.clawford/huckle-push-disabled
+ExecStart=/usr/bin/python3 /home/openclaw/.clawford/connector-workspace/scripts/gmail-push-listener.py
+WorkingDirectory=/home/openclaw/repo
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/home/openclaw/.clawford/logs/huckle-push.log
+StandardError=append:/home/openclaw/.clawford/logs/huckle-push.log
+
+[Install]
+WantedBy=default.target

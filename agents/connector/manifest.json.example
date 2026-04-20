@@ -28,7 +28,10 @@
     "scripts/facts-import-flux.py",
     "scripts/people-expand-from-flux.py",
     "scripts/voice_profile_lib.py",
-    "scripts/voice-profile-build.py"
+    "scripts/voice-profile-build.py",
+    "scripts/gmail-auth.py",
+    "scripts/gmail-watch-renew.py",
+    "scripts/gmail-push-listener.py"
   ],
   "state_files": [
     {

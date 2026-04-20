@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import time
 import traceback
@@ -33,6 +34,7 @@ WORKSPACE = os.path.expanduser("~/.clawford/connector-workspace")
 CONFIG_FILE = os.path.join(WORKSPACE, "connector-config.json")
 TRIAGE_FILE = os.path.join(WORKSPACE, "pending-triage.json")
 CACHE_DIR = os.path.join(WORKSPACE, "cache")
+WATCH_STATE_FILE = os.path.join(CACHE_DIR, "gmail-watch-state.json")
 
 REQUIRED_FILES = [
     ("connector-config.json", lambda: CONFIG_FILE),
@@ -41,6 +43,11 @@ REQUIRED_FILES = [
 
 TRIAGE_STALE_HOURS = 48
 CACHE_STALE_DAYS = 14
+
+# Alert if the Gmail watch expires within this many hours. 36h gives
+# the daily renewal cron (0 7 * * *) at least one more chance to run
+# before the listener goes silent.
+WATCH_EXPIRY_WARN_HOURS = 36
 
 CACHE_FILES = [
     ("last-morning-nudge.json", "morning-relationship-nudge"),
@@ -107,6 +114,66 @@ def _prune_stale_cache() -> int:
     return pruned
 
 
+def _check_gmail_push_listener() -> dict:
+    """Assess the real-time Gmail push listener's health. Returns a
+    dict with optional `status` (degraded/error) and `alert` fields.
+    An empty dict means "not applicable" (e.g. no watch state on
+    disk, so the listener isn't meant to be running yet).
+
+    Two signals:
+      * systemctl is-active clawford-huckle-push → running.
+      * gmail-watch-state.json expiration > now + WATCH_EXPIRY_WARN_HOURS.
+
+    A missing watch state is NOT degraded — the listener is optional
+    infrastructure layered on top of the 30-min polling cron.
+    """
+    out: dict = {}
+    if not os.path.exists(WATCH_STATE_FILE):
+        return out
+
+    try:
+        data = json.loads(open(WATCH_STATE_FILE, encoding="utf-8").read())
+        exp_ms = int(data.get("expiration_ms", 0))
+    except Exception:
+        out["watch_state"] = "corrupt"
+        return out
+
+    now_ms = int(time.time() * 1000)
+    hours_left = (exp_ms - now_ms) / 3600_000
+    out["watch_expires_in_hours"] = round(hours_left, 1)
+
+    if hours_left <= 0:
+        out["watch_state"] = "expired"
+        out["alert"] = "🐱 huckle: Gmail watch expired — run gmail-watch-renew"
+    elif hours_left <= WATCH_EXPIRY_WARN_HOURS:
+        out["watch_state"] = "expiring_soon"
+
+    # systemctl is-active — best-effort; heartbeat must still succeed
+    # on platforms without systemd (dev machines). Tests can bypass
+    # this by monkeypatching subprocess.run or WATCH_STATE_FILE.
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", "clawford-huckle-push"],
+            capture_output=True, text=True, timeout=5,
+        )
+        state = (result.stdout or "").strip()
+        out["listener_service"] = state or "unknown"
+        if state != "active":
+            # Only alert if we expected the listener to be running
+            # (i.e. the watch state is fresh). If the watch is
+            # expired we've already alerted on that above.
+            if hours_left > 0:
+                out["alert"] = (
+                    f"🐱 huckle-push listener is {state or 'unreachable'} "
+                    "— falling back to 30-min polling"
+                )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        # No systemctl on this platform (e.g. dev machine). Skip.
+        out["listener_service"] = "unavailable"
+
+    return out
+
+
 def _read_cron_caches() -> tuple[str | None, str | None, str | None]:
     """Return (timestamp, cron_name, summary) from the freshest
     per-cron cache file. Same shape as shopping/heartbeat.py for
@@ -145,6 +212,7 @@ def probe() -> dict:
     pruned_triage = _prune_stale_triage()
     pruned_cache = _prune_stale_cache()
     cache_ts, cache_name, cache_summary = _read_cron_caches()
+    push = _check_gmail_push_listener()
 
     status = "degraded" if missing_files else "ok"
     result: dict = {
@@ -156,10 +224,16 @@ def probe() -> dict:
         "last_cron_name": cache_name,
         "last_cron_result": cache_summary,
     }
+    # Surface push-listener signals without escalating overall status —
+    # the 30-min polling cron is the belt-and-suspenders fallback.
+    if push:
+        result["gmail_push"] = {k: v for k, v in push.items() if k != "alert"}
     if missing_files:
         result["alert"] = (
             f"🐱 connector degraded: missing {', '.join(missing_files)}"
         )
+    elif push.get("alert"):
+        result["alert"] = push["alert"]
     return result
 
 

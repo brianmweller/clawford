@@ -40,7 +40,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from agents.shared.brain import dropbox_brain_root                  # noqa: E402
 from flux_import_lib import build_email_to_slug_map                 # noqa: E402
-from inbox_triage_lib import classify_thread_for_triage             # noqa: E402
+from inbox_triage_lib import (                                      # noqa: E402
+    classify_thread_for_triage,
+    upsert_thread_in_queue,
+)
 
 
 BRIAN_ADDRESSES = {
@@ -73,6 +76,15 @@ def fetch_recent_threads(service, window_days: int, max_threads: int = 50) -> li
     return threads
 
 
+def _fetch_thread_metadata(service, thread_id: str) -> dict:
+    """Single-thread fetch — used by --thread-id mode when the
+    gmail-push-listener triggers triage on a specific Pub/Sub event."""
+    return service.users().threads().get(
+        userId="me", id=thread_id, format="metadata",
+        metadataHeaders=["From", "To", "Subject", "Date", "Message-ID"],
+    ).execute()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--window-days", type=int, default=7)
@@ -85,6 +97,10 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true",
                     help="Don't write queue file; just print")
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--thread-id",
+                    help="Single-thread mode: classify just this Gmail thread "
+                         "and upsert it into the existing queue. Used by the "
+                         "real-time push listener.")
     args = ap.parse_args()
 
     try:
@@ -112,6 +128,46 @@ def main() -> int:
     creds = get_credentials(str(args.creds), str(args.token), scopes)
     service = build("gmail", "v1", credentials=creds)
 
+    # ---- single-thread mode ----
+    if args.thread_id:
+        print(f"Single-thread mode: fetching {args.thread_id}")
+        thread = _fetch_thread_metadata(service, args.thread_id)
+        result = classify_thread_for_triage(
+            thread,
+            operator_emails=BRIAN_ADDRESSES,
+            email_to_slug=email_to_slug,
+        )
+        print(f"  classified: {result['status']}")
+        if result["status"] == "queued":
+            print(f"    slug={result['slug']}  from={result['from_email']}")
+            print(f"    subject={result.get('subject','')[:80]}")
+
+        if not args.dry_run:
+            existing_queue: dict = {}
+            if args.queue_json.exists():
+                try:
+                    existing_queue = json.loads(args.queue_json.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    existing_queue = {}
+            new_queue = upsert_thread_in_queue(existing_queue, result)
+            args.queue_json.parent.mkdir(parents=True, exist_ok=True)
+            args.queue_json.write_text(
+                json.dumps(new_queue, indent=2),
+                encoding="utf-8",
+            )
+            print(f"Queue updated at {args.queue_json} "
+                  f"({len(new_queue.get('queued', []))} entries)")
+
+        print()
+        print(json.dumps({
+            "status": "ok",
+            "mode": "single-thread",
+            "thread_id": args.thread_id,
+            "classification": result["status"],
+        }))
+        return 0
+
+    # ---- full-scan mode (existing behaviour) ----
     print(f"Fetching threads: in:inbox newer_than:{args.window_days}d -from:me "
           f"(max {args.max_threads})")
     threads = fetch_recent_threads(service, args.window_days, args.max_threads)

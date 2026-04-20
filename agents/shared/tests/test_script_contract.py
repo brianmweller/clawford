@@ -169,6 +169,14 @@ NATIVE_COMPLIANCE_XFAIL: set[str] = {
     "connector/voice-profile-build.py",
     "connector/facts-import-flux.py",
     "connector/people-expand-from-flux.py",
+    # Interactive OAuth helper — prompts for user input; never run bare.
+    "connector/gmail-auth.py",
+    # Long-running systemd daemon (clawford-huckle-push.service). Doesn't
+    # conform to the one-shot JSON contract model: the script runs a
+    # blocking Pub/Sub pull loop until SIGTERM. Health is observed via
+    # heartbeat.py's gmail_push probe (systemctl is-active + watch-state
+    # freshness), not via the contract envelope.
+    "connector/gmail-push-listener.py",
 }
 
 

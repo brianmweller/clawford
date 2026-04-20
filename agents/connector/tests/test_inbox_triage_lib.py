@@ -19,6 +19,7 @@ from inbox_triage_lib import (  # type: ignore
     classify_thread_for_triage,
     extract_email_from_header,
     latest_message,
+    upsert_thread_in_queue,
 )
 
 
@@ -168,3 +169,77 @@ def test_classify_captures_message_id_for_threading():
     )
     assert result["status"] == "queued"
     assert result["in_reply_to_message_id"] == "<abc123@mail.gmail.com>"
+
+
+# --- upsert_thread_in_queue ---
+
+
+def _classified_queued(thread_id="t1", slug="josh-cherry"):
+    return {
+        "thread_id": thread_id, "slug": slug,
+        "from_email": f"{slug}@example.com",
+        "from_header": f"{slug} <{slug}@example.com>",
+        "subject": "Hi", "date": "Tue, 15 Apr 2026 10:00:00 -0700",
+        "snippet": "hello", "in_reply_to_message_id": f"<{thread_id}@m>",
+        "status": "queued",
+    }
+
+
+def test_upsert_appends_new_queued_thread_to_empty_queue():
+    result = upsert_thread_in_queue(None, _classified_queued("t1"))
+    assert len(result["queued"]) == 1
+    assert result["queued"][0]["thread_id"] == "t1"
+    assert result["queued"][0]["slug"] == "josh-cherry"
+    # status is a transient classifier diagnostic, not persisted
+    assert "status" not in result["queued"][0]
+
+
+def test_upsert_replaces_existing_entry_for_same_thread_id():
+    queue = {"queued": [_classified_queued("t1", slug="old-slug")]}
+    # scrub the "status" field that upsert strips on insertion
+    queue["queued"][0].pop("status", None)
+    new = _classified_queued("t1", slug="new-slug")
+    result = upsert_thread_in_queue(queue, new)
+    assert len(result["queued"]) == 1
+    assert result["queued"][0]["slug"] == "new-slug"
+
+
+def test_upsert_preserves_other_threads():
+    queue = {"queued": [
+        {"thread_id": "t2", "slug": "other"},
+        {"thread_id": "t3", "slug": "third"},
+    ]}
+    new = _classified_queued("t1")
+    result = upsert_thread_in_queue(queue, new)
+    tids = [e["thread_id"] for e in result["queued"]]
+    assert set(tids) == {"t1", "t2", "t3"}
+
+
+def test_upsert_drops_entry_when_classified_is_skipped():
+    """A thread that reclassifies as skipped_brian_last (e.g. the operator
+    replied between polling scan and push event) must be removed from
+    the queue, not re-added."""
+    queue = {"queued": [
+        {"thread_id": "t1", "slug": "josh-cherry"},
+        {"thread_id": "t2", "slug": "other"},
+    ]}
+    skipped = {
+        "thread_id": "t1",
+        "from_email": "operator@example.com",
+        "status": "skipped_brian_last",
+    }
+    result = upsert_thread_in_queue(queue, skipped)
+    tids = [e["thread_id"] for e in result["queued"]]
+    assert tids == ["t2"]
+
+
+def test_upsert_skipped_on_empty_queue_is_noop():
+    skipped = {"thread_id": "t1", "status": "skipped_service"}
+    result = upsert_thread_in_queue(None, skipped)
+    assert result["queued"] == []
+
+
+def test_upsert_preserves_non_queued_fields_in_queue_dict():
+    queue = {"queued": [], "generated_at": "2026-04-20T00:00:00Z"}
+    result = upsert_thread_in_queue(queue, _classified_queued("t1"))
+    assert result["generated_at"] == "2026-04-20T00:00:00Z"

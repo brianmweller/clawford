@@ -194,3 +194,85 @@ def test_main_emits_error_json_when_probe_crashes(stub_workspace, capsys, monkey
     payload = json.loads(out)
     assert payload["status"] == "error"
     assert "alert" in payload
+
+
+# ─── gmail push listener probe ───────────────────────────────────────
+
+
+def test_probe_omits_gmail_push_when_watch_state_absent(stub_workspace):
+    """No watch-state file = listener not configured = no push block."""
+    result = stub_workspace.hb.probe()
+    assert "gmail_push" not in result
+
+
+def test_probe_reports_fresh_watch_state(stub_workspace, monkeypatch):
+    watch_state = stub_workspace.cache_dir / "gmail-watch-state.json"
+    far_future_ms = int(time.time() * 1000) + 6 * 86400_000  # 6 days
+    watch_state.write_text(json.dumps({
+        "history_id": "42",
+        "expiration_ms": far_future_ms,
+        "topic": "projects/p/topics/t",
+    }))
+    monkeypatch.setattr(stub_workspace.hb, "WATCH_STATE_FILE", str(watch_state))
+    # Stub systemctl to say "active" so we don't get a listener alert
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: types.SimpleNamespace(
+        stdout="active\n", stderr="", returncode=0,
+    ))
+
+    result = stub_workspace.hb.probe()
+    assert result["status"] == "ok"
+    assert "gmail_push" in result
+    assert result["gmail_push"]["listener_service"] == "active"
+    assert result["gmail_push"]["watch_expires_in_hours"] > 24
+
+
+def test_probe_alerts_when_watch_expires_soon(stub_workspace, monkeypatch):
+    watch_state = stub_workspace.cache_dir / "gmail-watch-state.json"
+    soon_ms = int(time.time() * 1000) + 12 * 3600_000  # 12h from now
+    watch_state.write_text(json.dumps({
+        "history_id": "42", "expiration_ms": soon_ms, "topic": "t",
+    }))
+    monkeypatch.setattr(stub_workspace.hb, "WATCH_STATE_FILE", str(watch_state))
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: types.SimpleNamespace(
+        stdout="active\n", stderr="", returncode=0,
+    ))
+    result = stub_workspace.hb.probe()
+    assert result["gmail_push"]["watch_state"] == "expiring_soon"
+
+
+def test_probe_alerts_when_listener_inactive(stub_workspace, monkeypatch):
+    watch_state = stub_workspace.cache_dir / "gmail-watch-state.json"
+    far_future_ms = int(time.time() * 1000) + 6 * 86400_000
+    watch_state.write_text(json.dumps({
+        "history_id": "1", "expiration_ms": far_future_ms, "topic": "t",
+    }))
+    monkeypatch.setattr(stub_workspace.hb, "WATCH_STATE_FILE", str(watch_state))
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: types.SimpleNamespace(
+        stdout="failed\n", stderr="", returncode=3,
+    ))
+    result = stub_workspace.hb.probe()
+    assert "alert" in result
+    assert "listener" in result["alert"].lower()
+    # missing_files still empty so top-level status remains "ok"
+    assert result["status"] == "ok"
+
+
+def test_probe_tolerates_missing_systemctl(stub_workspace, monkeypatch):
+    watch_state = stub_workspace.cache_dir / "gmail-watch-state.json"
+    far_future_ms = int(time.time() * 1000) + 6 * 86400_000
+    watch_state.write_text(json.dumps({
+        "history_id": "1", "expiration_ms": far_future_ms, "topic": "t",
+    }))
+    monkeypatch.setattr(stub_workspace.hb, "WATCH_STATE_FILE", str(watch_state))
+    import subprocess
+
+    def raise_not_found(*_a, **_kw):
+        raise FileNotFoundError("no systemctl here")
+    monkeypatch.setattr(subprocess, "run", raise_not_found)
+    result = stub_workspace.hb.probe()
+    # Dev-machine heartbeat must still succeed
+    assert result["status"] == "ok"
+    assert result["gmail_push"]["listener_service"] == "unavailable"

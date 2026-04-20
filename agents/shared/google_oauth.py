@@ -48,6 +48,20 @@ import time
 from typing import Any
 
 
+# Known OAuth scope constants. Callers bundle these as needed — the
+# library doesn't enforce any particular combination. Each agent's
+# auth script (e.g. gmail-auth.py, gcal-auth.py) is the single source
+# of truth for which scopes that agent actually needs.
+CALENDAR_READONLY_SCOPE = "https://www.googleapis.com/auth/calendar.readonly"
+CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar"
+GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
+# 2026-04-20 — added for Huckle's real-time Gmail triage (pull from
+# the huckle-gmail-pull subscription). Gmail users.watch() itself does
+# NOT require this scope — only the consumer side does.
+PUBSUB_SCOPE = "https://www.googleapis.com/auth/pubsub"
+
+
 # Google packages imported lazily at module load so tests can
 # monkeypatch the module-level references. Each reference resolves to
 # the real class at import time on machines where google-auth is

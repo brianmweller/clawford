@@ -33,6 +33,7 @@
 #   0 6 * * 0     connector-birthday-miner              → CONNECTOR_BOT_TOKEN  (2026-04-19 — weekly passive GCal scan → identity facts)
 #   */30 * * * *  connector-inbox-triage                → CONNECTOR_BOT_TOKEN  (2026-04-20 — scans recent inbound, queues known-sender threads)
 #   5,35 * * * *  connector-auto-compose                → CONNECTOR_BOT_TOKEN  (2026-04-20 — processes queue, creates threaded Gmail drafts + Telegram pings)
+#   0 7 * * *     connector-gmail-watch-renew           → CONNECTOR_BOT_TOKEN  (2026-04-20 — daily re-call of users.watch() to keep Pub/Sub push alive; listener runs as clawford-huckle-push.service)
 #   30 10 * * *   meetings-coach-morning-meeting-brief  → MEETINGS_BOT_TOKEN   (Phase 4 — daily brief for 5 AM PT fleet; Monday fold replaces weekly-review)
 #   */30 * * * *  meetings-coach-pre-meeting-alert      → MEETINGS_BOT_TOKEN   (Phase 4 — 15-45 min lookahead, sent-alerts.json dedup)
 #   15,45 * * * * meetings-coach-post-meeting-scan      → MEETINGS_BOT_TOKEN   (Phase 4 — Krisp transcript scan + LLM coaching; preserves 74c726c idempotency)
@@ -136,6 +137,11 @@ CONTRACT_ENTRIES=(
   #   default --max 5 safety cap baked in, idempotent via log file).
   "*/30 * * * *|connector-inbox-triage|/home/openclaw/.clawford/connector-workspace/scripts/inbox-triage.py|CONNECTOR_BOT_TOKEN|300"
   "5,35 * * * *|connector-auto-compose|/home/openclaw/.clawford/connector-workspace/scripts/auto-compose.py|CONNECTOR_BOT_TOKEN|900"
+  # Daily watch-renew for Gmail push. Gmail invalidates watches after
+  # 7 days regardless of expiration; a daily renewal gives 6 days of
+  # slack. If this fails, the clawford-huckle-push listener stops
+  # receiving events and the 30-min polling cron above takes over.
+  "0 7 * * *|connector-gmail-watch-renew|/home/openclaw/.clawford/connector-workspace/scripts/gmail-watch-renew.py|CONNECTOR_BOT_TOKEN|120"
   "30 10 * * *|meetings-coach-morning-meeting-brief|/home/openclaw/.clawford/meetings-coach-workspace/scripts/morning-meeting-brief.py|MEETINGS_BOT_TOKEN|300"
   "*/30 * * * *|meetings-coach-pre-meeting-alert|/home/openclaw/.clawford/meetings-coach-workspace/scripts/pre-meeting-alert.py|MEETINGS_BOT_TOKEN|180"
   "15,45 * * * *|meetings-coach-post-meeting-scan|/home/openclaw/.clawford/meetings-coach-workspace/scripts/post-meeting-scan.py|MEETINGS_BOT_TOKEN|300"
