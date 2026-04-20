@@ -105,9 +105,21 @@ For each article, produce exactly two fields:
         🔗 LinkedIn        — anything with source=linkedin (always goes here)
         📋 Also Noted      — FALLBACK ONLY: use this when no other label fits
 
-  - `extended_headline`: a one-sentence rewritten headline that
-     explains WHY the item matters — context, stakes, who it affects.
-     Keep it concrete and specific; no filler like "could be important".
+  - `extended_headline`: a one-sentence rewritten headline.
+     - For NEWS items (source != linkedin): explain WHY the item
+       matters — context, stakes, who it affects. Concrete and
+       specific; no filler like "could be important".
+     - For LINKEDIN items (source = linkedin): LEAD with the author
+       and their credibility, then what they actually said. Shape:
+       "<Author>, <short role/company descriptor>: <what they posted>."
+       Use the provided `author` and `author_headline` fields — the
+       headline is the author's LinkedIn tagline and gives the
+       credibility signal. Drop job titles that don't matter, keep
+       company if it anchors authority. NEVER write "A LinkedIn post
+       argues…", "A LinkedIn update says…", or any generic platform
+       framing — always name the person. If author_headline is
+       empty, just use the author name. Quote or paraphrase the
+       substance; don't generalize into platitudes.
 
 LinkedIn items (source=linkedin) always go in the 🔗 LinkedIn category.
 
@@ -279,9 +291,18 @@ def select_items(
 def build_prompt(selected: list[dict]) -> str:
     """Format the prompt template with a compact JSON list of
     articles — just enough fields for the LLM to reason about
-    category + headline without the full summary text."""
-    compact = [
-        {
+    category + headline without the full summary text.
+
+    LinkedIn notifications and messages are excluded — they render
+    deterministically (see _render_notification_headline) and never
+    need LLM rewording, which used to produce the generic "A LinkedIn
+    notification showing…" framing the operator flagged 2026-04-20.
+    """
+    compact: list[dict] = []
+    for item in selected:
+        if item.get("_is_notification") or item.get("_is_message"):
+            continue
+        entry = {
             "id": item["id"],
             "title": item.get("title", ""),
             "source_label": item.get("source_label", ""),
@@ -289,8 +310,13 @@ def build_prompt(selected: list[dict]) -> str:
             "topics": item.get("topics", []),
             "summary": (item.get("summary") or "")[:400],
         }
-        for item in selected
-    ]
+        # LinkedIn feed items ship with author + headline so the LLM
+        # can write "Dario Amodei, Anthropic CEO: …" instead of a
+        # generic "A LinkedIn post argues…" with no credibility signal.
+        if item.get("source") == "linkedin":
+            entry["author"] = item.get("author", "")
+            entry["author_headline"] = item.get("author_headline", "")
+        compact.append(entry)
     articles_json = json.dumps(compact, indent=2, ensure_ascii=False)
     return PROMPT_TEMPLATE.replace("{articles_json}", articles_json)
 
@@ -360,6 +386,29 @@ def _fallback_category(item: dict) -> str:
     return "📋 Also Noted"
 
 
+def _render_notification_headline(item: dict) -> str:
+    """Deterministic render for a LinkedIn notification.
+
+    the operator's feedback 2026-04-20: notifications were being wrapped with
+    "A LinkedIn notification showing a recruiter viewed the profile
+    signals potential hiring interest…" — LLM generalization that
+    buries the actual who/what. Instead, show the raw notification
+    text (already contains name + action) with a time-ago suffix, no
+    LLM pass.
+    """
+    text = (item.get("summary") or item.get("title") or "").strip()
+    # LinkedIn notification text often trails a "See more" or
+    # "View all" CTA. Strip trailing CTAs so the rendered line is
+    # just the substantive bit.
+    for tail in (" See all views", " View all", " See more", " See all"):
+        if text.endswith(tail):
+            text = text[: -len(tail)].rstrip(" .")
+    time_ago = (item.get("time_ago") or "").strip()
+    if time_ago:
+        return f"{text} ({time_ago})"
+    return text
+
+
 def merge_annotations(
     selected: list[dict],
     annotations: list[dict],
@@ -371,6 +420,11 @@ def merge_annotations(
     function defends by owning the final shape. Only `category` and
     `extended_headline` are taken from the annotations; everything
     else comes from the `selected` list.
+
+    LinkedIn notifications skip the LLM entirely: their headline is
+    rendered deterministically from the scraped text + time_ago, so
+    the digest reads "Omar Shahine reacted to your post (2h)" instead
+    of a generic LLM paraphrase.
     """
     by_id: dict[str, dict] = {}
     for ann in annotations:
@@ -387,13 +441,21 @@ def merge_annotations(
         # distinct categories regardless of LLM output — the prompt
         # doesn't disambiguate these sub-types, so Python owns the
         # final section routing.
-        if item.get("source") == "linkedin" and item.get("_is_notification"):
+        is_notification = (
+            item.get("source") == "linkedin" and item.get("_is_notification")
+        )
+        is_message = (
+            item.get("source") == "linkedin" and item.get("_is_message")
+        )
+        if is_notification:
             category = "🔔 LinkedIn Notifications"
-        elif item.get("source") == "linkedin" and item.get("_is_message"):
+            headline = _render_notification_headline(item)
+        elif is_message:
             category = "💬 LinkedIn Messages"
+            headline = ann.get("extended_headline") or item.get("title", "")
         else:
             category = ann.get("category") or _fallback_category(item)
-        headline = ann.get("extended_headline") or item.get("title", "")
+            headline = ann.get("extended_headline") or item.get("title", "")
         merged.append({
             "num": item["num"],
             "id": item["id"],

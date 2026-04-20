@@ -362,6 +362,45 @@ def test_merge_annotations_overrides_llm_category_for_notifs_and_msgs(mod):
     assert cats["mm0"] == "💬 LinkedIn Messages"
 
 
+def test_merge_annotations_notification_headline_is_deterministic(mod):
+    """Notifications must NOT take the LLM's extended_headline — they
+    render from scraped text + time_ago directly. Regression gate for
+    the "A LinkedIn notification showing a recruiter viewed the
+    profile signals potential hiring interest" generic framing the operator
+    flagged 2026-04-20."""
+    notif = {**_linkedin_notif("nn0", "Sarah mentioned you in a comment", 0.3), "num": 1}
+    notif["time_ago"] = "2h"
+    annotations = [
+        {"id": "nn0", "category": "🔔 LinkedIn Notifications",
+         "extended_headline": "A LinkedIn notification showing Sarah mentioned you signals growing engagement."},
+    ]
+    merged = mod.merge_annotations([notif], annotations)
+    headline = merged[0]["extended_headline"]
+    # Deterministic shape: text (time_ago); no LLM wrapper prose
+    assert "A LinkedIn notification" not in headline
+    assert "Sarah mentioned you in a comment" in headline
+    assert "(2h)" in headline
+
+
+def test_render_notification_headline_strips_see_more_tail(mod):
+    """LinkedIn notification text often ends with 'See all views' /
+    'See more' CTAs. Strip them so the rendered line is substantive."""
+    notif = {
+        "id": "pv", "summary": "Omar reacted to your post See all views",
+        "title": "Omar reacted", "time_ago": "3h",
+        "_is_notification": True, "source": "linkedin",
+    }
+    out = mod._render_notification_headline(notif)
+    assert out == "Omar reacted to your post (3h)"
+
+
+def test_render_notification_headline_no_time_ago(mod):
+    notif = {"summary": "Dan started a new position at Anthropic", "time_ago": ""}
+    out = mod._render_notification_headline(notif)
+    assert out == "Dan started a new position at Anthropic"
+    assert "()" not in out
+
+
 # ─── build_prompt ────────────────────────────────────────────────────
 
 
@@ -393,6 +432,60 @@ def test_build_prompt_asks_for_items_object_keyed_by_id(mod):
     assert '"id"' in prompt
     assert '"category"' in prompt
     assert '"extended_headline"' in prompt
+
+
+def test_build_prompt_excludes_notifications_and_messages(mod):
+    """Notifications and messages don't need LLM rewording — they
+    render deterministically from the scraped text. Keeping them OUT
+    of the prompt saves tokens and prevents the "A LinkedIn
+    notification showing…" generic framing the operator flagged 2026-04-20."""
+    articles = _mixed_feed(non_li=10, linkedin=2)
+    articles.extend([
+        _linkedin_notif("nn0", "Sarah mentioned you in a comment", 0.3),
+        _linkedin_msg("mm0", "Jane Doe: quick question about…", 0.25),
+    ])
+    selected = mod.select_items(articles)
+    prompt = mod.build_prompt(selected)
+    assert "nn0" not in prompt
+    assert "mm0" not in prompt
+
+
+def test_build_prompt_includes_author_for_linkedin_items(mod):
+    """LinkedIn feed items must carry author + author_headline into
+    the prompt so the LLM can lead with credibility ("Dario Amodei,
+    Anthropic CEO: …") instead of the generic "A LinkedIn post
+    argues…" framing the operator flagged 2026-04-20."""
+    articles = _mixed_feed(non_li=5, linkedin=0)
+    articles.append({
+        "id": "li_author",
+        "title": "Dario Amodei: AI agents are…",
+        "summary": "body of post",
+        "link": "https://linkedin.com/x",
+        "source": "linkedin",
+        "source_label": "LinkedIn",
+        "topics": ["linkedin"],
+        "rank": 0.9,
+        "author": "Dario Amodei",
+        "author_headline": "CEO at Anthropic",
+    })
+    selected = mod.select_items(articles)
+    prompt = mod.build_prompt(selected)
+    assert "Dario Amodei" in prompt
+    assert "Anthropic" in prompt
+    assert '"author"' in prompt
+    assert '"author_headline"' in prompt
+
+
+def test_build_prompt_forbids_generic_linkedin_framing(mod):
+    """The prompt must explicitly tell the LLM NOT to write
+    'A LinkedIn post argues…' / 'A LinkedIn update says…' — that
+    generic framing is exactly what the operator complained about."""
+    articles = _mixed_feed(non_li=5, linkedin=2)
+    selected = mod.select_items(articles)
+    prompt = mod.build_prompt(selected)
+    lower = prompt.lower()
+    assert "a linkedin post" in lower or "generic platform" in lower
+    assert "name the person" in lower or "lead with the author" in lower
 
 
 def test_build_prompt_discourages_also_noted_overuse(mod):

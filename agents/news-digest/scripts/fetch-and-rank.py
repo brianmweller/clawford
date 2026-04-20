@@ -352,6 +352,28 @@ def _time_ago_within_24h(t: str) -> bool:
     return unit in ("m", "h")
 
 
+_FEED_STALE_RE = re.compile(
+    r"^\s*\d+\s*(d|day|days|w|wk|week|weeks|mo|month|months|y|yr|year|years)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _feed_post_is_stale(t: str) -> bool:
+    """True when a feed post's time_ago indicates it's older than 1 day.
+
+    the operator's feedback 2026-04-20: stale posts were landing in the
+    morning digest because the scraper surfaces everything LinkedIn
+    renders on /feed/, including re-promoted items from earlier in
+    the week. Anything labelled in days/weeks/months/years is dropped.
+
+    Empty / unparseable time_ago is treated as fresh (keep) — a
+    scraper regression that lost the time string shouldn't silently
+    drop real content."""
+    if not t:
+        return False
+    return bool(_FEED_STALE_RE.match(t.strip()))
+
+
 def _build_profile_view_summary(notifications: list[dict]) -> dict | None:
     """Collapse every `type: profile_view` notification into ONE rollup.
 
@@ -451,6 +473,8 @@ def _linkedin_articles_from_scrape(data: dict) -> list[dict]:
             "summary": text,
             "source": "linkedin",
             "source_label": "LinkedIn Notification",
+            "time_ago": notif.get("time_ago", ""),
+            "notif_type": notif.get("type", ""),
             "pub_date": datetime.now(timezone.utc).isoformat(),
             "fetched_at": datetime.now(timezone.utc).isoformat(),
             "_is_notification": True,
@@ -520,10 +544,15 @@ def fetch_linkedin_browser():
     articles = []
 
     # Convert feed posts to article format
+    stale_dropped = 0
     for post in data.get("posts", []):
         author = post.get("author", "LinkedIn")
+        author_headline = (post.get("author_headline") or "").strip()
         text = post.get("text", "")
         if not text:
+            continue
+        if _feed_post_is_stale(post.get("time_ago", "")):
+            stale_dropped += 1
             continue
         # Clean the text: remove lines that are just the author name or tagline
         clean_lines = []
@@ -532,6 +561,8 @@ def fetch_linkedin_browser():
             if not stripped:
                 continue
             if stripped == author:
+                continue
+            if author_headline and stripped == author_headline:
                 continue
             if stripped.count("|") >= 2:
                 continue
@@ -555,9 +586,19 @@ def fetch_linkedin_browser():
             "summary": text[:300],
             "source": "linkedin",
             "source_label": source_label,
+            "author": author,
+            "author_headline": author_headline,
+            "time_ago": post.get("time_ago", ""),
             "pub_date": datetime.now(timezone.utc).isoformat(),
             "fetched_at": datetime.now(timezone.utc).isoformat(),
         }, source_type="linkedin-feed"))
+
+    if stale_dropped:
+        print(
+            f"  [linkedin] dropped {stale_dropped} stale feed posts "
+            f"(time_ago > 1d)",
+            file=sys.stderr,
+        )
 
     # Convert notifications to article format (separate category).
     # Profile-view notifications get collapsed into ONE synthesized
@@ -580,6 +621,8 @@ def fetch_linkedin_browser():
             "summary": text,
             "source": "linkedin",
             "source_label": "LinkedIn Notification",
+            "time_ago": notif.get("time_ago", ""),
+            "notif_type": notif.get("type", ""),
             "pub_date": datetime.now(timezone.utc).isoformat(),
             "fetched_at": datetime.now(timezone.utc).isoformat(),
             "_is_notification": True,
