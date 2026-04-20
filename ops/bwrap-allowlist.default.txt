@@ -22,6 +22,23 @@
 #
 # Lines starting with '#' or empty are ignored by the installer.
 
+# Fact miners (Phase 1a restore, 2026-04-20)
 connector-gmail-facts-mine
 connector-workflowy-facts-mine
 meetings-coach-krisp-facts-mine
+
+# Phase 1d Stage A — non-browser crons, fleet-wide rollout 2026-04-20.
+# All confirmed free of Camoufox/Playwright/Firefox by grep audit.
+connector-auto-compose
+connector-birthday-miner
+connector-gmail-watch-renew
+connector-inbox-triage
+family-calendar-calendar-index-build
+family-calendar-tasks-sync
+family-calendar-whatsapp-chat-alert
+
+# Phase 1d Stage B — browser-driven crons. Requires --tmpfs /dev/shm
+# (landed 2026-04-20 in isolation.py). Added after 24h Stage A soak.
+# connector-gmessages-mine
+# linkedin-keepalive
+
