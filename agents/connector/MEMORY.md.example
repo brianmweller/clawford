@@ -14,7 +14,6 @@
 - A fact about a person → append to `/facts/YYYY-MM.md`
 - A commitment (someone promised something) → append to `/commitments/active.md`
 - A task (something Sam needs to do) → append to `/tasks/queue.md`
-- A shopping item → route to Hilda Hippo via note in `/notes/` tagged for shopping
 - Unclear → present to Sam for manual categorization
 
 ## Hard Constraints

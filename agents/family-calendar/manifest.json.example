@@ -105,22 +105,6 @@
       "announce": true,
       "no_deliver": false,
       "enabled": false
-    },
-    {
-      "name": "whatsapp-chat-alert",
-      "cron": "45 */2 * * *",
-      "message": "DISABLED — replaced by ops/scripts/install-host-cron.sh entry family-calendar-whatsapp-chat-alert, which runs agents/family-calendar/scripts/whatsapp-chat-alert.py on host cron at 45 */2 * * * (LLM classifies WhatsApp messages via the existing Baileys-backed chat-parse-schedule.py script). Kept here for Phase 4 rollback reference.",
-      "announce": false,
-      "no_deliver": true,
-      "enabled": false
-    },
-    {
-      "name": "whatsapp-schedule-post",
-      "cron": "0 12 * * *",
-      "message": "DISABLED — replaced by ops/scripts/install-host-cron.sh entry family-calendar-whatsapp-schedule-post, which runs agents/family-calendar/scripts/whatsapp-schedule-post.py on host cron at 0 12 * * * (composes a WhatsApp-style summary for the operator to manually forward — never auto-posts to family groups). Kept here for Phase 4 rollback reference.",
-      "announce": false,
-      "no_deliver": true,
-      "enabled": false
     }
   ]
 }
