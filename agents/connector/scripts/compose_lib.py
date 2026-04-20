@@ -142,11 +142,11 @@ think through:
      work you only do when replying.
 
 
-  1. OBJECTIVE / INTENT — what is the operator trying to achieve with this
-     communication? Be specific and outcome-oriented. Not "reply warmly";
-     rather "keep the candidacy pipeline alive for future corporate roles"
-     or "decline without burning the bridge" or "lock in a meeting this
-     week to unblock X."
+  1. OBJECTIVE / INTENT — what is the operator trying to achieve with
+     this communication? Be specific and outcome-oriented. Not "reply
+     warmly"; rather "keep the candidacy pipeline alive for future roles
+     at this company" or "decline without burning the bridge" or "lock
+     in a meeting this week to unblock X."
   2. CURRENT STATE AND GAP — given the brain context, email history, and
      inbound message: where does the operator stand relative to the objective,
      and what's missing to close the gap?

@@ -56,6 +56,7 @@ sam-smith==>sam-smith
 priya-rivera==>priya-rivera
 priya-rivera==>priya-rivera
 ravi-rivera==>ravi-rivera
+kai-rivera==>kai-rivera
 sam smith==>sam smith
 priya rivera==>priya rivera
 
@@ -70,8 +71,18 @@ regex:\bbrian\b==>operator
 the operator's==>the operator's
 regex:\bBrian\b==>the operator
 
-# ---------- Employer name in prompts + test fixtures ----------
-# 'Anthropic' appears in compose_lib prompt template + test fixtures as
-# the operator's (former) employer. Not PII per se but identifying.
-Anthropic==>Example Corp
-anthropic.com==>example.com
+***REMOVED***
+***REMOVED***
+***REMOVED***
+***REMOVED***
+***REMOVED***
+***REMOVED***
+future corporate roles==>future corporate roles
+(OpenAI, Example Corp,==>(OpenAI, Example Corp,
+example.webex.com==>example.webex.com
+
+***REMOVED***
+# Bare 'Priya' (tests + comments), Kai Rivera, Sam M Smith.
+Priya==>Priya
+Kai Rivera==>Kai Rivera
+Sam M Smith==>Sam M Smith

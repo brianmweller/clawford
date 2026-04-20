@@ -233,8 +233,8 @@ def is_likely_service_account(email: str | None, subject_name: str | None) -> bo
 
 _NON_PERSON_FIRST_TOKENS = {
     # Brand names that commonly appear as Flux subject prefixes for
-    # non-person topics. Do NOT include brands where the operator has actual
-    # human contacts under first names (OpenAI, Example Corp, etc.).
+    # non-person topics. Do NOT include brands where the operator has
+    # actual human contacts under first names (e.g., OpenAI).
     "apple", "google", "amazon", "fedex", "ups", "usps",
     "chubb", "stripe", "factor", "costco", "netflix",
     "meta", "linkedin", "facebook", "twitter",

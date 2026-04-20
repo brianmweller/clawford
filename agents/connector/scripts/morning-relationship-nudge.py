@@ -80,7 +80,7 @@ def build_nudge_items(scan: dict, now_pacific: datetime) -> list[dict]:
       {"type": "overview",     "text": "..."}            — no buttons
       {"type": "group_header", "text": "👪 FAMILY (5)"} — no buttons
       {"type": "person",       "slug": "...",
-                                "text": "Kai Rivera — 64 days · WhatsApp"}
+                                "text": "Kai Rivera — 64 days · Messages"}
         — renders with [\u2705 done] [\U0001f515 snooze 30d] [\U0001f648 ignore]
 
     Returns a flat list so fleet-delivery can iterate once.

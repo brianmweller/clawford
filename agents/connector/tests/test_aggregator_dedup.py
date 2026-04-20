@@ -41,8 +41,8 @@ def test_subset_with_middle_name(agg):
     assert agg.is_name_subset("Jedrzej Yendrick Zieleniak", "Yendrick Zieleniak")
 
 
-def test_subset_brian_michael(agg):
-    assert agg.is_name_subset("Sam Smith", "the operator Sam M Smith")
+def test_subset_three_tokens(agg):
+    assert agg.is_name_subset("Sam Smith", "Sam M Smith")
 
 
 def test_not_subset_sibling_names(agg):

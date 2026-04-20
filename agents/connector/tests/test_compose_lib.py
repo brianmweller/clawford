@@ -33,7 +33,7 @@ def _ctx(**overrides):
             "tone": "warm",
         },
         facts_shareable=[
-            {"id": "f-001", "content": "Priya's chemo is Monday", "recorded_at": "2026-04-10"},
+            {"id": "f-001", "content": "Priya is traveling next week", "recorded_at": "2026-04-10"},
         ],
         facts_blocked=["f-999-secret"],
         target_audiences=["personal", "family"],
@@ -226,7 +226,7 @@ def test_prompt_includes_shareable_facts_but_never_blocked():
     ctx = _ctx()
     ctx.facts_blocked = ["f-999-secret"]
     prompt = build_compose_prompt(ctx, _voice(), _inbound())
-    assert "Priya's chemo is Monday" in prompt
+    assert "Priya is traveling next week" in prompt
     assert "f-001" in prompt
     assert "f-999-secret" not in prompt
 

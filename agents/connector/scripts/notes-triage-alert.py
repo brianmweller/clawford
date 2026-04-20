@@ -55,14 +55,14 @@ knowledge system. Pick exactly one category based on what the note is
 about.
 
 Categories:
-- fact: information about a person or situation (e.g., "Priya's chemo
-  is Monday"; "Maya prefers text over email")
-- commitment: someone promised something, or the operator promised something
-  to someone (e.g., "told Jay I'd look into the rebalance by Friday")
-- task: an action the operator needs to take for himself (e.g., "book dentist
-  for Avery")
-- shopping: a physical item to buy (e.g., "more paper towels from
-  Costco")
+- fact: information about a person or situation (e.g., "Priya is
+  traveling next week"; "Maya prefers text over email")
+- commitment: someone promised something, or the operator promised
+  something to someone (e.g., "told Ravi I'd look into the rebalance
+  by Friday")
+- task: an action the operator needs to take for themself (e.g.,
+  "book dentist for Avery")
+- shopping: a physical item to buy (e.g., "more paper towels")
 - unclear: ambiguous, too little context, or doesn't fit above
 
 Return JSON ONLY, no markdown fences:
