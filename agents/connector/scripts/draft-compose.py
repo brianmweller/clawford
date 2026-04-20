@@ -88,25 +88,32 @@ def load_person(slug: str) -> dict:
 _VOICE_PROFILE_DIR = Path.home() / ".clawford" / "connector-workspace" / "cache" / "voice-profiles"
 
 
-def _load_voice_profile_for_person(person: dict) -> dict | None:
-    """Load the voice profile for the person's primary circle if one has
-    been built (via voice-profile-build.py). Returns the 'profile' sub-
-    dict or None. Never raises — a missing/malformed profile just falls
-    through to the abstract-register path."""
-    circles = person.get("circles") or []
-    if not circles:
+def _read_profile_file(path: Path) -> dict | None:
+    if not path.exists():
         return None
-    # Walk circles in declared order; first profile that exists wins
-    for c in circles:
-        path = _VOICE_PROFILE_DIR / f"{c}.json"
-        if not path.exists():
-            continue
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            continue
-        prof = data.get("profile")
-        if isinstance(prof, dict):
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    prof = data.get("profile")
+    return prof if isinstance(prof, dict) else None
+
+
+def _load_voice_profile_for_person(person: dict) -> dict | None:
+    """Load the best available voice profile for this person. Lookup order:
+      1. cache/voice-profiles/person/<slug>.json — per-person override
+      2. cache/voice-profiles/<primary_circle>.json — first matching circle
+      3. None — draft-compose falls through to abstract register calibration.
+    Never raises; malformed / missing files silently skip to the next tier."""
+    slug = person.get("slug")
+    if slug:
+        person_path = _VOICE_PROFILE_DIR / "person" / f"{slug}.json"
+        prof = _read_profile_file(person_path)
+        if prof is not None:
+            return prof
+    for c in person.get("circles") or []:
+        prof = _read_profile_file(_VOICE_PROFILE_DIR / f"{c}.json")
+        if prof is not None:
             return prof
     return None
 

@@ -58,6 +58,8 @@ MIN_SAMPLES_FOR_PROFILE = 15       # below this, voice inference is too noisy �
 
 
 DEFAULT_CACHE = Path(os.path.expanduser("~/.clawford/connector-workspace/cache/voice-profiles"))
+PERSON_CACHE_SUBDIR = "person"
+MIN_SAMPLES_FOR_PERSON_PROFILE = 10  # lower than circle's 15 — per-person data is sparser
 DEFAULT_TOKEN = Path(os.path.expanduser("~/.clawford/connector-workspace/token.json"))
 DEFAULT_CREDS = Path(os.path.expanduser("~/.clawford/connector-workspace/credentials.json"))
 
@@ -65,6 +67,22 @@ DEFAULT_CREDS = Path(os.path.expanduser("~/.clawford/connector-workspace/credent
 def chunks(lst: list, n: int):
     for i in range(0, len(lst), n):
         yield lst[i:i + n]
+
+
+def _lookup_person_email(people_dir: Path, slug: str) -> str | None:
+    """Return the email address stored in people/<slug>.md, or None."""
+    import re
+    path = people_dir / f"{slug}.md"
+    if not path.exists():
+        return None
+    field_re = re.compile(r"^\s*-\s*\*\*email(?::\*\*|\*\*:)\s*(.+?)\s*$")
+    for line in path.read_text(encoding="utf-8").splitlines():
+        m = field_re.match(line)
+        if m:
+            val = m.group(1).strip().lower()
+            if val and val not in {"—", "-"} and "@" in val:
+                return val
+    return None
 
 
 def fetch_sent_messages_for_circle(
@@ -126,6 +144,7 @@ def build_profile_for_circle(
     sample_size: int,
     llm_backend: str,
     verbose: bool = False,
+    min_samples: int | None = None,
 ) -> dict:
     """Returns {circle, samples_used, profile, extracted_at} or
     {error, raw} on failure."""
@@ -151,9 +170,10 @@ def build_profile_for_circle(
     if not samples:
         return {"error": f"no usable samples for {circle}"}
 
-    if len(samples) < MIN_SAMPLES_FOR_PROFILE:
+    threshold = min_samples if min_samples is not None else MIN_SAMPLES_FOR_PROFILE
+    if len(samples) < threshold:
         return {
-            "error": f"only {len(samples)} samples (need >= {MIN_SAMPLES_FOR_PROFILE}); "
+            "error": f"only {len(samples)} samples (need >= {threshold}); "
                      f"voice inference from too few messages is unreliable — skipping "
                      f"profile. draft-compose will fall through to register calibration.",
             "circle": circle,
@@ -182,6 +202,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--circle", help="Build profile for one circle (e.g. family-inner)")
     ap.add_argument("--all", action="store_true", help="Build profiles for all circles")
+    ap.add_argument("--person", help="Build per-person override profile (e.g. ravi-rivera)")
     ap.add_argument("--sample-size", type=int, default=30)
     ap.add_argument("--people-dir", type=Path)
     ap.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE)
@@ -199,11 +220,54 @@ def main() -> int:
     except (AttributeError, Exception):
         pass
 
-    if not args.circle and not args.all:
-        print("ERROR: pass --circle <name> or --all", file=sys.stderr)
+    modes = [bool(args.circle), bool(args.all), bool(args.person)]
+    if sum(modes) != 1:
+        print("ERROR: pass exactly one of --circle <name>, --all, or --person <slug>",
+              file=sys.stderr)
         return 1
 
     people_dir = args.people_dir or (dropbox_brain_root() / "people")
+
+    # Per-person profile mode: different flow, skip circle discovery
+    if args.person:
+        person_email = _lookup_person_email(people_dir, args.person)
+        if not person_email:
+            print(f"ERROR: person slug {args.person!r} not found or has no email",
+                  file=sys.stderr)
+            return 1
+        print(f"Building per-person profile: {args.person} <{person_email}>")
+        if args.dry_run:
+            print(f"DRY RUN — would query sent mail to {person_email}, sample up to {args.sample_size}")
+            return 0
+        from googleapiclient.discovery import build as _build
+        from agents.shared.google_oauth import get_credentials
+        scopes = [
+            "https://www.googleapis.com/auth/calendar.readonly",
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.compose",
+        ]
+        creds = get_credentials(str(args.creds), str(args.token), scopes)
+        service = _build("gmail", "v1", credentials=creds)
+        result = build_profile_for_circle(
+            args.person, [person_email], service,
+            sample_size=args.sample_size,
+            llm_backend=args.llm_backend,
+            verbose=args.verbose,
+            min_samples=MIN_SAMPLES_FOR_PERSON_PROFILE,
+        )
+        if "error" in result:
+            print(f"[{args.person}] FAILED: {result['error']}")
+            return 1
+        person_dir = args.cache_dir / PERSON_CACHE_SUBDIR
+        person_dir.mkdir(parents=True, exist_ok=True)
+        path = person_dir / f"{args.person}.json"
+        path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"[{args.person}] wrote {path}")
+        print(f"[{args.person}] greeting: {result['profile']['typical_greeting']}")
+        print(f"[{args.person}] signoff:  {result['profile']['typical_signoff']}")
+        print(f"[{args.person}] register: {result['profile']['register']}")
+        return 0
+
     buckets = bucket_people_by_circle(people_dir)
     print(f"Discovered circles: {sorted(buckets.keys())}")
     for c in sorted(buckets.keys()):
