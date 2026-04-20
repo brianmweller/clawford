@@ -12,12 +12,7 @@ import re
 from pathlib import Path
 
 from agents.shared.facts import parse_facts_file
-
-
-VALID_SCOPE_TAGS = {
-    "professional", "personal", "family", "friends",
-    "academic", "financial", "legal", "genealogy", "internal", "public",
-}
+from agents.shared.fact_extraction import VALID_SCOPE_TAGS  # noqa: F401 — re-exported
 
 
 def load_untagged_facts(facts_dir: Path) -> list[dict]:

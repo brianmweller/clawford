@@ -159,6 +159,9 @@ NATIVE_COMPLIANCE_XFAIL: set[str] = {
     "connector/inbox_triage_lib.py",
     "connector/flux_import_lib.py",
     "connector/voice_profile_lib.py",
+    "connector/gmail_facts_mine_lib.py",
+    "connector/workflowy_facts_mine_lib.py",
+    "meetings-coach/krisp_facts_mine_lib.py",
     # Compose-pipeline CLIs — require args (--person-slug, --gmail-thread-id,
     # --circle, etc.) or a live Gmail token; bare invocation can't produce
     # the contract envelope without side effects. Invoked by cron with
