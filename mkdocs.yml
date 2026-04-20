@@ -73,12 +73,10 @@ nav:
     - 07 — Intro to agents: guide-v3/07-intro-to-agents.md
     - 08 — Your first agent: guide-v3/08-your-first-agent.md
     - 09 — Mr Fixit 🦊🔧: guide-v3/09-mr-fixit.md
-    - 10 — Lowly Worm — newsfeed 🐛📰: guide-v3/10-lowly-worm-newsfeed.md
-    - 11 — Lowly Worm — social 🐛📰: guide-v3/11-lowly-worm-social.md
+    - 10 — Lowly Worm 🐛📰: guide-v3/10-lowly-worm-newsfeed.md
     - 12 — Mistress Mouse 🐭📅: guide-v3/12-mistress-mouse.md
     - 13 — Sergeant Murphy 🐷🔍: guide-v3/13-sergeant-murphy.md
     - 14 — Huckle Cat 🐱🤝: guide-v3/14-huckle-cat.md
-    - 15 — Hilda Hippo 🦛🛒: guide-v3/15-hilda-hippo.md
   - Architecture:
     - 16 — The shared brain: guide-v3/16-shared-brain.md
     - 17 — Auth architectures: guide-v3/17-auth-architectures.md
@@ -88,14 +86,3 @@ nav:
     - 20 — Scripts and configs: guide-v3/20-scripts-and-configs.md
     - 21 — Glossary: guide-v3/21-glossary.md
     - Bonus — The Ballad of Mr Fixit: docs/ballad-of-mr-fixit.md
-  - v2 (frozen — OpenClaw era):
-    - Index: guide-v2/index.md
-    - 02 — Before you start: guide-v2/02-before-you-start.md
-    - 03 — VPS setup: guide-v2/03-vps-setup.md
-    - 04 — Dev setup: guide-v2/04-dev-setup.md
-    - 05 — Infra setup: guide-v2/05-infra-setup.md
-    - 06 — Intro to agents: guide-v2/06-intro-to-agents.md
-    - 07-0 — Your first agent: guide-v2/07-0-your-first-agent.md
-    - 07-1 — Mr Fixit 🦊🔧: guide-v2/07-1-mr-fixit.md
-    - 07-2a — Lowly Worm — newsfeed 🐛📰: guide-v2/07-2a-lowly-worm-newsfeed.md
-    - 07-2b — Lowly Worm — social 🐛📰: guide-v2/07-2b-lowly-worm-social.md

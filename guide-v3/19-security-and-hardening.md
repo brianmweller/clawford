@@ -2,7 +2,7 @@
 
 *Last updated: 2026-04-20 · Reading time: ~30 min · Difficulty: hard*
 
-> **TL;DR.** A Clawford fleet is a personal single-operator runtime, and the threat model reflects that: the failures that actually happen are **drift** (an agent slowly learning the wrong behavior), **accident** (a cron that sends a message to the wrong chat), **trust erosion** (a cron fires at 3 AM PT with output that makes the operator stop trusting the fleet), and **promptware** (a malicious calendar invite or LinkedIn DM carries an injection that the agent reads and follows). Seven defense layers line up against those threats: (1) **OS-level immutability** on every file that encodes agent identity, (2) a **script contract + forensic envelope** that makes every cron-invoked script return JSON on stdout, exit 0, and tag itself with a `trace_id` so the whole call chain greps as one unit, (3) **deterministic Python guards** in the deploy tool that refuse to deploy anything that would break the contract, (4) a **regex + LLM-classifier inbound scanner** in front of every external-content ingest path, (5) an **LLM-classifier outbound reviewer** in front of every Telegram send, calendar write, and shopping mutation, (6) a **deterministic rate limiter + dedup** that catches the *quantitative* anomalies the reviewer doesn't (the canonical "the same message went out five times" class), and (7) **process-level isolation** via bubblewrap so a compromised agent can't read another agent's tokens. Credentials are covered in [Ch 17 — Auth architectures](17-auth-architectures.md); this chapter is about the surface around the credentials.
+> **TL;DR.** A Clawford fleet is a personal single-operator runtime, and the threat model reflects that: the failures that actually happen are **drift** (an agent slowly learning the wrong behavior), **accident** (a cron that sends a message to the wrong chat), **trust erosion** (a cron fires at 3 AM PT with output that makes the operator stop trusting the fleet), and **promptware** (a malicious calendar invite or newsletter carries an injection that the agent reads and follows). Seven defense layers line up against those threats: (1) **OS-level immutability** on every file that encodes agent identity, (2) a **script contract + forensic envelope** that makes every cron-invoked script return JSON on stdout, exit 0, and tag itself with a `trace_id` so the whole call chain greps as one unit, (3) **deterministic Python guards** in the deploy tool that refuse to deploy anything that would break the contract, (4) a **regex + LLM-classifier inbound scanner** in front of every external-content ingest path, (5) an **LLM-classifier outbound reviewer** in front of every Telegram send, calendar write, and shopping mutation, (6) a **deterministic rate limiter + dedup** that catches the *quantitative* anomalies the reviewer doesn't (the canonical "the same message went out five times" class), and (7) **process-level isolation** via bubblewrap so a compromised agent can't read another agent's tokens. Credentials are covered in [Ch 17 — Auth architectures](17-auth-architectures.md); this chapter is about the surface around the credentials.
 
 ## The threat model
 
@@ -10,13 +10,13 @@ Before the hardening, name the threats. Getting this wrong is how security engin
 
 **Threat 1 — Agent drift.** The biggest real threat to a Clawford fleet is an agent slowly learning the wrong behavior over time. The LLM-driven composition surfaces (the morning briefings, the triage digests, the coaching messages) are easy to nudge into a tone or a cadence the operator did not intend, through a dozen small prompt refinements nobody reviewed carefully. The defense is deterministic code at the cron boundary: Python that produces JSON, not prompts that produce natural language. See [§ Defense layer 2 — The script contract](#defense-layer-2-the-script-contract) below.
 
-**Threat 2 — Accidental output.** The second-biggest real threat is a cron that sends the right content to the wrong audience. The [smart-reply chip incident in Ch 11](11-lowly-worm-social.md#the-smart-reply-chip-incident-2026-04-14) is a textbook example: an enrichment path that was supposed to read DMs accidentally triggered the send flow and auto-replied five times to a dormant thread. The defense is network-level blocks on the specific mutation endpoints the fleet never wants to hit by accident — not "careful review of the click handler," but a `page.route` that returns HTTP 418 for the endpoints that must not fire.
+**Threat 2 — Accidental output.** The second-biggest real threat is a cron that sends the right content to the wrong audience. A scar-tissue example: an enrichment path that was supposed to read messages accidentally triggered the send flow and auto-replied multiple times to a dormant thread. The defense is network-level blocks on the specific mutation endpoints the fleet never wants to hit by accident — not "careful review of the click handler," but a `page.route` that returns HTTP 418 for the endpoints that must not fire.
 
 **Threat 3 — Credential leak via git.** Third-biggest real threat is a token file or a `.env` value getting committed to the repo. Recovery is painful: vendor-side credential rotation is slow, sometimes intrusive, and sometimes impossible for shape 4 / shape 5 / shape 6 auth flows. Prevention is much cheaper than recovery. The defense is the gitignore discipline described in [Ch 17 Idiom 2](17-auth-architectures.md#the-three-cross-cutting-idioms).
 
 **Threat 4 — Trust erosion.** Distinct from "drift," this is the class of failure where the fleet technically produces the right output but the operator's trust in the output degrades over time anyway, usually because of a visible bug that shipped once and got remembered. The [5x resend incident in Ch 13](13-sergeant-murphy.md#the-5x-resend-incident) was two things in one: a real bug, and a trust-erosion event that still echoes through operator cadence weeks later. The defense is conservative cron scheduling and pre-commit regression tests for every delivery path.
 
-**Threat 5 — Promptware (indirect prompt injection).** Originally lumped under "active attack" and treated as distant; the 2025–2026 research corpus changed that. Real exploits exist in the wild — the Gemini/Google-Calendar exploit (a malicious invite contains text that hijacks the assistant when it summarizes the week), the *Invitation Is All You Need* paper, Microsoft Prompt Shields, the AgentSentry framework. Every Clawford agent that reads external content is susceptible: calendar invites, LinkedIn DMs, news articles, Gmail bodies, web-scraped product pages, even Telegram-forwarded text. A naive ingest path lets an attacker write text that the agent then *executes*. This threat is no longer hypothetical — defending against it is the work of the inbound scanner (Defense layer 4) and the outbound reviewer (Defense layer 5).
+**Threat 5 — Promptware (indirect prompt injection).** Originally lumped under "active attack" and treated as distant; the 2025–2026 research corpus changed that. Real exploits exist in the wild — the Gemini/Google-Calendar exploit (a malicious invite contains text that hijacks the assistant when it summarizes the week), the *Invitation Is All You Need* paper, Microsoft Prompt Shields, the AgentSentry framework. Every Clawford agent that reads external content is susceptible: calendar invites, news articles, Gmail bodies, even Telegram-forwarded text. A naive ingest path lets an attacker write text that the agent then *executes*. This threat is no longer hypothetical — defending against it is the work of the inbound scanner (Defense layer 4) and the outbound reviewer (Defense layer 5).
 
 **Threat 6 — Active attack on infrastructure.** What's left of the original "active attack" category after promptware split out: SSH key compromise, a compromised upstream dependency in a `pip install` (defended by the pip-audit gate, Defense layer 3 Safeguard 12), a malicious response from a vendor API that the agent parses incorrectly. The VPS is single-tenant with no public services beyond SSH on a non-standard port; the attack surface is narrow. Harden against them, but don't let the hardening squeeze out attention from the first five threats.
 
@@ -56,8 +56,8 @@ Layered on top of the script contract: every wrapped script's stdout JSON now ca
 
 ```json
 {"trace_id": "a2b6-…-uuid",
- "agent_id": "shopping",
- "tool_name": "costco-orders",
+ "agent_id": "connector",
+ "tool_name": "gmail-facts-mine",
  "parameters_hash": "<sha256 of the canonical-JSON action payload>"}
 ```
 
@@ -94,7 +94,7 @@ Safeguards 8 (exec-approvals baseline) and 11 (docker-compose.yml drift) were re
 
 The mirror of the outbound reviewer. Every script that ingests external text into a prompt routes that text through `agents/shared/scan_fields.py` first. Three sub-checks per call:
 
-1. **Regex layer** (`agents/shared/inbound_patterns.py`): 23 patterns covering instruction-override (`ignore previous instructions`), role hijacking (`you are now`, `enter DAN mode`), prompt extraction, secret extraction, exfiltration verbs (`curl`, `wget`, `exfiltrate`), encoding attacks (`base64 encode`), fake system tags (`[SYSTEM]`, `<<SYS>>`), token smuggling (`<|im_start|>`). Hard-block on match. Ported from a sibling project's regex list and tuned against a 23-payload false-positive corpus (normal calendar invites, news leads, LinkedIn DMs).
+1. **Regex layer** (`agents/shared/inbound_patterns.py`): 23 patterns covering instruction-override (`ignore previous instructions`), role hijacking (`you are now`, `enter DAN mode`), prompt extraction, secret extraction, exfiltration verbs (`curl`, `wget`, `exfiltrate`), encoding attacks (`base64 encode`), fake system tags (`[SYSTEM]`, `<<SYS>>`), token smuggling (`<|im_start|>`). Hard-block on match. Ported from a sibling project's regex list and tuned against a 23-payload false-positive corpus (normal calendar invites, news leads, Gmail DMs).
 
 2. **Semantic guard** (`agents/shared/inbound_scanner.py:semantic_guard`): an LLM classifier that catches paraphrased / novel attacks the regex layer misses. Returns `safe / unsafe / error`, with explicit bias toward SAFE — false negatives are caught downstream by the outbound reviewer; a wrongful block here breaks the operator's day.
 
@@ -109,8 +109,7 @@ Wired into all six agents:
 | Sergeant Murphy | `meeting-prep.py` — calendar event title, description, attendee names |
 | Mistress Mouse | `gmail-invite-check.py`, `activity-email-check.py` — invite + newsletter subject + body |
 | Huckle Cat | `gmessages-mine.py` (display name), `mine/gmail-mine.py` (subject + body excerpt per contact) |
-| Lowly Worm | `fetch-and-rank.py` — RSS title + summary, LinkedIn feed/notification/messages, plus a pre-LLM scan in `_summarize_linkedin_thread` that short-circuits on block before any prompt is built |
-| Hilda Hippo | `gmail-search.py` — vendor email subject + snippet + body |
+| Lowly Worm | `fetch-and-rank.py` — RSS title + summary |
 | Telegram dispatcher | `agents/shared/dispatcher.py` — every inbound text the inbox daemon hands the LLM, with a forwarded-message detector for higher-trust gating |
 
 ## Defense layer 5 — Outbound-action reviewer (P0.1)
@@ -128,7 +127,7 @@ Wired into:
 
 - **`telegram_api.send_message`** — the single chokepoint for every Telegram outbound in the fleet. Resolves agent id from kwarg → `CLAWFORD_AGENT_ID` env var (set by the wrapper). Mechanical confirm/cancel handler messages pass `skip_review=True` because they're hardcoded strings, not LLM-composed payloads.
 - **`gcal-write.py`** — all three calendar mutations (create / move / remove).
-- **All six shopping mutations**: `amazon-reorder.py:add_to_cart`, `amazon-sns-manage.py:skip|change|cancel|resubscribe`, `amazon-sns-skip.py:browser-skip`, `costco-reorder.py:add_to_cart`. The cancel path is the highest-stakes single mutation in the fleet (irreversible) — flagged that way in the prompt.
+- **`draft-compose.py`** — Gmail draft creation for Huckle's real-time reply path.
 
 Fail open on any LLM error: a wrongful block on every call would break the day. The deterministic rate limiter (Defense layer 6) is the backstop.
 
@@ -185,7 +184,7 @@ Mr Fixit is hard-coded as exempt (`isolation.ISOLATION_EXEMPT_AGENTS = {"fix-it"
 
 Enable per cron by editing the allowlist and re-running `install-bwrap-allowlist.sh` on the VPS. The wrapper checks for bwrap availability and falls back to unwrapped execution with a stderr warning if missing — devcontainer / non-Linux laptops never block the operator. On Ubuntu 24.04, `kernel.apparmor_restrict_unprivileged_userns=0` must be set (handled by `install-host-system-deps.sh`).
 
-The 2026-04-20 rollout went in two stages — non-browser crons first for a short soak, browser crons (Costco Camoufox, LinkedIn Playwright, Google Messages DevTools) second once the brain-write and SHM fixes had a clean smoke. The staging made it cheap to isolate any regression to the browser variable specifically. It's the right sequence for any future profile change that touches the same hot paths.
+The 2026-04-20 rollout went in two stages — non-browser crons first for a short soak, browser crons (Google Messages DevTools) second once the brain-write and SHM fixes had a clean smoke. The staging made it cheap to isolate any regression to the browser variable specifically. It's the right sequence for any future profile change that touches the same hot paths.
 
 ## Credential storage
 

@@ -2,11 +2,11 @@
 
 *Last updated: 2026-04-18 · Reading time: ~20 min · Difficulty: hard*
 
-> **TL;DR.** Mistress Mouse is the household-logistics agent: she reads a family's Google Calendars, composes a morning briefing delivered at 5 AM PT, fires 60/30/15-minute reminders for the events that matter today, parses activity-provider emails (school closures, cancellations, signup windows), surfaces Google Calendar invites that actually need a response, and summarizes WhatsApp family-chat traffic into a once-a-day digest. She is also the first agent in a Clawford fleet to go through Google OAuth — the local-auth-then-SCP pattern she pioneered is the same pattern [Sergeant Murphy](13-sergeant-murphy.md) and [Huckle Cat](14-huckle-cat.md) reuse. Read [the WhatsApp section](#the-whatsapp-chapter) before binding her to a real phone number — there is a live ban risk on personal accounts. Read [the routing boundary section](#the-routing-boundary-with-sergeant-murphy) before deploying her alongside Sergeant Murphy.
+> **TL;DR.** Mistress Mouse is the household-logistics agent: she reads a family's Google Calendars, composes a morning briefing delivered at 5 AM PT, fires 60/30/15-minute reminders for the events that matter today, parses activity-provider emails (school closures, cancellations, signup windows), and surfaces Google Calendar invites that actually need a response. She is also the first agent in a Clawford fleet to go through Google OAuth — the local-auth-then-SCP pattern she pioneered is the same pattern [Sergeant Murphy](13-sergeant-murphy.md) and [Huckle Cat](14-huckle-cat.md) reuse. Read [the routing boundary section](#the-routing-boundary-with-sergeant-murphy) before deploying her alongside Sergeant Murphy.
 
 ## Meet the agent
 
-Mistress Mouse is the Richard Scarry character — a mouse who runs the household. Her job in a Clawford fleet is family logistics: the stuff that a human operator tracks across two Google accounts, four or five subscribed calendars, a shared school portal, a partner's events calendar, and a family WhatsApp group, and that falls on the floor the moment the operator gets busy for a week.
+Mistress Mouse is the Richard Scarry character — a mouse who runs the household. Her job in a Clawford fleet is family logistics: the stuff that a human operator tracks across two Google accounts, four or five subscribed calendars, a shared school portal, and a partner's events calendar, and that falls on the floor the moment the operator gets busy for a week.
 
 She is a **family** calendar agent, not a work calendar agent — Sergeant Murphy owns work meetings. The bright line between the two is in [§ The routing boundary with Sergeant Murphy](#the-routing-boundary-with-sergeant-murphy). If you only need one of the two, deploy Sergeant Murphy if your bottleneck is post-meeting coaching and deploy Mistress Mouse if your bottleneck is "my kid's school closed and I didn't know until noon."
 
@@ -16,7 +16,6 @@ She is a **family** calendar agent, not a work calendar agent — Sergeant Murph
 - Three-tier reminders (60 min / 30 min / 15 min) for events on your own calendars, with per-calendar opt-out so a partner who finds reminders annoying can be skipped automatically.
 - Activity-provider emails (school closures, lesson cancellations, signup windows) parsed and classified into five categories with a Telegram alert per non-trivial item, so the "the school emailed at 6 AM and nobody saw it" class of failure goes away.
 - Google Calendar invite surfacing — the common `METHOD:REQUEST` stuff you actually need to respond to, filtered out of the noise of calendar updates and cancellations.
-- A once-a-day digest of family WhatsApp chat traffic, delivered to Telegram, so the "partner sent a schedule change in WhatsApp and I missed it because I was heads-down" failure mode goes away.
 - Personal tasks surfaced the same way events are: anything in the shared brain's `tasks/queue.md` assigned to you shows up in the 5 AM PT brief under "TODAY'S TASKS"; timed tasks get a T-30min Telegram ping with `done / snooze / ignore` buttons; the ledger two-way syncs every 5 minutes with your phone's Google Tasks list so checking something off on the phone flips `status=done` in the brain, and vice versa.
 
 ## Why you might skip this one
@@ -24,17 +23,14 @@ She is a **family** calendar agent, not a work calendar agent — Sergeant Murph
 - If your household has zero Google Calendar footprint, she has nothing to read. Port the scripts to iCloud or Outlook if that's your world, but that's a rewrite, not a config change.
 - If you don't have an activity-provider email corpus to parse (no school, no lessons, no signups), the activity-email cron is dead weight. Disable it and deploy the rest.
 - If your partner doesn't share a calendar with you, the per-calendar routing loses most of its value.
-- If you don't want to run WhatsApp at all — and [§ The WhatsApp chapter](#the-whatsapp-chapter) below is a strong argument for why you might not — the two WhatsApp crons can be disabled without affecting the rest of the agent.
 
 ## What makes this agent hard
 
-Three things, roughly in order of how long each took to get right.
+Two things, roughly in order of how long each took to get right.
 
-**Google OAuth is not hard, but it's the first piece of the fleet that does not run on API keys.** Everything before Mistress Mouse — Mr Fixit, Lowly Worm, Hilda Hippo — either talks to public web pages (Playwright) or talks to vendor APIs that take an API key (OpenAI, Telegram, the news sources). Google Calendar and Gmail require a full OAuth2 consent dance with a browser, a redirect URL, a consent screen, test users, and a refresh token that lives on disk. That story is in [§ The Google OAuth pattern](#the-google-oauth-pattern) below. It is the reusable chapter of this guide — Sergeant Murphy and Huckle Cat both reuse it verbatim.
+**Google OAuth is not hard, but it's the first piece of the fleet that does not run on API keys.** Everything before Mistress Mouse — Mr Fixit, Lowly Worm — talks to vendor APIs that take an API key (OpenAI, Telegram, the news sources). Google Calendar and Gmail require a full OAuth2 consent dance with a browser, a redirect URL, a consent screen, test users, and a refresh token that lives on disk. That story is in [§ The Google OAuth pattern](#the-google-oauth-pattern) below. It is the reusable chapter of this guide — Sergeant Murphy and Huckle Cat both reuse it verbatim.
 
 **Family calendar logistics are not a generic calendar problem.** A work calendar has one person. A family calendar has two adults with two Google accounts, three or four kids with activities, a school district, a couple of sports subscriptions, and a partner whose preferences about reminders are different from the operator's. The per-calendar `remind` flag (landed 2026-04-12) is what lets this work — every calendar in `calendar-config.json` has an explicit opt-in or opt-out for reminders, so the agent never sends a "🔴 NOW" Telegram alert about the partner's Pilates class at a time that would be interpreted as a snarky nudge. The scar tissue that forced this flag is in [Pitfalls](#pitfalls) below.
-
-**Family WhatsApp is a liability surface, not a feature surface.** See [§ The WhatsApp chapter](#the-whatsapp-chapter). The short version is that the library Mistress Mouse uses to read WhatsApp (Baileys) gets personal numbers banned by Meta on a non-deterministic schedule, and every outbound message from this agent must go to Telegram for the operator to forward, never to a WhatsApp group directly. There is a three-rule contract in [§ The WhatsApp chapter](#the-whatsapp-chapter) that is non-negotiable if you deploy the WhatsApp side of this agent at all.
 
 ## The Google OAuth pattern
 
@@ -51,24 +47,6 @@ The pattern is five rules.
 **Rule 4 — The refresh token lives forever unless you revoke it.** Once you have a valid `token.json` with a refresh token, Google will keep refreshing it on demand indefinitely — no rotation, no manual re-auth, no expiration. The only things that invalidate the refresh token are: explicit user revocation (from the Google account security page), deletion of the Google Cloud project, or removal from the test-users list. None of those happen by accident. This is a fire-and-forget setup after the first local auth run.
 
 **Rule 5 — Expanding scopes requires a new auth flow.** Mistress Mouse started with `calendar.readonly` scope (just enough to read events), then later added `calendar` (full write) and `gmail.readonly` (for invite parsing). Upgrading scopes requires running `InstalledAppFlow.run_local_server` again against a new scope list, which pops a fresh consent screen, which writes a new `token.json`. Mistress Mouse's auth-setup script (`google-auth-setup.py`, kept in the workspace but not run from cron) takes the full scope list as a constant and is safe to re-run at any time — it will short-circuit if the existing `token.json` already covers the requested scopes, and run the flow if not.
-
-## The WhatsApp chapter
-
-This is the section you must read before deploying the WhatsApp crons. It is also the section you might read and then decide to deploy Mistress Mouse without the WhatsApp side at all. Both are reasonable.
-
-**The architecture.** Mistress Mouse reads WhatsApp via [Baileys](https://github.com/WhiskeySockets/Baileys), a reverse-engineered whatsapp-web library. Baileys binds to a personal WhatsApp account as a "linked device" — the same kind of pairing WhatsApp Web uses. The binding lives in a session directory under `~/.clawford/family-calendar-workspace/whatsapp-session/` and survives restarts as long as the session hasn't expired. Two crons consume it: `whatsapp-chat-alert` (every 2 hours, LLM-classified) and `whatsapp-schedule-post` (once a day at 5 AM PT).
-
-**The ban risk.** Baileys is not an authorized API. Meta actively detects reverse-engineered clients and bans the personal phone numbers they are bound to, on a non-deterministic schedule. The ban is typically a hard number ban — the personal account is locked, and recovery requires contacting Meta support with a phone-ownership proof. In the worst case, the ban is permanent. **This is not a theoretical risk.** It is the reason the Clawford guide treats the WhatsApp binding as a liability surface and not a feature surface, and it is the reason every outbound message path goes through Telegram.
-
-**The three-rule contract.** If you deploy the WhatsApp side of Mistress Mouse, these three rules are non-negotiable:
-
-1. **Outbound goes to Telegram, never to a WhatsApp group.** The `whatsapp-schedule-post.py` cron composes a daily digest and sends it to the operator's Telegram, not to the family WhatsApp group. If the operator wants to forward the digest to the family group, that is a manual copy-and-paste action the operator performs by hand. The agent never initiates a group message. The scar tissue that forced this rule is in [Pitfalls](#pitfalls) below — the first draft of the cron sent the digest straight to the family group and had to be pulled within hours.
-
-2. **`dmPolicy=disabled` on the bound account.** The bot framework layered on top of Baileys has a "respond to direct messages" mode that defaults to on in most templates. If you leave it on, the framework will auto-reply to any DM the bound account receives — including DMs from the operator's partner, in the operator's voice, with a pairing-code message header. This has happened. It is confusing to everyone involved. Set `dmPolicy=disabled` in the agent config before the first cron fires.
-
-3. **One WhatsApp account per deployment.** Do not share the bound Baileys session across multiple agents. Huckle Cat (the connector agent) has its own WhatsApp-reading surface for mining contact relationships; if you deploy both Mistress Mouse and Huckle Cat, use two different WhatsApp accounts for the two bindings. A single account bound to two Baileys sessions at once is a fast path to a ban.
-
-**The alternative: deploy without WhatsApp.** `whatsapp-schedule-post` and `whatsapp-chat-alert` can both be moved to `disabled-agents.txt` (see [Ch 06 — Infra setup](06-infra-setup.md)) without affecting the morning briefing, the reminder check, the activity-email cron, or the Gmail-invite cron. Mistress Mouse works fine without WhatsApp. Every other agent in the fleet that reads WhatsApp (currently just Huckle Cat) is also optional on the same grounds.
 
 ## The routing boundary with Sergeant Murphy
 
@@ -97,8 +75,6 @@ As of 2026-04-18, Mistress Mouse runs entirely on host crons under `~/.clawford/
 | `tasks-sync` | `*/5 * * * *` | Two-way sync between `tasks/queue.md` and the operator's Google Tasks list. Push creates/patches/deletes remote tasks; pull propagates phone-side completions back as in-place `status=done` edits. State map in `tasks-sync-state.json` keyed by local task id |
 | `activity-email-alert` | `15 */2 * * *` | Fetch recent activity-provider emails, LLM-classify into {closure, cancellation, action, event, fyi, none}, send one Telegram alert per non-none item |
 | `gmail-invite-alert` | `30 */3 * * *` | Parse ICS attachments from Gmail, surface METHOD:REQUEST invites only, dedup via `seen-invites.json` |
-| `whatsapp-chat-alert` | `45 */2 * * *` | LLM-classify recent WhatsApp chat into action types, send Telegram alert per classified item. **Optional — see [§ The WhatsApp chapter](#the-whatsapp-chapter).** |
-| `whatsapp-schedule-post` | `0 12 * * *` | Daily WhatsApp chat digest, synced with the fleet 5 AM PT delivery window. **Optional — see [§ The WhatsApp chapter](#the-whatsapp-chapter).** |
 
 **I/O scripts** (deterministic Python, subprocess-safe, called by the orchestrators above):
 
@@ -108,8 +84,7 @@ As of 2026-04-18, Mistress Mouse runs entirely on host crons under `~/.clawford/
 - `reminder-check.py` — also serves as an orchestrator; see cron table above
 - `activity-email-check.py` — recursive MIME parser; no LLM; emits raw event dicts for the alert cron to classify
 - `gmail-invite-check.py` — ICS attachment parser; filters METHOD:REQUEST only
-- `chat-parse-schedule.py` — reads Baileys session store, extracts schedule-change keywords from family chat messages
-- `gcal-tasks-sync.py` — Google Tasks push/pull; resolves the target list by title (`Sam.M.Smith's list`), maintains `tasks-sync-state.json`, treats `status=ignored` as `completed` + `[IGNORED]` title prefix, tombstones phone-side deletes back to `queue.md`
+- `gcal-tasks-sync.py` — Google Tasks push/pull; resolves the target list by title, maintains `tasks-sync-state.json`, treats `status=ignored` as `completed` + `[IGNORED]` title prefix, tombstones phone-side deletes back to `queue.md`
 
 **Workspace layout** under `~/.clawford/family-calendar-workspace/`:
 
@@ -127,7 +102,6 @@ sent-reminders.json     # reminder dedup state (events + tasks share the keyspac
 seen-invites.json       # invite dedup state
 tasks-sync-state.json   # Google Tasks sync state (list_id, per-task map, etag, updatedMin watermark)
 calendar-config.json    # calendar list + activity providers + per-calendar flags
-whatsapp-session/       # Baileys session store (if WhatsApp enabled)
 logs/                   # calendar-writes.jsonl audit log
 cache/                  # morning-brief-ready.txt + staging files
 scripts/                # all Python scripts listed above
@@ -145,19 +119,13 @@ This adds onto [Ch 08 — Your first agent](08-your-first-agent.md). Everything 
 
 **Step 3b: SCP `token.json` to the VPS.** `scp token.json operator@vps:~/.clawford/family-calendar-workspace/token.json`. Verify on the VPS with the same `gcal-fetch.py --days 1` test. If the VPS test fails but the local test passed, check that `credentials.json` was also SCPed (it has to live next to `token.json`).
 
-**Step 3c (optional): WhatsApp setup.** If deploying the WhatsApp crons, run `python3 agents/family-calendar/scripts/whatsapp-pair.py` on the VPS. It prints a pairing code. Open WhatsApp on the operator's phone, go to "Linked devices → Link a device → Link with phone number instead," and enter the pairing code. The session writes to `whatsapp-session/` and survives restarts. **Do not skip the [§ The WhatsApp chapter](#the-whatsapp-chapter) rules before this step.**
-
-**Step 5: Register the host crons.** Add the six Mistress Mouse entries to the `CONTRACT_ENTRIES` block in `ops/scripts/install-host-cron.sh`. The six entries land under the `family-calendar` section and each one calls `python3 ~/repo/agents/family-calendar/scripts/{cron-name}.py`. Run `ops/scripts/install-host-cron.sh` on the VPS — it drift-detects and rewrites the crontab idempotently.
+**Step 5: Register the host crons.** Add the five Mistress Mouse entries to the `CONTRACT_ENTRIES` block in `ops/scripts/install-host-cron.sh`. Each entry lands under the `family-calendar` section and calls `python3 ~/repo/agents/family-calendar/scripts/{cron-name}.py`. Run `ops/scripts/install-host-cron.sh` on the VPS — it drift-detects and rewrites the crontab idempotently.
 
 **Step 6: Deploy.** `python3 agents/shared/deploy.py family-calendar` on the VPS, as documented in [Ch 07 — Intro to agents](07-intro-to-agents.md). Verify with `python3 agents/family-calendar/scripts/reminder-check.py --dry-run` — it should print a JSON blob with the reminders it would send, plus a `dry_run: true` field.
 
 **Step 7: Wait for the next `*/5` tick** and check the Telegram channel. If you deployed at 10:23 UTC, at 10:30 UTC the morning-briefing cron will fire, write `cache/morning-brief-ready.txt`, and the cron will exit cleanly. The fleet-deliver at 12:00 UTC will pick up the file and actually send the Telegram message.
 
 ## Pitfalls
-
-> 🧨 **Pitfall.** Deploying the WhatsApp crons without reading [§ The WhatsApp chapter](#the-whatsapp-chapter). **Why:** the Baileys ban risk is real, non-deterministic, and can lock a personal WhatsApp account permanently. The "dmPolicy=disabled" rule is non-optional and exists because an earlier version auto-replied to a partner's personal DM with a pairing-code message in the operator's voice, which was confusing to everyone involved. **How to avoid:** read [§ The WhatsApp chapter](#the-whatsapp-chapter) in full, then either follow all three rules exactly or disable the two WhatsApp crons via `disabled-agents.txt` and deploy the rest of the agent without them.
-
-> 🧨 **Pitfall.** First-draft outbound WhatsApp delivery. **Why:** the first version of `whatsapp-schedule-post.py` (2026-04-08) sent the daily digest straight to the family WhatsApp group. That cron ran exactly once before getting pulled — family groups are not a place where an automated summary lands well, and Meta's ban detection also looks for automated-looking group posts from linked devices. **How to avoid:** outbound from the WhatsApp side of Mistress Mouse goes to the operator's Telegram only. The operator decides what, if anything, gets forwarded to the family group by hand. This is rule 1 of the three-rule contract.
 
 > 🧨 **Pitfall.** Forgetting to add the operator to the Google Cloud OAuth consent-screen test-users list. **Why:** the first time `google-auth-setup.py` runs, the browser pops a consent screen, and if the operator's email is not in the test-users list, the screen shows `Access blocked: {app name} has not completed the Google verification process` with no indication that the fix is to add yourself as a test user. The error message makes this look like a permissions problem with the API scope. It is not. **How to avoid:** the Google Cloud Console "OAuth consent screen" page has a "Test users" section near the bottom — add the operator's email there before the first auth flow. You can add or remove test users at any time without re-running the flow.
 
@@ -168,8 +136,6 @@ This adds onto [Ch 08 — Your first agent](08-your-first-agent.md). Everything 
 > 🧨 **Pitfall.** Upgrading Google OAuth scopes without re-running the auth flow. **Why:** the refresh token is scoped to exactly the scopes the consent screen showed the first time. If you add `calendar` (write) to a token that was originally generated for `calendar.readonly` only, every write call will return a 403 with a cryptic message about insufficient permissions. The refresh token will not auto-upgrade. **How to avoid:** any time you change the scope list in `google-auth-setup.py`, re-run the script on the local laptop. It will detect the scope mismatch, pop a fresh consent screen, and write a new `token.json`. SCP the new file to the VPS and redeploy. This is a once-per-scope-change operation, not a recurring one.
 
 > 🧨 **Pitfall.** The routing boundary check against Workflowy silently failing. **Why:** the Workflowy presence check in `gcal-fetch.py` is a best-effort lookup against Workflowy's search endpoint. If the Workflowy session is expired, the search call returns an empty result set — which Mistress Mouse interprets as "no Workflowy node, so I own this event," which means she might start sending reminders for work meetings that Sergeant Murphy should own. The symptom is duplicated reminders across both agents. **How to avoid:** the Workflowy session is maintained by Sergeant Murphy's own auth pipeline; see [Ch 13](13-sergeant-murphy.md) for the pattern. If deploying Mistress Mouse standalone (without Sergeant Murphy), the Workflowy check always returns empty and Mistress Mouse owns everything — which is the intended standalone behavior. The bug only manifests when both agents are deployed and Murphy's Workflowy session has expired; fix Murphy first, not Mistress Mouse.
-
-> 🧨 **Pitfall.** Schedule-change detection in WhatsApp dropping ambiguous messages. **Why:** `chat-parse-schedule.py` uses a keyword-based filter for "schedule change language" — times, cancellations, date references. It is deliberately conservative: it would rather miss a real schedule change than flood the operator with false positives. That means a message like "hey can you push it back an hour" is caught, but "does tomorrow still work for the thing" is not. The agent is not a complete substitute for reading the WhatsApp group. **How to avoid:** the agent is a safety net, not a primary channel. Read the WhatsApp group at whatever cadence you currently do; the agent's value is catching the things that hit in the middle of a busy day, not replacing the channel entirely.
 
 ## See also
 

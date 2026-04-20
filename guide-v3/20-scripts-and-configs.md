@@ -23,13 +23,13 @@ Everything in `agents/shared/` is world-access infrastructure that every agent c
 
 | Module | Exports | What it does |
 |--------|---------|--------------|
-| `agents/shared/playwright_profile.py` | `launch_persistent_profile`, `ensure_xvfb`, `cleanup_profile_lock` | Chromium persistent-profile launch + Xvfb management for the "cookies live, tokens refresh" case. Consumers: LinkedIn keepalive in [Ch 11](11-lowly-worm-social.md), Google Messages scraper in [Ch 14](14-huckle-cat.md). |
+| `agents/shared/playwright_profile.py` | `launch_persistent_profile`, `ensure_xvfb`, `cleanup_profile_lock` | Chromium persistent-profile launch + Xvfb management for the "cookies live, tokens refresh" case. Primary consumer: Google Messages scraper in [Ch 14](14-huckle-cat.md). |
 
 ### Tier 3 — Camoufox + residential proxy
 
 | Module | Exports | What it does |
 |--------|---------|--------------|
-| `agents/shared/camoufox_proxy.py` | `launch_hardened`, `sticky_proxy_session`, `totp_code(secret)` | Camoufox launcher with residential-proxy sticky port + TOTP helper for auto-MFA. See [Ch 17 Shape 5](17-auth-architectures.md#shape-5-camoufox-residential-proxy-auto-mfa) for the deployment story and [Ch 15 Hilda Hippo](15-hilda-hippo.md) for the scar tissue. |
+| `agents/shared/camoufox_proxy.py` | `launch_hardened`, `sticky_proxy_session`, `totp_code(secret)` | Camoufox launcher with residential-proxy sticky port + TOTP helper for auto-MFA. See [Ch 17 Shape 5](17-auth-architectures.md#shape-5-camoufox-residential-proxy-auto-mfa) for the auth shape and [Ch 06 — Tier 3 in practice](06-infra-setup.md#tier-3-in-practice) for the patterns. |
 
 ### Ops modules
 
@@ -69,7 +69,6 @@ The "host wrappers" — one `*-host.sh` per cron — sit in `ops/scripts/` and a
 | `ops/scripts/morning-fleet-deliver-host.sh` | `0 12 * * *` | The 5 AM PT fleet delivery aggregator (reads every agent's `cache/morning-brief-ready.txt` and sends one composite Telegram message) | [Ch 06 — Infra setup](06-infra-setup.md) |
 | `ops/scripts/news-digest-morning-edition-host.sh` | `30 10 * * *` | Lowly Worm's morning composition cron | [Ch 10](10-lowly-worm-newsfeed.md) |
 | `ops/scripts/fix-it-cron-self-check-host.sh` | `*/30 * * * *` | Mr Fixit's self-check probe | [Ch 09 — Mr Fixit](09-mr-fixit.md) |
-| `ops/scripts/costco-token-refresh-host.sh` | every 15 min | Hilda Hippo's Costco persistent-daemon token refresh | [Ch 15 Hilda Hippo](15-hilda-hippo.md) |
 | `ops/scripts/script-contract-host.sh` | manual / deploy-time | Runs the script-contract compliance check against a target agent | [Ch 19 § Defense layer 2](19-security-and-hardening.md#defense-layer-2-the-script-contract) |
 
 Ops scripts that are not cron-invoked:
@@ -109,7 +108,7 @@ Every agent directory under `agents/{agent}/` follows the same skeleton. The exa
 | `{vendor}-fetch.py` | I/O-only reader from an external source. Deterministic Python, no LLM, emits JSON. | `gcal-fetch.py`, `gmail-fetch.py` |
 | `{vendor}-mine.py` | One-off or periodic mining script. Heavier than `-fetch.py` — pagination, caching, rate-limiting. | `gmessages-mine.py`, `workflowy-read.py` |
 | `{thing}-check.py` | Deterministic read + classify. No side effects. | `activity-email-check.py`, `gmail-invite-check.py` |
-| `{thing}-alert.py` | Orchestrator — calls `-check.py`, runs LLM, sends Telegram. Always a host cron entry point. | `activity-email-alert.py`, `whatsapp-chat-alert.py` |
+| `{thing}-alert.py` | Orchestrator — calls `-check.py`, runs LLM, sends Telegram. Always a host cron entry point. | `activity-email-alert.py`, `gmail-invite-alert.py` |
 | `{thing}-host.sh` | Cron wrapper. Lives under `ops/scripts/`, not `agents/{agent}/scripts/`. Exec bit in git. | `fleet-health-host.sh`, `morning-fleet-deliver-host.sh` |
 | `heartbeat.py` | Per-agent required file. Subclasses `HeartbeatProbe`. | every agent has one |
 
@@ -151,8 +150,8 @@ Common keys across multiple agents:
 | `TELEGRAM_BOT_TOKEN` | every agent that sends | The bot's API token |
 | `TELEGRAM_CHAT_ID` | every agent that sends | The chat id to send to |
 | `WORKFLOWY_TOKEN` | [Murphy](13-sergeant-murphy.md), [Huckle](14-huckle-cat.md) | Workflowy bearer token |
-| `PROXY_USER` / `PROXY_PASS` / `PROXY_HOST` / `PROXY_PORT` | [Hilda Hippo](15-hilda-hippo.md) | Residential proxy credentials, sticky port is 10000 |
-| `{VENDOR}_TOTP_SECRET` | [Hilda Hippo](15-hilda-hippo.md) | The TOTP seed for auto-MFA on vendor login |
+| `PROXY_USER` / `PROXY_PASS` / `PROXY_HOST` / `PROXY_PORT` | Any Tier 3 integration | Residential proxy credentials (sticky port); see [Ch 06 — Tier 3 in practice](06-infra-setup.md#tier-3-in-practice) |
+| `{VENDOR}_TOTP_SECRET` | Any Tier 3 integration with auto-MFA | TOTP seed; lives in `secrets.env` (chmod 600), not `.env` |
 
 ### Identity file conventions
 
@@ -168,7 +167,6 @@ For when you know the name but not the category.
 - [`camoufox_proxy.py`](#tier-3-camoufox-residential-proxy) — Category 1
 - [`contract_wrap.py`](#ops-modules) — Category 1
 - [`conversation.py`](#ops-modules) — Category 1
-- [`costco-token-refresh-host.sh`](#category-3-ops-helpers-and-host-cron-wrappers) — Category 3
 - [`crlf-scan.py`](#category-3-ops-helpers-and-host-cron-wrappers) — Category 3
 - [`deploy.py`](#ops-modules) — Category 1
 - [`dispatcher.py`](#ops-modules) — Category 1

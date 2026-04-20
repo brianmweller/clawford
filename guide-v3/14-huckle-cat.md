@@ -54,7 +54,6 @@ Seven miners, each scoped to one data source, each producing a flat JSON output 
 | `gcal-mine.py` | Google Calendar (all events) | Attendees + dates |
 | `contacts-mine.py` | Google Contacts | Both `people.connections.list` (2500+ saved) and `otherContacts.list` (1900+ auto-saved) |
 | `transcripts-mine.py` | MCP transcription provider | Session metadata + participant lists; cross-references by first-name + title against calendar attendees |
-| `whatsapp-mine.py` | WhatsApp session logs | Message participants; group chats split per non-operator author |
 | `gmessages-mine.py` | Google Messages (DevTools) | DOM-scraped conversation list + metadata — see [§ The Google Messages + DevTools story](#the-google-messages-devtools-story) |
 | `workflowy-read.py` | Workflowy (API export) | ~3000 people extracted from ~16K meeting nodes in the contact cache |
 
@@ -100,7 +99,7 @@ The wrapper scripts around this:
 - `gmessages-mine.py` — runs the DevTools snippet against the authenticated session, scroll-paginates through the conversation list (not capped by DOM height — scroll triggers lazy-load), handles both absolute timestamps (`"Mar 15, 2:35 PM"`) and relative timestamps (`"Today 2:35 PM"`, `"Yesterday 4:20 PM"`), and 2-digit-year disambiguation context-aware rather than naive.
 - A **graceful selector fallback** so that if Google changes the HTML structure, the miner degrades to a "this source is broken, surface that in the heartbeat" state instead of crashing the whole aggregator run.
 
-The pattern generalizes: if you have an important data source with no API, a hand-rolled DevTools snippet run from a persistent-profile browser gets you 80% of the way to "this data is now part of the brain." It is the same shape as Hilda Hippo's Camoufox-based auth flows, minus the MFA.
+The pattern generalizes: if you have an important data source with no API, a hand-rolled DevTools snippet run from a persistent-profile browser gets you 80% of the way to "this data is now part of the brain." It is the same shape as a full Tier 3 auth flow, minus the anti-bot armor and the MFA automation.
 
 ## The stale-dates bug and the daily-refresh fix
 
@@ -175,7 +174,7 @@ Ten read tools and six producer tools (plus three confirm executors the LLM neve
 | Command | What it does | Backing |
 |---------|--------------|---------|
 | `/people <name>` | Full record for one person — circle, tone, last_interaction, visible facts (birthday, health, relationship context) | `get_person` → `brain.get_person` with first-name fallback |
-| `/commitments` | Unified open-commitment view across every agent (Murphy's, Hilda's, Mouse's) with overdue / approaching flags | `get_commitments` → shells `scripts/commitment-scan.py` |
+| `/commitments` | Unified open-commitment view across every agent (Murphy's, Mouse's, Huckle's own) with overdue / approaching flags | `get_commitments` → shells `scripts/commitment-scan.py` |
 | `/nudge` | Force the morning relationship scan on-demand (without overwriting the 5 AM PT delivery cache) | `force_nudge` → shells `scripts/people-scan.py` |
 | `/triage` | Force notes-inbox triage on-demand | `force_triage` → shells `scripts/notes-triage.py` |
 | `/draft <name> [text]` | Compose a check-in (no arg) or reply (with inbound text) using the recipient's facts, tone, and voice profile | `draft_reply` → shells `scripts/draft-compose.py` |
@@ -199,18 +198,18 @@ That meant building an ingestion path. `scripts/birthday-miner.py` runs weekly (
 2. **Resolve** — for each event, extract the owner's name from the title via a regex pipeline: strip to-do prefixes (`Get / Bring / Buy / Order / Remember <X> birthday card`) and generic greetings (`Happy birthday!`), strip relational titles (`Aunt Marcia` → `Marcia`, `Mama Yao` → `Yao`), then either (a) match the `aliases` map in `birthday-aliases.json` (operator-forced), (b) fall back to `brain.get_person` with the first-name-unique heuristic, or (c) skip silently.
 3. **Upsert** — call `facts.upsert_fact(subject, category="identity", content=f"Birthday: {date}", idempotency_key="birthday")`. The idempotency key means re-runs are cheap and non-destructive.
 
-The resolver's heuristics are deliberately loose. A typical calendar has eighteen events matching the regex, of which maybe four are parse-clean (`Priya's Birthday`, `Jeanette's birthday`), six are to-do cards (`Get Dad birthday card`), three are relational titles (`Aunt Marcia's birthday`, `Mama Yao's birthday!`), one or two are joke entries (`OliMom's fake birthday!`), and the rest are ambiguous (`Emily's birthday` when I have three Emilys in people/). The miner gets the parse-clean and relational cases right automatically. For everything else, there's a companion file at `~/.clawford/connector-workspace/birthday-aliases.json`:
+The resolver's heuristics are deliberately loose. A typical calendar has eighteen events matching the regex, of which maybe four are parse-clean (`Priya's Birthday`, `Jeanette's birthday`), six are to-do cards (`Get Dad birthday card`), three are relational titles (`Aunt Marcia's birthday`, `Grandma's birthday!`), one or two are joke entries (`OliMom's fake birthday!`), and the rest are ambiguous (`Emily's birthday` when there are three Emilys in people/). The miner gets the parse-clean and relational cases right automatically. For everything else, there's a companion file at `~/.clawford/connector-workspace/birthday-aliases.json`:
 
 ```json
 {
   "aliases": {
     "Mom": "priya-rivera",
     "Emily": "emily-bruemmer",
-    "Mama Yao": "nicole-yao"
+    "Grandma": "marcia-rivera"
   },
   "manual_birthdays": {
-    "marcia-sokolanderson": "1954-07-27",
-    "david-yao": "1958-12-17"
+    "marcia-rivera": "1954-07-27",
+    "david-rivera": "1958-12-17"
   }
 }
 ```

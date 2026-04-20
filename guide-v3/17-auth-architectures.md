@@ -46,7 +46,7 @@ These three rules apply to every auth shape in the fleet. They are not optional.
 
 ### Shape 3 — Bearer token in `.env`
 
-**Used by:** [Sergeant Murphy](13-sergeant-murphy.md) + [Huckle Cat](14-huckle-cat.md) (Workflowy), every agent that sends Telegram messages (Telegram bot token), [Hilda Hippo](15-hilda-hippo.md) (residential-proxy credentials).
+**Used by:** [Sergeant Murphy](13-sergeant-murphy.md) + [Huckle Cat](14-huckle-cat.md) (Workflowy), every agent that sends Telegram messages (Telegram bot token). Any Tier 3 integration using a residential-proxy service also stores credentials this way.
 
 **Token lifetime:** varies by vendor. Workflowy bearer tokens are long-lived and only rotate on explicit user action. Telegram bot tokens are effectively permanent. Residential-proxy credentials rotate on a manual cadence.
 
@@ -56,40 +56,40 @@ These three rules apply to every auth shape in the fleet. They are not optional.
 
 ### Shape 4 — Persistent browser profile (Playwright)
 
-**Used by:** [Lowly Worm social](11-lowly-worm-social.md) (LinkedIn).
+**Used by:** no public consumer at present. The pattern is stable and documented here for anyone adding a new integration whose target is a normal web app (not a clean API, not a hostile retailer).
 
-**Session lifetime:** days to weeks, dependent on the vendor's idle-session cleanup. LinkedIn specifically invalidates sessions after one to two days of no activity, which is why the `linkedin-keepalive` cron exists — it fires a lightweight page-load every 6 hours specifically to prevent the session from going idle.
+**Session lifetime:** days to weeks, dependent on the vendor's idle-session cleanup. Long-idle sessions tend to expire after a day or two, which is why a `*-keepalive` cron that fires a lightweight page-load every few hours is often necessary to keep the session from going idle.
 
 **Setup flow:**
-1. Run `linkedin-auth.py` on the operator's local machine. A Chromium window opens against `linkedin.com/login`.
+1. Run a vendor-specific `*-auth.py` on the operator's local machine. A Chromium window opens against the vendor's login page.
 2. The operator logs in by hand, including any 2FA the vendor requires.
 3. Playwright writes the session state (cookies + local storage) to a persistent profile directory.
 4. SCP the entire profile directory to the VPS workspace.
 
-**Why Playwright and not Camoufox here.** LinkedIn's bot detection is aggressive on login pages but lenient on authenticated page-loads. A plain Chromium profile, once authenticated, is indistinguishable from a real user for the page-load cadence this agent uses. Camoufox (Shape 5) is the tool for surfaces where even the authenticated traffic looks bot-shaped without heavy anti-fingerprinting.
+**Why Playwright and not Camoufox here.** Shape 4 targets are vendors whose bot detection is aggressive on login pages but lenient on authenticated page-loads. A plain Chromium profile, once authenticated, is indistinguishable from a real user for the page-load cadence these targets use. Camoufox (Shape 5) is the tool for surfaces where even the authenticated traffic looks bot-shaped without heavy anti-fingerprinting.
 
 ### Shape 5 — Camoufox + residential proxy + auto-MFA
 
-**Used by:** [Hilda Hippo](15-hilda-hippo.md) (Costco and Amazon).
+**Used by:** no public consumer at present. The shape is the Tier 3 pattern documented in detail at [Ch 06 — Tier 3 in practice](06-infra-setup.md#tier-3-in-practice); the shared library (`camoufox_proxy.py`, `retry_policy.py`) ships the scaffolding. Anyone building an integration against a hostile-vendor surface (Azure B2C + Akamai, or similar) lands here.
 
-**Session lifetime:** varies by vendor. Costco's Azure B2C custom policy has a public-client flow with PKCE + refresh-token that the daemon keeps alive in the background. Amazon's consumer login expires and requires re-login via an auto-MFA flow that reads a TOTP secret from `.env`.
+**Session lifetime:** varies by vendor. A typical profile: Azure B2C custom policy with a PKCE public-client flow that a daemon keeps alive in the background via refresh-token rotation, falling back to browser silent refresh when the RT chain ends. Some vendors' consumer logins expire and require re-login via an auto-MFA flow that reads a TOTP secret from `secrets.env`.
 
 **Setup flow:** this is the heaviest auth shape in the fleet. Four dependencies compose:
 
 1. **Camoufox** — hardened Firefox with anti-fingerprinting patches. Installed via `pip install camoufox` + `camoufox fetch` for the underlying binary. Used when plain Playwright + Chromium is too easy to fingerprint.
-2. **Residential proxy with sticky session port** — routes all vendor traffic through a residential IP to avoid datacenter-IP blocks. A sticky port (port 10000 in the fleet's DataImpulse setup) holds the same residential IP for the session's duration. Credentials live in `.env` as `PROXY_USER` / `PROXY_PASS` / `PROXY_HOST` / `PROXY_PORT`.
-3. **TOTP secret in `.env`** — the 2FA seed for the vendor account, stored as `AMAZON_TOTP_SECRET` (or the vendor equivalent). The auto-MFA script reads the seed on each login attempt, generates the 6-digit code via `pyotp`, and submits it to the MFA field automatically.
+2. **Residential egress** — either a sticky-port residential-proxy subscription, or (strongly preferred when available) a SOCKS5 tunnel over Tailscale to a machine on the operator's home network. See [Ch 06 — Tier 3 in practice](06-infra-setup.md#tier-3-in-practice) for why the home-ISP path collapses the adversarial game entirely.
+3. **TOTP secret in `secrets.env`** — the 2FA seed for the vendor account, stored in a dedicated `secrets.env` (chmod 600, separate from regular `.env`, sourced as a second env_file). The auto-MFA script reads the seed on each login attempt, generates the 6-digit code via `pyotp`, and submits it to the MFA field automatically.
 4. **Persistent Camoufox profile** — cookies + local storage, stored under `~/.clawford/{agent}-workspace/camoufox-profile/{vendor}/`.
 
-**The auto-MFA rule.** Never ask the operator to manually re-authenticate a Shape 5 vendor. Every login flow must be fully automated, including the MFA step. The operator-time cost of a manual re-auth ("can you open your phone and read me the 6-digit code right now") is high enough that the correct engineering answer is "build the auto-MFA once and never ask again." This is a hard feedback rule from the [Hilda Hippo](15-hilda-hippo.md) deployment.
+**The auto-MFA rule.** Never ask the operator to manually re-authenticate a Shape 5 vendor. Every login flow must be fully automated, including the MFA step. The operator-time cost of a manual re-auth ("can you open your phone and read me the 6-digit code right now") is high enough that the correct engineering answer is "build the auto-MFA once and never ask again."
 
-**Setup cost.** Shape 5 is expensive to set up the first time — expect hours of work per new vendor, especially the first one. Re-use the existing Camoufox + proxy + auto-MFA scaffolding from [Hilda Hippo's scripts](15-hilda-hippo.md#deployment-walkthrough) for any new vendor that lands in this shape.
+**Setup cost.** Shape 5 is expensive to set up the first time — expect one to two weeks of evenings for the first vendor. Re-use the `agents/shared/camoufox_proxy.py` + `retry_policy.py` scaffolding for any new vendor that lands in this shape. The Tier 3 patterns in Ch 06 name the specific traps.
 
 ### Shape 6 — QR-code pairing
 
-**Used by:** [Mistress Mouse](12-mistress-mouse.md) (WhatsApp via Baileys) and [Huckle Cat](14-huckle-cat.md) (Google Messages Web).
+**Used by:** [Huckle Cat](14-huckle-cat.md) (Google Messages Web).
 
-**Session lifetime:** weeks to months. Both Baileys and Google Messages Web use a "linked device" pairing model — the operator scans a QR code once, and the session persists as long as the vendor's device-link cleanup doesn't flag it.
+**Session lifetime:** weeks to months. Google Messages Web uses a "linked device" pairing model — the operator scans a QR code once, and the session persists as long as the vendor's device-link cleanup doesn't flag it.
 
 **Setup flow:**
 1. Run the pairing script on the operator's local machine. It opens a Camoufox browser against the vendor's linked-device page.
@@ -99,32 +99,30 @@ These three rules apply to every auth shape in the fleet. They are not optional.
 
 **The screenshot-QR variant.** [Huckle Cat's `gmessages-auth.py`](14-huckle-cat.md#the-google-messages-devtools-story) uses a screenshot-QR variant where the browser takes a screenshot of the QR code at a known DOM coordinate and saves it to a local file for the operator to scan with their phone. This avoids the need for a debug-port flow.
 
-**The liability footnote.** Shape 6 is the most fragile of the six shapes. The vendor's terms of service typically forbid reverse-engineered linked-device clients, and a ban is a real risk — see [§ The WhatsApp chapter in Ch 12](12-mistress-mouse.md#the-whatsapp-chapter) for the full liability story on the Baileys side. Deploy Shape 6 integrations only when the value clearly outweighs the ban risk, and never share a Shape 6 session across multiple agents.
+**The liability footnote.** Shape 6 is the most fragile of the six shapes. Vendor terms of service typically forbid reverse-engineered linked-device clients, and a ban on the bound account is a real risk. Deploy Shape 6 integrations only when the value clearly outweighs the ban risk, and never share a Shape 6 session across multiple agents.
 
 ## Per-agent reference table
 
 | Agent | Shape 1 | Shape 2 | Shape 3 | Shape 4 | Shape 5 | Shape 6 |
 |-------|---------|---------|---------|---------|---------|---------|
 | [Mr Fixit 🦊🔧](09-mr-fixit.md) | — | — | Telegram | — | — | — |
-| [Lowly Worm newsfeed 🐛📰](10-lowly-worm-newsfeed.md) | — | — | Telegram | — | — | — |
-| [Lowly Worm social 🐛📰](11-lowly-worm-social.md) | — | — | Telegram | LinkedIn | — | — |
-| [Mistress Mouse 🐭📅](12-mistress-mouse.md) | Google Cal + Gmail | — | Telegram | — | — | WhatsApp (Baileys) |
+| [Lowly Worm 🐛📰](10-lowly-worm-newsfeed.md) | — | — | Telegram | — | — | — |
+| [Mistress Mouse 🐭📅](12-mistress-mouse.md) | Google Cal + Gmail | — | Telegram | — | — | — |
 | [Sergeant Murphy 🐷🔍](13-sergeant-murphy.md) | Google Cal + Gmail | Transcription provider | Telegram + Workflowy | — | — | — |
 | [Huckle Cat 🐱🤝](14-huckle-cat.md) | Google Cal + Gmail + Contacts | — | Telegram + Workflowy | — | — | Google Messages |
-| [Hilda Hippo 🦛🛒](15-hilda-hippo.md) | — | — | Telegram + proxy creds | — | Costco + Amazon | — |
 
 A few observations from the table:
 
 - **Shape 3 is universal.** Every agent that sends a Telegram message uses Shape 3 for the bot token. This is the cheapest auth shape in the fleet and the default for any new vendor that hands you an API key.
 - **Shape 1 is the Google-cluster shape.** Three agents touch Google services, and all three use the same Shape 1 pattern against a single Google Cloud project. Reuse the project across agents — one Google Cloud project, one OAuth Desktop client, different scopes per agent.
-- **Shape 5 has exactly one consumer.** Hilda Hippo is the only agent that needs Camoufox + residential proxy + auto-MFA, and the expectation is that new Shape 5 integrations will be rare. If a new agent needs Shape 5, expect the first deploy to be a multi-day effort.
-- **Shapes 2, 4, and 6 each have one or two consumers.** These are the custom shapes. When you add a new agent and it needs one of these, re-read the single reference chapter for that shape before starting.
+- **Shapes 4 and 5 have no current consumer in the public fleet.** They are documented here as stable patterns for anyone adding a new integration. Shape 5 in particular is weeks of work the first time — read [Ch 06 — Tier 3 in practice](06-infra-setup.md#tier-3-in-practice) before starting.
+- **Shapes 2 and 6 each have one or two consumers.** These are the custom shapes. When you add a new agent and it needs one of these, re-read the single reference chapter for that shape before starting.
 
 ## Pitfalls
 
 > 🧨 **Pitfall.** Running any browser-based auth flow on the VPS. **Why:** the VPS is headless. `InstalledAppFlow.run_local_server(port=8080, open_browser=True)`, Camoufox, Playwright, and QR-code pairing all need a real browser. Every attempt to run them over `ssh` hangs, fails, or leaves half-authorized state behind. **How to avoid:** every auth flow in every shape runs on the operator's local machine, and the resulting token file (or profile directory) gets SCPed to the VPS. Idiom 1 above is load-bearing, not a suggestion.
 
-> 🧨 **Pitfall.** Committing a token file or a `.env` value to git. **Why:** once a credential is in git history, the cheapest recovery is to rotate the credential at the vendor. Vendor-side rotation is slow, intrusive, and sometimes impossible for shape 6 / shape 4 setups (you would have to re-pair or re-authenticate by hand). A token leaked to a public repo is also a hard "rotate now" incident. **How to avoid:** every workspace has a `.gitignore` that lists `token.json`, `credentials.json`, `.env`, `cache/`, `camoufox-profile/`, `whatsapp-session/`, and any other credential-shaped filename the agent uses. Idiom 2 is the default; if you are adding a new credential file, add its path to `.gitignore` in the same commit that creates the file.
+> 🧨 **Pitfall.** Committing a token file or a `.env` value to git. **Why:** once a credential is in git history, the cheapest recovery is to rotate the credential at the vendor. Vendor-side rotation is slow, intrusive, and sometimes impossible for shape 6 / shape 4 setups (you would have to re-pair or re-authenticate by hand). A token leaked to a public repo is also a hard "rotate now" incident. **How to avoid:** every workspace has a `.gitignore` that lists `token.json`, `credentials.json`, `.env`, `cache/`, `camoufox-profile/`, and any other credential-shaped filename the agent uses. Idiom 2 is the default; if you are adding a new credential file, add its path to `.gitignore` in the same commit that creates the file.
 
 > 🧨 **Pitfall.** Using raw API keys for LLM calls. **Why:** raw OpenAI / Anthropic API keys in scripts mean a parallel billing surface the operator has to track separately from the main LLM subscription. For a personal Clawford fleet, the correct answer is to route every LLM call through `agents.shared.llm.infer`, which uses the operator's ChatGPT Plus subscription via the `codex` CLI — no API key, no parallel bill, no token to rotate. **How to avoid:** never add `OPENAI_API_KEY` or equivalent to any `.env` file. If a new script wants to call an LLM, the only sanctioned path is `from agents.shared import llm; llm.infer(...)`. The one-time mining pipeline for [Huckle Cat](14-huckle-cat.md#the-mining-pipeline) is an explicit exception because it runs locally, not as a VPS cron, and the cost is visible in the local bill during the run.
 
@@ -134,19 +132,18 @@ A few observations from the table:
 
 > 🧨 **Pitfall.** Asking the operator to manually re-auth a Shape 5 vendor. **Why:** the operator-time cost of manual re-auth ("open your phone, read me the 6-digit code") is high enough that the correct engineering answer is to build auto-MFA once and never ask again. Any Shape 5 integration that falls back to manual re-auth is one step from being abandoned. **How to avoid:** the first-deploy budget for a Shape 5 vendor includes the auto-MFA path. The TOTP secret lives in `.env`, the login script reads it, generates the 6-digit code via `pyotp`, and submits it to the MFA field automatically. No shortcuts.
 
-> 🧨 **Pitfall.** Sharing a Shape 6 session across multiple agents. **Why:** Shape 6 is already on the "ban-risk" side of the vendor's terms of service. A single bound account with two simultaneous linked-device sessions reading the same conversation stream is exactly the pattern vendor detection is looking for. **How to avoid:** one WhatsApp account per Shape 6 agent. If both [Mistress Mouse](12-mistress-mouse.md) and [Huckle Cat](14-huckle-cat.md) need to read WhatsApp, use two different WhatsApp accounts for the two bindings. If that is not possible, disable one of the two integrations.
+> 🧨 **Pitfall.** Sharing a Shape 6 session across multiple agents. **Why:** Shape 6 is already on the "ban-risk" side of the vendor's terms of service. A single bound account with two simultaneous linked-device sessions reading the same conversation stream is exactly the pattern vendor detection is looking for. **How to avoid:** one bound account per Shape 6 agent. If two agents need to read the same linked-device channel, use two different accounts, or disable one of the two integrations.
 
 > 🧨 **Pitfall.** Forgetting that SCP is the sync path, not `git pull`. **Why:** the credential files live outside git by design (Idiom 2). A new operator cloning the repo and running `git pull` on the VPS will have no token files at all, and every OAuth-based cron will fail on the first tick. **How to avoid:** the deployment walkthrough for every agent calls out the SCP steps explicitly. After `git pull`, verify that the workspace has the expected token files with a one-shot read call. If the read call fails, the SCP step was skipped, not the code.
 
-> 🧨 **Pitfall.** Cross-workspace symlinks for a shared token file. **Why:** the historical convenience pattern was `shopping-workspace/token.json → ../family-calendar-workspace/token.json` so two agents share one Google OAuth token. That works fine until the [P1.2 bubblewrap layer](19-security-and-hardening.md#defense-layer-7-process-level-isolation-p12) lands — each agent's bwrap namespace only binds its own workspace, so the symlink resolves to a path that isn't visible inside the namespace and the agent's cron errors with "token.json not found". The regression bit shopping-delivery-digest on 2026-04-16 and took the Gmail half of Hilda's morning report dark for a day. **How to avoid:** every credential file must be a real file inside the consuming agent's workspace. If two agents need the same Google OAuth token, SCP the token to BOTH workspaces (or use the deploy tool's auto-heal — `heal_cross_workspace_symlinks` runs every deploy and resolves any offending symlink into an independent copy). Each agent then refreshes its own token on its own schedule — the refresh_token is typically long-lived enough that parallel refresh doesn't cause drift.
+> 🧨 **Pitfall.** Cross-workspace symlinks for a shared token file. **Why:** the historical convenience pattern was `{agent-a}-workspace/token.json → ../{agent-b}-workspace/token.json` so two agents share one Google OAuth token. That works fine until the [P1.2 bubblewrap layer](19-security-and-hardening.md#defense-layer-7-process-level-isolation-p12) lands — each agent's bwrap namespace only binds its own workspace, so the symlink resolves to a path that isn't visible inside the namespace and the agent's cron errors with "token.json not found". The regression took a morning digest dark for a day. **How to avoid:** every credential file must be a real file inside the consuming agent's workspace. If two agents need the same Google OAuth token, SCP the token to BOTH workspaces (or use the deploy tool's auto-heal — `heal_cross_workspace_symlinks` runs every deploy and resolves any offending symlink into an independent copy). Each agent then refreshes its own token on its own schedule — the refresh_token is typically long-lived enough that parallel refresh doesn't cause drift.
 
 ## See also
 
 - [Ch 04 — VPS setup](04-vps-setup.md) — the `codex` CLI setup that underpins the no-raw-API-keys rule for LLM calls
 - [Ch 06 — Infra setup](06-infra-setup.md) — the shared library layout that hosts `agents.shared.llm.infer` and `agents.shared.env.load_env`
 - [Ch 07 — Intro to agents](07-intro-to-agents.md) — the deploy path and safeguard story
-- [Ch 12 — Mistress Mouse 🐭📅](12-mistress-mouse.md) — canonical Shape 1 (Google OAuth) and Shape 6 (Baileys) chapters
+- [Ch 12 — Mistress Mouse 🐭📅](12-mistress-mouse.md) — canonical Shape 1 (Google OAuth) chapter
 - [Ch 13 — Sergeant Murphy 🐷🔍](13-sergeant-murphy.md) — canonical Shape 2 (rotation-prone OAuth)
 - [Ch 14 — Huckle Cat 🐱🤝](14-huckle-cat.md) — canonical Shape 6 (screenshot-QR variant)
-- [Ch 15 — Hilda Hippo 🦛🛒](15-hilda-hippo.md) — canonical Shape 5 (Camoufox + residential proxy + auto-MFA)
 - [Ch 19 — Security and hardening](19-security-and-hardening.md) — the credential-storage + attack-surface story

@@ -48,7 +48,7 @@ color-coded: <span class="d-tag d-easy">easy</span>
 
     `easy` · ~15 min
 
-    The one-way-door decisions: dedicated VPS, Telegram over WhatsApp,
+    The one-way-door decisions: dedicated VPS, Telegram channel,
     Mr Fixit first. Cheap to get right, expensive to reverse.
     { .d-easy }
 
@@ -120,7 +120,7 @@ color-coded: <span class="d-tag d-easy">easy</span>
     confabulation episode.
     { .d-hard }
 
--   __[10 — Lowly Worm: newsfeed 🐛📰](10-lowly-worm-newsfeed.md)__
+-   __[10 — Lowly Worm 🐛📰](10-lowly-worm-newsfeed.md)__
 
     ---
 
@@ -130,16 +130,6 @@ color-coded: <span class="d-tag d-easy">easy</span>
     The preference-learning story is the hero of this chapter.
     { .d-moderate }
 
--   __[11 — Lowly Worm: social 🐛📰](11-lowly-worm-social.md)__
-
-    ---
-
-    `hard` · ~25 min
-
-    Optional LinkedIn layer on top of the core newsfeed. Playwright,
-    aria-label selectors, and the smart-reply chip incident.
-    { .d-hard }
-
 -   __[12 — Mistress Mouse 🐭📅](12-mistress-mouse.md)__
 
     ---
@@ -147,7 +137,7 @@ color-coded: <span class="d-tag d-easy">easy</span>
     `hard` · ~20 min
 
     Family logistics: Google Calendar reader, three-tier reminders,
-    school-email parser, WhatsApp digest. First Google OAuth agent.
+    school-email parser, Google Tasks sync. First Google OAuth agent.
     { .d-hard }
 
 -   __[13 — Sergeant Murphy 🐷🔍](13-sergeant-murphy.md)__
@@ -170,16 +160,6 @@ color-coded: <span class="d-tag d-easy">easy</span>
     Relationship memory across seven sources plus an email correspondence
     layer. The only agent where the mining pipeline runs **before** the
     first cron — by design.
-    { .d-hard }
-
--   __[15 — Hilda Hippo 🦛🛒](15-hilda-hippo.md)__
-
-    ---
-
-    `hard` · ~40 min
-
-    Amazon + Costco orders, Subscribe & Save, morning digest. Hardest
-    auth in the fleet — nine-act saga ending at a 72-hour B2C cap.
     { .d-hard }
 
 </div>

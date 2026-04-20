@@ -7,7 +7,7 @@
 - Use Terraform to provision the VPS, not the Hetzner console. The whole box should be reproducible from a git repo because rebuilding it is a routine operation, not a disaster.
 - Hetzner cpx31 in Hillsboro, Oregon works well. Other providers work too, but the community Terraform module this guide wraps targets Hetzner specifically.
 - Lock down SSH (key-only, non-root, restricted CIDRs), put Tailscale on top. Nothing in a Clawford fleet needs to be reachable from the public internet — not SSH, not an API endpoint, nothing.
-- **Residential proxies are a first-class dependency** for any agent that reaches Amazon or Costco. Buy a sticky residential egress, not a rotating pool, and test it before deploying a shopping agent.
+- **Residential egress is a first-class dependency** for any Tier 3 integration against a vendor with active bot defense. Buy a sticky residential proxy (not a rotating pool) — or, better, run a SOCKS5 tunnel to your home network over Tailscale. Test whichever you pick before deploying a Tier 3 agent.
 - `codex` is the one binary that has to work on the VPS. Authenticate it once on a laptop, SCP the credential file across, and verify with a one-shot `codex infer "ping"`.
 - Never develop on the VPS. Code lives in local git; the shared brain lives in Dropbox. The VPS just mounts both.
 
@@ -32,7 +32,7 @@ Other providers work — DigitalOcean, Linode, Vultr, OVH, AWS Lightsail. What p
 
 A few things to check when provider-shopping:
 
-- **IP reputation.** Some datacenter ranges are more aggressively blocked by Amazon, Cloudflare, and Costco than others. Hetzner's Hillsboro block has been fine for general outbound traffic; for scraping, everything routes through a residential proxy anyway (see below).
+- **IP reputation.** Some datacenter ranges are more aggressively blocked by retailers and anti-bot services than others. Hetzner's Hillsboro block has been fine for general outbound traffic; for Tier 3 scraping, everything routes through a residential egress anyway (see below).
 - **Snapshot / backup pricing.** Hetzner charges 20% of the VPS price for automated snapshots. Cheap. Turn them on.
 - **Instance availability by region.** The tier you want may not be in the region you want. Pick one step above what seems necessary — the price delta is small and headroom is cheap.
 
@@ -96,7 +96,7 @@ The default firewall posture from the Terraform module is conservative and doesn
 
 - **Inbound SSH (22/tcp):** open only to the CIDRs in `ssh_allowed_cidrs`, or closed entirely when Tailscale is up.
 - **Inbound Tailscale (UDP 41641):** open when Tailscale is enabled. This is the WireGuard port.
-- **Everything else: denied.** No HTTP, no HTTPS, no exposed service ports. A Clawford-native fleet has nothing listening publicly — every scheduled job fires from host crontab and talks outbound to Telegram, Google, Costco, etc. via HTTPS, and nothing on the VPS needs an inbound port beyond SSH.
+- **Everything else: denied.** No HTTP, no HTTPS, no exposed service ports. A Clawford-native fleet has nothing listening publicly — every scheduled job fires from host crontab and talks outbound to Telegram, Google, and whatever other vendors the agents target via HTTPS; nothing on the VPS needs an inbound port beyond SSH.
 
 > ⚠️ **Warning.** There is never a reason to open an inbound port on the VPS for a Clawford fleet. If a debugging flow seems to require exposing something (a metrics endpoint, a web UI), use Tailscale Serve — not a firewall rule change.
 
@@ -119,7 +119,7 @@ The credential file is a secret. It grants full access to the ChatGPT Plus accou
 
 ## Residential proxies, a first-class dependency
 
-Any shopping agent needs a residential proxy. Amazon and Costco both detect Hetzner IPs — and every other major cloud provider's IP ranges — and serve either outright blocks or a persistent series of CAPTCHAs that a headless browser cannot solve. A datacenter IP does not reach a shopping cart.
+Any Tier 3 integration against a vendor with active bot defense needs residential egress. Retailers and fraud-sensitive portals detect Hetzner IPs — and every other major cloud provider's IP ranges — and serve either outright blocks or a persistent series of CAPTCHAs that a headless browser cannot solve. A datacenter IP does not survive a Tier 3 auth flow. See [Ch 06 — Tier 3 in practice](06-infra-setup.md#tier-3-in-practice) for the patterns.
 
 ### Sticky vs rotating
 
@@ -128,7 +128,7 @@ The two shapes of residential proxy:
 - **Rotating pool.** Each request (or each short window) comes out of a different residential IP. Great for bulk scraping, *terrible* for anything session-based: the auth cookies were issued to IP A and the next request comes from IP B, so the site decides something just got phished and invalidates the session.
 - **Sticky / session-persistent.** One IP stays with the client for minutes to hours. Each connection gets its own sticky session via a session identifier encoded in the credentials the provider expects.
 
-**Sticky is correct for shopping workflows.** Every Amazon / Costco / LinkedIn arc in the fleet depends on session persistence across scrape → auth → cart → checkout, and a rotating pool breaks every one of those arcs. This is almost never a pricing decision — most providers (including DataImpulse) treat rotating vs sticky as a config toggle on the same plan, not as separate tiers. It's a correctness choice, not a cost tradeoff.
+**Sticky is correct for any Tier 3 workflow.** Every login-then-session arc depends on session persistence across scrape → auth → request, and a rotating pool breaks every one of those arcs. This is almost never a pricing decision — most providers (including DataImpulse) treat rotating vs sticky as a config toggle on the same plan, not as separate tiers. It's a correctness choice, not a cost tradeoff.
 
 ### DataImpulse
 
@@ -217,7 +217,7 @@ On-VPS config edits are the same class of forbidden as on-VPS code edits. When a
 
 > 🧨 **Pitfall.** SCP-ing `~/.codex/auth.json` into a path the Dropbox daemon also watches. **Why:** Dropbox will happily sync the secret off-VPS, and depending on the destination folder it may replicate to every device on the same account. **How to avoid:** keep `~/.codex/` outside any Dropbox-synced path. The default home-directory install is safe; a custom install under `~/Dropbox/...` is a mistake.
 
-> 🧨 **Pitfall.** Using a rotating residential proxy (or no proxy, or a datacenter proxy) for shopping workflows. **Why:** a new IP per request invalidates every session Amazon and Costco build, so auth flows that need a consistent egress IP across requests silently fail. Datacenter IPs get blocked outright. **How to avoid:** buy a sticky residential proxy, test it with a one-off script that prints its egress IP, and confirm session persistence before letting an agent near it.
+> 🧨 **Pitfall.** Using a rotating residential proxy (or no proxy, or a datacenter proxy) for a Tier 3 workflow. **Why:** a new IP per request invalidates every session the vendor builds, so auth flows that need a consistent egress IP across requests silently fail. Datacenter IPs get blocked outright. **How to avoid:** use a sticky residential egress (paid proxy or home-ISP SOCKS tunnel), test it with a one-off script that prints its egress IP, and confirm session persistence before letting an agent near it.
 
 ## See also
 

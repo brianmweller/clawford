@@ -37,7 +37,7 @@ When I first built Clawford on top of OpenClaw, I thought the platform was provi
 
 1. **Cron scheduling** — a cron runtime with an LLM session baked in, so you could schedule reasoning work on a clock
 2. **Exec-approvals policy** — an allowlist-based security layer governing what the LLM could actually run
-3. **Comms bindings** — Telegram and WhatsApp channel integrations with the message-routing plumbing built in
+3. **Comms bindings** — Telegram channel integration with the message-routing plumbing built in
 4. **LLM inference** — authenticated LLM calls via `openclaw infer`, riding a ChatGPT Plus subscription
 5. **Skill library** — 100+ built-in skills and a community marketplace of more
 6. **Filesystem layout** — a convention for where agent state lives (`~/.openclaw/<agent>-workspace/`)
@@ -52,7 +52,7 @@ Over two weeks of building, I routed around five of the six pitched things:
 
 - **Cron scheduling** → routed around. The LLM cron runtime has a hard 600-second budget. My news digest kept getting killed mid-compose. The fix was to run a **host cron** (plain system crontab) that called `openclaw infer` from a Python composer, bypassing the cron runtime entirely. I was writing host crons; OpenClaw's cron just happened to register them for me.
 - **Exec-approvals policy** → routed around. I started with strict allowlists. I ended with `policy=full` (maximally permissive) plus deterministic Python guards inside the agent scripts themselves. The long version is in [Ch 06](06-infra-setup.md); the short version is *you cannot pattern-match your way out of a Turing-complete shell language*, and every week I spent fighting the allowlist was a week I wasn't improving the fleet.
-- **Comms bindings** → half routed around, half revealed as a liability. Telegram is a bot token and an HTTP POST; I was already calling the API directly from Python in several places. WhatsApp is implemented on top of Baileys, which reverse-engineers the WhatsApp Web protocol, and Meta's detection is good enough that automating it can get your number banned. The binding that looked like infrastructure was never going to survive contact with reality.
+- **Comms bindings** → routed around. Telegram is a bot token and an HTTP POST; I was already calling the API directly from Python in several places. The binding that looked like infrastructure turned out to be less than it looked.
 - **Skill library** → never meaningfully used. I tried adopting a few community skills in the first week and hit two problems immediately: the skill system is buggy (skills show "enabled" but are silently disabled until you hand-edit config), and a non-trivial fraction of the community marketplace contains skills with actively malicious behavior — community estimates put the number around fifteen percent. I wrote my own scripts from scratch and stopped looking at the marketplace.
 - **Filesystem layout** → vestigial. `~/.openclaw/<agent>-workspace/` is just a directory. My agents read and write files in it with normal Python I/O. Rename it to `~/.clawford/` and nothing meaningful changes.
 
@@ -129,8 +129,8 @@ This is exactly one module in the Clawford library: `agents/shared/llm.py`. It e
 This is the one I wish someone had told me at the start. Personal fleets reach outside the box in three increasingly painful tiers, and each tier wants its own shared library.
 
 - **[Tier 1](06-infra-setup.md#tier-1-clean-apis) — clean APIs.** Gmail, Google Calendar, Telegram Bot API, RSS, meeting transcripts, Workflowy. Well-behaved endpoints with documentation and SDKs. The shared infrastructure here is boring: an OAuth helper for Google, a Telegram delivery helper, a retry-with-backoff wrapper. If five of your agents each reimplement `sendMessage` to `api.telegram.org`, you have accidentally written five Telegram clients. Fix this early. In Clawford: `agents/shared/telegram.py`, `agents/shared/google_oauth.py`, `agents/shared/heartbeat_base.py`.
-- **[Tier 2](06-infra-setup.md#tier-2-stock-playwright) — stock headless Chromium.** Sites that work fine with a default Playwright browser, but need a *persistent profile* and *out-of-band* authentication. LinkedIn is the canonical example in this fleet — you authenticate once in a real browser, store the profile, and subsequent automated runs reuse the stored session. The shared infrastructure here is a profile-bootstrap helper, an Xvfb virtual-display wrapper, and a set of selectors that survive DOM rot (aria-labels, not hashed class names). In Clawford: `agents/shared/playwright_profile.py`.
-- **[Tier 3](06-infra-setup.md#tier-3-hardened-camoufox-behind-a-residential-proxy) — fingerprint-aware browsers through residential proxies.** Sites with serious anti-bot systems. In this fleet, that is Costco and Amazon. A stock Chromium fails immediately; you need Camoufox (a fingerprint-aware Firefox fork), a residential proxy with sticky-session support, auto-MFA through TOTP, and careful cookie lifecycle management. The shared infrastructure here is the hardest and most agent-specific, but consolidating the proxy-config parsing and retry-policy classifier pays off every time you touch it. In Clawford: `agents/shared/camoufox_proxy.py`, `agents/shared/retry_policy.py`.
+- **[Tier 2](06-infra-setup.md#tier-2-stock-playwright) — stock headless Chromium.** Sites that work fine with a default Playwright browser, but need a *persistent profile* and *out-of-band* authentication. You authenticate once in a real browser, store the profile, and subsequent automated runs reuse the stored session. The shared infrastructure here is a profile-bootstrap helper, an Xvfb virtual-display wrapper, and a set of selectors that survive DOM rot (aria-labels, not hashed class names). In Clawford: `agents/shared/playwright_profile.py`.
+- **[Tier 3](06-infra-setup.md#tier-3-hardened-camoufox-behind-a-residential-proxy) — fingerprint-aware browsers through residential egress.** Sites with serious anti-bot systems (retailers with fraud scoring, Azure B2C custom policies, anything Akamai guards). A stock Chromium fails immediately; you need Camoufox (a fingerprint-aware Firefox fork), residential egress (a paid sticky proxy or — better — a SOCKS5 tunnel to your home ISP over Tailscale), auto-MFA through TOTP, and careful cookie lifecycle management. The shared infrastructure here is the hardest and most agent-specific, but consolidating the proxy-config parsing and retry-policy classifier pays off every time you touch it. In Clawford: `agents/shared/camoufox_proxy.py`, `agents/shared/retry_policy.py`. The full set of patterns lives in [Ch 06 — Tier 3 in practice](06-infra-setup.md#tier-3-in-practice).
 
 OpenClaw offered nothing for any of these tiers. The browser automation work is entirely mine. The library I should have been building from day one is the library that makes these three tiers reusable across agents, not the library that glues skills together. See [Ch 17 — Auth architectures](17-auth-architectures.md) for the cross-cutting auth patterns.
 
@@ -169,10 +169,10 @@ Here's what Clawford looks like after the migration. Compare to the diagram in [
                  │   (shared LLM broker)    │
                  └─────────────┬────────────┘
                                │
-    ┌────────┬───────┬─────────┼─────────┬────────┬────────┐
-    │Fix-It  │Lowly  │  Hilda  │  Mouse  │ Murphy │ Huckle │
-    │ 🦊🔧   │ 🐛📰  │   🦛🛒  │   🐭📅  │  🐷🔍  │  🐱🤝  │
-    └────────┴───┬───┴─────────┴─────────┴────────┴────────┘
+    ┌────────┬───────┬─────────┬────────┬────────┐
+    │Fix-It  │Lowly  │  Mouse  │ Murphy │ Huckle │
+    │ 🦊🔧   │ 🐛📰  │   🐭📅  │  🐷🔍  │  🐱🤝  │
+    └────────┴───┬───┴─────────┴────────┴────────┘
                  │
     ┌────────────┴─────────────────────────────┐
     │                                          │

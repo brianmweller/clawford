@@ -2,7 +2,7 @@
 
 *Last updated: 2026-04-20 · Reading time: ~23 min · Difficulty: moderate*
 
-> **TL;DR.** Every agent chapter up to this point describes **outbound** behavior — crons that fire, scripts that compose, Telegram messages that push to the operator. This chapter is the **inbound** side. A single inbox daemon long-polls all six Telegram bots concurrently, routes each incoming message to the right agent, hands it to an LLM with a tool manifest the agent defines, lets the LLM call read tools (no side effects) or producer tools (which stage a pending action with inline buttons), and waits for the operator to tap **Confirm** or **Cancel** before anything mutates state. The result is that every agent in the fleet is conversational — the operator can message Hilda Hippo and say "reorder the Kirkland water" and get a `[Add to cart]` `[Skip]` button pair without a single line of Hilda-specific dispatcher code. A second, smaller listener covers the other inbound channel — real-time Gmail triage via Pub/Sub pull — so Huckle Cat drafts a reply in under a minute instead of waiting on the half-hour polling cron. The architecture is ~1200 lines of shared Python for the Telegram side, ~400 more for the Gmail side, a `tools.py` file per agent, and two systemd units on the VPS. This chapter covers all five Telegram components, the tools.py pattern, the inline-button UX, the Gmail push path, the deployment story, and the pitfalls.
+> **TL;DR.** Every agent chapter up to this point describes **outbound** behavior — crons that fire, scripts that compose, Telegram messages that push to the operator. This chapter is the **inbound** side. A single inbox daemon long-polls every Telegram bot concurrently, routes each incoming message to the right agent, hands it to an LLM with a tool manifest the agent defines, lets the LLM call read tools (no side effects) or producer tools (which stage a pending action with inline buttons), and waits for the operator to tap **Confirm** or **Cancel** before anything mutates state. The result is that every agent in the fleet is conversational — the operator can message Mistress Mouse and say "add school pickup Thursday 3pm" and get a `[Create event]` `[Cancel]` button pair without a single line of agent-specific dispatcher code. A second, smaller listener covers the other inbound channel — real-time Gmail triage via Pub/Sub pull — so Huckle Cat drafts a reply in under a minute instead of waiting on the half-hour polling cron. The architecture is ~1200 lines of shared Python for the Telegram side, ~400 more for the Gmail side, a `tools.py` file per agent, and two systemd units on the VPS. This chapter covers all five Telegram components, the tools.py pattern, the inline-button UX, the Gmail push path, the deployment story, and the pitfalls.
 
 ## What changed
 
@@ -121,31 +121,30 @@ The confirm executor is the piece that makes the pending-action flow safe. The L
 | [Mistress Mouse 🐭📅](12-mistress-mouse.md) | `get_events_for_day`, `get_week`, `get_configured_calendars`, `get_recent_reminders_sent` | `propose_event_add`, `propose_event_move`, `propose_event_cancel`, `propose_remember` | `confirm_calendar_add`, `confirm_calendar_move`, `confirm_calendar_cancel`, `confirm_remember` |
 | [Sergeant Murphy 🐷🔍](13-sergeant-murphy.md) | `get_meetings_for_day`, `get_week_meetings`, `get_commitment_status`, `get_coaching_config`, `get_recent_coaching_entries`, `force_prep`, `force_debrief` | `list_pending_action_items`, `confirm_action_item`, `dismiss_action_item`, `propose_coaching_toggle`, `propose_coaching_area_add`, `propose_coaching_area_remove`, `propose_remember` | `confirm_coaching_toggle`, `confirm_coaching_area_add`, `confirm_coaching_area_remove`, `confirm_remember` |
 | [Huckle Cat 🐱🤝](14-huckle-cat.md) | `get_morning_nudge`, `get_upcoming_meetings`, `get_pending_triage`, `get_checkin_log`, `get_config_summary`, `get_person`, `get_commitments`, `force_nudge`, `force_triage`, `draft_reply` | `mark_checkin`, `snooze_reminder`, `dismiss_triage_n`, `propose_add_note`, `propose_add_person`, `propose_remember` | `confirm_add_note`, `confirm_add_person`, `confirm_remember` |
-| [Hilda Hippo 🦛🛒](15-hilda-hippo.md) | `get_delivery_digest`, `get_recent_orders`, `get_grocery_list`, `get_pending_actions`, `find_amazon_item`, `find_costco_item` | `propose_reorder`, `add_to_grocery`, `remove_from_grocery`, `propose_clear_grocery`, `propose_clear_grocery_except`, `propose_skip_sns`, `propose_modify_sns`, `propose_remember` | `confirm_reorder`, `confirm_clear_grocery`, `confirm_clear_grocery_except`, `confirm_skip_sns`, `confirm_modify_sns`, `confirm_remember` |
 
 Every agent has `propose_remember` / `confirm_remember` — the self-learning memory surface added in the 2026-04 brain migration. Saying "from now on X" to any agent stages the rule with `[💾 Remember] [Skip]` inline buttons; tapping Remember appends to that agent's `MEMORY.md` (Dropbox-brain-synced), which is then loaded into every future system prompt.
 
-Mr Fixit's three producer tools are the operational ones: `propose_snooze_alert` mutes a noisy alert for a specified window, `propose_refresh_session` kicks the relevant auth/session-refresh script (Krisp tokens, Costco cookies, etc.), `propose_rerun_cron` re-fires a cron that missed or errored. Each stages behind a confirm button for the same reason Huckle Cat's note flow does — these mutate shared state (fleet-health entries, session files, cron run-history) and I want the button in the loop. Huckle Cat now carries the richest tool surface — sixteen LLM-callable tools plus three confirm executors, covering relationship lookups (`get_person`, `get_commitments`), on-demand re-runs of the morning cron (`force_nudge`, `force_triage`), draft composition (`draft_reply`), note and person-file creation (`propose_add_note`, `propose_add_person`), and inbox triage dismissal (`dismiss_triage_n`).
+Mr Fixit's three producer tools are the operational ones: `propose_snooze_alert` mutes a noisy alert for a specified window, `propose_refresh_session` kicks the relevant auth/session-refresh script (Krisp tokens, Google OAuth, etc.), `propose_rerun_cron` re-fires a cron that missed or errored. Each stages behind a confirm button for the same reason Huckle Cat's note flow does — these mutate shared state (fleet-health entries, session files, cron run-history) and I want the button in the loop. Huckle Cat now carries the richest tool surface — sixteen LLM-callable tools plus three confirm executors, covering relationship lookups (`get_person`, `get_commitments`), on-demand re-runs of the morning cron (`force_nudge`, `force_triage`), draft composition (`draft_reply`), note and person-file creation (`propose_add_note`, `propose_add_person`), and inbox triage dismissal (`dismiss_triage_n`).
 
 ## The inline button UX
 
 **Single action.** When one producer tool fires in a turn:
 
 ```
-🦛 Staged: Add 1x Kirkland Water to Costco cart
+🐭 Staged: Add "School pickup" to Thursday 3pm
 
-[🛒 Add to cart]  [Skip]
+[📅 Create event]  [Skip]
 ```
 
 **Multiple actions (batch).** When the LLM stages two or more actions in one turn:
 
 ```
-🦛 Staged 2 items:
-• 1x Kirkland Water — Costco
-• 1x Huggies Diapers — Amazon
+🐭 Staged 2 items:
+• Thursday 3pm — School pickup
+• Friday 6pm — Ballet recital
 
-[🛒 Add] Kirkland Water   [Skip]
-[🛒 Add] Huggies Diapers  [Skip]
+[📅 Create] School pickup   [Skip]
+[📅 Create] Ballet recital  [Skip]
 [✅ Confirm all 2]  [❌ Cancel all]
 ```
 
@@ -153,7 +152,7 @@ Per-item buttons use individual action IDs. Batch buttons use a shared `batch_id
 
 **Engagement buttons.** [Lowly Worm's](10-lowly-worm-newsfeed.md) morning edition articles can carry `[👍 Like]` `[👎 Dislike]` `[📖 More]` buttons. These are hardwired callback shortcuts (`like:{article_id}`, `dislike:{article_id}`, `more:{article_id}`) that route directly to the `record_engagement` executor without going through the pending-action store — they are instant feedback, not staged mutations.
 
-**Button label customization.** The `stage()` call accepts `confirm_label` and `cancel_label` parameters. Hilda's reorder tool uses `"🛒 Add to cart"` / `"Skip"`. Mistress Mouse's calendar tools use `"📅 Create event"` / `"Cancel"`. The default is `"✅ Confirm"` / `"❌ Cancel"`.
+**Button label customization.** The `stage()` call accepts `confirm_label` and `cancel_label` parameters. Mistress Mouse's calendar tools use `"📅 Create event"` / `"Cancel"`. The default is `"✅ Confirm"` / `"❌ Cancel"`.
 
 ## Deployment walkthrough
 
@@ -226,7 +225,7 @@ Nine architectural decisions that are load-bearing and documented here so future
 
 > 🧨 **Pitfall.** Adding a confirm executor to `TOOLS` (making it LLM-callable). **Why:** the entire point of the pending-action flow is that mutations require a human button tap. If `confirm_reorder` is in the `TOOLS` manifest, the LLM can call it directly, bypassing the inline-button gate. The operator asks "reorder the water" and the LLM adds it to the cart immediately without asking for confirmation. **How to avoid:** confirm executors go in `EXECUTORS` only, never in `TOOLS`. The naming convention is the guard: anything named `confirm_{kind}` should trigger a code-review reflex to verify it is not in the `TOOLS` list. The test suite asserts `confirm_` prefixed names are not in `TOOLS`.
 
-> 🧨 **Pitfall.** Pending-action TTL silently expiring before the operator sees the buttons. **Why:** the default TTL is 4 hours. If the operator asks Hilda to stage a reorder at 10 AM and doesn't check Telegram until 3 PM, the action has expired and the buttons do nothing — tapping Confirm returns "action not found." The operator has to re-request the reorder. **How to avoid:** 4 hours is a reasonable default for an operator who checks Telegram a few times a day. If the operator's cadence is longer, increase the `ttl_hours` parameter in the `stage()` call for that agent's producer tools. There is no fleet-wide config for TTL — it is per-tool.
+> 🧨 **Pitfall.** Pending-action TTL silently expiring before the operator sees the buttons. **Why:** the default TTL is 4 hours. If the operator asks an agent to stage an action at 10 AM and doesn't check Telegram until 3 PM, the action has expired and the buttons do nothing — tapping Confirm returns "action not found." The operator has to re-request. **How to avoid:** 4 hours is a reasonable default for an operator who checks Telegram a few times a day. If the operator's cadence is longer, increase the `ttl_hours` parameter in the `stage()` call for that agent's producer tools. There is no fleet-wide config for TTL — it is per-tool.
 
 > 🧨 **Pitfall.** Missing `__pending_action__` marker in a producer tool's return value. **Why:** the dispatcher scans tool outputs for `__pending_action__` to decide whether to attach inline buttons. If a producer tool calls `pending_actions.stage()` but discards the return value and returns something else, the action gets staged in the JSON file but no buttons appear in the Telegram message. The operator sees a text reply that says "staged a reorder" but has no way to confirm it — they have to wait for TTL expiry or manually remove the action. **How to avoid:** every producer tool must `return pending_actions.stage(...)` — the `stage()` return value IS the tool's return value. Do not post-process it, do not wrap it, do not replace it.
 

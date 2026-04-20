@@ -46,7 +46,7 @@ Four things.
 
 ## The 5x resend incident
 
-Every agent in this guide has a load-bearing war story. Mr Fixit has his probation episode. Hilda Hippo has the Costco saga. Lowly Worm has the smart-reply chip incident. Sergeant Murphy has **the 5x resend incident**, and the design rule that came out of it is the single rule that makes cron-based staging-and-confirmation flows work anywhere else in the fleet.
+Every agent in this guide has a load-bearing war story. Mr Fixit has his probation episode. Huckle Cat has the stale-dates bug. Sergeant Murphy has **the 5x resend incident**, and the design rule that came out of it is the single rule that makes cron-based staging-and-confirmation flows work anywhere else in the fleet.
 
 ### The silent prior
 
