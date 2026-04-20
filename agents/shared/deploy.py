@@ -1216,6 +1216,7 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "llm.py",
     "meeting_classifier.py",  # 2026-04-18 — Murphy/Mouse routing predicate
     "memory_writer.py",
+    "operator.py",            # 2026-04-20 — operator identity loader (~/.clawford/operator.json)
     "pending_actions.py",
     "playwright_profile.py",
     "rate_limit.py",         # P1.3 — outbound rate limit + dedup
