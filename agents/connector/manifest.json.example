@@ -18,7 +18,17 @@
     "scripts/gmessages-mine.py",
     "scripts/gmessages-auth.py",
     "scripts/morning-relationship-nudge.py",
-    "scripts/birthday-miner.py"
+    "scripts/birthday-miner.py",
+    "scripts/compose_lib.py",
+    "scripts/draft-compose.py",
+    "scripts/inbox_triage_lib.py",
+    "scripts/inbox-triage.py",
+    "scripts/auto-compose.py",
+    "scripts/flux_import_lib.py",
+    "scripts/facts-import-flux.py",
+    "scripts/people-expand-from-flux.py",
+    "scripts/voice_profile_lib.py",
+    "scripts/voice-profile-build.py"
   ],
   "state_files": [
     {

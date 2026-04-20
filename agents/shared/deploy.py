@@ -1198,7 +1198,9 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "brain.py",
     "brain_tasks.py",         # 2026-04-18 — task-queue parser + in-place editors for Mouse
     "camoufox_proxy.py",
+    "context_builder.py",     # 2026-04-19 — RecipientContext assembler for draft-compose
     "facts.py",              # 2026-04-19 — fact-file reader + upsert_fact for birthday miner
+    "gmail_api.py",          # 2026-04-19 — Gmail threaded-draft creation + thread_to_compose_inputs
     "fleet_health_types.py",
     "google_oauth.py",
     "heartbeat_base.py",
