@@ -140,6 +140,8 @@ def main() -> int:
     ap.add_argument("--gmail-thread-id", help="If set + reply_needed=true, create a threaded Gmail draft via gmail_api")
     ap.add_argument("--gmail-token", default="~/.clawford/connector-workspace/token.json")
     ap.add_argument("--gmail-creds", default="~/.clawford/connector-workspace/credentials.json")
+    ap.add_argument("--no-create-draft", action="store_true",
+                    help="Run full pipeline (fetch + LLM) but SKIP the Gmail drafts().create() step — simulation only")
     ap.add_argument("--json-out", type=Path, help="Write full parsed result + metadata to this path as JSON")
     ap.add_argument("--print-prompt-only", action="store_true")
     ap.add_argument("--llm-backend", default="codex",
@@ -309,7 +311,10 @@ def main() -> int:
         print("-" * 72)
         print(f"Telegram: {parsed['reasoning_summary']}")
 
-        if args.gmail_thread_id:
+        if args.gmail_thread_id and args.no_create_draft:
+            print()
+            print("(--no-create-draft — Gmail draft creation SKIPPED; simulation only)")
+        elif args.gmail_thread_id:
             from agents.shared.gmail_api import (
                 build_gmail_service, create_threaded_draft, fetch_inbound_message_id,
             )

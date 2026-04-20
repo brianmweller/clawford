@@ -65,7 +65,8 @@ def save_log(path: Path, log: dict) -> None:
     tmp.replace(path)
 
 
-def run_draft_compose(thread_id: str, slug: str, llm_backend: str) -> tuple[int, str, dict]:
+def run_draft_compose(thread_id: str, slug: str, llm_backend: str,
+                      no_create_draft: bool = False) -> tuple[int, str, dict]:
     """Run draft-compose, capturing the parsed JSON result via --json-out.
     Returns (exit_code, stdout, parsed_result_dict)."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as tf:
@@ -79,6 +80,8 @@ def run_draft_compose(thread_id: str, slug: str, llm_backend: str) -> tuple[int,
             "--llm-backend", llm_backend,
             "--json-out", str(json_out),
         ]
+        if no_create_draft:
+            cmd.append("--no-create-draft")
         env = os.environ.copy()
         result = subprocess.run(cmd, capture_output=True, text=True, env=env,
                                 encoding="utf-8", errors="replace", timeout=600)
@@ -162,6 +165,8 @@ def main() -> int:
     ap.add_argument("--max", type=int, help="Cap on number of threads to process")
     ap.add_argument("--no-telegram", action="store_true",
                     help="Skip Telegram ping (defaults to on when token env is present)")
+    ap.add_argument("--no-create-draft", action="store_true",
+                    help="Simulation mode: run compose pipeline but SKIP Gmail draft creation")
     args = ap.parse_args()
 
     try:
@@ -216,7 +221,8 @@ def main() -> int:
         tid = item["thread_id"]
         slug = item["slug"]
         print(f"COMPOSING [{tid}] {slug} ...")
-        rc, output, parsed = run_draft_compose(tid, slug, args.llm_backend)
+        rc, output, parsed = run_draft_compose(tid, slug, args.llm_backend,
+                                               no_create_draft=args.no_create_draft)
 
         reply_needed = parsed.get("reply_needed") if parsed else None
         gmail_draft_id = parsed.get("gmail_draft_id") if parsed else None
