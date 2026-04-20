@@ -100,6 +100,9 @@ def main() -> int:
     ap.add_argument("--search-window", help="ISO start/end/tz for availability window, e.g. 2026-04-13T16:00/2026-04-17T18:00/America/Los_Angeles")
     ap.add_argument("--busy-blocks", help="Path to JSON list of [{start,end}] ISO times (GCal stub)")
     ap.add_argument("--meeting-length", type=int, default=30, help="Minutes, default 30")
+    ap.add_argument("--gmail-thread-id", help="If set + reply_needed=true, create a threaded Gmail draft via gmail_api")
+    ap.add_argument("--gmail-token", default="~/.clawford/connector-workspace/token.json")
+    ap.add_argument("--gmail-creds", default="~/.clawford/connector-workspace/credentials.json")
     ap.add_argument("--print-prompt-only", action="store_true")
     ap.add_argument("--llm-backend", default="claude-cli", choices=["claude-cli", "stdout"])
     args = ap.parse_args()
@@ -241,6 +244,35 @@ def main() -> int:
         print(parsed["draft_text"])
         print("-" * 72)
         print(f"Telegram: {parsed['reasoning_summary']}")
+
+        if args.gmail_thread_id:
+            from agents.shared.gmail_api import (
+                build_gmail_service, create_threaded_draft, fetch_inbound_message_id,
+            )
+            token = Path(args.gmail_token).expanduser()
+            creds = Path(args.gmail_creds).expanduser()
+            service = build_gmail_service(
+                str(token), str(creds),
+                scopes=[
+                    "https://www.googleapis.com/auth/calendar.readonly",
+                    "https://www.googleapis.com/auth/gmail.readonly",
+                    "https://www.googleapis.com/auth/gmail.compose",
+                ],
+            )
+            in_reply_to = fetch_inbound_message_id(service, args.gmail_thread_id)
+            reply_subject = inbound.get("subject", "")
+            if reply_subject and not reply_subject.lower().startswith("re:"):
+                reply_subject = f"Re: {reply_subject}"
+            draft_resource = create_threaded_draft(
+                service,
+                thread_id=args.gmail_thread_id,
+                to=[inbound["from_email"]],
+                subject=reply_subject,
+                body=parsed["draft_text"],
+                in_reply_to_message_id=in_reply_to,
+            )
+            print()
+            print(f"GMAIL DRAFT CREATED: id={draft_resource.get('id')} threadId={args.gmail_thread_id}")
     else:
         print("VERDICT: reply_needed=FALSE — no Gmail draft, Telegram FYI only")
         print("=" * 72)

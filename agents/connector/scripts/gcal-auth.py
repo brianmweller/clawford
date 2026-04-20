@@ -43,6 +43,10 @@ from agents.shared.google_oauth import build_flow, save_credentials
 SCOPES = [
     "https://www.googleapis.com/auth/calendar.readonly",
     "https://www.googleapis.com/auth/gmail.readonly",
+    # gmail.compose — create Gmail drafts via agents/shared/gmail_api.
+    # This scope technically permits send; safety is enforced by code
+    # (we never call users.messages.send, only users.drafts.create).
+    "https://www.googleapis.com/auth/gmail.compose",
 ]
 
 DEFAULT_CREDS = os.path.expanduser(
