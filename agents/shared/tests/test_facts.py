@@ -107,6 +107,103 @@ def test_load_facts_for_subject_filters_across_months(tmp_path: Path):
     assert {f["id"] for f in facts} == {"f-001", "f-010"}
 
 
+def test_load_facts_for_subject_default_filters_sub_review_confidence(tmp_path: Path):
+    """Default min_confidence filter is REVIEW_CONFIDENCE (0.6). Facts
+    below that have been flagged in _pending_review.md and must not
+    leak into composer context until the operator triages them up.
+    Prior to 2026-04-20 every caller had to filter post-load, which
+    was easy to forget; centralizing the default here closes the gap."""
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "2026-04.md").write_text(
+        "- **id:** high\n"
+        "- **content:** High-conf fact\n"
+        "- **subject:** priya-rivera\n"
+        "- **confidence:** 0.8\n"
+        "- **category:** identity\n"
+        "- **recorded_at:** 2026-04-10\n"
+        "- **source_agent:** connector\n"
+        "---\n"
+        "- **id:** low\n"
+        "- **content:** Low-conf fact\n"
+        "- **subject:** priya-rivera\n"
+        "- **confidence:** 0.45\n"
+        "- **category:** identity\n"
+        "- **recorded_at:** 2026-04-10\n"
+        "- **source_agent:** connector\n",
+        encoding="utf-8",
+    )
+    facts = load_facts_for_subject("priya-rivera", facts_dir)
+    assert [f["id"] for f in facts] == ["high"], (
+        "Low-conf fact must be filtered out by the default threshold"
+    )
+
+
+def test_load_facts_for_subject_explicit_min_confidence_zero_returns_all(tmp_path: Path):
+    """Callers that need everything (audit tools, confidence-floor
+    bypass, _pending_review triage UIs) can pass min_confidence=0 to
+    disable the default filter."""
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "2026-04.md").write_text(
+        "- **id:** high\n"
+        "- **content:** H\n"
+        "- **subject:** priya-rivera\n"
+        "- **confidence:** 0.9\n"
+        "- **category:** identity\n"
+        "- **recorded_at:** 2026-04-10\n"
+        "- **source_agent:** connector\n"
+        "---\n"
+        "- **id:** mid\n"
+        "- **content:** M\n"
+        "- **subject:** priya-rivera\n"
+        "- **confidence:** 0.45\n"
+        "- **category:** identity\n"
+        "- **recorded_at:** 2026-04-10\n"
+        "- **source_agent:** connector\n"
+        "---\n"
+        "- **id:** low\n"
+        "- **content:** L\n"
+        "- **subject:** priya-rivera\n"
+        "- **confidence:** 0.1\n"
+        "- **category:** identity\n"
+        "- **recorded_at:** 2026-04-10\n"
+        "- **source_agent:** connector\n",
+        encoding="utf-8",
+    )
+    facts = load_facts_for_subject("priya-rivera", facts_dir, min_confidence=0.0)
+    assert {f["id"] for f in facts} == {"high", "mid", "low"}
+
+
+def test_load_facts_for_subject_custom_min_confidence(tmp_path: Path):
+    """A caller can tighten or loosen the threshold. Tight: 0.8 only
+    returns certain facts."""
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "2026-04.md").write_text(
+        "- **id:** very-high\n"
+        "- **content:** VH\n"
+        "- **subject:** priya-rivera\n"
+        "- **confidence:** 0.9\n"
+        "- **category:** identity\n"
+        "- **recorded_at:** 2026-04-10\n"
+        "- **source_agent:** connector\n"
+        "---\n"
+        "- **id:** mid-high\n"
+        "- **content:** MH\n"
+        "- **subject:** priya-rivera\n"
+        "- **confidence:** 0.7\n"
+        "- **category:** identity\n"
+        "- **recorded_at:** 2026-04-10\n"
+        "- **source_agent:** connector\n",
+        encoding="utf-8",
+    )
+    facts = load_facts_for_subject(
+        "priya-rivera", facts_dir, min_confidence=0.8,
+    )
+    assert [f["id"] for f in facts] == ["very-high"]
+
+
 def test_load_facts_for_subject_is_case_insensitive(tmp_path: Path):
     facts_dir = tmp_path / "facts"
     facts_dir.mkdir()

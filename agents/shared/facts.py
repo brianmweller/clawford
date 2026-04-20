@@ -81,16 +81,39 @@ def _parse_audience_scope(raw: str | None) -> list[str] | None:
     return [raw]
 
 
-def load_facts_for_subject(subject_slug: str, facts_dir: Path) -> list[dict]:
-    """Return every fact in facts_dir whose subject matches the slug (case-insensitive)."""
+DEFAULT_COMPOSER_MIN_CONFIDENCE = 0.6
+
+
+def load_facts_for_subject(
+    subject_slug: str,
+    facts_dir: Path,
+    *,
+    min_confidence: float = DEFAULT_COMPOSER_MIN_CONFIDENCE,
+) -> list[dict]:
+    """Return every fact in facts_dir whose subject matches the slug
+    (case-insensitive) AND whose confidence is >= min_confidence.
+
+    The default min_confidence mirrors ``fact_extraction.REVIEW_CONFIDENCE``:
+    facts below 0.6 are flagged in ``_pending_review.md`` for operator
+    triage and must NOT leak into draft composition until promoted.
+    Centralizing the default here closes the gap that every caller used
+    to have to filter post-load.
+
+    Callers who need the full set (audit tools, triage UIs, the pending-
+    review loop itself) can pass ``min_confidence=0.0`` to disable the
+    filter.
+    """
     if not facts_dir.exists():
         return []
     target = subject_slug.lower()
     out: list[dict] = []
     for path in sorted(facts_dir.glob("*.md")):
         for fact in parse_facts_file(path):
-            if fact["subject"].lower() == target:
-                out.append(fact)
+            if fact["subject"].lower() != target:
+                continue
+            if fact["confidence"] < min_confidence:
+                continue
+            out.append(fact)
     return out
 
 

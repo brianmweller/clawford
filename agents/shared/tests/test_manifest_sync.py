@@ -88,14 +88,18 @@ def _load_deploy_module():
 
 def test_sync_removes_entries_from_config_files(paths):
     """The core use case: .example drops TOOLS.md, sync removes it from
-    the operator's manifest.json too."""
+    the operator's manifest.json too. Post the 2026-04-20 silent-delete
+    guard, the operator must pass force_delete=True to acknowledge the
+    removal explicitly."""
     _write(paths["example"], _example(config_files=[{"src": "SOUL.md"}, {"src": "USER.md"}]))
     _write(paths["actual"], _operator(config_files=[
         {"src": "SOUL.md"}, {"src": "TOOLS.md"}, {"src": "USER.md"}
     ]))
 
     deploy = _load_deploy_module()
-    result = deploy.sync_manifest_structure(paths["actual"], paths["example"])
+    result = deploy.sync_manifest_structure(
+        paths["actual"], paths["example"], force_delete=True,
+    )
 
     assert result["status"] == "ok"
     updated = _read(paths["actual"])
@@ -135,7 +139,8 @@ def test_sync_preserves_operator_approvals(paths):
 
 
 def test_sync_updates_scripts_list(paths):
-    """scripts list is structural — should sync."""
+    """scripts list is structural — should sync. Removal requires
+    force_delete=True per the 2026-04-20 silent-delete guard."""
     _write(paths["example"], _example(
         config_files=[{"src": "SOUL.md"}],
         scripts=["scripts/new.py", "scripts/existing.py"],
@@ -146,14 +151,17 @@ def test_sync_updates_scripts_list(paths):
     ))
 
     deploy = _load_deploy_module()
-    deploy.sync_manifest_structure(paths["actual"], paths["example"])
+    deploy.sync_manifest_structure(
+        paths["actual"], paths["example"], force_delete=True,
+    )
 
     updated = _read(paths["actual"])
     assert set(updated["scripts"]) == {"scripts/new.py", "scripts/existing.py"}
 
 
 def test_sync_updates_state_files(paths):
-    """state_files list is structural — should sync."""
+    """state_files list is structural — should sync. Removal requires
+    force_delete=True per the 2026-04-20 silent-delete guard."""
     _write(paths["example"], _example(
         config_files=[{"src": "SOUL.md"}],
         state_files=[{"path": "new-state.json"}],
@@ -163,29 +171,38 @@ def test_sync_updates_state_files(paths):
     _write(paths["actual"], op)
 
     deploy = _load_deploy_module()
-    deploy.sync_manifest_structure(paths["actual"], paths["example"])
+    deploy.sync_manifest_structure(
+        paths["actual"], paths["example"], force_delete=True,
+    )
 
     updated = _read(paths["actual"])
     assert updated["state_files"] == [{"path": "new-state.json"}]
 
 
 def test_sync_is_idempotent(paths):
-    """Running sync twice should produce the same result as once."""
+    """Running sync twice should produce the same result as once. Uses
+    force_delete=True for the removal case; on the second call there
+    are no more removals, so the guard is a no-op."""
     _write(paths["example"], _example(config_files=[{"src": "SOUL.md"}]))
     _write(paths["actual"], _operator(config_files=[{"src": "SOUL.md"}, {"src": "TOOLS.md"}]))
 
     deploy = _load_deploy_module()
-    deploy.sync_manifest_structure(paths["actual"], paths["example"])
+    deploy.sync_manifest_structure(
+        paths["actual"], paths["example"], force_delete=True,
+    )
     first = _read(paths["actual"])
 
-    deploy.sync_manifest_structure(paths["actual"], paths["example"])
+    deploy.sync_manifest_structure(
+        paths["actual"], paths["example"], force_delete=True,
+    )
     second = _read(paths["actual"])
 
     assert first == second
 
 
 def test_sync_reports_what_changed(paths):
-    """Return value describes the structural diff applied."""
+    """Return value describes the structural diff applied. Requires
+    force_delete=True for the removal."""
     _write(paths["example"], _example(
         config_files=[{"src": "SOUL.md"}],
         scripts=["a.py", "b.py"],
@@ -196,7 +213,9 @@ def test_sync_reports_what_changed(paths):
     ))
 
     deploy = _load_deploy_module()
-    result = deploy.sync_manifest_structure(paths["actual"], paths["example"])
+    result = deploy.sync_manifest_structure(
+        paths["actual"], paths["example"], force_delete=True,
+    )
 
     assert result["status"] == "ok"
     assert result["config_files_removed"] == ["TOOLS.md", "HEARTBEAT.md"] or \

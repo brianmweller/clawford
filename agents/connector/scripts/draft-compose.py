@@ -153,7 +153,14 @@ def main() -> int:
 
     person = load_person(args.person_slug)
     facts_dir = Path(args.facts_dir) if args.facts_dir else BRAIN_ROOT / "facts"
-    facts = load_facts_for_subject(args.person_slug, facts_dir)
+    # Filter to facts >= DEFAULT_COMPOSER_MIN_CONFIDENCE. Low-conf
+    # facts live in _pending_review.md and should not leak into
+    # drafted prose until the operator triages them up. (Explicit
+    # kwarg at the call site for readability; the default is also
+    # 0.6, matching fact_extraction.REVIEW_CONFIDENCE.)
+    facts = load_facts_for_subject(
+        args.person_slug, facts_dir, min_confidence=0.6,
+    )
 
     if args.inbound:
         inbound = json.loads(Path(args.inbound).read_text(encoding="utf-8"))
