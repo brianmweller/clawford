@@ -1,6 +1,10 @@
 site_name: Clawford
 site_description: Field guide to a personal fleet of LLM agents on a $30/month VPS.
-site_author: the operator
+site_author: Sam Smith
+
+repo_url: https://github.com/samsmith/clawford
+repo_name: samsmith/clawford
+edit_uri: edit/master/_site_src/
 
 docs_dir: _site_src
 site_dir: site

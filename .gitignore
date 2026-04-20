@@ -72,5 +72,11 @@ agents/fix-it/probation.md
 agents/connector/scripts/mine/family_map.py
 agents/connector/scripts/mine/mining-config.json
 
+# Operator identity (emails, name variants) — lives in ~/.clawford/operator.json
+# Committed template is agents/shared/operator.json.example. Never commit
+# an operator.json in-tree.
+agents/shared/operator.json
+operator.json
+
 # Local scratch / worksheets (not committed)
 scratch/

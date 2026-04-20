@@ -7,7 +7,7 @@ real-time push listener) or when the token is revoked.
 Standard fleet pattern: run this locally on the operator's workstation,
 authorize in the browser, SCP the resulting token.json to the VPS.
 The VPS itself has no public port / no browser, so it can't run the
-flow — see memory: reference_google_oauth.md.
+flow.
 
 Scopes:
   gmail.readonly   — list/threads/history/getProfile
@@ -33,7 +33,7 @@ Prerequisites:
 
 After a successful run, SCP the token to the VPS:
   scp ~/.clawford/connector-workspace/token.json \\
-      openclaw@<your-tailscale-host>:~/.clawford/connector-workspace/token.json
+      <user>@<your-tailscale-host>:~/.clawford/connector-workspace/token.json
 """
 from __future__ import annotations
 
@@ -119,10 +119,10 @@ def main() -> int:
     print()
     print("Next step — SCP to the VPS:")
     print(f"  scp {token_path} \\")
-    print("      openclaw@<your-tailscale-host>:~/.clawford/connector-workspace/token.json")
+    print("      <user>@<your-tailscale-host>:~/.clawford/connector-workspace/token.json")
     print()
     print("Then verify on the VPS:")
-    print("  ssh openclaw@<your-tailscale-host> 'python3 ~/.clawford/connector-workspace/"
+    print("  ssh <user>@<your-tailscale-host> 'python3 ~/.clawford/connector-workspace/"
           "scripts/gmail-watch-renew.py'")
     return 0
 

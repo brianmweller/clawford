@@ -1,0 +1,20 @@
+{
+  "_comment": "Operator identity. Copy to ~/.clawford/operator.json and edit. See agents/shared/operator.py for usage. Real values are PII and must never be committed.",
+  "emails": [
+    "sam.smith@example.com",
+    "sam.smith+work@example.com",
+    "sam@example.org"
+  ],
+  "name_variants": [
+    "Sam Smith",
+    "Sam M Smith",
+    "Sam M. Smith",
+    "Sam"
+  ],
+  "slugs": [
+    "sam-smith",
+    "sam",
+    "sam-m-smith"
+  ],
+  "google_email": "sam.smith@example.com"
+}
