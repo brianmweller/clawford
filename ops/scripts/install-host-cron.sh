@@ -31,6 +31,8 @@
 #   30 10 * * *   connector-morning-relationship-nudge  → CONNECTOR_BOT_TOKEN  (Phase 4 — daily nudge for 5 AM PT fleet; Monday recap folds weekly-review)
 #   0 8,20 * * *  connector-notes-triage-alert          → CONNECTOR_BOT_TOKEN  (Phase 4 — LLM classifies inbox notes twice daily)
 #   0 6 * * 0     connector-birthday-miner              → CONNECTOR_BOT_TOKEN  (2026-04-19 — weekly passive GCal scan → identity facts)
+#   */30 * * * *  connector-inbox-triage                → CONNECTOR_BOT_TOKEN  (2026-04-20 — scans recent inbound, queues known-sender threads)
+#   5,35 * * * *  connector-auto-compose                → CONNECTOR_BOT_TOKEN  (2026-04-20 — processes queue, creates threaded Gmail drafts + Telegram pings)
 #   30 10 * * *   meetings-coach-morning-meeting-brief  → MEETINGS_BOT_TOKEN   (Phase 4 — daily brief for 5 AM PT fleet; Monday fold replaces weekly-review)
 #   */30 * * * *  meetings-coach-pre-meeting-alert      → MEETINGS_BOT_TOKEN   (Phase 4 — 15-45 min lookahead, sent-alerts.json dedup)
 #   15,45 * * * * meetings-coach-post-meeting-scan      → MEETINGS_BOT_TOKEN   (Phase 4 — Krisp transcript scan + LLM coaching; preserves 74c726c idempotency)
@@ -128,6 +130,12 @@ CONTRACT_ENTRIES=(
   "30 10 * * *|connector-morning-relationship-nudge|/home/openclaw/.clawford/connector-workspace/scripts/morning-relationship-nudge.py|CONNECTOR_BOT_TOKEN|300"
   "0 8,20 * * *|connector-notes-triage-alert|/home/openclaw/.clawford/connector-workspace/scripts/notes-triage-alert.py|CONNECTOR_BOT_TOKEN|180"
   "0 6 * * 0|connector-birthday-miner|/home/openclaw/.clawford/connector-workspace/scripts/birthday-miner.py|CONNECTOR_BOT_TOKEN|300"
+  # Email-reply drafting pipeline (2026-04-20):
+  #   inbox-triage scans recent inbound, queues known-sender threads.
+  #   auto-compose processes the queue 5 min later (one draft per thread,
+  #   default --max 5 safety cap baked in, idempotent via log file).
+  "*/30 * * * *|connector-inbox-triage|/home/openclaw/.clawford/connector-workspace/scripts/inbox-triage.py|CONNECTOR_BOT_TOKEN|300"
+  "5,35 * * * *|connector-auto-compose|/home/openclaw/.clawford/connector-workspace/scripts/auto-compose.py|CONNECTOR_BOT_TOKEN|900"
   "30 10 * * *|meetings-coach-morning-meeting-brief|/home/openclaw/.clawford/meetings-coach-workspace/scripts/morning-meeting-brief.py|MEETINGS_BOT_TOKEN|300"
   "*/30 * * * *|meetings-coach-pre-meeting-alert|/home/openclaw/.clawford/meetings-coach-workspace/scripts/pre-meeting-alert.py|MEETINGS_BOT_TOKEN|180"
   "15,45 * * * *|meetings-coach-post-meeting-scan|/home/openclaw/.clawford/meetings-coach-workspace/scripts/post-meeting-scan.py|MEETINGS_BOT_TOKEN|300"

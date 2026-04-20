@@ -165,7 +165,9 @@ def main() -> int:
                     choices=["codex", "claude-cli", "stdout"])
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--force", help="Re-process this thread ID even if logged")
-    ap.add_argument("--max", type=int, help="Cap on number of threads to process")
+    ap.add_argument("--max", type=int, default=5,
+                    help="Cap on threads processed per run. Defaults to 5 as a safety "
+                         "rail for cron invocations. Pass a larger number for manual bulk runs.")
     ap.add_argument("--no-telegram", action="store_true",
                     help="Skip Telegram ping (defaults to on when token env is present)")
     ap.add_argument("--no-create-draft", action="store_true",
