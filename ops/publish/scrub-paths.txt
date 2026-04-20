@@ -60,3 +60,11 @@ guide-v2/
 # --- Planning artifacts (private-only) ---
 SCRUB_PATHS.txt
 REPLACEMENTS.txt
+
+# --- Claude Code operator state (private-only) ---
+# .claude/skills/ is tracked (see .gitignore), but every file inside
+# contains the authoring scar-tissue narratives with full vendor names
+# (audit-guide/CANONICAL_STORIES.md, guide-chapter/CHRONOLOGY.md, etc.)
+# plus the real-name → placeholder mapping. None of it is useful
+# outside the private authoring workflow.
+.claude/
