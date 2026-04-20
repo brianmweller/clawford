@@ -14,7 +14,7 @@ Telegram bot, and shared memory it can read from and write to.
 > the `~/.openclaw/` workspace root, the `oc` / `oci` CLI wrappers —
 > and Clawford is now a self-contained system of plain Python scripts,
 > host crons, and a `deploy.py` built for purpose. The full story is
-> in [`guide-v3/02-what-isnt-clawford.md`](guide-v3/02-what-isnt-clawford.md).
+> in [Ch 02 — What Isn't Clawford?](https://clawford-guide-f049b1d8.pages.dev/guide-v3/02-what-isnt-clawford/).
 
 ## ⚠️ Vendor terms disclaimer
 
@@ -37,43 +37,43 @@ patterns.
 
 ## 📖 The Guide
 
-**Start here: [guide-v3/index.md](guide-v3/index.md)** — twenty-one
+**Start here: [clawford-guide-f049b1d8.pages.dev](https://clawford-guide-f049b1d8.pages.dev/guide-v3/)** — twenty-one
 chapters, written as scar-tissue. The README is an orientation map;
 the guide is the field manual.
 
 **Overview**
 
-- [01 — What is Clawford?](guide-v3/01-what-is-clawford.md) — A personal fleet on a $30/mo VPS; the Busytown premise.
-- [02 — What Isn't Clawford?](guide-v3/02-what-isnt-clawford.md) — Why Clawford left the OpenClaw platform.
+- [01 — What is Clawford?](https://clawford-guide-f049b1d8.pages.dev/guide-v3/01-what-is-clawford/) — A personal fleet on a $30/mo VPS; the Busytown premise.
+- [02 — What Isn't Clawford?](https://clawford-guide-f049b1d8.pages.dev/guide-v3/02-what-isnt-clawford/) — Why Clawford left the OpenClaw platform.
 
 **Setup**
 
-- [03 — Before you start](guide-v3/03-before-you-start.md) — One-way-door decisions: dedicated VPS, Telegram channel, Mr Fixit first.
-- [04 — VPS setup](guide-v3/04-vps-setup.md) — Terraform-provisioned Hetzner box, SSH-hardened, Tailscale overlay, `codex` installed.
-- [05 — Dev setup](guide-v3/05-dev-setup.md) — Claude Code as the dev environment; red-green TDD for infra.
-- [06 — Infra setup](guide-v3/06-infra-setup.md) — Three-tier shared library, shared brain (git + Dropbox), host-cron runtime, ten deploy safeguards.
+- [03 — Before you start](https://clawford-guide-f049b1d8.pages.dev/guide-v3/03-before-you-start/) — One-way-door decisions: dedicated VPS, Telegram channel, Mr Fixit first.
+- [04 — VPS setup](https://clawford-guide-f049b1d8.pages.dev/guide-v3/04-vps-setup/) — Terraform-provisioned Hetzner box, SSH-hardened, Tailscale overlay, `codex` installed.
+- [05 — Dev setup](https://clawford-guide-f049b1d8.pages.dev/guide-v3/05-dev-setup/) — Claude Code as the dev environment; red-green TDD for infra.
+- [06 — Infra setup](https://clawford-guide-f049b1d8.pages.dev/guide-v3/06-infra-setup/) — Three-tier shared library, shared brain (git + Dropbox), host-cron runtime, ten deploy safeguards.
 
 **Agents**
 
-- [07 — Intro to agents](guide-v3/07-intro-to-agents.md) — The anatomy of a Clawford agent: workspace files, manifest, script contract, LLM-vs-deterministic line.
-- [08 — Your first agent](guide-v3/08-your-first-agent.md) — The seven-step first-deploy arc every agent inherits.
-- [09 — Mr Fixit 🦊🔧](guide-v3/09-mr-fixit.md) — The infrastructure fox. Fleet-health canary, brain validator, conflict-scanner.
-- [10 — Lowly Worm 🐛📰](guide-v3/10-lowly-worm-newsfeed.md) — A personalized morning news digest that learns from your thumbs.
-- [12 — Mistress Mouse 🐭📅](guide-v3/12-mistress-mouse.md) — Family logistics; first Google OAuth agent.
-- [13 — Sergeant Murphy 🐷🔍](guide-v3/13-sergeant-murphy.md) — Meeting prep, transcript-driven debrief, commitment tracking, coaching.
-- [14 — Huckle Cat 🐱🤝](guide-v3/14-huckle-cat.md) — Relationship memory across seven sources.
+- [07 — Intro to agents](https://clawford-guide-f049b1d8.pages.dev/guide-v3/07-intro-to-agents/) — The anatomy of a Clawford agent: workspace files, manifest, script contract, LLM-vs-deterministic line.
+- [08 — Your first agent](https://clawford-guide-f049b1d8.pages.dev/guide-v3/08-your-first-agent/) — The seven-step first-deploy arc every agent inherits.
+- [09 — Mr Fixit 🦊🔧](https://clawford-guide-f049b1d8.pages.dev/guide-v3/09-mr-fixit/) — The infrastructure fox. Fleet-health canary, brain validator, conflict-scanner.
+- [10 — Lowly Worm 🐛📰](https://clawford-guide-f049b1d8.pages.dev/guide-v3/10-lowly-worm-newsfeed/) — A personalized morning news digest that learns from your thumbs.
+- [12 — Mistress Mouse 🐭📅](https://clawford-guide-f049b1d8.pages.dev/guide-v3/12-mistress-mouse/) — Family logistics; first Google OAuth agent.
+- [13 — Sergeant Murphy 🐷🔍](https://clawford-guide-f049b1d8.pages.dev/guide-v3/13-sergeant-murphy/) — Meeting prep, transcript-driven debrief, commitment tracking, coaching.
+- [14 — Huckle Cat 🐱🤝](https://clawford-guide-f049b1d8.pages.dev/guide-v3/14-huckle-cat/) — Relationship memory across seven sources.
 
 **Architecture**
 
-- [16 — The shared brain](guide-v3/16-shared-brain.md) — The git + Dropbox directory that turns a pile of agents into a fleet.
-- [17 — Auth architectures](guide-v3/17-auth-architectures.md) — Six auth shapes across the fleet, three cross-cutting idioms.
-- [18 — The inbox](guide-v3/18-the-inbox.md) — One async daemon polls six bots, routes each message, stages every mutation behind a Confirm button.
-- [19 — Security and hardening](guide-v3/19-security-and-hardening.md) — Seven defense layers; bubblewrap profile covers every non-Fixit cron.
+- [16 — The shared brain](https://clawford-guide-f049b1d8.pages.dev/guide-v3/16-shared-brain/) — The git + Dropbox directory that turns a pile of agents into a fleet.
+- [17 — Auth architectures](https://clawford-guide-f049b1d8.pages.dev/guide-v3/17-auth-architectures/) — Six auth shapes across the fleet, three cross-cutting idioms.
+- [18 — The inbox](https://clawford-guide-f049b1d8.pages.dev/guide-v3/18-the-inbox/) — One async daemon polls six bots, routes each message, stages every mutation behind a Confirm button.
+- [19 — Security and hardening](https://clawford-guide-f049b1d8.pages.dev/guide-v3/19-security-and-hardening/) — Seven defense layers; bubblewrap profile covers every non-Fixit cron.
 
 **Reference**
 
-- [20 — Scripts and configs](guide-v3/20-scripts-and-configs.md) — The catalog. A lookup, not a read-through.
-- [21 — Glossary](guide-v3/21-glossary.md) — Every Clawford-specific term, alphabetically.
+- [20 — Scripts and configs](https://clawford-guide-f049b1d8.pages.dev/guide-v3/20-scripts-and-configs/) — The catalog. A lookup, not a read-through.
+- [21 — Glossary](https://clawford-guide-f049b1d8.pages.dev/guide-v3/21-glossary/) — Every Clawford-specific term, alphabetically.
 
 ## The Agents
 
@@ -179,7 +179,7 @@ bot tokens, OpenAI API key, VPS host, etc.).
 - Secrets stored in `.env` (gitignored), never in code
 - Three-tier defense: OS-level immutability on identity files, the
   script contract for cron messages, and `deploy.py`'s ten safeguards.
-  See [`guide-v3/19-security-and-hardening.md`](guide-v3/19-security-and-hardening.md)
+  See [Ch 19 — Security and hardening](https://clawford-guide-f049b1d8.pages.dev/guide-v3/19-security-and-hardening/)
   for the full picture.
 - Security reports: see [`SECURITY.md`](SECURITY.md).
 
