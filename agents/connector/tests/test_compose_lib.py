@@ -184,6 +184,33 @@ def test_prompt_instructs_date_reanchoring_for_stale_inbounds():
     assert "re-anchor" in prompt.lower() or "reanchor" in prompt.lower()
 
 
+def test_prompt_renders_voice_profile_when_present():
+    voice = _voice()
+    voice["profile_present"] = True
+    voice["profile_greeting"] = "Hey {name},"
+    voice["profile_signoff"] = "Love, the operator"
+    voice["profile_register"] = "intimate"
+    voice["profile_patterns"] = ["double-dash em-dashes", "heavy contractions"]
+    voice["profile_anti_patterns"] = ["no formal salutations"]
+    voice["profile_opening_phrases"] = ["Thanks --", "Yep,"]
+    voice["profile_distinctive_traits"] = "Warm-but-efficient rhythm."
+    prompt = build_compose_prompt(_ctx(), voice, _inbound())
+    assert "LEARNED VOICE PROFILE" in prompt
+    assert "Hey {name}" in prompt
+    assert "Love, the operator" in prompt
+    assert "double-dash em-dashes" in prompt
+    assert "no formal salutations" in prompt
+    assert "Thanks --" in prompt
+    assert "Warm-but-efficient rhythm" in prompt
+
+
+def test_prompt_omits_profile_section_when_absent():
+    voice = _voice()
+    voice["profile_present"] = False
+    prompt = build_compose_prompt(_ctx(), voice, _inbound())
+    assert "LEARNED VOICE PROFILE" not in prompt
+
+
 def test_prompt_includes_recipient_name():
     prompt = build_compose_prompt(_ctx(), _voice(), _inbound())
     assert "Priya Rivera" in prompt

@@ -195,3 +195,41 @@ def test_unknown_relationship_type_uses_sane_defaults():
     # must not raise; register should still be a valid scale value
     assert g["register"] in REGISTER_SCALE
     assert g["politeness_weight"] >= 0.0
+
+
+# --- voice_profile optional parameter ---
+
+def test_no_profile_sets_profile_present_false():
+    person = {"relationship_type": "family"}
+    g = compose_voice_guidance(
+        recipient=person,
+        inbound_act={"intent": "inform", "imposition": 0.2},
+        platform="gmail",
+    )
+    assert g["profile_present"] is False
+
+
+def test_profile_merges_into_guidance():
+    person = {"relationship_type": "family"}
+    profile = {
+        "typical_greeting": "Hey {name},",
+        "typical_signoff": "Love,\nBrian",
+        "register": "intimate",
+        "common_patterns": ["pattern A", "pattern B"],
+        "anti_patterns": ["no 'Dear'"],
+        "sample_opening_phrases": ["Thanks for", "Yep --"],
+        "distinctive_traits": "Warm-but-efficient.",
+    }
+    g = compose_voice_guidance(
+        recipient=person,
+        inbound_act={"intent": "inform", "imposition": 0.2},
+        platform="gmail",
+        voice_profile=profile,
+    )
+    assert g["profile_present"] is True
+    assert g["profile_greeting"] == "Hey {name},"
+    assert "Love" in g["profile_signoff"]
+    assert "pattern A" in g["profile_patterns"]
+    assert "no 'Dear'" in g["profile_anti_patterns"]
+    assert "Thanks for" in g["profile_opening_phrases"]
+    assert "Warm-but-efficient" in g["profile_distinctive_traits"]

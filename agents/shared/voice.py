@@ -171,6 +171,7 @@ def compose_voice_guidance(
     recipient: dict,
     inbound_act: dict,
     platform: str = "gmail",
+    voice_profile: dict | None = None,
 ) -> dict:
     """Compose the voice guidance bundle for draft-compose.
 
@@ -213,7 +214,7 @@ def compose_voice_guidance(
     emotional_valence = inbound_act.get("emotional_valence", "neutral")
     time_pressure = inbound_act.get("time_pressure", "on_time")
 
-    return {
+    result = {
         "register": register,
         "register_guidance": REGISTER_GUIDANCE.get(register, ""),
         "politeness_strategy": strategy,
@@ -236,3 +237,17 @@ def compose_voice_guidance(
         "time_pressure": time_pressure,
         "time_pressure_guidance": TIME_PRESSURES.get(time_pressure, ""),
     }
+
+    if voice_profile:
+        result["profile_present"] = True
+        result["profile_greeting"] = voice_profile.get("typical_greeting", "")
+        result["profile_signoff"] = voice_profile.get("typical_signoff", "")
+        result["profile_register"] = voice_profile.get("register", "")
+        result["profile_patterns"] = list(voice_profile.get("common_patterns", []))
+        result["profile_anti_patterns"] = list(voice_profile.get("anti_patterns", []))
+        result["profile_opening_phrases"] = list(voice_profile.get("sample_opening_phrases", []))
+        result["profile_distinctive_traits"] = voice_profile.get("distinctive_traits", "")
+    else:
+        result["profile_present"] = False
+
+    return result

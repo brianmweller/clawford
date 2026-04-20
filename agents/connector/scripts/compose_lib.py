@@ -78,6 +78,23 @@ def build_compose_prompt(
             )
         slots_section = "\nOPEN SLOTS (propose these if the sender asked to schedule):\n" + "\n".join(slot_lines) + "\n"
 
+    profile_section = ""
+    if voice.get("profile_present"):
+        patterns = "\n".join(f"    - {p}" for p in voice.get("profile_patterns", [])) or "    (none)"
+        antis = "\n".join(f"    - {a}" for a in voice.get("profile_anti_patterns", [])) or "    (none)"
+        openings = ", ".join(f'"{o}"' for o in voice.get("profile_opening_phrases", [])) or "(none)"
+        profile_section = (
+            "\nLEARNED VOICE PROFILE (distilled from the operator's prior sent mail to people\n"
+            "in this circle — these patterns OVERRIDE abstract register guidance when\n"
+            "they disagree)\n"
+            f"  Typical greeting:   {voice.get('profile_greeting')}\n"
+            f"  Typical signoff:    {voice.get('profile_signoff')}\n"
+            f"  Common patterns:\n{patterns}\n"
+            f"  Anti-patterns (avoid these):\n{antis}\n"
+            f"  Opening phrases to match: {openings}\n"
+            f"  Distinctive trait:  {voice.get('profile_distinctive_traits')}\n"
+        )
+
     return f"""You are drafting an email reply on the operator's behalf. Do NOT send it — the operator will review.
 
 Not every inbound deserves a reply, and a draft without an explicit
@@ -190,6 +207,7 @@ COMMUNICATION CONTEXT
   {voice.get("valence_guidance")}
   {voice.get("time_pressure_guidance")}
   {voice.get("audience_guidance")}
+{profile_section}
 
 WHAT YOU MAY REFERENCE (facts that passed the audience filter — the ONLY
 facts about this person you know; do not invent or assume others)

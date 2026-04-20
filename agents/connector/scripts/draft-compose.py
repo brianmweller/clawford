@@ -79,6 +79,32 @@ def load_person(slug: str) -> dict:
     return person
 
 
+_VOICE_PROFILE_DIR = Path.home() / ".clawford" / "connector-workspace" / "cache" / "voice-profiles"
+
+
+def _load_voice_profile_for_person(person: dict) -> dict | None:
+    """Load the voice profile for the person's primary circle if one has
+    been built (via voice-profile-build.py). Returns the 'profile' sub-
+    dict or None. Never raises — a missing/malformed profile just falls
+    through to the abstract-register path."""
+    circles = person.get("circles") or []
+    if not circles:
+        return None
+    # Walk circles in declared order; first profile that exists wins
+    for c in circles:
+        path = _VOICE_PROFILE_DIR / f"{c}.json"
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        prof = data.get("profile")
+        if isinstance(prof, dict):
+            return prof
+    return None
+
+
 def call_claude_cli(prompt: str, timeout: int = 180) -> str:
     result = subprocess.run(
         ["claude", "-p"],
@@ -165,10 +191,12 @@ def main() -> int:
         "time_pressure": "late_reply",
     }
 
+    voice_profile = _load_voice_profile_for_person(person)
     voice = compose_voice_guidance(
         recipient=person,
         inbound_act=inbound_act,
         platform="gmail",
+        voice_profile=voice_profile,
     )
 
     availability_slots = None
