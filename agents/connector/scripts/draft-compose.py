@@ -35,6 +35,10 @@ sys.path.insert(0, str(_REPO))
 # Sibling compose_lib.py
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from datetime import datetime                                       # noqa: E402
+from zoneinfo import ZoneInfo                                       # noqa: E402
+
+from agents.shared.availability import free_slots                   # noqa: E402
 from agents.shared.brain import dropbox_brain_root                  # noqa: E402
 from agents.shared.context_builder import build_recipient_context  # noqa: E402
 from agents.shared.facts import load_facts_for_subject             # noqa: E402
@@ -92,6 +96,10 @@ def main() -> int:
     ap.add_argument("--inbound", required=True)
     ap.add_argument("--history")
     ap.add_argument("--facts-dir", help="Override brain/facts path (for dry-run testing)")
+    ap.add_argument("--scheduling-rules", help="Path to scheduling.rules.json")
+    ap.add_argument("--search-window", help="ISO start/end/tz for availability window, e.g. 2026-04-13T16:00/2026-04-17T18:00/America/Los_Angeles")
+    ap.add_argument("--busy-blocks", help="Path to JSON list of [{start,end}] ISO times (GCal stub)")
+    ap.add_argument("--meeting-length", type=int, default=30, help="Minutes, default 30")
     ap.add_argument("--print-prompt-only", action="store_true")
     ap.add_argument("--llm-backend", default="claude-cli", choices=["claude-cli", "stdout"])
     args = ap.parse_args()
@@ -126,7 +134,35 @@ def main() -> int:
         inbound_act=inbound_act,
         platform="gmail",
     )
-    prompt = build_compose_prompt(ctx, voice, inbound)
+
+    availability_slots = None
+    if args.scheduling_rules and args.search_window:
+        with open(args.scheduling_rules, encoding="utf-8") as f:
+            rules = json.load(f)
+        start_s, end_s, tz_s = args.search_window.split("/", 2)
+        tz = ZoneInfo(tz_s)
+        search_start = datetime.fromisoformat(start_s).replace(tzinfo=tz)
+        search_end = datetime.fromisoformat(end_s).replace(tzinfo=tz)
+        busy_blocks = []
+        if args.busy_blocks:
+            with open(args.busy_blocks, encoding="utf-8") as f:
+                raw = json.load(f)
+            for b in raw:
+                busy_blocks.append((
+                    datetime.fromisoformat(b["start"]).replace(tzinfo=tz),
+                    datetime.fromisoformat(b["end"]).replace(tzinfo=tz),
+                ))
+        recipient_circles = person.get("circles") or []
+        availability_slots = free_slots(
+            search_start=search_start,
+            search_end=search_end,
+            meeting_length_minutes=args.meeting_length,
+            rules=rules,
+            busy_blocks=busy_blocks,
+            recipient_circles=recipient_circles,
+        )
+
+    prompt = build_compose_prompt(ctx, voice, inbound, availability_slots=availability_slots)
 
     print("=" * 72)
     print("RECIPIENT")
@@ -149,6 +185,15 @@ def main() -> int:
     for k in ("register", "politeness_strategy", "politeness_weight",
               "direction", "power_description", "distance_description"):
         print(f"  {k}: {voice[k]}")
+
+    if availability_slots is not None:
+        print()
+        print("=" * 72)
+        print("AVAILABILITY")
+        print("=" * 72)
+        print(f"  computed_slots: {len(availability_slots)}")
+        for s, e in availability_slots:
+            print(f"    {s.strftime('%a %b %d %H:%M')} - {e.strftime('%H:%M %Z')}")
 
     if args.print_prompt_only:
         print()
