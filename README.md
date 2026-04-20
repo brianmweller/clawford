@@ -74,7 +74,6 @@ the guide is the field manual.
 
 - [20 — Scripts and configs](guide-v3/20-scripts-and-configs.md) — The catalog. A lookup, not a read-through.
 - [21 — Glossary](guide-v3/21-glossary.md) — Every Clawford-specific term, alphabetically.
-- [Bonus — The Ballad of Mr Fixit](guide-v3/ballad-of-mr-fixit.md) — A five-act tragedy covering just the first day of setup.
 
 ## The Agents
 
@@ -121,7 +120,7 @@ clawford/
 │   │                      # fleet-health.py, deploy helpers
 │   └── brain/             # git-tracked brain config + scripts
 ├── telegram-relay/        # Local Telegram ↔ Claude Code bot
-├── guide-v3/              # Field guide (setup, operation, hardening) + Ballad
+├── guide-v3/              # Field guide (setup, operation, hardening)
 └── tests/                 # Test harness
 ```
 
