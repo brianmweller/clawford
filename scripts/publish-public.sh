@@ -81,15 +81,23 @@ git filter-repo --force --invert-paths --paths-from-file "$SCRUB_PATHS"
 echo "[3/5] Applying text replacements..."
 git filter-repo --force --replace-text "$REPLACEMENTS"
 
+# trim leading + trailing whitespace via bash parameter expansion.
+# (Previously used xargs, which mangles apostrophes in literals like
+# "the operator's" — xargs treats ' as a shell quote delimiter.)
+_trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
 # Verify: any scrubbed path that survived is a failure.
 echo "[4/5] Verifying scrub..."
 fail=0
 while IFS= read -r path; do
-  # Strip comment and whitespace.
   path="${path%%#*}"
-  path="$(echo "$path" | xargs)"
+  path="$(_trim "$path")"
   [[ -z "$path" ]] && continue
-  # Strip trailing slash for file existence check.
   if [[ -e "$WORK/$path" || -e "$WORK/${path%/}" ]]; then
     echo "  FAIL: $path survived the scrub" >&2
     fail=1
@@ -97,10 +105,14 @@ while IFS= read -r path; do
 done < "$SCRUB_PATHS"
 
 # Verify: PII literals from replacements.txt must not appear at HEAD.
+# Skip `regex:` rules — they're patterns not literals, and skip lines
+# whose literal is a meta-token like 'regex' after prefix strip.
 while IFS= read -r line; do
   line="${line%%#*}"
-  line="$(echo "$line" | xargs)"
+  line="$(_trim "$line")"
   [[ -z "$line" ]] && continue
+  [[ "$line" == regex:* ]] && continue
+  [[ "$line" == glob:* ]] && continue
   literal="${line%%==>*}"
   [[ -z "$literal" ]] && continue
   if git -C "$WORK" grep -q -F -- "$literal" 2>/dev/null; then
