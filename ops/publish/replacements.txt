@@ -1,6 +1,7 @@
 ***REMOVED***
-replacement` per line. Comments via leading '#' + space==>replacement` per line. Comments via leading '#'.
-#
+replacement` per line. Comments via leading '#' + space==>replacement` per line. Comments via leading '#' + space
+***REMOVED***
+***REMOVED***
 ***REMOVED***
 ***REMOVED***
 
@@ -40,3 +41,24 @@ placeholder.sibling==>placeholder.sibling
 111111111==>111111111
 <your-tailscale-host>==><your-tailscale-host>
 openclaw@<your-tailscale-host>==>ops@<your-tailscale-host>
+
+***REMOVED***
+example.webex.com==>example.webex.com
+/meet/alice==>/meet/alice
+
+***REMOVED***
+***REMOVED***
+sam.smith==>sam.smith
+operator_emails==>operator_emails
+operator_emails==>operator_emails
+_operator_emails==>_operator_emails
+sam-smith==>sam-smith
+priya-rivera==>priya-rivera
+priya-rivera==>priya-rivera
+ravi-rivera==>ravi-rivera
+sam smith==>sam smith
+priya rivera==>priya rivera
+
+***REMOVED***
+***REMOVED***
+regex:\bbrian\b==>operator
