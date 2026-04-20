@@ -72,7 +72,7 @@ FAMILY_EMAIL_MAP = {
         ],
     },
 
-    # Arnold — paternal uncle (Pat's brother)
+    # paternal uncle (Pat's brother)
     "alex.smith@example.com": {
         "name": "Alex Smith",
         "relation": "paternal uncle",
@@ -80,7 +80,7 @@ FAMILY_EMAIL_MAP = {
         "facts": ["Sam's paternal uncle (Pat Smith's brother)", "Married to Dana Smith"],
     },
 
-    # Robin — paternal aunt (Arnold's wife)
+    # paternal aunt (Alex Smith's wife)
     "dana.smith@example.com": {
         "name": "Dana Smith",
         "relation": "paternal aunt",
@@ -88,7 +88,7 @@ FAMILY_EMAIL_MAP = {
         "facts": ["Sam's paternal aunt (by marriage to Alex Smith)"],
     },
 
-    # Quinn family — Robin's aunt/uncle (Sam's great-aunt/uncle)
+    # Quinn family — great-aunt/uncle (Sam's great-aunt/uncle)
     "quinn.family@example.com": {
         "name": "Frances and Gerald Quinn",
         "relation": "great-aunt and great-uncle",

@@ -2,10 +2,8 @@
   "operator_emails": [
     "sam.smith@example.com",
     "sam.smith.alt@example.com",
-    "sam.smith@airbnb.example",
-    "sam.smith@chicagobooth.example",
-    "sam.smith@kellogg.example",
-    "sam.smith@uchicago.example",
+    "sam.smith@example.org",
+    "sam.smith@university.example",
     "samsmith@example.com"
   ],
   "email_aliases": {
