@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 
 import memory_writer  # type: ignore
 import pending_actions  # type: ignore
+import state_introspection  # type: ignore
 import subprocess_helpers  # type: ignore
 
 
@@ -707,7 +708,29 @@ TOOLS: list[dict] = [
             "required": ["area_id"],
         },
     },
+    {
+        "type": "function",
+        "name": "get_recent_runs",
+        "description": (
+            "Return your own recent cron-run activity in the operator's "
+            "timezone (PT). Use this BEFORE answering questions like "
+            "'did you run today?', 'what did you do?', 'why didn't "
+            "you X?'. Returns per-run status + summary counts. "
+            "Default window is 24h."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "since_hours": {"type": "integer", "default": 24},
+            },
+            "required": [],
+        },
+    },
 ]
+
+
+def get_recent_runs(since_hours: int = 24) -> dict:
+    return state_introspection.recent_runs(AGENT_ID, since_hours=since_hours)
 
 
 EXECUTORS: dict = {
@@ -732,4 +755,5 @@ EXECUTORS: dict = {
     "confirm_coaching_area_add": confirm_coaching_area_add,
     "propose_coaching_area_remove": propose_coaching_area_remove,
     "confirm_coaching_area_remove": confirm_coaching_area_remove,
+    "get_recent_runs": get_recent_runs,
 }

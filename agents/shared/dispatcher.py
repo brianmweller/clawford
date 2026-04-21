@@ -141,14 +141,31 @@ def _read_agent_doc(agent_id: str, name: str) -> str:
         return ""
 
 
+_META_QA_PREAMBLE = (
+    "# Answering questions about yourself\n\n"
+    "When the operator asks about your recent activity, state, or why "
+    "something did or didn't happen (e.g. \"did you run today?\", "
+    "\"what did you draft?\", \"why is X empty?\"), your first "
+    "action must be to call your state-inspection tools — typically "
+    "`get_recent_runs` — before composing a reply. Do not "
+    "confabulate from the static description of your role: the "
+    "description tells you what you aim to do, the tools tell you "
+    "what actually happened. If the tools return no matching "
+    "activity, say so plainly rather than inventing history."
+)
+
+
 def _build_system_prompt(agent_id: str, tools: list[dict]) -> str:
     """Concatenate the 5 conversational docs + tool manifest + context.
 
     Loaded from Dropbox brain: SOUL (principles), IDENTITY (persona/voice),
     USER (who the operator is), AGENTS (fleet map for cross-agent routing),
     MEMORY (learned rules, writable via the remember tool).
+
+    Prepends the fleet-wide meta-QA preamble so every agent grounds
+    its answers in tool output rather than static prompt knowledge.
     """
-    parts = []
+    parts = [_META_QA_PREAMBLE]
     soul = _read_agent_doc(agent_id, "SOUL.md")
     if soul:
         parts.append("# Your identity (SOUL.md)\n\n" + soul.strip())

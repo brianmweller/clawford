@@ -356,3 +356,23 @@ def test_system_prompt_skips_missing_docs(disp, tmp_path, monkeypatch):
     assert "ONLY_SOUL" in prompt
     assert "IDENTITY.md" not in prompt
     assert "AGENTS.md" not in prompt
+
+
+def test_system_prompt_includes_meta_qa_preamble(disp, tmp_path, monkeypatch):
+    """Fleet-wide: when the operator asks meta-questions about the agent's
+    own state, the agent must call its state-inspection tools before
+    replying — not recite its static role prompt. This preamble is
+    what teaches that behavior."""
+    brain_dir = _brain_agent_dir(tmp_path, "fake-agent")
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT",
+                        str(tmp_path / "dropbox" / "openclaw-backup"))
+    (brain_dir / "SOUL.md").write_text("whatever", encoding="utf-8")
+
+    import sys
+    for m in ("brain", "dispatcher"):
+        if m in sys.modules:
+            del sys.modules[m]
+    import dispatcher as disp2
+    prompt = disp2._build_system_prompt("fake-agent", [])
+    assert "get_recent_runs" in prompt
+    assert "confabulate" in prompt.lower() or "invent" in prompt.lower()

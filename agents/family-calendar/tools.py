@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 import pending_actions  # type: ignore
 import memory_writer  # type: ignore
+import state_introspection  # type: ignore
 from subprocess_helpers import run_json_script, is_subprocess_error  # type: ignore
 
 # Put the agent dir on sys.path so we can import agent-root modules.
@@ -424,7 +425,29 @@ TOOLS: list[dict] = [
             "required": ["rule"],
         },
     },
+    {
+        "type": "function",
+        "name": "get_recent_runs",
+        "description": (
+            "Return your own recent cron-run activity in the operator's "
+            "timezone (PT). Use this BEFORE answering questions like "
+            "'did you run today?', 'what did you do?', 'why didn't "
+            "you X?'. Returns per-run status + summary counts. "
+            "Default window is 24h."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "since_hours": {"type": "integer", "default": 24},
+            },
+            "required": [],
+        },
+    },
 ]
+
+
+def get_recent_runs(since_hours: int = 24) -> dict:
+    return state_introspection.recent_runs(AGENT_ID, since_hours=since_hours)
 
 
 EXECUTORS: dict = {
@@ -443,4 +466,5 @@ EXECUTORS: dict = {
     "confirm_remember": confirm_remember,
     # Dispatcher shortcut — callback buttons on task reminders.
     "handle_task_callback": handle_task_callback,
+    "get_recent_runs": get_recent_runs,
 }

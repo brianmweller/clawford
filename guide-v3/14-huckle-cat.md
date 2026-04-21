@@ -332,6 +332,24 @@ A twin pipeline, landing in a sibling session, replaces the half-hour polling of
 
 The polling path above stays in place as belt-and-suspenders. The push path is faster for responsive inbounds ("can you call in ten minutes?") but can miss events under Pub/Sub edge cases and systemd restarts; the poll loop guarantees eventual delivery. The full architecture lives in [Ch 18 — The inbox](18-the-inbox.md).
 
+### The 9 PM silence
+
+The correspondence layer was a month old when the operator sent Huckle Cat a one-line question at 9:07 PM PT and got no reply. Two check-marks on the Telegram side. No typing indicator, no error bubble, no eventual response — just silence. The question itself was trivial: *"Did you draft any emails today?"*
+
+The conversation JSONL at `~/.clawford/inbox/connector.jsonl` told the wrong story. An assistant turn was recorded at the right timestamp, saying *"No — I don't send or draft emails unless you ask me to help with a specific person."* Every signal short of actually looking at the operator's phone suggested the reply had gone through. The clue was one line in `~/.clawford/logs/inbox.log`:
+
+```
+telegram send DENIED by reviewer for agent='connector':
+  The agent's role is to send relationship nudges/notes triage,
+  not to conduct a direct conversation reply like this.
+```
+
+The outbound reviewer had denied the message. Dispatcher's persist-before-send ordering meant the JSONL recorded an assistant turn that had never actually left the VPS. Two bugs stacked: the reviewer's role summary for connector forbade *"auto-replies"* too broadly, and the reply itself — even if it had reached Telegram — was a confident lie. Auto-compose had been drafting Gmail drafts for weeks. The agent answered from its static role prompt because it had no tool to look at its own cron logs.
+
+The fix landed as a fleet-wide edit on 2026-04-21: the reviewer's role summaries now affirmatively license conversational Q&A about the agent's own state; every agent's `tools.py` exposes `get_recent_runs`; and `_build_system_prompt` in the dispatcher carries a shared preamble teaching every agent to call its state-inspection tools before answering meta-questions. The full architecture lives in [Ch 18 — The inbox](18-the-inbox.md#conversational-grounding-and-the-outbound-reviewer). Huckle Cat was the agent that triggered the discovery; the lesson generalizes to the whole fleet.
+
+The meta-lesson is worth naming because it will recur: **an agent that doesn't know what it did today will confabulate, and the outbound reviewer will silently block the lie.** The two failure modes are linked — a better classifier wouldn't have helped if the underlying reply was still wrong, and a better reply wouldn't have helped if the reviewer kept denying it. Fix both or fix neither.
+
 ### The bubblewrap beat
 
 The three fact miners run under process-level isolation — the first brain-writing crons to adopt the P1.2 bubblewrap profile documented in [Ch 19 — Security and hardening](19-security-and-hardening.md). The file-based opt-in pattern: a line per cron log-name in `~/.clawford/bwrap-allowlist.txt`, read by the host-cron wrapper, triggers the `CLAWFORD_ISOLATION_MODE=bwrap` handoff before the script runs.

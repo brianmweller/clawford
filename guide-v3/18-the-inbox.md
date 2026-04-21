@@ -126,6 +126,50 @@ Every agent has `propose_remember` / `confirm_remember` — the self-learning me
 
 Mr Fixit's three producer tools are the operational ones: `propose_snooze_alert` mutes a noisy alert for a specified window, `propose_refresh_session` kicks the relevant auth/session-refresh script (Krisp tokens, Google OAuth, etc.), `propose_rerun_cron` re-fires a cron that missed or errored. Each stages behind a confirm button for the same reason Huckle Cat's note flow does — these mutate shared state (fleet-health entries, session files, cron run-history) and I want the button in the loop. Huckle Cat now carries the richest tool surface — sixteen LLM-callable tools plus three confirm executors, covering relationship lookups (`get_person`, `get_commitments`), on-demand re-runs of the morning cron (`force_nudge`, `force_triage`), draft composition (`draft_reply`), note and person-file creation (`propose_add_note`, `propose_add_person`), and inbox triage dismissal (`dismiss_triage_n`).
 
+Every agent also carries one fleet-shared tool — `get_recent_runs` — that exposes its own cron activity. The tool is a thin wrapper around `agents/shared/state_introspection.py`, which parses the uniform host-cron log format at `~/.clawford/logs/<agent-id>-*-host.log` and returns a PT-relative summary of recent runs, their statuses, and their JSON envelopes. It exists for one reason: without it, an agent asked "did you run today?" has no way to look at its own activity and will answer from the static description of its role, which is usually stale. See the next section.
+
+## Conversational grounding and the outbound reviewer
+
+The tool manifest and the conversation window together make an agent capable of responding. They do not, on their own, make it *correct*. Two load-bearing additions close the gap.
+
+### The outbound reviewer
+
+Every outbound Telegram message (and every agent-composed side effect — Gmail send, Calendar write, Playwright form submit) routes through `agents/shared/reviewer.py` before the wire. The reviewer is a small, fast LLM classifier asking one question: *does this proposed action match the declared role of the agent making it?* Three verdicts — `safe`, `warn`, `deny` — with a fourth `error` state for fail-open on model failure. In `enforce` mode a `deny` short-circuits the send and the caller returns `False` silently; in `warn` mode every non-`safe` verdict is logged for the weekly review pass and the send proceeds.
+
+The reviewer exists because two real incidents motivated it: [Sergeant Murphy's](13-sergeant-murphy.md) 5x-resend loop in 2026-04 where a stale cache iterated over the same five items and sent the same Telegram body five times in twenty minutes, and [Lowly Worm's](10-lowly-worm-newsfeed.md) LinkedIn smart-reply chip incident where a DM-read path accidentally triggered the DM-send path and auto-replied five times. A classifier asking "does this fit the agent's role?" catches both patterns. It is a second pair of eyes wired into the send path — one the operator never sees unless it logs something unusual.
+
+The classifier reads a per-agent `AGENT_ROLE_SUMMARIES` entry describing what each agent does and does not do. These summaries are the load-bearing piece of the reviewer's prompt. A summary that is too narrow triggers false-positive denies; a summary that is too wide lets a real misbehavior through. Both failure modes are recoverable but painful to diagnose.
+
+### The 2026-04-20 carve-out
+
+On the evening of 2026-04-20 the operator sent Huckle Cat a simple question — *"did you draft any emails today?"* — and got no reply. Two blue check-marks on the Telegram side; silence from the bot. The conversation JSONL at `~/.clawford/inbox/connector.jsonl` told a misleading story: an assistant turn was recorded at the expected timestamp. Nothing had ever reached Telegram. `grep` on `~/.clawford/logs/inbox.log` produced the one line that explained it:
+
+```
+telegram send DENIED by reviewer for agent='connector':
+  The agent's role is to send relationship nudges/notes triage,
+  not to conduct a direct conversation reply like this.
+```
+
+The reviewer's role summary for connector said *"sends nudges + notes triage to the operator on Telegram. Never sends external messages, never auto-replies."* The LLM classifier read *"never auto-replies"* as forbidding conversational DMs with the operator, not just the intended *"don't auto-reply to inbound emails on the operator's behalf."* It denied a message that was obviously safe. Persistence-before-send in `dispatcher.py` made the failure silent: the assistant turn got appended to the conversation log before the `send_message` call, and the denied return value was logged to stderr but not surfaced.
+
+The fix is fleet-wide. Every agent's role summary now affirmatively licenses one class of reply — *"Answers the operator's Telegram DMs about its own tracking activity, recent runs, and pipeline state."* The carve-out is narrowly scoped to the agent's own state (not arbitrary conversation) so the reviewer still denies attempts to send messages *about unrelated topics to external recipients.* The regression tests in `test_reviewer_conversational_carveout.py` pin both halves: a plausible meta-reply classifies `safe`, a fabricated external-send reply still classifies `deny`.
+
+Three downstream wording clarifications rode the same edit. Connector's *"never auto-replies"* got replaced with *"drafts Gmail replies to known contacts (saved as Gmail drafts for the operator to review and send — never auto-sends),"* because the auto-compose cron does exactly that and the role summary needs to match what the code actually does. News-digest's *"does not auto-reply"* got scoped to LinkedIn specifically — *"does not post, comment, DM, or auto-reply to LinkedIn messages"* — so the clause stops reading ambiguously against an inbound Telegram DM. The word *"never"* in every summary now refers to external recipients, not to the operator.
+
+### The meta-QA preamble
+
+The reviewer fix was necessary but not sufficient. Even if Huckle Cat's reply had reached Telegram, it would have been wrong: *"I don't send or draft emails unless you ask me to help with a specific person."* The auto-compose cron has been drafting Gmail drafts for weeks. The agent didn't know what it did today because its only inputs were its static role prompt and the conversation window — neither of which contained a view of today's cron runs.
+
+The fix is one paragraph at the top of every agent's system prompt, injected by `_build_system_prompt` in `dispatcher.py` before any of the per-agent docs:
+
+> When the operator asks about your recent activity, state, or why something did or didn't happen (e.g. "did you run today?", "what did you draft?", "why is X empty?"), your first action must be to call your state-inspection tools — typically `get_recent_runs` — before composing a reply. Do not confabulate from the static description of your role: the description tells you what you aim to do, the tools tell you what actually happened. If the tools return no matching activity, say so plainly rather than inventing history.
+
+The preamble is the lightest possible intervention — no new agent config, no per-agent edit, one shared paragraph that travels with the dispatcher. Paired with `get_recent_runs` (the read tool every agent's `tools.py` exposes), it shifts the default behavior for meta-questions from *"answer from the role prompt"* to *"look at the log first, then answer."*
+
+The pattern generalizes. Any future question-class that an agent can't answer accurately from its static docs — *"how many drafts are still pending review?"*, *"when did you last refresh my calendar?"* — gets a tool, gets registered in the agent's `tools.py`, and becomes reachable. The preamble teaches the LLM to look for those tools before guessing.
+
+> 🔦 **Tip.** If an agent is giving confident wrong answers to meta-questions, check its `tools.py` first. A missing `get_recent_runs` tool, or one whose description doesn't hint at the question the operator is actually asking, is the most common cause. Add the description hint; re-deploy; ask again. The LLM is usually a mediocre fiction writer and a good tool-picker — lean on the picker.
+
 ## The inline button UX
 
 **Single action.** When one producer tool fires in a turn:

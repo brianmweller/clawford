@@ -37,6 +37,7 @@ if _THIS_DIR not in sys.path:
 
 import memory_writer  # type: ignore
 import pending_actions  # type: ignore
+import state_introspection  # type: ignore
 
 import _cron_lookup  # type: ignore
 
@@ -481,7 +482,29 @@ TOOLS: list[dict] = [
             "required": ["name", "reason"],
         },
     },
+    {
+        "type": "function",
+        "name": "get_recent_runs",
+        "description": (
+            "Return your own recent cron-run activity in the operator's "
+            "timezone (PT). Use this BEFORE answering questions like "
+            "'did you run today?', 'what did you do?', 'why didn't "
+            "you X?'. Returns per-run status + summary counts. "
+            "Default window is 24h."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "since_hours": {"type": "integer", "default": 24},
+            },
+            "required": [],
+        },
+    },
 ]
+
+
+def get_recent_runs(since_hours: int = 24) -> dict:
+    return state_introspection.recent_runs(AGENT_ID, since_hours=since_hours)
 
 
 EXECUTORS: dict = {
@@ -492,6 +515,7 @@ EXECUTORS: dict = {
     "propose_snooze_alert": propose_snooze_alert,
     "propose_refresh_session": propose_refresh_session,
     "propose_rerun_cron": propose_rerun_cron,
+    "get_recent_runs": get_recent_runs,
     # Shortcut-only (not in TOOLS manifest):
     "confirm_remember": confirm_remember,
     "confirm_snooze_alert": confirm_snooze_alert,
