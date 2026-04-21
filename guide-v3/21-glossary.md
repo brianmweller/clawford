@@ -144,7 +144,7 @@ Load-bearing war stories referenced by name across multiple chapters. Each one p
 
 **The probation episode (2026-04-11).** [Mr Fixit](09-mr-fixit.md#the-probation-episode). `chr()` approval incident that violated three agent rules and triggered a same-day brain transplant. Produced the five Diagnostic Discipline rules, the P1-P4 failure framework, and the pre-baked `retire.sh`.
 
-**The stale-dates bug (2026-04-14).** [Huckle Cat](14-huckle-cat.md#the-stale-dates-bug-and-the-daily-refresh-fix). Morning relationship nudge flagged contacts the operator had just texted because the mining pipeline stamped `last_interaction` once at deploy time and never refreshed. Fix: `daily-refresh` cron re-mines a 14-day window every morning. Second-order: 6-attendee cap on transcript-based refresh to prevent all-hands meetings from silently clearing the overdue list.
+**The stale-dates bug (2026-04-14 / 2026-04-21).** [Huckle Cat](14-huckle-cat.md#the-stale-dates-bug-and-the-refresh-crons). Morning relationship nudge flagged contacts the operator had just texted because the mining pipeline stamped `last_interaction` once at deploy time and never refreshed. Two-part fix: `daily-refresh` (2026-04-14) re-mines a 14-day window each morning covering Gmail-inbound + GCal + GMessages; `gmail-sent-mine` (2026-04-21) walks the Sent folder every two hours to catch outbound email `daily-refresh` misses. Second-order: 6-attendee cap on transcript-based refresh to prevent all-hands meetings from silently clearing the overdue list; the ✅ done button now also stamps `last_interaction = today`.
 
 ## Retired terms
 

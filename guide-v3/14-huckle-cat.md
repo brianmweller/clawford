@@ -1,6 +1,6 @@
 # Huckle Cat 🐱🤝 — the connector agent
 
-*Last updated: 2026-04-20 · Reading time: ~35 min · Difficulty: hard*
+*Last updated: 2026-04-21 · Reading time: ~35 min · Difficulty: hard*
 
 > **TL;DR.** Huckle Cat is the relationship agent — the one that inverts the usual shape of a Clawford agent. Instead of wrapping a single external API the way Mr Fixit wraps the fleet's own heartbeat or Mistress Mouse wraps Google Calendar, Huckle Cat is built **around the shared brain itself**. His input is six disparate data sources (Gmail, Google Calendar, Google Contacts, Google Messages, meeting transcripts, and Workflowy) and his output is a relationship intelligence layer: ~280 people files in the brain with names, emails, phones, circles, last-interaction timestamps, enriched context notes, and facts pulled from email signatures. He composes a morning relationship nudge at 5 AM PT (overdue / approaching / healthy), triages a shared notes inbox twice a day, and keeps `last_interaction` fresh via a daily re-mining pass. He was the last agent in the fleet to deploy, and he is the only one where the [mining pipeline](#the-mining-pipeline) runs **before** the first cron fires — by design.
 
@@ -38,7 +38,7 @@ Three things, in order of operational weight.
 
 **Seven-source fanout is a data-quality problem, not an engineering problem.** Each of the seven miners produces output of different shapes, different fidelity, different levels of trust. Gmail gives you rich history but also gives you every newsletter you ever subscribed to. Google Contacts gives you high-signal saved contacts and also 1,900 auto-saved "other contacts" from stray CCs. Meeting transcripts give you participants but have to be matched back to calendar attendees via fuzzy name+title logic. Workflowy gives you ~3,000 meeting nodes but many of them reference people by first name only. The aggregator's job is to dedupe, score, merge aliases, and produce a coherent per-person record — and the only way to verify that it worked is a human review pass before finalization. That review pass is a real chunk of operator time on first deploy, and it cannot be skipped.
 
-**Stale `last_interaction` timestamps are the failure mode you will actually hit.** The mining pipeline runs once at deploy time and stamps every contact's `last_interaction` field with the most recent message found in the scan. If nothing updates those timestamps afterwards, the morning nudge will, within days, start flagging contacts the operator has interacted with since — which is the textbook way to lose operator trust in a relationship-nudge agent. The `daily-refresh` cron (landed 2026-04-14) exists specifically to fix this; see [§ The stale-dates bug and the daily-refresh fix](#the-stale-dates-bug-and-the-daily-refresh-fix).
+**Stale `last_interaction` timestamps are the failure mode you will actually hit.** The mining pipeline runs once at deploy time and stamps every contact's `last_interaction` field with the most recent message found in the scan. If nothing updates those timestamps afterwards, the morning nudge will, within days, start flagging contacts the operator has interacted with since — which is the textbook way to lose operator trust in a relationship-nudge agent. Two crons keep the dates fresh: `daily-refresh` (landed 2026-04-14) re-mines a rolling Gmail-inbound / Google Calendar / Google Messages window once a day, and `gmail-sent-mine` (landed 2026-04-21) walks the Sent folder every two hours to catch outbound email — the dominant channel for colleagues where the Messages scraper sees nothing. See [§ The stale-dates bug and the refresh crons](#the-stale-dates-bug-and-the-refresh-crons).
 
 ## The mining pipeline
 
@@ -101,7 +101,7 @@ The wrapper scripts around this:
 
 The pattern generalizes: if you have an important data source with no API, a hand-rolled DevTools snippet run from a persistent-profile browser gets you 80% of the way to "this data is now part of the brain." It is the same shape as a full Tier 3 auth flow, minus the anti-bot armor and the MFA automation.
 
-## The stale-dates bug and the daily-refresh fix
+## The stale-dates bug and the refresh crons
 
 Huckle Cat deployed on 2026-04-12 with 279 seeded people files. Each people file had a `last_interaction` field stamped with the most recent interaction found during the one-time mining run. That was the operator state on day 1.
 
@@ -109,26 +109,35 @@ Two days later, the morning relationship nudge started flagging contacts the ope
 
 The root cause was simple in retrospect: **the mining pipeline ran once, and the people files were frozen from that moment forward.** The morning relationship nudge was reading a snapshot from April 12 every day, and every day the snapshot was more wrong.
 
-The 2026-04-14 fix introduced `daily-refresh.py`, a new host cron that runs at `0 10 UTC` (3:00 AM PT), re-mines a 14-day rolling Gmail + Google Calendar + Google Messages window, and updates the `last_interaction` field in the affected people files in place. The morning relationship nudge at `30 10 UTC` then reads the refreshed `last_interaction` values and produces an output that reflects the real state of things.
+The 2026-04-14 fix introduced `daily-refresh.py`, a host cron at `0 10 UTC` (3:00 AM PT) that re-mines a 14-day rolling window from Gmail (inbound), Google Calendar, and Google Messages, and updates the `last_interaction` field in the affected people files in place. The morning nudge at `30 10 UTC` then reads the refreshed values and composes against the real state of things.
 
-Three second-order details fell out:
+A week later the agent tripped on a narrower version of the same class of bug. The operator had emailed two colleagues the day before and Huckle flagged both as overdue the next morning. `daily-refresh` re-mines Gmail *inbound* — replies from those colleagues would have updated the dates — but nobody had replied yet. The operator's outbound send wasn't a signal the system was scanning at all. For relationships where email is the dominant channel (colleagues, extended family who don't text), a full week of outbound conversation could produce zero `last_interaction` updates.
+
+The 2026-04-21 follow-up fix introduced `gmail-sent-mine.py`, a second host cron at `15 */2 UTC` (every two hours, offset from `gmessages-mine`) that walks the operator's Sent folder, maps each recipient email to a people slug via the same `build_email_to_slug_map` helper the other miners use, and stamps `last_interaction` with the send date. Max-merged — a fresher existing date (from Krisp, from `gmessages-mine`, from a `/checkin`) is never rewound by an older sent message. The cursor lives at `cache/gmail-sent-mine-cursor.json`; the bootstrap window is 90 days. The per-run stats land at `cache/mined-gmail-sent.json` with an `unmatched_samples` field that makes it easy to see which Sent-folder recipients don't have a people file yet.
+
+A parallel fix in the same commit wired `handle_nudge_action("done")` to stamp `last_interaction = today` when the operator presses ✅ done on a morning-nudge entry. Before, the button only wrote to `snoozes.json`, which hides the contact for thirty days but leaves the cadence clock stuck. After, pressing ✅ done is an explicit "I contacted them today" signal, max-merged against the existing date. The operator gets the quick manual path, the miner gets the passive path, and together they close the gap that the inbound-only `daily-refresh` left open.
+
+Four second-order details fell out:
 
 1. **Meeting transcript attendee-count cap.** The transcript source can also update `last_interaction` — a 1:1 meeting transcript with person X is strong evidence the operator interacted with person X that day. But a 12-attendee all-hands meeting is not evidence of a real interaction with any individual attendee. The fix caps attendee-based refresh at 6 participants; meetings larger than that don't stamp `last_interaction` on anybody. This prevents the operator's "overdue" list from being silently cleared by their weekly all-hands.
 
-2. **Cron ordering is load-bearing.** `gmessages-mine` runs at `0 */2 UTC` (every 2 hours, writes `cache/mined-gmessages.json`). `daily-refresh` runs at `0 10 UTC` (reads `mined-gmessages.json`, updates people files). `morning-relationship-nudge` runs at `30 10 UTC` (reads updated people files, composes brief, writes `cache/morning-brief-ready.txt` for fleet-deliver at `0 12 UTC`). The 30-minute gap between refresh and nudge is slack for the refresh cron — if you make them adjacent, a slow refresh run produces a nudge against stale data. Keep the slack.
+2. **Cron ordering is load-bearing.** `gmessages-mine` runs at `0 */2 UTC` (writes `cache/mined-gmessages.json`). `gmail-sent-mine` runs at `15 */2 UTC` (writes direct to people files with max-merge; the 15-min offset keeps the two Google OAuth flows from firing simultaneously). `daily-refresh` runs at `0 10 UTC` (reads `mined-gmessages.json`, updates people files). `morning-relationship-nudge` runs at `30 10 UTC` (reads updated people files, composes brief, writes `cache/morning-brief-ready.txt` for fleet-deliver at `0 12 UTC`). The 30-minute gap between refresh and nudge is slack for the refresh cron — if you make them adjacent, a slow refresh run produces a nudge against stale data. Keep the slack.
 
 3. **Cache freshness is not verified.** `morning-relationship-nudge` does *not* currently check whether `cache/mined-gmessages.json` is fresh before composing the brief. If `gmessages-mine` fails silently for a week, the nudge will quietly start using 7-day-old Google Messages data. This is a known gap — see [Pitfalls](#pitfalls).
 
+4. **Max-merge is the contract.** Every signal that writes `last_interaction` — `daily-refresh`, `gmail-sent-mine`, the ✅ done button, `/checkin` — goes through `daily_refresh.update_last_interaction`, which reads the existing date, keeps whichever is newer, and atomic-writes the result. This means the crons can run in any order, re-run after partial failures, and produce the same final state. The cursor advance in `gmail-sent-mine` is the only piece where ordering matters, and it only persists on a successful run.
+
 ## Current state
 
-As of 2026-04-20, Huckle Cat runs ten host crons off `~/.clawford/connector-workspace/`.
+As of 2026-04-21, Huckle Cat runs eleven host crons off `~/.clawford/connector-workspace/`.
 
 **Host cron surface.** Registered via `ops/scripts/install-host-cron.sh`:
 
 | Cron | Schedule (UTC) | What it does |
 |------|----------------|--------------|
 | `gmessages-mine` | `0 */2 * * *` | Camoufox + DevTools JS snippet, scrapes Google Messages Web, writes `cache/mined-gmessages.json` |
-| `daily-refresh` | `0 10 * * *` | Re-mines 14-day Gmail + GCal + GMessages window; updates `last_interaction` in people files; writes `cache/upcoming-meetings.json` |
+| `gmail-sent-mine` | `15 */2 * * *` | Walks the Gmail Sent folder (cursor-based), maps To/Cc recipients to people slugs, max-merges `last_interaction = message_date` directly onto people files. Covers the outbound-email signal `daily-refresh` misses. 15-min offset from `gmessages-mine` keeps the two Google OAuth flows from stacking |
+| `daily-refresh` | `0 10 * * *` | Re-mines 14-day Gmail-inbound + GCal + GMessages window; updates `last_interaction` in people files; writes `cache/upcoming-meetings.json` |
 | `morning-relationship-nudge` | `30 10 * * *` | Calls `people-scan.py`, groups by overdue / approaching / healthy, writes `cache/morning-brief-ready.txt` for fleet-deliver at `0 12 UTC` |
 | `notes-triage-alert` | `0 8,20 * * *` | Reads `notes/inbox.md`, LLM-classifies new entries into `{fact, commitment, task, shopping, unclear}`, sends twice-daily Telegram digest with inline `/confirm N` + `/dismiss N` |
 | `birthday-miner` | `0 6 * * 0` | Weekly: scans Google Calendar for recurring birthday events, resolves event titles to person slugs, upserts identity facts so `/people [name]` surfaces a birthday line |
@@ -150,17 +159,21 @@ MEMORY.md                 # persistent notes
 token.json                # Google OAuth (gitignored)
 credentials.json          # Google OAuth client (gitignored)
 cache/
-  mined-gmessages.json    # gmessages-mine output, read by daily-refresh
-  upcoming-meetings.json  # daily-refresh output, read by nudge
-  pending-triage.json     # notes-triage pending state
+  mined-gmessages.json       # gmessages-mine output, read by daily-refresh
+  mined-gmail-sent.json      # gmail-sent-mine per-run summary (stats + unmatched-sample)
+  gmail-sent-mine-cursor.json # gmail-sent-mine cursor (last_internalDate + last_run_at)
+  upcoming-meetings.json     # daily-refresh output, read by nudge
+  pending-triage.json        # notes-triage pending state
 scripts/
-  mine/                   # the one-time mining pipeline (7 miners + aggregator + enricher)
-  gmessages-auth.py       # Camoufox QR pairing
-  gmessages-mine.py       # ongoing scraper
-  daily-refresh.py        # 14d rolling refresh
-  people-scan.py          # deterministic scan called by nudge
+  mine/                      # the one-time mining pipeline (7 miners + aggregator + enricher)
+  gmessages-auth.py          # Camoufox QR pairing
+  gmessages-mine.py          # ongoing Messages scraper
+  gmail-sent-mine.py         # ongoing Sent-folder miner (stamps last_interaction direct)
+  gmail_sent_mine_lib.py     # cursor I/O + recipient extraction (pure helpers, unit-tested)
+  daily-refresh.py           # 14d rolling refresh (owns update_last_interaction)
+  people-scan.py             # deterministic scan called by nudge
   morning-relationship-nudge.py  # the orchestrator
-  notes-triage-alert.py   # the triage orchestrator
+  notes-triage-alert.py      # the triage orchestrator
 ```
 
 **Brain state** lives outside the workspace, in the shared brain on Dropbox — this is the point of Huckle Cat. After the initial mining run plus the correspondence-layer fact import (see below), the operator's shared brain carries `~400` people files under `people/` and `~600` durable facts under `facts/`, every fact tagged with an `audience_scope` that gates which kinds of recipient will see it surface in a draft.
