@@ -1223,6 +1223,7 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "retry_policy.py",
     "reviewer.py",           # P0.1 — outbound action classifier
     "scan_fields.py",        # P0.4 — wire-in helper (per-agent ingest)
+    "state_introspection.py",  # 2026-04-20 — host-cron log parser for get_recent_runs
     "subprocess_helpers.py",
     "telegram_api.py",
     "voice.py",              # 2026-04-19 — B&L politeness + register model for draft-compose
