@@ -61,9 +61,27 @@ def parse_facts_file(path: Path) -> list[dict]:
             "source_agent": fields.get("source_agent", ""),
             "audience_scope": _parse_audience_scope(fields.get("audience_scope")),
             "mention_slugs": _parse_slug_list(fields.get("mention_slugs")),
+            "fact_type": fields.get("fact_type", ""),
+            "value": _parse_value_json(fields.get("value")),
             "raw": raw_block,
         })
     return facts
+
+
+def _parse_value_json(raw: str | None) -> dict | None:
+    """Parse the optional `value` field as a JSON object.
+    Returns None for missing, empty, or malformed content — the field
+    is best-effort metadata; a parse failure must not take down the reader."""
+    if not raw:
+        return None
+    raw = raw.strip()
+    if not raw or raw.lower() == "null":
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _parse_slug_list(raw: str | None) -> list[str]:
@@ -313,6 +331,8 @@ def upsert_fact(
     recorded_at: str,
     audience_scope: list[str] | None = None,
     mention_slugs: list[str] | None = None,
+    fact_type: str = "",
+    value: dict | None = None,
 ) -> dict:
     """Append a fact to ``facts/YYYY-MM.md`` (derived from ``recorded_at``),
     idempotent on ``(source_agent, subject, idempotency_key)``.
@@ -374,6 +394,10 @@ def upsert_fact(
         entry += f"- **audience_scope:** {json.dumps(audience_scope)}\n"
     if mention_slugs:
         entry += f"- **mention_slugs:** {json.dumps(mention_slugs)}\n"
+    if fact_type:
+        entry += f"- **fact_type:** {fact_type}\n"
+    if value is not None:
+        entry += f"- **value:** {json.dumps(value, ensure_ascii=False)}\n"
 
     with open(month_path, "a", encoding="utf-8") as f:
         if is_new:

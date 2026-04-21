@@ -216,6 +216,8 @@ def run(
                     recorded_at=now_iso,
                     audience_scope=f["audience_scope"],
                     mention_slugs=f.get("mention_slugs") or None,
+                    fact_type=f.get("fact_type", ""),
+                    value=f.get("value"),
                 )
                 if result["status"] == "reinforced":
                     stats["facts_reinforced"] += 1

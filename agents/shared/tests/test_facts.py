@@ -689,6 +689,133 @@ def test_load_facts_for_subject_unions_subject_and_mentions_without_duplicates(t
     assert len(ids) == len(set(ids))
 
 
+def test_upsert_fact_writes_fact_type_and_value_json(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    upsert_fact(
+        facts_dir=facts_dir,
+        subject="eliott-fitzgerald",
+        category="identity",
+        content="Eliott was born approx 2021-06.",
+        source_agent="connector",
+        idempotency_key="birth-claim",
+        recorded_at="2026-04-21T12:00:00Z",
+        audience_scope=["personal", "family"],
+        fact_type="birthdate",
+        value={"year": 2021, "month": 6, "day": None, "precision": "month"},
+    )
+    text = (facts_dir / "2026-04.md").read_text(encoding="utf-8")
+    assert "- **fact_type:** birthdate" in text
+    # value line must be JSON-serialized so structured readers can round-trip
+    assert '"year": 2021' in text
+    assert '"precision": "month"' in text
+
+
+def test_upsert_fact_omits_fact_type_line_when_empty(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    upsert_fact(
+        facts_dir=facts_dir,
+        subject="jane-doe",
+        category="event",
+        content="Jane moved to Seattle.",
+        source_agent="connector",
+        idempotency_key="move",
+        recorded_at="2026-04-21T12:00:00Z",
+        audience_scope=["personal"],
+    )
+    text = (facts_dir / "2026-04.md").read_text(encoding="utf-8")
+    assert "fact_type" not in text
+    # Narrative content is unchanged for untyped facts
+    assert "Jane moved to Seattle." in text
+
+
+def test_upsert_fact_omits_value_line_when_none(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    upsert_fact(
+        facts_dir=facts_dir,
+        subject="jane-doe",
+        category="identity",
+        content="x",
+        source_agent="connector",
+        idempotency_key="typed-no-value",
+        recorded_at="2026-04-21T12:00:00Z",
+        audience_scope=["personal"],
+        fact_type="birthdate",
+        value=None,
+    )
+    text = (facts_dir / "2026-04.md").read_text(encoding="utf-8")
+    # fact_type writes but value doesn't when None
+    assert "- **fact_type:** birthdate" in text
+    # Must not emit a bare `- **value:**` line when value is None
+    assert "- **value:**" not in text
+
+
+def test_parse_facts_file_roundtrips_fact_type_and_value(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "2026-04.md").write_text(
+        "# Facts — 2026-04\n"
+        "\n---\n\n"
+        "- **id:** connector-eliott-birth\n"
+        "- **content:** Eliott was born approx 2021-06.\n"
+        "- **subject:** eliott-fitzgerald\n"
+        "- **category:** identity\n"
+        "- **source_agent:** connector\n"
+        "- **confidence:** 0.7\n"
+        "- **recorded_at:** 2026-04-21T12:00:00Z\n"
+        "- **fact_type:** birthdate\n"
+        '- **value:** {"year": 2021, "month": 6, "precision": "month"}\n',
+        encoding="utf-8",
+    )
+    facts = parse_facts_file(facts_dir / "2026-04.md")
+    assert len(facts) == 1
+    assert facts[0]["fact_type"] == "birthdate"
+    assert facts[0]["value"] == {"year": 2021, "month": 6, "precision": "month"}
+
+
+def test_parse_facts_file_missing_fact_type_is_empty_string(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "2026-04.md").write_text(
+        "# Facts — 2026-04\n"
+        "\n---\n\n"
+        "- **id:** x\n"
+        "- **content:** narrative-only fact\n"
+        "- **subject:** jane-doe\n"
+        "- **category:** event\n"
+        "- **source_agent:** connector\n"
+        "- **confidence:** 0.8\n"
+        "- **recorded_at:** 2026-04-21T12:00:00Z\n",
+        encoding="utf-8",
+    )
+    facts = parse_facts_file(facts_dir / "2026-04.md")
+    assert len(facts) == 1
+    assert facts[0].get("fact_type", "") == ""
+    assert facts[0].get("value") is None
+
+
+def test_parse_facts_file_tolerates_malformed_value_json(tmp_path: Path):
+    # A corrupted value line should degrade to None, never raise
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "2026-04.md").write_text(
+        "# Facts — 2026-04\n"
+        "\n---\n\n"
+        "- **id:** x\n"
+        "- **content:** y\n"
+        "- **subject:** jane-doe\n"
+        "- **category:** identity\n"
+        "- **source_agent:** connector\n"
+        "- **confidence:** 0.9\n"
+        "- **recorded_at:** 2026-04-21T12:00:00Z\n"
+        "- **fact_type:** birthdate\n"
+        "- **value:** {not valid json\n",
+        encoding="utf-8",
+    )
+    facts = parse_facts_file(facts_dir / "2026-04.md")
+    assert facts[0]["fact_type"] == "birthdate"
+    assert facts[0].get("value") is None  # graceful degrade
+
+
 def test_load_facts_for_subject_respects_min_confidence_on_mention_matches(tmp_path: Path):
     facts_dir = tmp_path / "facts"
     facts_dir.mkdir()

@@ -80,25 +80,57 @@ Rules of thumb for audience_scope:
 - Identity facts that are intimate (health, beliefs, marital status) → ["personal"]
 - If truly generic (harmless everywhere) → ["public"]
 
-AGE NORMALIZATION (IMPORTANT — ages rot, birthdates don't):
-When the source material states a person's age (e.g. "Eliott is almost 5,"
-"the twins just turned 3," "baby is 10 months"), DO NOT store the raw age
-string. Instead, use the STATEMENT DATE above to compute an approximate
-birth month/year and store THAT as the fact. Reader LLMs will compute
-current age from today's date.
+STRUCTURED FACT TYPES (ages rot, structure doesn't):
+Every fact gets narrative `content` as a complete sentence. When the
+claim also fits one of the four types below, ALSO emit `fact_type` +
+`value` so structured readers don't have to re-parse prose. Emit
+fact_type ONLY when confident the value's required keys are satisfied.
 
-Format the content as:
-  "<Name> is <relationship>, born approx <YYYY-MM> (age ~<N> as of <STATEMENT_DATE>)"
+1. birthdate — use for ANY age or birth claim. Ages rot; birthdates
+   don't.
+   value: {{"year": <int>, "month": <int 1-12|null>, "day": <int 1-31|null>,
+           "precision": "year"|"month"|"day"}}
+   Example — if the STATEMENT DATE above is 2026-04-21 and the source
+   says "Eliott is approaching 5":
+     content: "Eliott is Jamie's son, born approx 2021-06 (age ~5 as of 2026-04-21)"
+     fact_type: "birthdate"
+     value: {{"year": 2021, "month": 6, "precision": "month"}}
+   For ranges like "2.5" offset back 2.5 years from the statement date.
+   "baby"/"newborn" → +/- 6 months. Never store a raw "age 5" narrative
+   without the structured value — that's worthless in 12 months.
 
-Example — if the statement date is 2026-04-21 and the source says
-"Eliott is approaching 5":
-  content: "Eliott is Jamie's son, born approx 2021-06 (age ~5 as of 2026-04-21)"
-  category: "identity"
-  confidence: 0.6  (approximate — widen the month to +/- 2 months mentally)
+2. employer — use when the claim names BOTH a title AND an org. Role
+   nested inside. If title-only (no org known), use fact_type: "role"
+   instead.
+   value: {{"company": <str required>, "role": <str>, "level":
+           "IC"|"Manager"|"Director"|"VP"|"CxO"|"Founder"|null,
+           "functional_area": <str>, "start_date": <ISO>,
+           "end_date": <ISO or null = current>,
+           "status": "current"|"former"}}
+   Example:
+     content: "Jane is Director of Data at Example Corp."
+     fact_type: "employer"
+     value: {{"company": "Example Corp", "role": "Director of Data",
+             "level": "Director", "functional_area": "Data",
+             "status": "current"}}
 
-Do the same for age ranges ("2.5" → month offset back 2.5 years from the
-statement date). For "baby"/"newborn", use +/- 6 months. Never store just
-"age 5" — that's worthless in 12 months.
+3. role — title-only (common in career-exploration emails). Set status
+   to "exploring" when the person is actively looking for this role;
+   "current" or "former" otherwise.
+   value: {{"title": <str required>, "level": <str>,
+           "functional_area": <str>,
+           "status": "current"|"exploring"|"former"}}
+
+4. preference — a liked/disliked/preferred thing.
+   value: {{"domain": <str required — "food"|"travel"|"communication"|...>,
+           "item": <str required>,
+           "polarity": "likes"|"dislikes"|"prefers"|"avoids",
+           "strength": "strong"|"moderate"|"mild"|null,
+           "context": <str>}}
+
+OVERLAP RULE: if a claim includes BOTH a title AND an org, emit
+fact_type: "employer" (with role nested). Title-only → fact_type:
+"role". Never both for the same employment claim.
 
 Confidence scale:
 - 0.8+ = fact stated explicitly (e.g. "I'm starting a new job at Acme")
@@ -115,6 +147,9 @@ Output a JSON object with a single "facts" array. Each fact has:
 - reason: short phrase naming the evidence
 - mention_slugs: (optional) list of slugs from "MENTION CANDIDATES" below
   that the fact names but isn't principally about. Omit or empty when none.
+- fact_type: (optional) "birthdate" | "employer" | "role" | "preference"
+  — only when the value's required keys are satisfied
+- value: (optional) structured value object matching fact_type's schema
 {mention_candidates_block}
 SOURCE MATERIAL
 {text}
@@ -286,6 +321,138 @@ def _build_idempotency_key(source_context: dict, subject_slug: str, content: str
     return f"{source}-{src_id}-{subject_slug}-{content_hash}"
 
 
+# ---------------------------------------------------------------------------
+# Structured-value validators (Phase 2)
+# ---------------------------------------------------------------------------
+
+_EMPLOYER_LEVELS = {"IC", "Manager", "Director", "VP", "CxO", "Founder"}
+_EMPLOYER_STATUS = {"current", "former"}
+_ROLE_STATUS = {"current", "exploring", "former"}
+_PREFERENCE_POLARITY = {"likes", "dislikes", "prefers", "avoids"}
+_PREFERENCE_STRENGTH = {"strong", "moderate", "mild"}
+
+
+def _validate_birthdate(value: dict) -> dict | None:
+    """Return a normalized birthdate value, or None when invalid."""
+    if not isinstance(value, dict):
+        return None
+    year = value.get("year")
+    if not isinstance(year, int) or not (1900 <= year <= 2100):
+        return None
+    precision = value.get("precision")
+    if precision not in ("year", "month", "day"):
+        return None
+    out: dict = {"year": year, "precision": precision}
+    month = value.get("month")
+    if month is not None:
+        if not isinstance(month, int) or not (1 <= month <= 12):
+            return None
+        out["month"] = month
+    day = value.get("day")
+    if day is not None:
+        if not isinstance(day, int) or not (1 <= day <= 31):
+            return None
+        out["day"] = day
+    return out
+
+
+def _validate_employer(value: dict) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    company = value.get("company")
+    if not isinstance(company, str) or not company.strip():
+        return None
+    status = value.get("status")
+    if status not in _EMPLOYER_STATUS:
+        return None
+    out: dict = {"company": company.strip(), "status": status}
+    for key in ("role", "functional_area", "start_date", "end_date"):
+        v = value.get(key)
+        if isinstance(v, str) and v.strip():
+            out[key] = v.strip()
+    level = value.get("level")
+    if level is not None:
+        if level not in _EMPLOYER_LEVELS:
+            return None
+        out["level"] = level
+    return out
+
+
+def _validate_role(value: dict) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    title = value.get("title")
+    if not isinstance(title, str) or not title.strip():
+        return None
+    status = value.get("status")
+    if status not in _ROLE_STATUS:
+        return None
+    out: dict = {"title": title.strip(), "status": status}
+    for key in ("functional_area",):
+        v = value.get(key)
+        if isinstance(v, str) and v.strip():
+            out[key] = v.strip()
+    level = value.get("level")
+    if level is not None:
+        if level not in _EMPLOYER_LEVELS:
+            return None
+        out["level"] = level
+    return out
+
+
+def _validate_preference(value: dict) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    domain = value.get("domain")
+    item = value.get("item")
+    polarity = value.get("polarity")
+    if not isinstance(domain, str) or not domain.strip():
+        return None
+    if not isinstance(item, str) or not item.strip():
+        return None
+    if polarity not in _PREFERENCE_POLARITY:
+        return None
+    out: dict = {
+        "domain": domain.strip(),
+        "item": item.strip(),
+        "polarity": polarity,
+    }
+    strength = value.get("strength")
+    if strength is not None:
+        if strength not in _PREFERENCE_STRENGTH:
+            return None
+        out["strength"] = strength
+    context = value.get("context")
+    if isinstance(context, str) and context.strip():
+        out["context"] = context.strip()
+    return out
+
+
+_VALIDATORS: dict = {
+    "birthdate": _validate_birthdate,
+    "employer": _validate_employer,
+    "role": _validate_role,
+    "preference": _validate_preference,
+}
+
+
+def _normalize_structured_fields(fact_type: str, value) -> tuple[str, dict | None]:
+    """Apply per-type validation to (fact_type, value). Returns the
+    pair that should land on the normalized fact — either the
+    validated shape, or ("", None) for graceful degrade when the
+    input is unrecognized / malformed."""
+    if not isinstance(fact_type, str) or not fact_type.strip():
+        return "", None
+    ft = fact_type.strip()
+    validator = _VALIDATORS.get(ft)
+    if validator is None:
+        return "", None
+    validated = validator(value) if isinstance(value, dict) else None
+    if validated is None:
+        return "", None
+    return ft, validated
+
+
 def _normalize_fact(
     raw: dict,
     *,
@@ -351,6 +518,10 @@ def _normalize_fact(
 
     needs_review = confidence < REVIEW_CONFIDENCE
 
+    fact_type, value = _normalize_structured_fields(
+        raw.get("fact_type", ""), raw.get("value"),
+    )
+
     return {
         "subject": subject_slug,
         "category": category,
@@ -358,6 +529,8 @@ def _normalize_fact(
         "confidence": confidence,
         "audience_scope": scope,
         "mention_slugs": mention_slugs,
+        "fact_type": fact_type,
+        "value": value,
         "source_detail": source_detail,
         "idempotency_key": _build_idempotency_key(source_context, subject_slug, content),
         "needs_review": needs_review,

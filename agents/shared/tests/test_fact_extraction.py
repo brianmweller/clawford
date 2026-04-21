@@ -528,6 +528,274 @@ def test_append_pending_review_appends_multiple_entries(mod, tmp_path):
     assert "Second fact" in text
 
 
+def test_prompt_documents_four_structured_fact_types(mod):
+    prompt = mod.build_extraction_prompt(
+        text="hello",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jamie-fitzgerald"},
+    )
+    # All four types must be named in the STRUCTURED FACT TYPES section
+    low = prompt.lower()
+    assert "structured fact type" in low or "fact_type" in low
+    for t in ("birthdate", "employer", "role", "preference"):
+        assert t in low
+
+
+def test_prompt_enforces_employer_vs_role_overlap_rule(mod):
+    prompt = mod.build_extraction_prompt(
+        text="hello",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jamie-fitzgerald"},
+    )
+    # Must explain when to use employer vs role
+    low = prompt.lower()
+    # Both "title" and "org" (or "company") referenced → employer.
+    # Title-only → role.
+    assert "title-only" in low or ("title" in low and "org" in low) or ("title" in low and "company" in low)
+
+
+def test_extract_passes_through_valid_birthdate_value(mod):
+    payload = {"facts": [{
+        "subject_slug": "eliott-fitzgerald-does-not-match",  # mention candidate
+        # Invalid: mention candidates can't be subjects. Use a primary.
+    }]}
+    # Actually switch to a primary candidate for this positive test
+    payload = {"facts": [{
+        "subject_slug": "jamie-fitzgerald",
+        "category": "relationship",
+        "content": "Jamie's son Eliott, born approx 2021-06.",
+        "confidence": 0.7,
+        "audience_scope": ["personal", "family"],
+        "fact_type": "birthdate",
+        "value": {"year": 2021, "month": 6, "precision": "month"},
+        "mention_slugs": ["eliott-fitzgerald"],
+        "reason": "claim includes age",
+    }]}
+    facts = mod.extract_facts_from_text(
+        text="body",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jamie-fitzgerald"},
+        mention_candidate_slugs={"eliott-fitzgerald": {"full_name": "Eliott Fitzgerald", "first_name": "Eliott"}},
+        infer_fn=lambda prompt, **kw: _ok_infer(payload),
+    )
+    assert len(facts) == 1
+    assert facts[0]["fact_type"] == "birthdate"
+    assert facts[0]["value"]["year"] == 2021
+
+
+def test_extract_drops_value_but_keeps_fact_when_value_invalid(mod):
+    # birthdate with missing required `year` → value dropped, fact narrative kept
+    payload = {"facts": [{
+        "subject_slug": "jamie-fitzgerald",
+        "category": "identity",
+        "content": "Jamie mentioned a birth year.",
+        "confidence": 0.7,
+        "audience_scope": ["personal"],
+        "fact_type": "birthdate",
+        "value": {"month": 6},  # missing year
+        "reason": "x",
+    }]}
+    facts = mod.extract_facts_from_text(
+        text="body",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jamie-fitzgerald"},
+        infer_fn=lambda prompt, **kw: _ok_infer(payload),
+    )
+    assert len(facts) == 1
+    # Graceful degrade: fact_type cleared, value cleared, but fact survives
+    assert facts[0].get("fact_type", "") == ""
+    assert facts[0].get("value") is None
+    assert "Jamie mentioned a birth year" in facts[0]["content"]
+
+
+def test_extract_accepts_employer_with_full_shape(mod):
+    payload = {"facts": [{
+        "subject_slug": "jane-doe",
+        "category": "role",
+        "content": "Jane is Director of Data at Example Corp.",
+        "confidence": 0.9,
+        "audience_scope": ["professional"],
+        "fact_type": "employer",
+        "value": {
+            "company": "Example Corp",
+            "role": "Director of Data",
+            "level": "Director",
+            "functional_area": "Data",
+            "status": "current",
+        },
+        "reason": "signature block",
+    }]}
+    facts = mod.extract_facts_from_text(
+        text="body",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jane-doe"},
+        infer_fn=lambda prompt, **kw: _ok_infer(payload),
+    )
+    assert len(facts) == 1
+    assert facts[0]["fact_type"] == "employer"
+    assert facts[0]["value"]["company"] == "Example Corp"
+
+
+def test_extract_drops_value_when_employer_missing_company(mod):
+    payload = {"facts": [{
+        "subject_slug": "jane-doe",
+        "category": "role",
+        "content": "Jane is a Director.",
+        "confidence": 0.8,
+        "audience_scope": ["professional"],
+        "fact_type": "employer",
+        "value": {"role": "Director", "status": "current"},  # missing company
+        "reason": "x",
+    }]}
+    facts = mod.extract_facts_from_text(
+        text="body",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jane-doe"},
+        infer_fn=lambda prompt, **kw: _ok_infer(payload),
+    )
+    assert len(facts) == 1
+    assert facts[0].get("fact_type", "") == ""
+    assert facts[0].get("value") is None
+
+
+def test_extract_accepts_role_with_title_only(mod):
+    payload = {"facts": [{
+        "subject_slug": "jane-doe",
+        "category": "role",
+        "content": "Jane is exploring VP of Product roles.",
+        "confidence": 0.8,
+        "audience_scope": ["professional"],
+        "fact_type": "role",
+        "value": {
+            "title": "VP of Product",
+            "level": "VP",
+            "functional_area": "Product",
+            "status": "exploring",
+        },
+        "reason": "x",
+    }]}
+    facts = mod.extract_facts_from_text(
+        text="body",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jane-doe"},
+        infer_fn=lambda prompt, **kw: _ok_infer(payload),
+    )
+    assert len(facts) == 1
+    assert facts[0]["fact_type"] == "role"
+    assert facts[0]["value"]["status"] == "exploring"
+
+
+def test_extract_drops_role_without_title(mod):
+    payload = {"facts": [{
+        "subject_slug": "jane-doe",
+        "category": "role",
+        "content": "Jane is a Director-level leader.",
+        "confidence": 0.7,
+        "audience_scope": ["professional"],
+        "fact_type": "role",
+        "value": {"level": "Director", "status": "current"},  # missing title
+        "reason": "x",
+    }]}
+    facts = mod.extract_facts_from_text(
+        text="body",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jane-doe"},
+        infer_fn=lambda prompt, **kw: _ok_infer(payload),
+    )
+    assert facts[0].get("fact_type", "") == ""
+
+
+def test_extract_accepts_preference_with_full_shape(mod):
+    payload = {"facts": [{
+        "subject_slug": "jane-doe",
+        "category": "preference",
+        "content": "Jane prefers email over phone for async updates.",
+        "confidence": 0.8,
+        "audience_scope": ["professional"],
+        "fact_type": "preference",
+        "value": {
+            "domain": "communication",
+            "item": "email over phone",
+            "polarity": "prefers",
+            "strength": "moderate",
+            "context": "for async updates",
+        },
+        "reason": "x",
+    }]}
+    facts = mod.extract_facts_from_text(
+        text="body",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jane-doe"},
+        infer_fn=lambda prompt, **kw: _ok_infer(payload),
+    )
+    assert len(facts) == 1
+    assert facts[0]["fact_type"] == "preference"
+    assert facts[0]["value"]["polarity"] == "prefers"
+
+
+def test_extract_drops_preference_with_invalid_polarity(mod):
+    payload = {"facts": [{
+        "subject_slug": "jane-doe",
+        "category": "preference",
+        "content": "Jane's thoughts on coffee.",
+        "confidence": 0.6,
+        "audience_scope": ["personal"],
+        "fact_type": "preference",
+        "value": {
+            "domain": "food",
+            "item": "coffee",
+            "polarity": "lukewarm",  # invalid
+        },
+        "reason": "x",
+    }]}
+    facts = mod.extract_facts_from_text(
+        text="body",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jane-doe"},
+        infer_fn=lambda prompt, **kw: _ok_infer(payload),
+    )
+    assert facts[0].get("fact_type", "") == ""
+
+
+def test_extract_drops_unknown_fact_type(mod):
+    payload = {"facts": [{
+        "subject_slug": "jane-doe",
+        "category": "event",
+        "content": "x",
+        "confidence": 0.8,
+        "audience_scope": ["personal"],
+        "fact_type": "skyfall",   # not a valid type
+        "value": {"any": "thing"},
+        "reason": "x",
+    }]}
+    facts = mod.extract_facts_from_text(
+        text="body",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jane-doe"},
+        infer_fn=lambda prompt, **kw: _ok_infer(payload),
+    )
+    assert facts[0].get("fact_type", "") == ""
+
+
+def test_extract_passes_through_when_no_fact_type(mod):
+    payload = {"facts": [{
+        "subject_slug": "jane-doe",
+        "category": "event",
+        "content": "Jane mentioned her upcoming move.",
+        "confidence": 0.85,
+        "audience_scope": ["personal"],
+        "reason": "x",
+    }]}
+    facts = mod.extract_facts_from_text(
+        text="body",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jane-doe"},
+        infer_fn=lambda prompt, **kw: _ok_infer(payload),
+    )
+    assert facts[0].get("fact_type", "") == ""
+    assert facts[0].get("value") is None
+
+
 def test_append_pending_review_also_enqueues_when_queue_path_given(mod, tmp_path):
     import pending_queue  # type: ignore
 
