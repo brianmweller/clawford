@@ -87,6 +87,30 @@ def compute_default_search_window(
     return f"{start.strftime('%Y-%m-%dT%H:%M')}/{end.strftime('%Y-%m-%dT%H:%M')}/{timezone_str}"
 
 
+def parse_search_window(window: str) -> tuple[datetime, datetime]:
+    """Inverse of compute_default_search_window — return tz-aware start/end
+    datetimes from a 'ISO-start/ISO-end/tz' window."""
+    start_s, end_s, tz_s = window.split("/", 2)
+    tz = ZoneInfo(tz_s)
+    return (
+        datetime.fromisoformat(start_s).replace(tzinfo=tz),
+        datetime.fromisoformat(end_s).replace(tzinfo=tz),
+    )
+
+
+def materialize_busy_blocks(blocks: list[dict], dest_dir: Path) -> Path | None:
+    """Write a list of {"start","end"} busy blocks to a JSON file in
+    dest_dir and return the path. Returns None when blocks is empty —
+    draft-compose.py simply omits busy filtering, which is cheaper than
+    passing an empty-list tempfile."""
+    if not blocks:
+        return None
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    path = dest_dir / "busy-blocks.json"
+    path.write_text(json.dumps(blocks, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
 def build_draft_compose_cmd(
     thread_id: str,
     slug: str,
@@ -301,11 +325,40 @@ def main() -> int:
 
     scheduling_rules = default_scheduling_rules_path()
     search_window = None
+    busy_blocks_path = None
     if scheduling_rules:
         tz = load_timezone_from_rules(scheduling_rules)
         search_window = compute_default_search_window(tz, days_ahead=14)
         print(f"Scheduling rules: {scheduling_rules}")
         print(f"Search window: {search_window}")
+
+        # Fetch calendar busy blocks so LLM-proposed times don't collide
+        # with existing meetings. Silent-fails to empty on API error —
+        # freehand scheduling is the fallback, not a crash.
+        try:
+            from agents.shared.gmail_api import build_gmail_service
+            from agents.shared.gcal_freebusy import query_busy
+
+            token_path = str(Path(os.path.expanduser(
+                "~/.clawford/connector-workspace/token.json")))
+            creds_path = str(Path(os.path.expanduser(
+                "~/.clawford/connector-workspace/credentials.json")))
+            service = build_gmail_service(
+                token_path, creds_path,
+                scopes=[
+                    "https://www.googleapis.com/auth/calendar.readonly",
+                    "https://www.googleapis.com/auth/gmail.readonly",
+                    "https://www.googleapis.com/auth/gmail.compose",
+                ],
+            )
+            s, e = parse_search_window(search_window)
+            blocks = query_busy(service, s, e)
+            cache_dir = Path(os.path.expanduser(
+                "~/.clawford/connector-workspace/cache"))
+            busy_blocks_path = materialize_busy_blocks(blocks, cache_dir)
+            print(f"Busy blocks: {len(blocks)} (path={busy_blocks_path})")
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARN: busy-block fetch failed ({exc}); using freehand only")
         print()
 
     results = []
@@ -318,6 +371,7 @@ def main() -> int:
             no_create_draft=args.no_create_draft,
             scheduling_rules=scheduling_rules,
             search_window=search_window,
+            busy_blocks=busy_blocks_path,
         )
 
         reply_needed = parsed.get("reply_needed") if parsed else None

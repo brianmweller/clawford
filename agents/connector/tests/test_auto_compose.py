@@ -134,3 +134,35 @@ def test_load_timezone_from_rules_defaults_to_pt_when_missing(tmp_path):
     p = tmp_path / "rules.json"
     p.write_text('{}', encoding="utf-8")
     assert auto_compose.load_timezone_from_rules(p) == "America/Los_Angeles"
+
+
+# --- busy-blocks materialization ---
+
+def test_materialize_busy_blocks_writes_temp_json(tmp_path):
+    blocks = [
+        {"start": "2026-04-22T16:00:00Z", "end": "2026-04-22T17:00:00Z"},
+        {"start": "2026-04-23T18:00:00Z", "end": "2026-04-23T19:30:00Z"},
+    ]
+    path = auto_compose.materialize_busy_blocks(blocks, dest_dir=tmp_path)
+    assert path.exists()
+    import json
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data == blocks
+
+
+def test_materialize_busy_blocks_returns_none_when_empty(tmp_path):
+    assert auto_compose.materialize_busy_blocks([], dest_dir=tmp_path) is None
+
+
+def test_parse_search_window_roundtrip():
+    # Helper to convert the 'ISO-start/ISO-end/tz' window back to
+    # tz-aware datetimes, used before calling gcal_freebusy.
+    start, end = auto_compose.parse_search_window(
+        "2026-04-22T09:00/2026-05-02T18:00/America/Los_Angeles"
+    )
+    assert start.tzinfo is not None
+    assert end.tzinfo is not None
+    assert start.year == 2026 and start.month == 4 and start.day == 22
+    assert start.hour == 9
+    assert end.month == 5 and end.day == 2
+    assert end.hour == 18
