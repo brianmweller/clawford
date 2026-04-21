@@ -544,3 +544,167 @@ def test_upsert_fact_idempotency_scans_all_months(tmp_path: Path):
     # April file should still not exist — reinforcement rewrites the
     # original monthly file, not the current-month one.
     assert not (facts_dir / "2026-04.md").exists()
+
+
+# ─── mention_slugs roundtrip ────────────────────────────────────────
+
+def test_upsert_fact_writes_mention_slugs_as_json_list(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    upsert_fact(
+        facts_dir=facts_dir,
+        subject="jamie-fitzgerald",
+        category="relationship",
+        content="Eliott and Arthur are Jamie's kids.",
+        source_agent="connector",
+        idempotency_key="kids-claim",
+        recorded_at="2026-04-21T12:00:00Z",
+        audience_scope=["personal", "family"],
+        mention_slugs=["eliott-fitzgerald", "arthur-fitzgerald"],
+    )
+    text = (facts_dir / "2026-04.md").read_text(encoding="utf-8")
+    assert '- **mention_slugs:** ["eliott-fitzgerald", "arthur-fitzgerald"]' in text
+
+
+def test_upsert_fact_omits_mention_slugs_line_when_empty(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    upsert_fact(
+        facts_dir=facts_dir,
+        subject="jamie-fitzgerald",
+        category="event",
+        content="Jamie is exploring opportunities.",
+        source_agent="connector",
+        idempotency_key="exploring",
+        recorded_at="2026-04-21T12:00:00Z",
+        audience_scope=["professional"],
+        mention_slugs=[],
+    )
+    text = (facts_dir / "2026-04.md").read_text(encoding="utf-8")
+    assert "mention_slugs" not in text
+
+
+def test_upsert_fact_omits_mention_slugs_line_when_none(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    upsert_fact(
+        facts_dir=facts_dir,
+        subject="jamie-fitzgerald",
+        category="event",
+        content="Jamie is exploring opportunities.",
+        source_agent="connector",
+        idempotency_key="exploring2",
+        recorded_at="2026-04-21T12:00:00Z",
+        audience_scope=["professional"],
+    )
+    text = (facts_dir / "2026-04.md").read_text(encoding="utf-8")
+    assert "mention_slugs" not in text
+
+
+def test_parse_facts_file_extracts_mention_slugs(tmp_path: Path):
+    p = tmp_path / "2026-04.md"
+    p.write_text(
+        "# Facts — 2026-04\n"
+        "\n---\n\n"
+        "- **id:** connector-jamie-1\n"
+        "- **content:** Eliott and Arthur are Jamie's kids.\n"
+        "- **subject:** jamie-fitzgerald\n"
+        "- **category:** relationship\n"
+        '- **audience_scope:** ["personal", "family"]\n'
+        '- **mention_slugs:** ["eliott-fitzgerald", "arthur-fitzgerald"]\n'
+        "- **source_agent:** connector\n"
+        "- **recorded_at:** 2026-04-21T12:00:00Z\n",
+        encoding="utf-8",
+    )
+    facts = parse_facts_file(p)
+    assert len(facts) == 1
+    assert facts[0]["mention_slugs"] == ["eliott-fitzgerald", "arthur-fitzgerald"]
+
+
+def test_parse_facts_file_missing_mention_slugs_is_empty_list(tmp_path: Path):
+    p = tmp_path / "2026-04.md"
+    p.write_text(
+        "# Facts — 2026-04\n"
+        "\n---\n\n"
+        "- **id:** connector-jamie-2\n"
+        "- **content:** Jamie likes email.\n"
+        "- **subject:** jamie-fitzgerald\n"
+        "- **category:** preference\n"
+        "- **source_agent:** connector\n"
+        "- **recorded_at:** 2026-04-21T12:00:00Z\n",
+        encoding="utf-8",
+    )
+    facts = parse_facts_file(p)
+    assert len(facts) == 1
+    assert facts[0].get("mention_slugs", []) == []
+
+
+# ─── Retrieval: union subject + mention_slugs ───────────────────────
+
+def _seed_jamie_fact_with_mentions(facts_dir: Path) -> None:
+    facts_dir.mkdir(parents=True, exist_ok=True)
+    (facts_dir / "2026-04.md").write_text(
+        "# Facts — 2026-04\n"
+        "\n---\n\n"
+        "- **id:** connector-jamie-kids\n"
+        "- **content:** Eliott and Arthur are Jamie's kids.\n"
+        "- **subject:** jamie-fitzgerald\n"
+        "- **confidence:** 0.91\n"
+        "- **category:** relationship\n"
+        "- **source_agent:** connector\n"
+        "- **recorded_at:** 2026-04-21T12:00:00Z\n"
+        '- **audience_scope:** ["personal", "family"]\n'
+        '- **mention_slugs:** ["eliott-fitzgerald", "arthur-fitzgerald"]\n',
+        encoding="utf-8",
+    )
+
+
+def test_load_facts_for_subject_returns_mentions(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    _seed_jamie_fact_with_mentions(facts_dir)
+    eliott_facts = load_facts_for_subject("eliott-fitzgerald", facts_dir)
+    assert len(eliott_facts) == 1
+    assert eliott_facts[0]["subject"] == "jamie-fitzgerald"
+    assert "eliott-fitzgerald" in eliott_facts[0]["mention_slugs"]
+
+
+def test_load_facts_for_subject_unions_subject_and_mentions_without_duplicates(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    _seed_jamie_fact_with_mentions(facts_dir)
+    # Add a direct fact about Eliott (same subject)
+    (facts_dir / "2026-04.md").write_text(
+        (facts_dir / "2026-04.md").read_text(encoding="utf-8") +
+        "\n---\n\n"
+        "- **id:** connector-eliott-pref\n"
+        "- **content:** Eliott likes trucks.\n"
+        "- **subject:** eliott-fitzgerald\n"
+        "- **confidence:** 0.9\n"
+        "- **category:** preference\n"
+        "- **source_agent:** connector\n"
+        "- **recorded_at:** 2026-04-22T12:00:00Z\n",
+        encoding="utf-8",
+    )
+    eliott_facts = load_facts_for_subject("eliott-fitzgerald", facts_dir)
+    ids = [f["id"] for f in eliott_facts]
+    assert "connector-eliott-pref" in ids
+    assert "connector-jamie-kids" in ids
+    # No duplicate
+    assert len(ids) == len(set(ids))
+
+
+def test_load_facts_for_subject_respects_min_confidence_on_mention_matches(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "2026-04.md").write_text(
+        "# Facts — 2026-04\n"
+        "\n---\n\n"
+        "- **id:** connector-jamie-lowconf\n"
+        "- **content:** Maybe Eliott plays soccer.\n"
+        "- **subject:** jamie-fitzgerald\n"
+        "- **confidence:** 0.4\n"
+        "- **category:** guess\n"
+        "- **source_agent:** connector\n"
+        "- **recorded_at:** 2026-04-21T12:00:00Z\n"
+        '- **mention_slugs:** ["eliott-fitzgerald"]\n',
+        encoding="utf-8",
+    )
+    assert load_facts_for_subject("eliott-fitzgerald", facts_dir) == []
+    # But pass min_confidence=0 and it surfaces
+    assert len(load_facts_for_subject("eliott-fitzgerald", facts_dir, min_confidence=0.0)) == 1

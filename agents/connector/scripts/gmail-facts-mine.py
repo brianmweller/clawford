@@ -50,6 +50,10 @@ from flux_import_lib import build_email_to_slug_map                # noqa: E402
 from gmail_facts_mine_lib import (                                 # noqa: E402
     build_candidate_slugs,
     build_gmail_query,
+    build_mention_candidate_slugs,
+    build_parent_to_children_map,
+    build_person_info_map,
+    filter_mention_info,
     load_cursor,
     message_metadata,
     save_cursor,
@@ -118,6 +122,8 @@ def run(
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     cursor = load_cursor(cursor_path)
     email_to_slug = build_email_to_slug_map(people_dir)
+    parent_to_children = build_parent_to_children_map(people_dir)
+    person_info = build_person_info_map(people_dir)
     query = build_gmail_query(
         cursor=cursor, fallback_days=window_days, now_iso=now_iso,
     )
@@ -159,12 +165,21 @@ def run(
             stats["messages_skipped_no_candidates"] += 1
             continue
 
+        # Mention candidates: children of primary candidates via parent_slug.
+        # Lets the LLM attach mention_slugs to a fact (e.g. Eliott + Arthur
+        # mentioned in Jamie's email) without making them subjects themselves.
+        mention_slugs = build_mention_candidate_slugs(
+            primary=slugs, parent_to_children=parent_to_children,
+        )
+        mention_info = filter_mention_info(mention_slugs, person_info)
+
         meta = message_metadata(msg, operator_emails=load_operator().emails)
         try:
             facts = extract_facts_from_text(
                 text=body,
                 source_context=meta,
                 candidate_slugs=slugs,
+                mention_candidate_slugs=mention_info or None,
             )
         except Exception:
             stats["extract_errors"] += 1
@@ -186,6 +201,7 @@ def run(
                     idempotency_key=f["idempotency_key"],
                     recorded_at=now_iso,
                     audience_scope=f["audience_scope"],
+                    mention_slugs=f.get("mention_slugs") or None,
                 )
                 if result["status"] == "reinforced":
                     stats["facts_reinforced"] += 1

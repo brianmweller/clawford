@@ -7,12 +7,138 @@ tests stay fast and deterministic.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
 from pathlib import Path
 
 
 FALLBACK_AFTER_HOURS = 48
+
+
+# ---------------------------------------------------------------------------
+# Person-file field parsing (shared across helpers in this module)
+# ---------------------------------------------------------------------------
+
+_SLUG_RE = re.compile(r"^\s*-\s*\*\*slug(?::\*\*|\*\*:)\s*(.+?)\s*$")
+_PARENT_SLUG_RE = re.compile(r"^\s*-\s*\*\*parent_slug(?::\*\*|\*\*:)\s*(.+?)\s*$")
+_FULL_NAME_RE = re.compile(r"^\s*-\s*\*\*full_name(?::\*\*|\*\*:)\s*(.+?)\s*$")
+_H1_RE = re.compile(r"^#\s+(.+?)\s*$")
+
+
+def build_parent_to_children_map(people_dir: Path) -> dict[str, list[str]]:
+    """Scan people/*.md for `parent_slug:` references and return a
+    {parent_slug → [child_slug, ...]} map.
+
+    Placeholder values (em-dash, hyphen, empty) and self-cycles are
+    silently dropped. Files starting with an underscore (templates,
+    archives) are skipped. Missing directory returns {}.
+
+    v1 limitations: single parent only, depth 1 (no grandparent
+    expansion by callers), no multi-parent / step-parent support.
+    """
+    if not people_dir.exists():
+        return {}
+    out: dict[str, list[str]] = {}
+    for path in sorted(people_dir.glob("*.md")):
+        if path.name.startswith("_"):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        slug: str | None = None
+        parent: str | None = None
+        for line in text.splitlines():
+            if slug is None:
+                m = _SLUG_RE.match(line)
+                if m:
+                    slug = m.group(1).strip()
+            if parent is None:
+                m = _PARENT_SLUG_RE.match(line)
+                if m:
+                    parent = m.group(1).strip()
+            if slug is not None and parent is not None:
+                break
+        if not slug or not parent:
+            continue
+        if parent in {"—", "-", ""}:
+            continue
+        if parent == slug:
+            continue  # self-cycle guard
+        out.setdefault(parent, []).append(slug)
+    return out
+
+
+def build_mention_candidate_slugs(
+    *,
+    primary: set[str],
+    parent_to_children: dict[str, list[str]],
+) -> set[str]:
+    """Given the primary (addressed) candidate slugs and a parent-to-children
+    map, return the set of mention-candidate slugs: children of any primary,
+    excluding slugs that are themselves in primary.
+
+    Depth 1 only — no transitive walk (Jamie → Arthur, not Jamie → Arthur →
+    Arthur's-eventual-kid). That's a deliberate v1 constraint; extending to
+    depth N wants cycle detection the simple self-cycle guard doesn't cover.
+    """
+    mention: set[str] = set()
+    for p in primary:
+        for child in parent_to_children.get(p, []):
+            if child not in primary:
+                mention.add(child)
+    return mention
+
+
+def build_person_info_map(people_dir: Path) -> dict[str, dict]:
+    """Scan people/*.md and return slug → {full_name, first_name}.
+    full_name defaults to the file's H1 if no explicit field; first_name
+    is derived as the first whitespace-separated token of full_name."""
+    if not people_dir.exists():
+        return {}
+    out: dict[str, dict] = {}
+    for path in sorted(people_dir.glob("*.md")):
+        if path.name.startswith("_"):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        slug: str | None = None
+        full_name: str | None = None
+        h1: str | None = None
+        for line in text.splitlines():
+            if slug is None:
+                m = _SLUG_RE.match(line)
+                if m:
+                    slug = m.group(1).strip()
+            if full_name is None:
+                m = _FULL_NAME_RE.match(line)
+                if m:
+                    full_name = m.group(1).strip()
+            if h1 is None:
+                m = _H1_RE.match(line)
+                if m:
+                    h1 = m.group(1).strip()
+            if slug and full_name:
+                break
+        if not slug:
+            slug = path.stem
+        name = full_name or h1 or slug
+        first = name.split()[0] if name else ""
+        out[slug] = {"full_name": name, "first_name": first}
+    return out
+
+
+def filter_mention_info(
+    mention_slugs: set[str],
+    info_map: dict[str, dict],
+) -> dict[str, dict]:
+    """Narrow a full person-info map to just the slugs in `mention_slugs`.
+    Missing slugs are omitted (caller gets a closed set containing only
+    slugs we have names for)."""
+    return {s: info_map[s] for s in mention_slugs if s in info_map}
 
 
 # ---------------------------------------------------------------------------

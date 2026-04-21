@@ -593,3 +593,283 @@ def test_prompt_gives_concrete_age_normalization_example(mod):
     # Concrete worked example — "approaching 5" on 2026-04 → born ~2021-06
     # The LLM gets the arithmetic right much more reliably with an example.
     assert "approaching 5" in prompt.lower() or "approaching 3" in prompt.lower() or "'age" in prompt.lower()
+
+
+# ─── mention_slugs: mention-candidate prompt block + schema + validation ──
+
+_MENTION_BLOCK_MARKER = "MENTION CANDIDATES — these people may be mentioned"
+
+
+def test_prompt_renders_mention_candidates_block_when_provided(mod):
+    prompt = mod.build_extraction_prompt(
+        text="Jamie's son Eliott is approaching 5.",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jamie-fitzgerald"},
+        mention_candidate_slugs={
+            "eliott-fitzgerald": {"full_name": "Eliott Fitzgerald", "first_name": "Eliott"},
+            "arthur-fitzgerald": {"full_name": "Arthur Fitzgerald", "first_name": "Arthur"},
+        },
+    )
+    assert _MENTION_BLOCK_MARKER in prompt
+    assert "eliott-fitzgerald" in prompt
+    assert "Eliott Fitzgerald" in prompt
+    assert "arthur-fitzgerald" in prompt
+    # Rule must be explicit — mention_slugs OK, subject_slug NOT.
+    assert "mention_slugs" in prompt
+    assert (
+        "MAY NOT use these as `subject_slug`" in prompt
+        or "may not use these as subject_slug" in prompt.lower()
+    )
+
+
+def test_prompt_omits_mention_block_when_not_provided(mod):
+    prompt = mod.build_extraction_prompt(
+        text="hello",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"someone"},
+    )
+    # Schema hint still references mention_slugs generically; the BLOCK
+    # itself (header + bullet list) must be absent.
+    assert _MENTION_BLOCK_MARKER not in prompt
+
+
+def test_prompt_omits_mention_block_when_empty_dict(mod):
+    prompt = mod.build_extraction_prompt(
+        text="hello",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"someone"},
+        mention_candidate_slugs={},
+    )
+    assert _MENTION_BLOCK_MARKER not in prompt
+
+
+def test_extract_preserves_valid_mention_slugs(mod):
+    payload = {
+        "facts": [
+            {
+                "subject_slug": "jamie-fitzgerald",
+                "category": "relationship",
+                "content": "Eliott and Arthur are Jamie's children.",
+                "confidence": 0.9,
+                "audience_scope": ["personal", "family"],
+                "mention_slugs": ["eliott-fitzgerald", "arthur-fitzgerald"],
+                "reason": "body names both children",
+            }
+        ]
+    }
+    facts = mod.extract_facts_from_text(
+        text="Jamie mentions Eliott and Arthur.",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jamie-fitzgerald"},
+        mention_candidate_slugs={
+            "eliott-fitzgerald": {"full_name": "Eliott Fitzgerald", "first_name": "Eliott"},
+            "arthur-fitzgerald": {"full_name": "Arthur Fitzgerald", "first_name": "Arthur"},
+        },
+        infer_fn=lambda prompt, **kw: _ok_infer(payload),
+    )
+    assert len(facts) == 1
+    assert facts[0]["mention_slugs"] == ["eliott-fitzgerald", "arthur-fitzgerald"]
+
+
+def test_extract_drops_mention_slugs_not_in_closed_set_but_keeps_fact(mod):
+    payload = {
+        "facts": [
+            {
+                "subject_slug": "jamie-fitzgerald",
+                "category": "relationship",
+                "content": "Eliott is Jamie's child.",
+                "confidence": 0.9,
+                "audience_scope": ["personal", "family"],
+                "mention_slugs": ["eliott-fitzgerald", "made-up-slug"],
+                "reason": "test",
+            }
+        ]
+    }
+    facts = mod.extract_facts_from_text(
+        text="body",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jamie-fitzgerald"},
+        mention_candidate_slugs={
+            "eliott-fitzgerald": {"full_name": "Eliott Fitzgerald", "first_name": "Eliott"},
+        },
+        infer_fn=lambda prompt, **kw: _ok_infer(payload),
+    )
+    assert len(facts) == 1
+    # Hallucinated slug dropped, valid one preserved
+    assert facts[0]["mention_slugs"] == ["eliott-fitzgerald"]
+
+
+def test_extract_rejects_mention_slug_used_as_subject_slug(mod):
+    # LLM tries to subject a mention-candidate slug → drop the fact
+    payload = {
+        "facts": [
+            {
+                "subject_slug": "eliott-fitzgerald",  # invalid — only mention, never subject
+                "category": "identity",
+                "content": "Eliott likes trucks.",
+                "confidence": 0.9,
+                "audience_scope": ["personal"],
+                "reason": "test",
+            }
+        ]
+    }
+    facts = mod.extract_facts_from_text(
+        text="body",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jamie-fitzgerald"},
+        mention_candidate_slugs={
+            "eliott-fitzgerald": {"full_name": "Eliott Fitzgerald", "first_name": "Eliott"},
+        },
+        infer_fn=lambda prompt, **kw: _ok_infer(payload),
+    )
+    assert facts == []
+
+
+def test_dedupe_within_batch_collapses_near_duplicate_facts_same_subject(mod):
+    # Two near-duplicate facts about Jamie's exploration (LLM re-stated
+    # the same claim with slight rewording). Higher-conf wins.
+    # Phase 1b handles TEXTUAL near-duplicates; semantic duplicates with
+    # genuinely disjoint vocabulary (e.g. "has a baby" vs. "Arthur is 2.5")
+    # are Phase 3's job via embeddings.
+    payload = {"facts": [
+        {
+            "subject_slug": "jamie-fitzgerald",
+            "category": "event",
+            "content": "Jamie has started exploring new job opportunities outside LinkedIn.",
+            "confidence": 0.93,
+            "audience_scope": ["professional"],
+            "reason": "body explicitly says so",
+        },
+        {
+            "subject_slug": "jamie-fitzgerald",
+            "category": "event",
+            "content": "Jamie started exploring opportunities outside LinkedIn.",
+            "confidence": 0.8,
+            "audience_scope": ["professional"],
+            "reason": "restated",
+        },
+    ]}
+    facts = mod.extract_facts_from_text(
+        text="body",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jamie-fitzgerald"},
+        infer_fn=lambda prompt, **kw: _ok_infer(payload),
+    )
+    assert len(facts) == 1
+    assert facts[0]["confidence"] == 0.93
+
+
+def test_dedupe_within_batch_preserves_facts_about_different_subjects(mod):
+    # Token-overlap high but subject different → keep both (dedupe is per-subject)
+    payload = {"facts": [
+        {
+            "subject_slug": "jamie-fitzgerald",
+            "category": "event",
+            "content": "Jamie has started exploring new roles.",
+            "confidence": 0.9,
+            "audience_scope": ["professional"],
+            "reason": "x",
+        },
+        {
+            "subject_slug": "sarah-chen",
+            "category": "event",
+            "content": "Sarah has started exploring new roles.",
+            "confidence": 0.9,
+            "audience_scope": ["professional"],
+            "reason": "x",
+        },
+    ]}
+    facts = mod.extract_facts_from_text(
+        text="body",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jamie-fitzgerald", "sarah-chen"},
+        infer_fn=lambda prompt, **kw: _ok_infer(payload),
+    )
+    assert len(facts) == 2
+
+
+def test_dedupe_within_batch_keeps_distinct_facts_same_subject(mod):
+    # Two facts about Jamie, different topics → low Jaccard → both kept
+    payload = {"facts": [
+        {
+            "subject_slug": "jamie-fitzgerald",
+            "category": "event",
+            "content": "Jamie has started exploring new roles.",
+            "confidence": 0.9,
+            "audience_scope": ["professional"],
+            "reason": "x",
+        },
+        {
+            "subject_slug": "jamie-fitzgerald",
+            "category": "preference",
+            "content": "Jamie prefers email over phone.",
+            "confidence": 0.8,
+            "audience_scope": ["professional"],
+            "reason": "x",
+        },
+    ]}
+    facts = mod.extract_facts_from_text(
+        text="body",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jamie-fitzgerald"},
+        infer_fn=lambda prompt, **kw: _ok_infer(payload),
+    )
+    assert len(facts) == 2
+
+
+def test_dedupe_within_batch_stable_ordering_on_confidence_tie(mod):
+    # Two near-dup facts with identical confidence → deterministic winner
+    # (lex-first idempotency_key). Both runs must select the same fact.
+    payload = {"facts": [
+        {
+            "subject_slug": "jamie-fitzgerald",
+            "category": "relationship",
+            "content": "Eliott is Jamie's son.",
+            "confidence": 0.8,
+            "audience_scope": ["personal"],
+            "reason": "x",
+        },
+        {
+            "subject_slug": "jamie-fitzgerald",
+            "category": "relationship",
+            "content": "Jamie's son is Eliott.",
+            "confidence": 0.8,
+            "audience_scope": ["personal"],
+            "reason": "y",
+        },
+    ]}
+    def _run():
+        return mod.extract_facts_from_text(
+            text="body",
+            source_context={"source": "gmail", "message_id": "m1"},
+            candidate_slugs={"jamie-fitzgerald"},
+            infer_fn=lambda prompt, **kw: _ok_infer(payload),
+        )
+    r1 = _run()
+    r2 = _run()
+    assert len(r1) == 1
+    assert r1[0]["content"] == r2[0]["content"]
+
+
+def test_extract_mention_slugs_missing_field_is_empty_list(mod):
+    # LLM didn't emit mention_slugs at all — fact should still pass with empty list
+    payload = {
+        "facts": [
+            {
+                "subject_slug": "jamie-fitzgerald",
+                "category": "event",
+                "content": "Jamie is exploring new roles.",
+                "confidence": 0.9,
+                "audience_scope": ["professional"],
+                "reason": "test",
+            }
+        ]
+    }
+    facts = mod.extract_facts_from_text(
+        text="body",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"jamie-fitzgerald"},
+        infer_fn=lambda prompt, **kw: _ok_infer(payload),
+    )
+    assert len(facts) == 1
+    assert facts[0].get("mention_slugs", []) == []

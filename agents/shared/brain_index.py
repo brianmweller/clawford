@@ -39,6 +39,7 @@ INDEX_FILENAME = "_index.json"
 
 _ID_RE = re.compile(r"^\s*-\s*\*\*id:\*\*\s*(.+)$")
 _SUBJECT_RE = re.compile(r"^\s*-\s*\*\*subject:\*\*\s*(.+)$")
+_MENTION_SLUGS_RE = re.compile(r"^\s*-\s*\*\*mention_slugs:\*\*\s*(.+)$")
 
 
 def _iter_fact_files(facts_dir: Path) -> list[Path]:
@@ -53,23 +54,60 @@ def _iter_fact_files(facts_dir: Path) -> list[Path]:
     )
 
 
+def _parse_mention_slugs(raw: str) -> list[str]:
+    """Parse the raw value of a ``- **mention_slugs:** ...`` line into a
+    lowercased slug list. Expects a JSON array; returns [] on any parse
+    error (hint-only, so best-effort)."""
+    raw = raw.strip()
+    if not raw.startswith("["):
+        return []
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    out: list[str] = []
+    for x in parsed:
+        if not isinstance(x, str):
+            continue
+        s = x.strip().lower()
+        if s:
+            out.append(s)
+    return out
+
+
 def rebuild_index(facts_dir: Path) -> dict:
-    """Scan every monthly fact file in facts_dir and build a fresh
-    subject→entries index. Returns the index dict; does NOT persist
-    it (save_index does that)."""
+    """Scan every monthly fact file in facts_dir and build fresh
+    subject→entries and mention→entries indexes. Returns the index
+    dict; does NOT persist it (save_index does that).
+
+    by_mention mirrors by_subject's shape but keyed on the slugs in
+    each fact's mention_slugs list — enabling retrieval of "facts that
+    name X" in addition to "facts whose subject is X".
+    """
     by_subject: dict[str, list[list[str]]] = {}
+    by_mention: dict[str, list[list[str]]] = {}
     for path in _iter_fact_files(facts_dir):
         month = path.stem  # YYYY-MM
         current_id: str | None = None
         current_subject: str | None = None
+        current_mentions: list[str] = []
+
+        def flush():
+            if current_id and current_subject:
+                subj = current_subject.lower()
+                by_subject.setdefault(subj, []).append([month, current_id])
+                for m in current_mentions:
+                    by_mention.setdefault(m, []).append([month, current_id])
+
         for line in path.read_text(encoding="utf-8").splitlines():
             stripped = line.strip()
             if stripped == "---":
-                if current_id and current_subject:
-                    subj = current_subject.lower()
-                    by_subject.setdefault(subj, []).append([month, current_id])
+                flush()
                 current_id = None
                 current_subject = None
+                current_mentions = []
                 continue
             m = _ID_RE.match(line)
             if m:
@@ -78,14 +116,17 @@ def rebuild_index(facts_dir: Path) -> dict:
             m = _SUBJECT_RE.match(line)
             if m:
                 current_subject = m.group(1).strip()
+                continue
+            m = _MENTION_SLUGS_RE.match(line)
+            if m:
+                current_mentions = _parse_mention_slugs(m.group(1))
         # Flush trailing block (no final `---`).
-        if current_id and current_subject:
-            subj = current_subject.lower()
-            by_subject.setdefault(subj, []).append([month, current_id])
+        flush()
 
     now = datetime.now(timezone.utc)
     return {
         "by_subject": by_subject,
+        "by_mention": by_mention,
         "built_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "built_at_epoch": now.timestamp(),
     }
@@ -143,8 +184,20 @@ def is_fresh(facts_dir: Path, index: dict | None) -> bool:
 
 
 def facts_for_subject(index: dict, subject_slug: str) -> list[list[str]]:
-    """Return the list of [month, fact_id] entries for the subject.
-    Empty list when the subject has no indexed facts. Lookup is
-    case-insensitive."""
+    """Return [month, fact_id] entries for the subject, unioning
+    by_subject and by_mention (facts whose subject is the slug AND
+    facts that mention the slug). Lookup is case-insensitive.
+    Dedupes on [month, fact_id]."""
+    target = subject_slug.lower()
     by_subject = index.get("by_subject") or {}
-    return list(by_subject.get(subject_slug.lower(), []))
+    by_mention = index.get("by_mention") or {}
+    seen: set[tuple[str, str]] = set()
+    out: list[list[str]] = []
+    for source in (by_subject, by_mention):
+        for month, fact_id in source.get(target, []):
+            key = (month, fact_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append([month, fact_id])
+    return out

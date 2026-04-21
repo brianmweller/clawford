@@ -195,6 +195,150 @@ def test_build_candidate_slugs_returns_empty_when_all_filtered(lib):
     assert slugs == set()
 
 
+# ─── Parent-to-children map ──────────────────────────────────────────
+
+
+def test_build_parent_to_children_map_happy_path(lib, tmp_path):
+    # Jamie (parent), with two kids linked via parent_slug
+    (tmp_path / "jamie-fitzgerald.md").write_text(
+        "# Jamie Fitzgerald\n\n- **slug:** jamie-fitzgerald\n- **email:** jamie@example.com\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "eliott-fitzgerald.md").write_text(
+        "# Eliott Fitzgerald\n\n- **slug:** eliott-fitzgerald\n- **parent_slug:** jamie-fitzgerald\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "arthur-fitzgerald.md").write_text(
+        "# Arthur Fitzgerald\n\n- **slug:** arthur-fitzgerald\n- **parent_slug:** jamie-fitzgerald\n",
+        encoding="utf-8",
+    )
+    m = lib.build_parent_to_children_map(tmp_path)
+    assert set(m["jamie-fitzgerald"]) == {"eliott-fitzgerald", "arthur-fitzgerald"}
+
+
+def test_build_parent_to_children_map_skips_files_with_leading_underscore(lib, tmp_path):
+    (tmp_path / "_template.md").write_text(
+        "- **slug:** template\n- **parent_slug:** someone\n", encoding="utf-8",
+    )
+    (tmp_path / "real.md").write_text(
+        "- **slug:** real\n- **parent_slug:** someone\n", encoding="utf-8",
+    )
+    m = lib.build_parent_to_children_map(tmp_path)
+    assert m == {"someone": ["real"]}
+
+
+def test_build_parent_to_children_map_ignores_empty_parent(lib, tmp_path):
+    (tmp_path / "solo.md").write_text(
+        "- **slug:** solo\n- **parent_slug:** —\n", encoding="utf-8",
+    )
+    (tmp_path / "noparent.md").write_text(
+        "- **slug:** noparent\n", encoding="utf-8",
+    )
+    m = lib.build_parent_to_children_map(tmp_path)
+    assert m == {}
+
+
+def test_build_parent_to_children_map_drops_self_cycle(lib, tmp_path):
+    # parent_slug pointing at self is a data bug — drop, don't infinite-loop
+    (tmp_path / "broken.md").write_text(
+        "- **slug:** broken\n- **parent_slug:** broken\n", encoding="utf-8",
+    )
+    m = lib.build_parent_to_children_map(tmp_path)
+    assert "broken" not in m
+
+
+def test_build_parent_to_children_map_returns_empty_when_dir_missing(lib, tmp_path):
+    missing = tmp_path / "nope"
+    assert lib.build_parent_to_children_map(missing) == {}
+
+
+# ─── Mention-candidate slugs ─────────────────────────────────────────
+
+
+def test_build_mention_candidate_slugs_expands_primary_via_parent_map(lib):
+    parent_to_children = {
+        "jamie-fitzgerald": ["eliott-fitzgerald", "arthur-fitzgerald"],
+    }
+    mention = lib.build_mention_candidate_slugs(
+        primary={"jamie-fitzgerald"},
+        parent_to_children=parent_to_children,
+    )
+    assert mention == {"eliott-fitzgerald", "arthur-fitzgerald"}
+
+
+def test_build_mention_candidate_slugs_empty_when_no_children(lib):
+    mention = lib.build_mention_candidate_slugs(
+        primary={"sarah-chen"},
+        parent_to_children={"jamie-fitzgerald": ["eliott-fitzgerald"]},
+    )
+    assert mention == set()
+
+
+def test_build_mention_candidate_slugs_excludes_primaries_themselves(lib):
+    # If "eliott-fitzgerald" were somehow in primary AND listed as a child
+    # elsewhere, it shouldn't appear in mention — primary wins.
+    parent_to_children = {"a": ["b"], "b": ["c"]}
+    mention = lib.build_mention_candidate_slugs(
+        primary={"a", "b"}, parent_to_children=parent_to_children,
+    )
+    # a's children = {b}, b's children = {c}; b is in primary → drop from mention
+    assert mention == {"c"}
+
+
+# ─── Person info map ─────────────────────────────────────────────────
+
+
+def test_build_person_info_map_uses_full_name_field(lib, tmp_path):
+    (tmp_path / "eliott-fitzgerald.md").write_text(
+        "# Eliott Fitzgerald\n\n- **slug:** eliott-fitzgerald\n- **full_name:** Eliott Fitzgerald\n",
+        encoding="utf-8",
+    )
+    m = lib.build_person_info_map(tmp_path)
+    assert m["eliott-fitzgerald"] == {
+        "full_name": "Eliott Fitzgerald",
+        "first_name": "Eliott",
+    }
+
+
+def test_build_person_info_map_falls_back_to_h1_when_no_full_name_field(lib, tmp_path):
+    (tmp_path / "arthur-fitzgerald.md").write_text(
+        "# Arthur Fitzgerald\n\n- **slug:** arthur-fitzgerald\n- **parent_slug:** jamie-fitzgerald\n",
+        encoding="utf-8",
+    )
+    m = lib.build_person_info_map(tmp_path)
+    assert m["arthur-fitzgerald"]["full_name"] == "Arthur Fitzgerald"
+    assert m["arthur-fitzgerald"]["first_name"] == "Arthur"
+
+
+def test_build_person_info_map_skips_underscore_files(lib, tmp_path):
+    (tmp_path / "_template.md").write_text(
+        "# Template\n- **slug:** template\n", encoding="utf-8",
+    )
+    (tmp_path / "real.md").write_text(
+        "# Real Person\n- **slug:** real\n", encoding="utf-8",
+    )
+    m = lib.build_person_info_map(tmp_path)
+    assert "template" not in m
+    assert "real" in m
+
+
+def test_filter_mention_info_narrows_to_requested_slugs(lib):
+    info = {
+        "eliott-fitzgerald": {"full_name": "Eliott Fitzgerald", "first_name": "Eliott"},
+        "arthur-fitzgerald": {"full_name": "Arthur Fitzgerald", "first_name": "Arthur"},
+        "jamie-fitzgerald": {"full_name": "Jamie Fitzgerald", "first_name": "Jamie"},
+    }
+    out = lib.filter_mention_info({"eliott-fitzgerald"}, info)
+    assert out == {"eliott-fitzgerald": info["eliott-fitzgerald"]}
+
+
+def test_filter_mention_info_omits_missing_slugs(lib):
+    info = {"eliott-fitzgerald": {"full_name": "Eliott Fitzgerald", "first_name": "Eliott"}}
+    out = lib.filter_mention_info({"eliott-fitzgerald", "ghost"}, info)
+    assert "ghost" not in out
+    assert "eliott-fitzgerald" in out
+
+
 # ─── Message metadata extraction ─────────────────────────────────────
 
 

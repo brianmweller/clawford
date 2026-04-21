@@ -60,9 +60,28 @@ def parse_facts_file(path: Path) -> list[dict]:
             "last_reinforced_at": fields.get("last_reinforced_at", recorded_at),
             "source_agent": fields.get("source_agent", ""),
             "audience_scope": _parse_audience_scope(fields.get("audience_scope")),
+            "mention_slugs": _parse_slug_list(fields.get("mention_slugs")),
             "raw": raw_block,
         })
     return facts
+
+
+def _parse_slug_list(raw: str | None) -> list[str]:
+    """Parse a JSON-list field (mention_slugs) into list[str].
+    Returns [] when field is missing or malformed."""
+    if not raw:
+        return []
+    raw = raw.strip()
+    if not raw or raw == "[]":
+        return []
+    if raw.startswith("["):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return [str(x).strip() for x in parsed if str(x).strip()]
+        except json.JSONDecodeError:
+            pass
+    return []
 
 
 def _parse_audience_scope(raw: str | None) -> list[str] | None:
@@ -131,16 +150,27 @@ def load_facts_for_subject(
     # (_pending_review.md, _index.json-like scratch) so low-confidence
     # entries quarantined in _pending_review.md don't leak back into
     # the composer via this loader.
+    #
+    # Match both subject and mention_slugs — the latter surfaces facts
+    # that name the target without being about them (e.g. a fact on
+    # Jamie's slug that mentions Eliott surfaces for Eliott too).
     out: list[dict] = []
+    seen: set[str] = set()
     for path in sorted(facts_dir.glob("*.md")):
         if path.name.startswith("_"):
             continue
         for fact in parse_facts_file(path):
-            if fact["subject"].lower() != target:
-                continue
             if fact["confidence"] < min_confidence:
                 continue
-            out.append(fact)
+            if fact["id"] in seen:
+                continue
+            matches_subject = fact["subject"].lower() == target
+            matches_mention = target in {
+                m.lower() for m in fact.get("mention_slugs") or []
+            }
+            if matches_subject or matches_mention:
+                out.append(fact)
+                seen.add(fact["id"])
     return out
 
 
@@ -282,6 +312,7 @@ def upsert_fact(
     idempotency_key: str | None = None,
     recorded_at: str,
     audience_scope: list[str] | None = None,
+    mention_slugs: list[str] | None = None,
 ) -> dict:
     """Append a fact to ``facts/YYYY-MM.md`` (derived from ``recorded_at``),
     idempotent on ``(source_agent, subject, idempotency_key)``.
@@ -341,6 +372,8 @@ def upsert_fact(
     )
     if audience_scope:
         entry += f"- **audience_scope:** {json.dumps(audience_scope)}\n"
+    if mention_slugs:
+        entry += f"- **mention_slugs:** {json.dumps(mention_slugs)}\n"
 
     with open(month_path, "a", encoding="utf-8") as f:
         if is_new:

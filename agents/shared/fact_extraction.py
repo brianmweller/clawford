@@ -113,7 +113,9 @@ Output a JSON object with a single "facts" array. Each fact has:
 - confidence: float 0.3-1.0
 - audience_scope: list of 1-3 valid tags
 - reason: short phrase naming the evidence
-
+- mention_slugs: (optional) list of slugs from "MENTION CANDIDATES" below
+  that the fact names but isn't principally about. Omit or empty when none.
+{mention_candidates_block}
 SOURCE MATERIAL
 {text}
 """
@@ -137,16 +139,56 @@ def _statement_date_iso(source_context: dict) -> str:
     return ""
 
 
+def _render_mention_candidates_block(
+    mention_candidate_slugs: dict[str, dict] | None,
+) -> str:
+    """Render the MENTION CANDIDATES section, or empty string when none.
+
+    Mention candidates are people who may be named in the body but cannot
+    themselves be subjects (typically minor children linked via parent_slug
+    who have no email address). The LLM may cite them in `mention_slugs`
+    but must not use them as `subject_slug`.
+    """
+    if not mention_candidate_slugs:
+        return ""
+    lines = []
+    for slug in sorted(mention_candidate_slugs.keys()):
+        info = mention_candidate_slugs[slug] or {}
+        full = info.get("full_name", "").strip()
+        first = info.get("first_name", "").strip()
+        if full and first:
+            lines.append(f"- {slug} ({full} — first name: {first})")
+        elif full:
+            lines.append(f"- {slug} ({full})")
+        else:
+            lines.append(f"- {slug}")
+    body = "\n".join(lines)
+    return (
+        "\nMENTION CANDIDATES — these people may be mentioned in the body.\n"
+        "If a fact names one, add their slug to `mention_slugs`.\n"
+        "You MAY NOT use these as `subject_slug` — only the primary\n"
+        "Candidate subjects list above is valid for subject_slug.\n"
+        f"{body}\n"
+    )
+
+
 def build_extraction_prompt(
     *,
     text: str,
     source_context: dict,
     candidate_slugs: set[str],
+    mention_candidate_slugs: dict[str, dict] | None = None,
 ) -> str:
     """Assemble the LLM prompt for a single extraction call.
 
     Source-agnostic framing. source_context hints (from_email, attendees,
     etc.) help the LLM anchor references like "she said" back to a slug.
+
+    `mention_candidate_slugs` maps slug → {full_name, first_name} for
+    people who may be named in the body but cannot be subjects (typically
+    children of primary candidates, linked via parent_slug on their person
+    record). When provided, they surface in a MENTION CANDIDATES block and
+    the LLM may cite them in each fact's `mention_slugs` field.
     """
     source = source_context.get("source", "unknown")
     hints = []
@@ -163,11 +205,14 @@ def build_extraction_prompt(
     )
 
     cand_lines = "\n".join(f"- {s}" for s in sorted(candidate_slugs))
+    mention_block = _render_mention_candidates_block(mention_candidate_slugs)
+
     return _PROMPT_TEMPLATE.format(
         source=source,
         source_hints=hints_block,
         statement_date_line=statement_date_line,
         candidate_block=cand_lines or "(none)",
+        mention_candidates_block=mention_block,
         valid_tags=", ".join(sorted(VALID_SCOPE_TAGS)),
         text=text,
     )
@@ -246,9 +291,19 @@ def _normalize_fact(
     *,
     source_context: dict,
     candidate_slugs: set[str],
+    mention_candidate_slugs: set[str] | None = None,
 ) -> dict | None:
     """Apply all filters; return the upsert-ready dict (with
-    needs_review flag) or None if the fact should be dropped."""
+    needs_review flag) or None if the fact should be dropped.
+
+    `subject_slug` must be in `candidate_slugs` (primary). Mention-candidate
+    slugs MAY NOT be used as subjects — a fact that tries to is dropped.
+    Valid `mention_slugs` values are those in `candidate_slugs ∪
+    mention_candidate_slugs`; invalid entries are silently filtered out
+    without dropping the fact.
+    """
+    mention_set = mention_candidate_slugs or set()
+
     subject_slug = str(raw.get("subject_slug") or "").strip()
     if not subject_slug or subject_slug not in candidate_slugs:
         return None
@@ -275,6 +330,21 @@ def _normalize_fact(
 
     category = str(raw.get("category") or "fact").strip() or "fact"
 
+    # mention_slugs: filter against the closed set (primary ∪ mention). Drop
+    # hallucinations but keep the fact. Preserve order, dedupe.
+    allowed_mentions = candidate_slugs | mention_set
+    seen: set[str] = set()
+    mention_slugs: list[str] = []
+    raw_mentions = raw.get("mention_slugs")
+    if isinstance(raw_mentions, list):
+        for m in raw_mentions:
+            if not isinstance(m, str):
+                continue
+            m = m.strip()
+            if m and m in allowed_mentions and m != subject_slug and m not in seen:
+                mention_slugs.append(m)
+                seen.add(m)
+
     source = source_context.get("source", "unknown")
     src_id = _source_id_from_context(source_context)
     source_detail = f"{source}:{src_id}" if src_id else source
@@ -287,6 +357,7 @@ def _normalize_fact(
         "content": content,
         "confidence": confidence,
         "audience_scope": scope,
+        "mention_slugs": mention_slugs,
         "source_detail": source_detail,
         "idempotency_key": _build_idempotency_key(source_context, subject_slug, content),
         "needs_review": needs_review,
@@ -299,15 +370,104 @@ def _normalize_fact(
 # ---------------------------------------------------------------------------
 
 
+_DEDUPE_JACCARD_THRESHOLD = 0.6
+
+_STOPWORDS: frozenset[str] = frozenset({
+    "a", "an", "the", "and", "or", "but", "of", "in", "on", "at", "to",
+    "is", "are", "was", "were", "be", "been", "has", "have", "had",
+    "for", "from", "with", "as", "that", "this", "these", "those",
+    "s",  # possessive leftovers after tokenize strip
+})
+
+
+def _tokenize_for_dedupe(text: str) -> frozenset[str]:
+    """Return a stopword-stripped lowercased token set. Numerics retained
+    (birth years, ages, phone fragments often carry the signal)."""
+    raw = re.findall(r"[a-zA-Z0-9]+", text.lower())
+    return frozenset(t for t in raw if t and t not in _STOPWORDS)
+
+
+def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
+    if not a or not b:
+        return 0.0
+    inter = len(a & b)
+    union = len(a | b)
+    return inter / union if union else 0.0
+
+
+def _dedupe_within_batch(facts: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Collapse near-duplicate facts within a single extraction batch.
+
+    Grouped by subject_slug. Within each group, facts are processed
+    ordered by (-confidence, idempotency_key) so the higher-confidence
+    fact is seen first; on tie the lexicographically-smaller
+    idempotency_key wins (determinism). A candidate fact is dropped
+    when its Jaccard similarity against any already-kept fact in the
+    same group meets the threshold.
+
+    Returns (kept, dropped). Dropped facts carry an extra key
+    'dropped_reason' pointing to the keeper id.
+    """
+    if not facts:
+        return [], []
+
+    # Preserve original order for the kept-list return.
+    by_subject: dict[str, list[dict]] = {}
+    for f in facts:
+        by_subject.setdefault(f.get("subject", ""), []).append(f)
+
+    keep_ids: set[str] = set()
+    dropped: list[dict] = []
+
+    for group in by_subject.values():
+        if len(group) < 2:
+            keep_ids.update(f["idempotency_key"] for f in group)
+            continue
+        ordered = sorted(
+            group,
+            key=lambda f: (
+                -float(f.get("confidence") or 0),
+                str(f.get("idempotency_key") or ""),
+            ),
+        )
+        kept_tokens: list[tuple[dict, frozenset[str]]] = []
+        for cand in ordered:
+            cand_tokens = _tokenize_for_dedupe(cand.get("content") or "")
+            match: dict | None = None
+            for kept_fact, kept_toks in kept_tokens:
+                if _jaccard(cand_tokens, kept_toks) >= _DEDUPE_JACCARD_THRESHOLD:
+                    match = kept_fact
+                    break
+            if match is None:
+                kept_tokens.append((cand, cand_tokens))
+                keep_ids.add(cand["idempotency_key"])
+            else:
+                cand_copy = dict(cand)
+                cand_copy["dropped_reason"] = (
+                    f"near-duplicate of {match.get('idempotency_key')}"
+                )
+                dropped.append(cand_copy)
+
+    kept = [f for f in facts if f["idempotency_key"] in keep_ids]
+    return kept, dropped
+
+
 def extract_facts_from_text(
     *,
     text: str,
     source_context: dict,
     candidate_slugs: set[str],
+    mention_candidate_slugs: dict[str, dict] | None = None,
     timeout: int = 120,
     infer_fn: Callable | None = None,
 ) -> list[dict]:
-    """Extract durable facts from text. See module docstring for contract."""
+    """Extract durable facts from text. See module docstring for contract.
+
+    `mention_candidate_slugs` maps slug → {full_name, first_name} for
+    people who may be named in the body but cannot be subjects. They
+    surface to the LLM via build_extraction_prompt's MENTION CANDIDATES
+    block; valid cites land in each fact's `mention_slugs` list.
+    """
     if not candidate_slugs:
         return []
     if not text or not text.strip():
@@ -317,6 +477,7 @@ def extract_facts_from_text(
         text=text,
         source_context=source_context,
         candidate_slugs=candidate_slugs,
+        mention_candidate_slugs=mention_candidate_slugs,
     )
     caller = infer_fn or _default_infer
     result = caller(prompt, json_mode=True, timeout=timeout)
@@ -324,14 +485,20 @@ def extract_facts_from_text(
         return []
 
     raw_facts = _parse_llm_response(getattr(result, "text", "") or "")
-    out: list[dict] = []
+    mention_set = set((mention_candidate_slugs or {}).keys())
+    normalized: list[dict] = []
     for raw in raw_facts:
         norm = _normalize_fact(
-            raw, source_context=source_context, candidate_slugs=candidate_slugs
+            raw,
+            source_context=source_context,
+            candidate_slugs=candidate_slugs,
+            mention_candidate_slugs=mention_set,
         )
         if norm is not None:
-            out.append(norm)
-    return out
+            normalized.append(norm)
+
+    kept, _dropped = _dedupe_within_batch(normalized)
+    return kept
 
 
 # ---------------------------------------------------------------------------

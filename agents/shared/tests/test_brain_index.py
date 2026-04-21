@@ -215,3 +215,75 @@ def test_facts_for_subject_case_insensitive_lookup(tmp_path: Path) -> None:
     # Caller passes uppercase; index is lowercase; lookup still works.
     entries = brain_index.facts_for_subject(idx, "PRIYA-RIVERA")
     assert entries == [["2026-04", "f-001"]]
+
+
+# ─── by_mention index ────────────────────────────────────────────────
+
+
+def _write_fact_file_with_mentions(path: Path, facts: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    parts = [f"# Facts — {path.stem}\n"]
+    for f in facts:
+        parts.append("\n---\n\n")
+        parts.append(f"- **id:** {f['id']}\n")
+        parts.append(f"- **content:** {f.get('content', 'X')}\n")
+        parts.append(f"- **subject:** {f['subject']}\n")
+        parts.append(f"- **confidence:** {f.get('confidence', 0.8)}\n")
+        parts.append(f"- **category:** {f.get('category', 'identity')}\n")
+        parts.append(f"- **recorded_at:** {f.get('recorded_at', '2026-04-10')}\n")
+        parts.append("- **source_agent:** connector\n")
+        mentions = f.get("mention_slugs")
+        if mentions:
+            parts.append(f'- **mention_slugs:** {json.dumps(mentions)}\n')
+    path.write_text("".join(parts), encoding="utf-8")
+
+
+def test_rebuild_index_maps_mentions_to_month_and_fact_id(tmp_path: Path) -> None:
+    facts_dir = tmp_path / "facts"
+    _write_fact_file_with_mentions(facts_dir / "2026-04.md", [
+        {
+            "id": "f-jamie-kids",
+            "subject": "jamie-fitzgerald",
+            "mention_slugs": ["eliott-fitzgerald", "arthur-fitzgerald"],
+        },
+    ])
+    idx = brain_index.rebuild_index(facts_dir)
+    assert idx["by_mention"]["eliott-fitzgerald"] == [["2026-04", "f-jamie-kids"]]
+    assert idx["by_mention"]["arthur-fitzgerald"] == [["2026-04", "f-jamie-kids"]]
+
+
+def test_rebuild_index_mentions_are_lowercased(tmp_path: Path) -> None:
+    facts_dir = tmp_path / "facts"
+    _write_fact_file_with_mentions(facts_dir / "2026-04.md", [
+        {
+            "id": "f-1",
+            "subject": "jamie-fitzgerald",
+            "mention_slugs": ["Eliott-Fitzgerald"],
+        },
+    ])
+    idx = brain_index.rebuild_index(facts_dir)
+    assert "eliott-fitzgerald" in idx["by_mention"]
+    assert "Eliott-Fitzgerald" not in idx["by_mention"]
+
+
+def test_facts_for_subject_includes_mentions_from_index(tmp_path: Path) -> None:
+    idx = {
+        "by_subject": {"eliott-fitzgerald": [["2026-03", "f-old"]]},
+        "by_mention": {"eliott-fitzgerald": [["2026-04", "f-jamie-kids"]]},
+        "built_at": "x",
+    }
+    entries = brain_index.facts_for_subject(idx, "eliott-fitzgerald")
+    # Expect union of both sources
+    assert [["2026-03", "f-old"], ["2026-04", "f-jamie-kids"]] == sorted(
+        entries, key=lambda e: e[0]
+    )
+
+
+def test_facts_for_subject_dedupes_when_same_entry_in_both_maps(tmp_path: Path) -> None:
+    idx = {
+        "by_subject": {"jamie-fitzgerald": [["2026-04", "f-1"]]},
+        "by_mention": {"jamie-fitzgerald": [["2026-04", "f-1"]]},
+        "built_at": "x",
+    }
+    entries = brain_index.facts_for_subject(idx, "jamie-fitzgerald")
+    assert entries == [["2026-04", "f-1"]]
