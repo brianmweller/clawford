@@ -1219,6 +1219,8 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "memory_writer.py",
     "operator.py",            # 2026-04-20 — operator identity loader (~/.clawford/operator.json)
     "pending_actions.py",
+    "pending_queue.py",       # 2026-04-21 — brain-maintenance review queue JSONL
+    "pending_review_resolve.py",  # 2026-04-21 — approve/reject helpers for pending facts
     "playwright_profile.py",
     "rate_limit.py",         # P1.3 — outbound rate limit + dedup
     "retry_policy.py",

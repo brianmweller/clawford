@@ -166,6 +166,13 @@ CONTRACT_ENTRIES=(
   # rather than producing skipped_dup work.
   "0 4,10,16,22 * * *|connector-gmail-facts-mine|/home/openclaw/.clawford/connector-workspace/scripts/gmail-facts-mine.py|CONNECTOR_BOT_TOKEN|900"
   "30 4,10,16,22 * * *|connector-workflowy-facts-mine|/home/openclaw/.clawford/connector-workspace/scripts/workflowy-facts-mine.py|CONNECTOR_BOT_TOKEN|900"
+  # Brain-maintenance digest (Phase 4 Telegram promotion): 2 12 UTC = 5:02
+  # AM PT, just after the morning-brief fleet delivery at 12 UTC. Reads
+  # the pending-review-queue.jsonl miners write to and renders one
+  # tap-to-resolve Telegram message per item (approve / reject / skip).
+  # Low-conf mined facts + suspected dupes + migration ambiguities all
+  # surface here. Suppresses the section entirely when the queue is empty.
+  "2 12 * * *|connector-brain-maintenance-digest|/home/openclaw/.clawford/connector-workspace/scripts/brain-maintenance-digest.py|CONNECTOR_BOT_TOKEN|120"
   "30 10 * * *|meetings-coach-morning-meeting-brief|/home/openclaw/.clawford/meetings-coach-workspace/scripts/morning-meeting-brief.py|MEETINGS_BOT_TOKEN|300"
   "*/30 * * * *|meetings-coach-pre-meeting-alert|/home/openclaw/.clawford/meetings-coach-workspace/scripts/pre-meeting-alert.py|MEETINGS_BOT_TOKEN|180"
   "15,45 * * * *|meetings-coach-post-meeting-scan|/home/openclaw/.clawford/meetings-coach-workspace/scripts/post-meeting-scan.py|MEETINGS_BOT_TOKEN|300"

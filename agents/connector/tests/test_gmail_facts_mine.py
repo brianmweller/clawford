@@ -22,6 +22,8 @@ import pytest
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
+SHARED_DIR = Path(__file__).resolve().parents[2] / "shared"
+sys.path.insert(0, str(SHARED_DIR))
 
 
 def _load_script(name: str):
@@ -337,6 +339,45 @@ def test_filter_mention_info_omits_missing_slugs(lib):
     out = lib.filter_mention_info({"eliott-fitzgerald", "ghost"}, info)
     assert "ghost" not in out
     assert "eliott-fitzgerald" in out
+
+
+# ─── Rejected-facts skip filter (Phase 4e) ───────────────────────────
+
+def test_filter_rejected_facts_drops_signatures_in_skip_set(lib):
+    # signature_for is canonical; build skip set the same way
+    from pending_review_resolve import signature_for  # type: ignore
+    skip = {signature_for(subject="jane-doe", content="Jane prefers tea over coffee.")}
+    facts = [
+        {"subject": "jane-doe", "content": "Jane prefers tea over coffee.",
+         "idempotency_key": "k1"},
+        {"subject": "jane-doe", "content": "Jane is launching a startup.",
+         "idempotency_key": "k2"},
+    ]
+    kept, dropped = lib.filter_rejected_facts(facts, skip)
+    assert len(kept) == 1
+    assert kept[0]["content"] == "Jane is launching a startup."
+    assert len(dropped) == 1
+
+
+def test_filter_rejected_facts_noop_when_skip_empty(lib):
+    facts = [{"subject": "x", "content": "y", "idempotency_key": "k"}]
+    kept, dropped = lib.filter_rejected_facts(facts, set())
+    assert kept == facts
+    assert dropped == []
+
+
+def test_filter_rejected_facts_is_whitespace_insensitive(lib):
+    from pending_review_resolve import signature_for  # type: ignore
+    # Skip set was recorded with one spacing; new fact has extra whitespace
+    skip = {signature_for(subject="jane-doe", content="Jane prefers tea over coffee.")}
+    facts = [{
+        "subject": "jane-doe",
+        "content": "Jane  prefers  tea over  coffee.",
+        "idempotency_key": "k1",
+    }]
+    kept, dropped = lib.filter_rejected_facts(facts, skip)
+    assert kept == []
+    assert len(dropped) == 1
 
 
 # ─── Message metadata extraction ─────────────────────────────────────

@@ -28,6 +28,7 @@ CHECKIN_LOG_PATH = os.path.join(WORKSPACE, "checkin-log.json")
 MORNING_NUDGE_PATH = os.path.join(CACHE, "morning-nudge.txt")
 LAST_NUDGE_PATH = os.path.join(CACHE, "last-morning-nudge.json")
 SNOOZES_PATH = os.path.join(WORKSPACE, "snoozes.json")
+PENDING_REVIEW_QUEUE_PATH = os.path.join(CACHE, "pending-review-queue.jsonl")
 
 # Default durations (days) for the three nudge button actions. done
 # and snooze map to explicit durations; ignore is a long default so
@@ -665,6 +666,29 @@ def _bump_last_interaction_for_slug(slug: str, date_iso: str) -> bool:
         return False
 
 
+def _handle_facts_callback(action: str, arg: str) -> dict:
+    """Executor wrapper for the shared dispatcher's facts:* callbacks.
+    Resolves the connector's facts_dir + queue path at call time so the
+    dispatcher doesn't need to know them."""
+    import importlib.util
+    scripts_dir = Path(__file__).parent / "scripts"
+    spec = importlib.util.spec_from_file_location(
+        "_facts_callback_lib", scripts_dir / "facts_callback_lib.py",
+    )
+    if spec is None or spec.loader is None:
+        return {"status": "error", "action": action, "detail": "import failure"}
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    facts_dir = brain.dropbox_brain_root() / "facts"
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return mod.handle_facts_callback(
+        action, arg,
+        facts_dir=facts_dir,
+        queue_path=Path(PENDING_REVIEW_QUEUE_PATH),
+        now_iso=now_iso,
+    )
+
+
 EXECUTORS: dict = {
     "get_morning_nudge": get_morning_nudge,
     "get_upcoming_meetings": get_upcoming_meetings,
@@ -676,6 +700,7 @@ EXECUTORS: dict = {
     "propose_remember": propose_remember,
     "confirm_remember": confirm_remember,
     "handle_nudge_action": handle_nudge_action,
+    "handle_facts_callback": lambda action, arg: _handle_facts_callback(action, arg),
     "get_person": get_person,
     "get_commitments": get_commitments,
     "dismiss_triage_n": dismiss_triage_n,

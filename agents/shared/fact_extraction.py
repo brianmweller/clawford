@@ -510,13 +510,21 @@ _REVIEW_HEADER = "# Pending review — low-confidence mined facts\n\n"
 _REVIEW_ID_LINE = re.compile(r"^\s*-\s*\*\*id:\*\*\s*(.+?)\s*$", re.MULTILINE)
 
 
-def append_pending_review(facts_dir: Path, fact: dict) -> None:
+def append_pending_review(
+    facts_dir: Path,
+    fact: dict,
+    *,
+    queue_path: Path | None = None,
+) -> None:
     """Append a low-confidence fact marker to
-    ``<facts_dir>/_pending_review.md``.
+    ``<facts_dir>/_pending_review.md`` (write-only audit trail) AND,
+    when ``queue_path`` is given, enqueue a tap-to-resolve item onto the
+    pending-review queue the morning-brief digest reads from.
 
     Idempotent on fact["id"] — re-running the miner on the same window
-    doesn't duplicate entries. Atomic tmp+replace when rewriting the
-    file; simple append when the file doesn't exist yet.
+    doesn't duplicate either the markdown entry or the queue line. The
+    markdown file uses atomic tmp+replace; the queue uses append-only
+    JSONL with a pre-append id scan (pending_queue.append).
     """
     facts_dir.mkdir(parents=True, exist_ok=True)
     path = facts_dir / "_pending_review.md"
@@ -525,16 +533,53 @@ def append_pending_review(facts_dir: Path, fact: dict) -> None:
     if path.exists():
         existing = path.read_text(encoding="utf-8")
         if fact_id and fact_id in {m.strip() for m in _REVIEW_ID_LINE.findall(existing)}:
-            return
+            already_in_md = True
+        else:
+            already_in_md = False
     else:
         existing = _REVIEW_HEADER
+        already_in_md = False
 
-    entry = _format_review_entry(fact)
-    new_text = existing.rstrip() + "\n\n" + entry + "\n"
+    if not already_in_md:
+        entry = _format_review_entry(fact)
+        new_text = existing.rstrip() + "\n\n" + entry + "\n"
+        tmp = path.with_suffix(".md.tmp")
+        tmp.write_text(new_text, encoding="utf-8")
+        tmp.replace(path)
 
-    tmp = path.with_suffix(".md.tmp")
-    tmp.write_text(new_text, encoding="utf-8")
-    tmp.replace(path)
+    if queue_path is not None and fact_id:
+        # Lazy import so test modules that don't use the queue path
+        # aren't forced to resolve pending_queue (keeps the existing
+        # audit-only callers free of a new hard dependency).
+        from pathlib import Path as _P
+        try:
+            from agents.shared import pending_queue  # type: ignore
+        except ImportError:
+            import pending_queue  # type: ignore
+        pending_queue.append(
+            _P(queue_path),
+            {
+                "id": fact_id,
+                "source": "miner",
+                "fact": {
+                    "id": fact_id,
+                    "subject": fact.get("subject", ""),
+                    "category": fact.get("category", ""),
+                    "content": fact.get("content", ""),
+                    "confidence": fact.get("confidence"),
+                    "audience_scope": fact.get("audience_scope") or [],
+                    "source_detail": fact.get("source_detail", ""),
+                    "reason": fact.get("reason", ""),
+                },
+                "question": "Is this a durable fact worth remembering?",
+                "options": ["approve", "reject", "skip"],
+                "created_at": _now_iso_for_queue(),
+            },
+        )
+
+
+def _now_iso_for_queue() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _format_review_entry(fact: dict) -> str:

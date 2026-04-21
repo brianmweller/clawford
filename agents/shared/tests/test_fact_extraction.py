@@ -528,6 +528,51 @@ def test_append_pending_review_appends_multiple_entries(mod, tmp_path):
     assert "Second fact" in text
 
 
+def test_append_pending_review_also_enqueues_when_queue_path_given(mod, tmp_path):
+    import pending_queue  # type: ignore
+
+    facts_dir = tmp_path / "facts"
+    queue_path = tmp_path / "pending-review-queue.jsonl"
+    fact = {
+        "id": "connector-jane-doe-xyz",
+        "subject": "jane-doe",
+        "category": "preference",
+        "content": "Jane prefers tea over coffee.",
+        "confidence": 0.45,
+        "audience_scope": ["personal"],
+        "source_detail": "gmail:msg-abc",
+        "reason": "low-conf extraction",
+    }
+    mod.append_pending_review(facts_dir, fact, queue_path=queue_path)
+
+    # Queue got an entry with matching id + source + the fact payload
+    entries = pending_queue.load(queue_path)
+    assert len(entries) == 1
+    assert entries[0]["id"] == "connector-jane-doe-xyz"
+    assert entries[0]["source"] == "miner"
+    assert entries[0]["fact"]["subject"] == "jane-doe"
+    assert entries[0]["fact"]["content"].startswith("Jane prefers")
+    # Markdown pending-review file got written too (existing behavior)
+    assert (facts_dir / "_pending_review.md").exists()
+
+
+def test_append_pending_review_no_queue_when_path_not_given(mod, tmp_path):
+    facts_dir = tmp_path / "facts"
+    fact = {
+        "id": "connector-jane-doe-nopath",
+        "subject": "jane-doe",
+        "category": "preference",
+        "content": "x",
+        "confidence": 0.45,
+        "audience_scope": ["personal"],
+        "source_detail": "gmail:m",
+        "reason": "r",
+    }
+    # Does not raise when queue_path omitted
+    mod.append_pending_review(facts_dir, fact)
+    assert (facts_dir / "_pending_review.md").exists()
+
+
 def test_append_pending_review_idempotent_on_same_id(mod, tmp_path):
     """Re-running the miner on the same window shouldn't duplicate
     pending-review entries."""

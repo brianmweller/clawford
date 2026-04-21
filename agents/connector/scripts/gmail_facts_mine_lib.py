@@ -141,6 +141,41 @@ def filter_mention_info(
     return {s: info_map[s] for s in mention_slugs if s in info_map}
 
 
+def filter_rejected_facts(
+    facts: list[dict],
+    skip_signatures: set[tuple[str, str]],
+) -> tuple[list[dict], list[dict]]:
+    """Partition `facts` into (kept, dropped) where dropped = those whose
+    (subject, content_hash) signature appears in `skip_signatures`.
+
+    Skip-signatures are produced by pending_review_resolve.signature_for()
+    and populated at miner startup via load_rejected_signatures(). Lets
+    operator rejections from _rejected.md suppress re-proposals on the
+    next mining pass without needing a schema join between the two files.
+    """
+    if not skip_signatures:
+        return list(facts), []
+    # Lazy import so the lib stays importable without the shared package
+    # being on sys.path (same convenience pattern used elsewhere here).
+    try:
+        from pending_review_resolve import signature_for  # type: ignore
+    except ImportError:
+        from agents.shared.pending_review_resolve import signature_for  # type: ignore
+
+    kept: list[dict] = []
+    dropped: list[dict] = []
+    for f in facts:
+        sig = signature_for(
+            subject=str(f.get("subject", "")),
+            content=str(f.get("content", "")),
+        )
+        if sig in skip_signatures:
+            dropped.append(f)
+        else:
+            kept.append(f)
+    return kept, dropped
+
+
 # ---------------------------------------------------------------------------
 # Cursor I/O
 # ---------------------------------------------------------------------------

@@ -598,6 +598,64 @@ def _handle_task_callback(
         log.warning("handle_task_callback failed: %s", exc)
 
 
+# facts:<action>:<arg> — Huckle Cat brain-maintenance callbacks
+# (approve / reject / skip / approve_remaining / silence_today / expand)
+_FACTS_TOAST = {
+    "approve": "✅ Remembered",
+    "reject": "❌ Rejected",
+    "skip": "⏭ Skipped (7d)",
+    "approve_remaining": "☑️ Approved all",
+    "silence_today": "\U0001f515 Silenced today",
+    "expand": "\U0001f4cb Expanding...",
+}
+
+
+def _handle_facts_callback(
+    cfg: AgentConfig, chat_id: str,
+    action: str, arg: str, cbq_id: str,
+) -> None:
+    """Route a brain-maintenance callback to the connector's
+    handle_facts_callback executor, which resolves facts_dir + queue
+    paths and dispatches to agents/connector/scripts/facts_callback_lib.
+    """
+    telegram_api.answer_callback_query(
+        cfg.token, cbq_id, text=_FACTS_TOAST.get(action, "Noted"),
+    )
+    executor = cfg.executors.get("handle_facts_callback")
+    if executor is None:
+        log.warning("no handle_facts_callback executor on %s", cfg.agent_id)
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            f"No handler for facts:{action}.",
+            skip_review=True,
+        )
+        return
+    try:
+        result = executor(action=action, arg=arg)
+    except Exception as exc:
+        log.warning("handle_facts_callback failed: %s", exc)
+        telegram_api.send_message(
+            cfg.token, chat_id, f"Failed: {exc}",
+            skip_review=True,
+        )
+        return
+    if not isinstance(result, dict):
+        return
+    status = result.get("status", "ok")
+    if status == "not_found":
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            f"Already handled or expired ({action}).",
+            skip_review=True,
+        )
+    elif status == "error":
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            f"Failed: {result.get('detail', 'unknown')}",
+            skip_review=True,
+        )
+
+
 # debrief_{save,dismiss}:<event_id> — Sergeant Murphy post-meeting
 # buttons. Save appends action items to commitments/active.md; Dismiss
 # deletes the pending file. 'See more' is a native Telegram URL button
@@ -723,6 +781,14 @@ def _try_callback_shortcut(
         if data.startswith(prefix + ":"):
             event_id = data[len(prefix) + 1:]
             _handle_debrief_callback(cfg, chat_id, prefix, event_id, cbq_id)
+            return True
+
+    # Brain-maintenance buttons (Huckle Cat): facts:<action>:<arg>
+    if data.startswith("facts:"):
+        parts = data.split(":", 2)
+        if len(parts) >= 3:
+            _, action, arg = parts
+            _handle_facts_callback(cfg, chat_id, action, arg, cbq_id)
             return True
 
     return False

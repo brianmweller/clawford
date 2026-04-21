@@ -54,15 +54,20 @@ from gmail_facts_mine_lib import (                                 # noqa: E402
     build_parent_to_children_map,
     build_person_info_map,
     filter_mention_info,
+    filter_rejected_facts,
     load_cursor,
     message_metadata,
     save_cursor,
 )
+from agents.shared.pending_review_resolve import load_rejected_signatures  # noqa: E402
 
 DEFAULT_TOKEN = Path(os.path.expanduser("~/.clawford/connector-workspace/token.json"))
 DEFAULT_CREDS = Path(os.path.expanduser("~/.clawford/connector-workspace/credentials.json"))
 DEFAULT_CURSOR = Path(os.path.expanduser(
     "~/.clawford/connector-workspace/cache/gmail-mine-cursor.json"
+))
+DEFAULT_QUEUE = Path(os.path.expanduser(
+    "~/.clawford/connector-workspace/cache/pending-review-queue.jsonl"
 ))
 
 
@@ -117,6 +122,7 @@ def run(
     max_messages: int,
     commit: bool,
     verbose: bool = False,
+    queue_path: Path | None = None,
 ) -> dict:
     """Run one miner pass. Returns the SCRIPT_CONTRACT envelope as a dict."""
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -124,6 +130,7 @@ def run(
     email_to_slug = build_email_to_slug_map(people_dir)
     parent_to_children = build_parent_to_children_map(people_dir)
     person_info = build_person_info_map(people_dir)
+    rejected_sigs = load_rejected_signatures(facts_dir)
     query = build_gmail_query(
         cursor=cursor, fallback_days=window_days, now_iso=now_iso,
     )
@@ -139,6 +146,7 @@ def run(
         "facts_minted": 0,
         "facts_reinforced": 0,
         "skipped_dup": 0,
+        "skipped_rejected": 0,
         "facts_flagged_low_conf": 0,
         "observations_appended": 0,
         "extract_errors": 0,
@@ -187,6 +195,12 @@ def run(
                 traceback.print_exc(file=sys.stderr)
             continue
 
+        # Drop facts the operator has already rejected (same subject +
+        # normalized content hash). Prevents re-surfacing the same
+        # claim after the operator said no.
+        facts, dropped_rejected = filter_rejected_facts(facts, rejected_sigs)
+        stats["skipped_rejected"] += len(dropped_rejected)
+
         for f in facts:
             if commit:
                 result = upsert_fact(
@@ -214,6 +228,7 @@ def run(
                     append_pending_review(
                         facts_dir,
                         {**f, "id": result["id"]},
+                        queue_path=queue_path,
                     )
                     stats["facts_flagged_low_conf"] += 1
                 # High-confidence facts surface on the person card too.
@@ -256,6 +271,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true",
                     help="Explicit dry-run (same as omitting --commit)")
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--queue-path", type=Path, default=DEFAULT_QUEUE,
+                    help="Pending-review queue JSONL for Telegram digest surfacing")
     args = ap.parse_args(argv)  # None → argparse uses sys.argv[1:]
 
     try:
@@ -280,6 +297,7 @@ def main(argv: list[str] | None = None) -> int:
             max_messages=args.max_messages,
             commit=commit,
             verbose=args.verbose,
+            queue_path=args.queue_path if commit else None,
         )
     except Exception as exc:  # noqa: BLE001 — final-line envelope is the contract
         traceback.print_exc(file=sys.stderr)
