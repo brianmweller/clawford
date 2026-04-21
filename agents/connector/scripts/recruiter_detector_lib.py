@@ -97,10 +97,14 @@ _STRONG_SUBJECT_RE = re.compile("|".join(_STRONG_SUBJECT_PHRASES), flags=re.IGNO
 
 
 # Negative keywords — phrases that suggest the email is NOT recruiting
-# (sales pitch, personal, service). Reduce confidence.
+# (transactional, newsletter, service). Reduce confidence.
+# NOTE: "partnering with" was removed — recruiters routinely say
+# "partnering with [hiring manager]" (ambiguous with sales "partnering
+# with your team"). The recruiter-language signals dominate when both
+# are present, and we don't want to drop genuine recruiter outreach.
 _NON_RECRUITER_PHRASES = [
-    r"\binvoice\b", r"\breceipt\b", r"\border\b", r"\bshipping\b",
-    r"\bdemo\b", r"\bpartner(ing)? with\b", r"\bpartnership\b",
+    r"\binvoice\b", r"\breceipt\b", r"\border (confirmation|shipped|status)\b",
+    r"\bshipping\b", r"\bdemo (our|the) (platform|product)\b",
     r"\bsubscribe\b", r"\bunsubscribe\b",
     r"\bnewsletter\b", r"\bdigest\b",
 ]
