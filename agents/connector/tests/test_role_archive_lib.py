@@ -88,17 +88,23 @@ def test_group_records_by_role_routes_filesystem_role_direct():
 
 def test_group_records_by_role_routes_meetings_by_chronological_date():
     """Workflowy records (role=meetings) route by chronological_date
-    against the timeline. 2021-03 → amazon, 2024-07 → airbnb, etc."""
+    against the timeline — EXCEPT those classified job_search_material,
+    which always go to the search/job-search bucket via the class
+    override (the operator's rule: job-search content never contaminates role
+    archives)."""
     p1, e1 = _rec("wf://1", "email_or_correspondence", 0.5, role="meetings", date="2021-03-15")
     p2, e2 = _rec("wf://2", "feedback_given", 0.8, role="meetings", date="2024-07-20")
     p3, e3 = _rec("wf://3", "strategic_doc", 0.7, role="meetings", date="2022-06-01")
     p4, e4 = _rec("wf://4", "job_search_material", 0.8, role="meetings", date="2024-03-10")
     index = {"files": {p1: e1, p2: e2, p3: e3, p4: e4}}
-    groups = group_records_by_role(index, _RANGES)
-    assert len(groups["amazon"]) == 1
-    assert len(groups["airbnb"]) == 1
-    assert len(groups["netflix"]) == 1
-    assert len(groups["between-linkedin-airbnb"]) == 1
+    groups = group_records_by_role(index, _RANGES)   # no search_timeline
+    # Non-job-search WF records route by date to role buckets
+    assert len(groups["amazon"]) == 1               # 2021-03 → amazon
+    assert len(groups["airbnb"]) == 1               # 2024-07 → airbnb
+    assert len(groups["netflix"]) == 1              # 2022-06 → netflix
+    # job_search_material → job-search bucket (NOT between-linkedin-airbnb)
+    assert len(groups["job-search"]) == 1
+    assert not groups.get("between-linkedin-airbnb")
 
 
 def test_group_records_by_role_bios_route_by_date_when_available():
@@ -178,6 +184,42 @@ def test_group_records_by_role_without_search_timeline_flat_bucket():
     groups = group_records_by_role(index, _RANGES)
     assert len(groups["job-search"]) == 1
     assert not groups.get("search-post-linkedin")
+
+
+def test_group_records_by_role_class_job_search_material_overrides_workflowy_role():
+    """Workflowy (role=meetings) records classified as job_search_material
+    route to search rounds, not to the role active on their date.
+
+    Catches the scenario where Uber/Wayfair interview-prep meeting notes
+    got pulled into role archives (e.g., linkedin.md, airbnb.md)."""
+    # Uber onsite prep during LinkedIn tenure (role timeline says 2023-07 = linkedin)
+    p1, e1 = _rec("wf://uber-prep-1", "job_search_material", 0.9,
+                  role="meetings", date="2023-07-15")
+    # Product jam prep during Example Corp tenure
+    p2, e2 = _rec("wf://uber-product-jam", "job_search_material", 0.9,
+                  role="meetings", date="2026-03-10")
+    index = {"files": {p1: e1, p2: e2}}
+    groups = group_records_by_role(index, _RANGES, search_timeline_ranges=_SEARCH_RANGES)
+    # Should land in search-round buckets, not role buckets
+    assert not groups.get("linkedin")
+    assert not groups.get("airbnb")
+    assert len(groups["search-post-linkedin"]) == 1
+    assert len(groups["search-post-airbnb"]) == 1
+
+
+def test_group_records_by_role_class_override_works_for_filesystem_too():
+    """Filesystem records classified job_search_material also route by
+    search timeline (this was already the case via src_role=job-search,
+    but the class override makes it robust against future src_role
+    mis-tagging)."""
+    p, e = _rec("prep.docx", "job_search_material", 0.9,
+                role="airbnb", date="2025-09-01")
+    # Even though src_role is 'airbnb' (filesystem path hypothetically),
+    # class=job_search_material forces search-round routing
+    index = {"files": {p: e}}
+    groups = group_records_by_role(index, _RANGES, search_timeline_ranges=_SEARCH_RANGES)
+    assert not groups.get("airbnb")
+    assert len(groups.get("search-post-airbnb", [])) == 1
 
 
 def test_group_records_by_role_unknown_date_bucket():

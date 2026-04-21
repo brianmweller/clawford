@@ -132,8 +132,18 @@ def group_records_by_role(
         rec = dict(entry)
         rec.setdefault("path", path)
         src_role = rec.get("role", "")
+        cls = rec.get("class", "")
 
-        if src_role in DIRECT_ROLES:
+        # CLASS-BASED OVERRIDE: any record the classifier marked as
+        # job_search_material routes to a search round, regardless of
+        # source. Catches Workflowy meeting notes about interview prep
+        # that would otherwise route to the role active on that date.
+        if cls == "job_search_material":
+            if search_timeline_ranges:
+                target = _route_job_search_to_search_round(rec, search_timeline_ranges)
+            else:
+                target = "job-search"
+        elif src_role in DIRECT_ROLES:
             target = src_role
         elif src_role == "meetings":
             target = role_for_date(rec.get("chronological_date", ""), timeline_ranges)
