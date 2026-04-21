@@ -317,6 +317,49 @@ def _rewrite_block_reinforcement(
     return block
 
 
+def reinforce_fact_by_id(
+    facts_dir: Path,
+    fact_id: str,
+    *,
+    reinforced_at: str,
+) -> dict:
+    """Find the fact with matching id across every monthly file in
+    ``facts_dir`` and bump its confidence.
+
+    Reuses ``_reinforce_fact_in_file`` — same confidence bump and cap,
+    same atomic tmp+replace rewrite. The caller does not need to know
+    which month the fact lives in; we scan every non-underscore
+    monthly file.
+
+    Returns ``{"status": "reinforced" | "not_found", "path", "new_confidence"}``.
+
+    This is the id-addressed sibling of ``upsert_fact``'s
+    idempotency-key-addressed reinforcement path — used by the
+    embedding-dedupe layer when it finds a semantic match to an
+    existing fact whose idempotency key would NOT collide (different
+    source message, same underlying claim).
+    """
+    if not facts_dir.exists():
+        return {"status": "not_found"}
+    for path in sorted(facts_dir.glob("*.md")):
+        if path.name.startswith("_"):
+            continue
+        for fact in parse_facts_file(path):
+            if fact["id"] == fact_id:
+                new_conf = _reinforce_fact_in_file(
+                    path=path,
+                    fact_id=fact_id,
+                    current_confidence=fact["confidence"],
+                    reinforced_at=reinforced_at,
+                )
+                return {
+                    "status": "reinforced",
+                    "path": str(path),
+                    "new_confidence": new_conf,
+                }
+    return {"status": "not_found"}
+
+
 def upsert_fact(
     *,
     facts_dir: Path,

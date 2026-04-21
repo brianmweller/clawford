@@ -1221,6 +1221,7 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "pending_actions.py",
     "pending_queue.py",       # 2026-04-21 — brain-maintenance review queue JSONL
     "pending_review_resolve.py",  # 2026-04-21 — approve/reject helpers for pending facts
+    "embed.py",               # 2026-04-21 — fastembed wrapper for cross-run semantic dedupe
     "playwright_profile.py",
     "rate_limit.py",         # P1.3 — outbound rate limit + dedup
     "retry_policy.py",

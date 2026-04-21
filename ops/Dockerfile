@@ -57,6 +57,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     httpx-sse \
     httpx \
     pip-audit \
+    fastembed \
   && fc-cache -f \
   && rm -rf /var/lib/apt/lists/*
 

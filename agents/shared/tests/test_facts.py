@@ -10,7 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from agents.shared.facts import parse_facts_file, load_facts_for_subject, upsert_fact
+from agents.shared.facts import (
+    load_facts_for_subject,
+    parse_facts_file,
+    reinforce_fact_by_id,
+    upsert_fact,
+)
 
 
 SAMPLE_FACTS = """\
@@ -814,6 +819,98 @@ def test_parse_facts_file_tolerates_malformed_value_json(tmp_path: Path):
     facts = parse_facts_file(facts_dir / "2026-04.md")
     assert facts[0]["fact_type"] == "birthdate"
     assert facts[0].get("value") is None  # graceful degrade
+
+
+def test_reinforce_fact_by_id_bumps_confidence_and_stamps_timestamp(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "2026-04.md").write_text(
+        "# Facts — 2026-04\n"
+        "\n---\n\n"
+        "- **id:** connector-jane-x\n"
+        "- **content:** Jane is a Director.\n"
+        "- **subject:** jane-doe\n"
+        "- **source_agent:** connector\n"
+        "- **confidence:** 0.7\n"
+        "- **category:** role\n"
+        "- **recorded_at:** 2026-04-10T12:00:00Z\n",
+        encoding="utf-8",
+    )
+    result = reinforce_fact_by_id(
+        facts_dir, "connector-jane-x",
+        reinforced_at="2026-04-21T18:00:00Z",
+    )
+    assert result["status"] == "reinforced"
+    assert result["new_confidence"] == 0.75  # 0.70 + 0.05 bump
+    text = (facts_dir / "2026-04.md").read_text(encoding="utf-8")
+    assert "- **confidence:** 0.75" in text
+    assert "- **last_reinforced_at:** 2026-04-21T18:00:00Z" in text
+
+
+def test_reinforce_fact_by_id_caps_at_0_95(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "2026-04.md").write_text(
+        "# Facts — 2026-04\n"
+        "\n---\n\n"
+        "- **id:** connector-x\n"
+        "- **content:** y\n"
+        "- **subject:** someone\n"
+        "- **source_agent:** connector\n"
+        "- **confidence:** 0.94\n"
+        "- **category:** identity\n"
+        "- **recorded_at:** 2026-04-10T12:00:00Z\n",
+        encoding="utf-8",
+    )
+    result = reinforce_fact_by_id(
+        facts_dir, "connector-x",
+        reinforced_at="2026-04-21T18:00:00Z",
+    )
+    assert result["new_confidence"] == 0.95  # capped
+
+
+def test_reinforce_fact_by_id_returns_not_found_when_missing(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "2026-04.md").write_text(
+        "# Facts — 2026-04\n", encoding="utf-8",
+    )
+    result = reinforce_fact_by_id(
+        facts_dir, "connector-ghost",
+        reinforced_at="2026-04-21T18:00:00Z",
+    )
+    assert result["status"] == "not_found"
+
+
+def test_reinforce_fact_by_id_searches_across_months(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "2026-03.md").write_text(
+        "# Facts — 2026-03\n", encoding="utf-8",
+    )
+    (facts_dir / "2026-04.md").write_text(
+        "# Facts — 2026-04\n"
+        "\n---\n\n"
+        "- **id:** connector-old-x\n"
+        "- **content:** Old fact from April.\n"
+        "- **subject:** someone\n"
+        "- **source_agent:** connector\n"
+        "- **confidence:** 0.6\n"
+        "- **category:** identity\n"
+        "- **recorded_at:** 2026-04-05T12:00:00Z\n",
+        encoding="utf-8",
+    )
+    (facts_dir / "2026-05.md").write_text(
+        "# Facts — 2026-05\n", encoding="utf-8",
+    )
+    # id lives in April's file but caller might not know that; the
+    # function scans all months.
+    result = reinforce_fact_by_id(
+        facts_dir, "connector-old-x",
+        reinforced_at="2026-05-10T12:00:00Z",
+    )
+    assert result["status"] == "reinforced"
+    assert result["path"].endswith("2026-04.md")
 
 
 def test_load_facts_for_subject_respects_min_confidence_on_mention_matches(tmp_path: Path):

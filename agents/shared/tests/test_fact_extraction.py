@@ -841,6 +841,202 @@ def test_append_pending_review_no_queue_when_path_not_given(mod, tmp_path):
     assert (facts_dir / "_pending_review.md").exists()
 
 
+# ─── _dedupe_against_existing (Phase 3) ──────────────────────────────
+
+def _new_fact(**overrides) -> dict:
+    base = {
+        "subject": "jane-doe",
+        "content": "Jane is a Director.",
+        "confidence": 0.9,
+        "idempotency_key": "gmail-m1-jane-doe-newhash",
+        "audience_scope": ["professional"],
+        "category": "role",
+        "fact_type": "",
+        "value": None,
+        "mention_slugs": [],
+        "source_detail": "gmail:m1",
+        "needs_review": False,
+        "reason": "",
+    }
+    base.update(overrides)
+    return base
+
+
+def _existing_fact(**overrides) -> dict:
+    base = {
+        "id": "connector-jane-doe-oldhash",
+        "subject": "jane-doe",
+        "content": "Jane is a Director.",
+        "confidence": 0.85,
+        "fact_type": "",
+        "value": None,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_dedupe_different_fact_types_short_circuit_to_new(mod):
+    # Even with identical content, different typed claims are NOT dupes
+    new = [_new_fact(fact_type="birthdate", value={"year": 2021, "precision": "year"})]
+    existing = [_existing_fact(fact_type="employer", value={"company": "X", "status": "current"})]
+    kept, reinforce, queued = mod._dedupe_against_existing(new, existing)
+    assert len(kept) == 1
+    assert reinforce == []
+    assert queued == []
+
+
+def test_dedupe_same_birthdate_year_reinforces(mod):
+    new = [_new_fact(
+        fact_type="birthdate", value={"year": 2021, "month": 6, "precision": "month"},
+    )]
+    existing = [_existing_fact(
+        id="connector-eliott-prior",
+        fact_type="birthdate", value={"year": 2021, "precision": "year"},
+    )]
+    kept, reinforce, _queued = mod._dedupe_against_existing(new, existing)
+    assert kept == []
+    assert len(reinforce) == 1
+    assert reinforce[0]["existing_id"] == "connector-eliott-prior"
+
+
+def test_dedupe_different_birthdate_year_is_new(mod):
+    new = [_new_fact(
+        fact_type="birthdate", value={"year": 2022, "precision": "year"},
+    )]
+    existing = [_existing_fact(
+        fact_type="birthdate", value={"year": 2019, "precision": "year"},
+    )]
+    kept, reinforce, _ = mod._dedupe_against_existing(new, existing)
+    assert len(kept) == 1
+    assert reinforce == []
+
+
+def test_dedupe_same_employer_company_reinforces(mod):
+    new = [_new_fact(
+        content="Jane is at Acme as Director of Product.",
+        fact_type="employer",
+        value={"company": "Acme", "status": "current", "role": "Director of Product"},
+    )]
+    existing = [_existing_fact(
+        id="connector-jane-acme",
+        fact_type="employer", value={"company": "Acme", "status": "current"},
+    )]
+    kept, reinforce, _ = mod._dedupe_against_existing(new, existing)
+    assert kept == []
+    assert len(reinforce) == 1
+    assert reinforce[0]["existing_id"] == "connector-jane-acme"
+
+
+def test_dedupe_different_employer_company_is_new(mod):
+    new = [_new_fact(
+        fact_type="employer", value={"company": "Beta", "status": "current"},
+    )]
+    existing = [_existing_fact(
+        fact_type="employer", value={"company": "Acme", "status": "current"},
+    )]
+    kept, reinforce, _ = mod._dedupe_against_existing(new, existing)
+    assert len(kept) == 1
+    assert reinforce == []
+
+
+def test_dedupe_same_preference_domain_and_item_reinforces(mod):
+    new = [_new_fact(
+        fact_type="preference",
+        value={"domain": "food", "item": "sushi", "polarity": "likes"},
+    )]
+    existing = [_existing_fact(
+        id="connector-jane-sushi",
+        fact_type="preference",
+        value={"domain": "food", "item": "sushi", "polarity": "likes"},
+    )]
+    kept, reinforce, _ = mod._dedupe_against_existing(new, existing)
+    assert kept == []
+    assert len(reinforce) == 1
+
+
+def test_dedupe_high_cosine_untyped_reinforces(mod):
+    # Embed stub returns identical vectors → cosine = 1.0 → reinforce
+    new = [_new_fact(content="Jane likes sushi.")]
+    existing = [_existing_fact(id="connector-old-sushi", content="Jane prefers sushi.")]
+
+    def fake_embed(t):
+        return [1.0, 0.0]  # identical for both calls
+
+    kept, reinforce, queued = mod._dedupe_against_existing(
+        new, existing, embed_fn=fake_embed,
+    )
+    assert kept == []
+    assert len(reinforce) == 1
+    assert reinforce[0]["existing_id"] == "connector-old-sushi"
+
+
+def test_dedupe_medium_cosine_queues(mod):
+    # Vectors ~0.80 similar → queue for review
+    new = [_new_fact(content="A")]
+    existing = [_existing_fact(id="connector-old", content="B")]
+
+    calls = {"n": 0}
+
+    def fake_embed(t):
+        calls["n"] += 1
+        # Return [1,0] and [0.6,0.8] → cosine = 0.6 (below 0.75 = NEW)
+        # We want ~0.80 so use [1,0] and [0.8,0.6] → cosine = 0.8
+        return [1.0, 0.0] if calls["n"] == 1 else [0.8, 0.6]
+
+    kept, reinforce, queued = mod._dedupe_against_existing(
+        new, existing, embed_fn=fake_embed,
+    )
+    assert kept == []
+    assert reinforce == []
+    assert len(queued) == 1
+    assert queued[0]["suspected_existing_id"] == "connector-old"
+
+
+def test_dedupe_low_cosine_passes_through_to_new(mod):
+    new = [_new_fact(content="A")]
+    existing = [_existing_fact(content="B")]
+
+    calls = {"n": 0}
+
+    def fake_embed(t):
+        calls["n"] += 1
+        # Cosine = 0, below 0.75 → NEW
+        return [1.0, 0.0] if calls["n"] == 1 else [0.0, 1.0]
+
+    kept, reinforce, queued = mod._dedupe_against_existing(
+        new, existing, embed_fn=fake_embed,
+    )
+    assert len(kept) == 1
+    assert reinforce == []
+    assert queued == []
+
+
+def test_dedupe_degrades_open_when_embed_returns_none(mod):
+    # embed_fn returns None (fastembed unavailable) → untyped facts
+    # can't be compared; fall through as NEW rather than crash.
+    new = [_new_fact(content="A")]
+    existing = [_existing_fact(content="A")]
+    kept, reinforce, queued = mod._dedupe_against_existing(
+        new, existing, embed_fn=lambda t: None,
+    )
+    assert len(kept) == 1
+    assert reinforce == []
+    assert queued == []
+
+
+def test_dedupe_ignores_existing_with_different_subject(mod):
+    # subject-scoping is the caller's responsibility; but if a
+    # mismatched subject slips into existing_facts, don't accidentally
+    # dedupe across subjects.
+    new = [_new_fact(subject="jane-doe", fact_type="employer",
+                     value={"company": "Acme", "status": "current"})]
+    existing = [_existing_fact(subject="alex-reyes", fact_type="employer",
+                               value={"company": "Acme", "status": "current"})]
+    kept, reinforce, _ = mod._dedupe_against_existing(new, existing)
+    assert len(kept) == 1
+    assert reinforce == []
+
+
 def test_append_pending_review_idempotent_on_same_id(mod, tmp_path):
     """Re-running the miner on the same window shouldn't duplicate
     pending-review entries."""

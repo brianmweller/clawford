@@ -539,6 +539,167 @@ def _normalize_fact(
 
 
 # ---------------------------------------------------------------------------
+# Cross-run semantic dedupe (Phase 3)
+# ---------------------------------------------------------------------------
+
+DEDUPE_REINFORCE_THRESHOLD = 0.88
+DEDUPE_REVIEW_THRESHOLD = 0.75
+
+
+def _structured_match(a_type: str, a_val, b_type: str, b_val) -> bool | None:
+    """Type-aware structured compare. Returns:
+       True  — confident structured match → treat as reinforcement
+       False — different fact_type OR same type but value conflict →
+               definitely NEW, skip embedding
+       None  — same type but value is inconclusive → fall through to
+               embedding for final call
+
+    Only fires when BOTH sides have fact_type set. When either side is
+    untyped, returns None so the embedding path handles the comparison.
+    """
+    if not a_type or not b_type:
+        return None
+    if a_type != b_type:
+        return False
+    if not isinstance(a_val, dict) or not isinstance(b_val, dict):
+        return None
+    if a_type == "birthdate":
+        return a_val.get("year") == b_val.get("year")
+    if a_type == "employer":
+        a_co = (a_val.get("company") or "").strip().lower()
+        b_co = (b_val.get("company") or "").strip().lower()
+        if not a_co or not b_co:
+            return None
+        return a_co == b_co
+    if a_type == "role":
+        a_t = (a_val.get("title") or "").strip().lower()
+        b_t = (b_val.get("title") or "").strip().lower()
+        if not a_t or not b_t:
+            return None
+        return a_t == b_t
+    if a_type == "preference":
+        pair_a = (
+            (a_val.get("domain") or "").strip().lower(),
+            (a_val.get("item") or "").strip().lower(),
+        )
+        pair_b = (
+            (b_val.get("domain") or "").strip().lower(),
+            (b_val.get("item") or "").strip().lower(),
+        )
+        if "" in pair_a or "" in pair_b:
+            return None
+        return pair_a == pair_b
+    return None
+
+
+def _dedupe_against_existing(
+    new_facts: list[dict],
+    existing_facts: list[dict],
+    *,
+    embed_fn: Callable[[str], list[float] | None] | None = None,
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """Route each new fact against the existing brain for the same
+    subject.
+
+    Returns ``(kept, reinforce_targets, queue_entries)``:
+      - kept: new facts with no prior match; the caller upserts these.
+      - reinforce_targets: list of dicts ``{"new_fact": <dict>,
+        "existing_id": <str>, "similarity": <float>}`` — caller
+        ``reinforce_fact_by_id``s each.
+      - queue_entries: list of dicts ``{"new_fact", "suspected_existing_id",
+        "similarity"}`` — caller enqueues these for Phase 4 operator review.
+
+    Routing:
+      - Type-aware match on `fact_type` + `value` structure first.
+        Conclusive match → reinforce (skip embedding).
+        Conclusive mismatch → NEW (skip embedding).
+        Inconclusive → embed.
+      - Cosine ≥ 0.88 → reinforce.
+      - 0.75 ≤ cosine < 0.88 → queue.
+      - cosine < 0.75 → NEW.
+
+    ``embed_fn`` is injectable so tests can stub it; production should
+    pass ``agents.shared.embed.embed``. When it returns None (fastembed
+    unavailable or runtime error) the comparison short-circuits to NEW —
+    never take down the miner over an embedding failure.
+    """
+    if not existing_facts:
+        return list(new_facts), [], []
+
+    kept: list[dict] = []
+    reinforce: list[dict] = []
+    queued: list[dict] = []
+
+    # Scope existing to the subject of each new fact. This guards
+    # against mixed-subject existing_facts accidentally deduping
+    # across people.
+    existing_by_subject: dict[str, list[dict]] = {}
+    for e in existing_facts:
+        existing_by_subject.setdefault(str(e.get("subject", "")), []).append(e)
+
+    for new in new_facts:
+        subject = str(new.get("subject", ""))
+        candidates = existing_by_subject.get(subject, [])
+        if not candidates:
+            kept.append(new)
+            continue
+
+        n_type = str(new.get("fact_type", "") or "")
+        n_val = new.get("value")
+
+        verdict: tuple[str, dict | None, float] = ("new", None, 0.0)
+        for ex in candidates:
+            e_type = str(ex.get("fact_type", "") or "")
+            e_val = ex.get("value")
+            structured = _structured_match(n_type, n_val, e_type, e_val)
+            if structured is True:
+                verdict = ("reinforce", ex, 1.0)
+                break
+            if structured is False:
+                # Definitive mismatch on structured compare — no need
+                # to embed. Don't set verdict; move to next candidate.
+                continue
+            # structured is None → embedding decides.
+            if embed_fn is None:
+                continue
+            n_vec = embed_fn(str(new.get("content", "")))
+            e_vec = embed_fn(str(ex.get("content", "")))
+            if not n_vec or not e_vec:
+                continue
+            try:
+                from agents.shared.embed import cosine as _cosine  # type: ignore
+            except ImportError:
+                from embed import cosine as _cosine  # type: ignore
+            sim = _cosine(n_vec, e_vec)
+            if sim >= DEDUPE_REINFORCE_THRESHOLD:
+                verdict = ("reinforce", ex, sim)
+                break
+            if sim >= DEDUPE_REVIEW_THRESHOLD:
+                # Remember the best candidate for the queue route.
+                _, best, best_sim = verdict
+                if best is None or sim > best_sim:
+                    verdict = ("queue", ex, sim)
+
+        label, match, sim = verdict
+        if label == "reinforce":
+            reinforce.append({
+                "new_fact": new,
+                "existing_id": match["id"],
+                "similarity": sim,
+            })
+        elif label == "queue":
+            queued.append({
+                "new_fact": new,
+                "suspected_existing_id": match["id"],
+                "similarity": sim,
+            })
+        else:
+            kept.append(new)
+
+    return kept, reinforce, queued
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 

@@ -39,10 +39,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from agents.shared.brain import dropbox_brain_root                 # noqa: E402
 from agents.shared.fact_extraction import (                        # noqa: E402
+    _dedupe_against_existing,
     append_pending_review,
     extract_facts_from_text,
 )
-from agents.shared.facts import upsert_fact                        # noqa: E402
+from agents.shared.facts import (                                  # noqa: E402
+    load_facts_for_subject,
+    reinforce_fact_by_id,
+    upsert_fact,
+)
+try:
+    from agents.shared.embed import embed as _embed_fn             # noqa: E402
+except ImportError:  # pragma: no cover — fastembed optional
+    _embed_fn = None                                               # type: ignore
 from agents.shared.people import append_observation                # noqa: E402
 from agents.shared.gmail_api import extract_plain_body             # noqa: E402
 from agents.shared.operator import load_operator                   # noqa: E402
@@ -145,6 +154,8 @@ def run(
         "messages_skipped_no_candidates": 0,
         "facts_minted": 0,
         "facts_reinforced": 0,
+        "facts_reinforced_semantic": 0,
+        "facts_queued_for_review": 0,
         "skipped_dup": 0,
         "skipped_rejected": 0,
         "facts_flagged_low_conf": 0,
@@ -200,6 +211,65 @@ def run(
         # claim after the operator said no.
         facts, dropped_rejected = filter_rejected_facts(facts, rejected_sigs)
         stats["skipped_rejected"] += len(dropped_rejected)
+
+        # Cross-run semantic dedupe (Phase 3): for every subject in
+        # the batch, load existing facts from the brain and route new
+        # facts via _dedupe_against_existing:
+        #   - high similarity (or structured match) → reinforce in
+        #     place (bump confidence, stamp last_reinforced_at).
+        #   - medium similarity → enqueue for operator review; the
+        #     morning brief surfaces these as tap-to-resolve items.
+        #   - low similarity or no match → fall through to upsert.
+        # Degrades open when embed unavailable — _dedupe_against_existing
+        # simply skips the embedding path and returns all new facts as kept.
+        if facts and commit:
+            existing_by_subject: dict[str, list[dict]] = {}
+            for f in facts:
+                subj = f["subject"]
+                if subj not in existing_by_subject:
+                    existing_by_subject[subj] = load_facts_for_subject(
+                        subj, facts_dir, min_confidence=0.0,
+                    )
+            all_existing: list[dict] = []
+            for subj_facts in existing_by_subject.values():
+                all_existing.extend(subj_facts)
+            kept, reinforce_targets, queue_entries = _dedupe_against_existing(
+                facts, all_existing, embed_fn=_embed_fn,
+            )
+            # Reinforce matched existing facts in place.
+            for r in reinforce_targets:
+                reinforce_fact_by_id(
+                    facts_dir, r["existing_id"],
+                    reinforced_at=now_iso,
+                )
+                stats["facts_reinforced_semantic"] += 1
+            # Queue ambiguous matches for morning-brief review.
+            if queue_entries and queue_path is not None:
+                try:
+                    from agents.shared import pending_queue  # type: ignore
+                except ImportError:
+                    import pending_queue  # type: ignore
+                for q in queue_entries:
+                    nf = q["new_fact"]
+                    pending_queue.append(queue_path, {
+                        "id": f"dedupe-{nf['idempotency_key']}",
+                        "source": "dedupe",
+                        "fact": {
+                            "subject": nf.get("subject", ""),
+                            "content": nf.get("content", ""),
+                            "confidence": nf.get("confidence"),
+                            "suspected_existing_id": q["suspected_existing_id"],
+                            "similarity": q["similarity"],
+                        },
+                        "question": (
+                            "Possible duplicate of an existing fact — "
+                            "merge (reinforce) or keep separate?"
+                        ),
+                        "options": ["approve", "reject", "skip"],
+                        "created_at": now_iso,
+                    })
+                    stats["facts_queued_for_review"] += 1
+            facts = kept  # only the novel facts proceed to upsert
 
         for f in facts:
             if commit:
