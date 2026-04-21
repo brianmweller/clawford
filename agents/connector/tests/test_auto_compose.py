@@ -66,6 +66,25 @@ def test_build_cmd_includes_scheduling_rules_when_provided():
     assert "2026-04-22T09:00/2026-05-05T18:00/America/Los_Angeles" in cmd
 
 
+def test_build_cmd_cold_inbound_uses_cold_flag_not_slug():
+    """Cold-recruiter dispatch: pass --cold-inbound, skip --person-slug."""
+    cmd = auto_compose.build_draft_compose_cmd(
+        thread_id="t1", slug=None, llm_backend="codex",
+        json_out=Path("/tmp/x.json"), cold_inbound=True,
+    )
+    assert "--cold-inbound" in cmd
+    assert "--person-slug" not in cmd
+
+
+def test_build_cmd_requires_slug_when_not_cold_inbound():
+    import pytest
+    with pytest.raises(ValueError):
+        auto_compose.build_draft_compose_cmd(
+            thread_id="t1", slug=None, llm_backend="codex",
+            json_out=Path("/tmp/x.json"), cold_inbound=False,
+        )
+
+
 def test_build_cmd_includes_busy_blocks_when_provided():
     cmd = auto_compose.build_draft_compose_cmd(
         thread_id="t", slug="s", llm_backend="codex",

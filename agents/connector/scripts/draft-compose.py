@@ -133,9 +133,32 @@ def call_codex(prompt: str, timeout: int = 180) -> str:
     return result.text
 
 
+def _make_cold_recruiter_stub_person(inbound: dict) -> dict:
+    """Build a minimal 'person' record for an unknown-recruiter inbound.
+    Enough to satisfy build_compose_prompt without requiring a brain
+    entry. Voice calibration falls through to generic recruiter-inbound
+    register."""
+    from_header = inbound.get("from_name") or inbound.get("from_email") or "Recruiter"
+    display_name = (inbound.get("from_name") or "").strip() or from_header.split("@")[0]
+    return {
+        "slug": "cold-recruiter-stub",
+        "full_name": display_name,
+        "relationship_type": "recruiter (unknown contact)",
+        "tone": "professional",
+        "circles": ["professional-outer"],
+        "communication_direction": "external",
+        "social_distance": 0.9,
+        "power_differential": 0.0,
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--person-slug", required=True)
+    ap.add_argument("--person-slug", required=False, default=None,
+                    help="Known recipient's slug. Omit with --cold-inbound.")
+    ap.add_argument("--cold-inbound", action="store_true",
+                    help="Unknown-recruiter draft: load self-profile, inject FIT CHECK "
+                         "+ SELF CONTEXT, emit fit_assessment in output.")
     ap.add_argument("--inbound", help="Path to JSON fixture; if omitted, --gmail-thread-id is used to fetch")
     ap.add_argument("--history", help="Path to JSON fixture of prior messages; ignored when fetching from Gmail")
     ap.add_argument("--facts-dir", help="Override brain/facts path (for dry-run testing)")
@@ -155,16 +178,30 @@ def main() -> int:
                     help="codex (production, via agents/shared/llm.py) | stdout (skip LLM for prompt preview)")
     args = ap.parse_args()
 
-    person = load_person(args.person_slug)
+    # Validate invariants
+    if args.cold_inbound and args.person_slug:
+        # cold-inbound + explicit slug = nonsense; choose one
+        raise SystemExit("--cold-inbound and --person-slug are mutually exclusive")
+    if not args.cold_inbound and not args.person_slug:
+        raise SystemExit("Need --person-slug (known sender) OR --cold-inbound (unknown recruiter)")
+
     facts_dir = Path(args.facts_dir) if args.facts_dir else BRAIN_ROOT / "facts"
-    # Filter to facts >= DEFAULT_COMPOSER_MIN_CONFIDENCE. Low-conf
-    # facts live in _pending_review.md and should not leak into
-    # drafted prose until the operator triages them up. (Explicit
-    # kwarg at the call site for readability; the default is also
-    # 0.6, matching fact_extraction.REVIEW_CONFIDENCE.)
-    facts = load_facts_for_subject(
-        args.person_slug, facts_dir, min_confidence=0.6,
-    )
+
+    if args.cold_inbound:
+        # Cold recruiter path: no person record, no shareable facts.
+        # `person` is a stub built post-inbound-load below; facts empty.
+        person = None
+        facts = []
+    else:
+        person = load_person(args.person_slug)
+        # Filter to facts >= DEFAULT_COMPOSER_MIN_CONFIDENCE. Low-conf
+        # facts live in _pending_review.md and should not leak into
+        # drafted prose until the operator triages them up. (Explicit
+        # kwarg at the call site for readability; the default is also
+        # 0.6, matching fact_extraction.REVIEW_CONFIDENCE.)
+        facts = load_facts_for_subject(
+            args.person_slug, facts_dir, min_confidence=0.6,
+        )
 
     if args.inbound:
         inbound = json.loads(Path(args.inbound).read_text(encoding="utf-8"))
@@ -186,6 +223,10 @@ def main() -> int:
         inbound, history = thread_to_compose_inputs(thread, load_operator().emails)
     else:
         raise SystemExit("Need --inbound (fixture JSON) or --gmail-thread-id (Gmail fetch).")
+
+    # Cold-inbound: build stub person now that we have the inbound
+    if args.cold_inbound and person is None:
+        person = _make_cold_recruiter_stub_person(inbound)
 
     ctx = build_recipient_context(
         recipient_person=person,
@@ -240,7 +281,26 @@ def main() -> int:
             recipient_circles=recipient_circles,
         )
 
-    prompt = build_compose_prompt(ctx, voice, inbound, availability_slots=availability_slots)
+    # For cold recruiter inbounds, load the operator's professional brain and
+    # pass into the compose prompt so FIT CHECK can reference it.
+    self_profile_dict = None
+    if args.cold_inbound:
+        from agents.shared.self_profile import load_self_profile
+        sp = load_self_profile()
+        self_profile_dict = {
+            "profile_md": sp.profile_md,
+            "level_bar_text": sp.level_bar_text,
+            "current_targets": sp.current_targets,
+            "strength_themes": sp.strength_themes,
+            "employer_history": sp.employer_history,
+        }
+
+    prompt = build_compose_prompt(
+        ctx, voice, inbound,
+        availability_slots=availability_slots,
+        cold_inbound=args.cold_inbound,
+        self_profile=self_profile_dict,
+    )
 
     print("=" * 72)
     print("RECIPIENT")

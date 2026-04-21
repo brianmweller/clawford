@@ -38,11 +38,123 @@ Respond with a JSON object with EXACTLY these fields, in this order:
 """
 
 
+_COLD_INBOUND_SCHEMA_HINT = """\
+Respond with a JSON object with EXACTLY these fields, in this order:
+{
+  "fit_assessment": {
+    "tier":         "A | B | C | not_a_target | unclear",
+    "rationale":    "<one–two sentences citing evidence from SELF CONTEXT — which target_company entry, level-bar match, strength-theme alignment. If tier=unclear, say what info you need.>",
+    "matched_target": "<company name from target_companies if the role matches a current target, else empty>"
+  },
+  "reply_needed":           true | false,
+  "objective":              "<as usual; for cold recruiter inbounds the objective usually = engage-proportionate-to-fit>",
+  "current_state_and_gap":  "<as usual>",
+  "leverage":               "<as usual>",
+  "strategy":               "<two–three sentences tied to fit_assessment.tier: A → engage, propose next step; B → curious-but-non-committal, ask for specifics; C/not_a_target → polite decline, preserve relationship; unclear → ask clarifying question about the role>",
+  "recipient_model":        "<as usual — recruiters want to feel you read their pitch and are worth their time>",
+  "draft_text":             "<the email reply body, matching the tier-appropriate stance. No subject line.>",
+  "no_reply_fyi":           "<empty string — cold recruiter replies always draft, never silent>",
+  "reasoning_summary":      "<one sentence, leads with the fit tier: 'A-tier / Stripe CDO / engaged', 'not-a-target / declined politely', etc.>",
+  "cited_fact_ids":         ["<fact id>", ...]
+}
+"""
+
+
+def _render_self_context_block(self_profile: dict) -> str:
+    """Render the operator's professional brain as a prompt section. Called
+    only for cold recruiter inbounds — known senders don't need this
+    context (Huckle already has per-recipient facts and voice anchor).
+
+    self_profile is a dict with: profile_md (str), level_bar_text (str),
+    current_targets (list), strength_themes (list), employer_history
+    (list). Keys missing → that subsection is skipped.
+    """
+    parts: list[str] = []
+
+    profile_md = self_profile.get("profile_md") or ""
+    level_bar = self_profile.get("level_bar_text") or ""
+    current_targets = self_profile.get("current_targets") or []
+    strengths = self_profile.get("strength_themes") or []
+    employers = self_profile.get("employer_history") or []
+
+    parts.append("SELF CONTEXT (the operator's professional brain — you are drafting on")
+    parts.append("his behalf; use this to calibrate fit + positioning + voice):")
+    parts.append("")
+
+    if employers:
+        parts.append("  Current / most recent employer:")
+        # Most recent = latest end date
+        latest = max(employers, key=lambda e: e.get("end", ""))
+        parts.append(f"    {latest.get('title', '?')} at {latest.get('company', '?')} "
+                     f"({latest.get('start', '?')} → {latest.get('end', '?')})")
+        parts.append("")
+
+    if level_bar:
+        parts.append("  LEVEL & SCOPE BAR (hard filter the operator applies to every role):")
+        for line in level_bar.splitlines():
+            parts.append(f"    {line}")
+        parts.append("")
+
+    if current_targets:
+        parts.append("  CURRENT TARGET COMPANIES (by opportunity tier):")
+        # Group by tier_opportunity
+        by_tier: dict[str, list[dict]] = {}
+        for t in current_targets:
+            key = t.get("tier_opportunity") or "?"
+            by_tier.setdefault(key, []).append(t)
+        for tier in ["A", "B", "C"]:
+            if tier not in by_tier:
+                continue
+            parts.append(f"    {tier}-opportunity:")
+            for t in by_tier[tier]:
+                role = t.get("role_type") or "(role_type not specified)"
+                tier_co = t.get("tier_company", "?")
+                parts.append(f"      - {t.get('company', '?')} "
+                             f"[tier_company={tier_co}] — {role}")
+        parts.append("")
+
+    if strengths:
+        parts.append("  STRENGTH THEMES (what the operator can credibly claim):")
+        for s in strengths[:6]:
+            parts.append(f"    - {s.get('theme', '?')}")
+        parts.append("")
+
+    if profile_md:
+        # Only include the profile's Self-description + top Track record
+        # to keep prompt bounded. Full profile.md is too large.
+        excerpt = _excerpt_profile_md(profile_md, max_chars=1200)
+        parts.append("  PROFILE EXCERPT (voice anchor):")
+        for line in excerpt.splitlines():
+            parts.append(f"    {line}")
+        parts.append("")
+
+    return "\n".join(parts)
+
+
+def _excerpt_profile_md(profile_md: str, max_chars: int = 1200) -> str:
+    """Pull the Self-description section from profile.md, capped. For
+    prompt size control; the full profile is too large to inject."""
+    if not profile_md:
+        return ""
+    # Find ## Self-description
+    m = re.search(r"^##\s+Self-description\s*$", profile_md, flags=re.MULTILINE)
+    if not m:
+        return profile_md[:max_chars]
+    start = m.end()
+    # Stop at next ##
+    next_m = re.search(r"^##\s+", profile_md[start:], flags=re.MULTILINE)
+    end = start + next_m.start() if next_m else len(profile_md)
+    return profile_md[start:end].strip()[:max_chars]
+
+
 def build_compose_prompt(
     context: RecipientContext,
     voice: dict,
     inbound: dict,
     availability_slots: list[tuple[datetime, datetime]] | None = None,
+    *,
+    cold_inbound: bool = False,
+    self_profile: dict | None = None,
 ) -> str:
     person = context.recipient_person
     name = person.get("full_name") or person.get("slug", "them")
@@ -304,7 +416,36 @@ TASK
   summarizing what arrived and why no reply is needed; leave draft_text
   empty.
 
-{_OUTPUT_SCHEMA_HINT}"""
+{_render_self_context_block(self_profile) if cold_inbound and self_profile else ""}
+
+{(
+    "FIT CHECK (cold recruiter inbound — this is step 0.5, before the " +
+    "reasoning steps below):\n" +
+    "  Compare the role described in the inbound against SELF CONTEXT:\n" +
+    "    - Does the company appear in CURRENT TARGET COMPANIES? If yes, " +
+    "which tier_opportunity?\n" +
+    "    - Does the implied role seniority pass the LEVEL & SCOPE BAR " +
+    "(owns a major lever OR C-suite-adjacent)? Cite which criterion.\n" +
+    "    - Do the strengths the operator can credibly claim match what the role " +
+    "needs?\n" +
+    "  Output the tier + rationale in the fit_assessment field of the JSON, " +
+    "then let the tier drive strategy:\n" +
+    "    A-tier + passes level bar → engage warmly, propose a concrete next " +
+    "step (15-30 min intro call, or a reply with specific availability).\n" +
+    "    B-tier → curious-but-non-committal: acknowledge, ask for role " +
+    "details (scope, reporting line, level), do NOT commit to a call yet.\n" +
+    "    C-tier / not_a_target → polite decline that preserves the " +
+    "relationship. Don't criticize the company; cite scope or timing, not " +
+    "brand.\n" +
+    "    unclear → ask one clarifying question about the role (level, " +
+    "scope, reporting line).\n" +
+    "  The draft should be concise (3-5 sentences for most tiers), in " +
+    "the operator's voice from the PROFILE EXCERPT. Recruiters skim — don't " +
+    "monologue. Reference target_company matches by name when relevant " +
+    "('I've been thinking about Stripe for a while, so yes happy to chat').\n\n"
+) if cold_inbound else ""}
+
+{(_COLD_INBOUND_SCHEMA_HINT if cold_inbound else _OUTPUT_SCHEMA_HINT)}"""
 
 
 _REQUIRED_REASONING_FIELDS = ("objective", "current_state_and_gap", "leverage", "strategy", "recipient_model")
@@ -367,7 +508,7 @@ def parse_compose_result(llm_text: str, shareable_ids: set[str]) -> dict:
         cited = []
     cited_clean = [c for c in cited if isinstance(c, str) and c in shareable_ids]
 
-    return {
+    out = {
         "reply_needed": reply_needed,
         "objective": parsed["objective"].strip(),
         "current_state_and_gap": parsed["current_state_and_gap"].strip(),
@@ -379,6 +520,17 @@ def parse_compose_result(llm_text: str, shareable_ids: set[str]) -> dict:
         "reasoning_summary": reasoning,
         "cited_fact_ids": cited_clean,
     }
+
+    # Cold-inbound path: preserve fit_assessment if the LLM returned it.
+    fit = parsed.get("fit_assessment")
+    if isinstance(fit, dict):
+        out["fit_assessment"] = {
+            "tier": str(fit.get("tier", "unclear")),
+            "rationale": str(fit.get("rationale", "")),
+            "matched_target": str(fit.get("matched_target", "")),
+        }
+
+    return out
 
 
 # Common sign-off openers the LLM may emit even though we instruct otherwise.

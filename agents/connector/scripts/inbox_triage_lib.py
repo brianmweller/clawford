@@ -23,6 +23,21 @@ from __future__ import annotations
 from email.utils import parseaddr
 
 from flux_import_lib import is_likely_service_account
+from recruiter_detector_lib import RECRUITER_DOMAINS, is_likely_recruiter
+
+
+def _is_recruiter_domain(email: str) -> bool:
+    """True if the email's domain matches a known ATS / recruiting
+    platform. Used to exempt such emails from the service-account
+    filter, since ATS mails often use no-reply@ prefixes but are NOT
+    service notifications — they're recruiter outreach."""
+    if not email or "@" not in email:
+        return False
+    domain = email.partition("@")[2].lower()
+    for rd in RECRUITER_DOMAINS:
+        if domain == rd or domain.endswith("." + rd):
+            return True
+    return False
 
 
 def extract_email_from_header(raw: str | None) -> str:
@@ -85,11 +100,33 @@ def classify_thread_for_triage(
     if from_email in {a.lower() for a in operator_emails}:
         return {**base, "status": "skipped_brian_last"}
 
-    if is_likely_service_account(from_email, from_raw):
+    # Recruiter-domain exemption: ATS / retained-search platforms often
+    # send from no-reply@ prefixes that trip the service-account
+    # filter. Let those fall through to the unknown-sender branch where
+    # the recruiter detector catches them.
+    if is_likely_service_account(from_email, from_raw) and not _is_recruiter_domain(from_email):
         return {**base, "status": "skipped_service"}
 
     slug = email_to_slug.get(from_email)
     if not slug:
+        # Unknown sender: check recruiter detector before skipping. Cold
+        # recruiter inbounds route into drafting (queued_cold_recruiter)
+        # so Huckle can evaluate fit against the operator's target_company list
+        # and draft a tier-appropriate reply.
+        is_rec, rec_conf, rec_signals = is_likely_recruiter(
+            from_email=from_email,
+            from_header=from_raw,
+            subject=subject,
+            snippet=snippet,
+        )
+        if is_rec:
+            return {
+                **base,
+                "status": "queued_cold_recruiter",
+                "recruiter_signal_confidence": rec_conf,
+                "recruiter_signal_reason": rec_signals.get("reason", ""),
+                "recruiter_matched_domain": rec_signals.get("matched_domain", ""),
+            }
         return {**base, "status": "skipped_unknown_sender"}
 
     return {**base, "slug": slug, "status": "queued"}
@@ -116,7 +153,8 @@ def upsert_thread_in_queue(queue: dict | None, classified: dict) -> dict:
     tid = classified.get("thread_id")
     filtered = [e for e in existing if e.get("thread_id") != tid] if tid else existing
 
-    if classified.get("status") == "queued":
+    status = classified.get("status")
+    if status == "queued":
         # Pass through only the fields auto-compose reads; stripping
         # transient classifier diagnostics keeps the queue tidy.
         entry = {
@@ -125,6 +163,19 @@ def upsert_thread_in_queue(queue: dict | None, classified: dict) -> dict:
                 "subject", "date", "snippet", "in_reply_to_message_id",
             ) if k in classified
         }
+        filtered.append(entry)
+    elif status == "queued_cold_recruiter":
+        # Cold recruiter: pass through recruiter signals + a `status`
+        # field so auto-compose knows to dispatch in cold-inbound mode.
+        entry = {
+            k: classified[k] for k in (
+                "thread_id", "from_email", "from_header",
+                "subject", "date", "snippet", "in_reply_to_message_id",
+                "recruiter_signal_confidence", "recruiter_signal_reason",
+                "recruiter_matched_domain",
+            ) if k in classified
+        }
+        entry["status"] = "queued_cold_recruiter"
         filtered.append(entry)
 
     return {**base, "queued": filtered}

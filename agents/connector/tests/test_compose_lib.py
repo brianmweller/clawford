@@ -112,6 +112,73 @@ def _valid_no_reply_json(**overrides):
 
 # --- build_compose_prompt ---
 
+def _self_profile(**overrides):
+    base = {
+        "profile_md": "# the operator\n\n## Self-description\nMarketplace AI leader.\n\n## Level & scope bar\nMust own a lever OR be C-suite-adjacent.\n",
+        "level_bar_text": "Must own a lever OR be C-suite-adjacent.",
+        "employer_history": [
+            {"company": "Example Corp", "title": "Director, Marketplace Data Science",
+             "start": "2024-05-01", "end": "2026-01-31"},
+        ],
+        "current_targets": [
+            {"company": "Anthropic", "tier_company": "A", "tier_opportunity": "A",
+             "role_type": "Head of AI Science", "outcome": "targeted"},
+            {"company": "Wayfair", "tier_company": "B", "tier_opportunity": "A",
+             "role_type": "Chief Data Officer", "outcome": "targeted"},
+        ],
+        "strength_themes": [
+            {"theme": "Marketplace systems thinking"},
+            {"theme": "Causal ML rigor"},
+        ],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_prompt_cold_inbound_adds_self_context_block():
+    prompt = build_compose_prompt(
+        _ctx(), _voice(), _inbound(),
+        cold_inbound=True, self_profile=_self_profile(),
+    )
+    assert "SELF CONTEXT" in prompt
+    assert "Anthropic" in prompt
+    assert "Wayfair" in prompt
+    assert "Must own a lever" in prompt
+    assert "Marketplace systems thinking" in prompt
+
+
+def test_prompt_cold_inbound_requests_fit_assessment():
+    prompt = build_compose_prompt(
+        _ctx(), _voice(), _inbound(),
+        cold_inbound=True, self_profile=_self_profile(),
+    )
+    assert "fit_assessment" in prompt
+    assert "FIT CHECK" in prompt
+    # Tier-driven strategy guidance
+    assert "A-tier" in prompt or "engage warmly" in prompt.lower()
+
+
+def test_prompt_warm_inbound_omits_self_context():
+    """Non-cold (known-sender) drafts don't get the SELF CONTEXT block
+    or the fit_assessment schema — existing behavior preserved."""
+    prompt = build_compose_prompt(_ctx(), _voice(), _inbound())
+    assert "SELF CONTEXT" not in prompt
+    assert "fit_assessment" not in prompt
+    assert "FIT CHECK" not in prompt
+
+
+def test_prompt_cold_inbound_without_profile_still_builds():
+    """If SELF CONTEXT data is missing (profile hasn't been synthesized
+    yet), the prompt should still render a valid fit-check structure
+    without crashing."""
+    prompt = build_compose_prompt(
+        _ctx(), _voice(), _inbound(),
+        cold_inbound=True, self_profile=None,
+    )
+    assert "FIT CHECK" in prompt
+    assert "fit_assessment" in prompt
+
+
 def test_prompt_requires_five_step_reasoning_in_order():
     prompt = build_compose_prompt(_ctx(), _voice(), _inbound())
     for label in ("OBJECTIVE", "CURRENT STATE AND GAP", "LEVERAGE", "STRATEGY", "RECIPIENT MODEL"):

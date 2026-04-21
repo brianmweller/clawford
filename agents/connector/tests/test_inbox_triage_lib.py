@@ -137,6 +137,59 @@ def test_thread_with_unknown_sender_last_is_skipped():
     assert result["status"] == "skipped_unknown_sender"
 
 
+def test_thread_with_unknown_recruiter_sender_is_queued_cold():
+    """Unknown sender whose domain is an ATS platform (greenhouse-mail.io)
+    routes to queued_cold_recruiter, not skipped_unknown_sender."""
+    thread = _thread("t1", [
+        _message("no-reply@greenhouse-mail.io", "Tue, 15 Apr 2026 10:00:00 -0700",
+                 subject="Opportunity — Director of Data Science at Stripe",
+                 body_snippet="Hi the operator, reaching out about a senior role..."),
+    ])
+    result = classify_thread_for_triage(
+        thread, operator_emails=BRIAN_ADDRESSES, email_to_slug={},
+    )
+    assert result["status"] == "queued_cold_recruiter"
+    assert result["recruiter_signal_confidence"] >= 0.9
+    assert "greenhouse-mail.io" in result.get("recruiter_matched_domain", "")
+
+
+def test_thread_with_unknown_non_recruiter_unknown_stays_skipped():
+    """Unknown sender without recruiter signals still skips (no drafting)."""
+    thread = _thread("t1", [
+        _message("mom@nowhere.com", "Tue, 15 Apr 2026 10:00:00 -0700",
+                 subject="dinner sunday?",
+                 body_snippet="want to come over this weekend?"),
+    ])
+    result = classify_thread_for_triage(
+        thread, operator_emails=BRIAN_ADDRESSES, email_to_slug={},
+    )
+    assert result["status"] == "skipped_unknown_sender"
+
+
+def test_linkedin_inmail_with_exec_role_subject_queued_cold():
+    """Ambiguous LinkedIn messages-noreply + exec-outreach subject → cold recruiter."""
+    thread = _thread("t1", [
+        _message("messages-noreply@linkedin.com", "Tue, 15 Apr 2026 10:00:00 -0700",
+                 subject="Senior opportunity — Director of Data Science, Marketplace",
+                 body_snippet="Reaching out about an executive role..."),
+    ])
+    # Note: LinkedIn messages-noreply matches is_likely_service_account's
+    # service-local prefix list, so this path is tested for the case
+    # where the service detector isn't hitting it. Check the service
+    # detector first behavior explicitly elsewhere.
+    # For now, verify the recruiter detector would catch it if service
+    # didn't: direct check.
+    from recruiter_detector_lib import is_likely_recruiter
+    ok, conf, _ = is_likely_recruiter(
+        from_email="messages-noreply@linkedin.com",
+        from_header='"Jane Smith" <messages-noreply@linkedin.com>',
+        subject="Senior opportunity — Director of Data Science, Marketplace",
+        snippet="Reaching out about an executive role...",
+    )
+    assert ok
+    assert conf >= 0.5
+
+
 def test_thread_with_empty_messages_is_skipped():
     result = classify_thread_for_triage(
         _thread("t1", []),

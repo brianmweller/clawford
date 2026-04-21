@@ -113,7 +113,7 @@ def materialize_busy_blocks(blocks: list[dict], dest_dir: Path) -> Path | None:
 
 def build_draft_compose_cmd(
     thread_id: str,
-    slug: str,
+    slug: str | None,
     llm_backend: str,
     json_out: Path,
     *,
@@ -121,8 +121,13 @@ def build_draft_compose_cmd(
     scheduling_rules: Path | None = None,
     search_window: str | None = None,
     busy_blocks: Path | None = None,
+    cold_inbound: bool = False,
 ) -> list[str]:
     """Assemble the draft-compose.py subprocess command. Pure: no I/O.
+
+    cold_inbound=True means --cold-inbound gets passed instead of
+    --person-slug; draft-compose loads the operator's self-profile and injects
+    FIT CHECK + SELF CONTEXT for unknown-recruiter drafting.
 
     When scheduling_rules and search_window are both provided, the draft
     pipeline computes OPEN SLOTS from them (optionally filtered by
@@ -132,11 +137,16 @@ def build_draft_compose_cmd(
     cmd = [
         sys.executable,
         str(_SCRIPTS_DIR / "draft-compose.py"),
-        "--person-slug", slug,
         "--gmail-thread-id", thread_id,
         "--llm-backend", llm_backend,
         "--json-out", str(json_out),
     ]
+    if cold_inbound:
+        cmd.append("--cold-inbound")
+    else:
+        if not slug:
+            raise ValueError("slug is required when cold_inbound=False")
+        cmd.extend(["--person-slug", slug])
     if no_create_draft:
         cmd.append("--no-create-draft")
     if scheduling_rules and search_window:
@@ -165,12 +175,13 @@ def save_log(path: Path, log: dict) -> None:
 
 def run_draft_compose(
     thread_id: str,
-    slug: str,
+    slug: str | None,
     llm_backend: str,
     no_create_draft: bool = False,
     scheduling_rules: Path | None = None,
     search_window: str | None = None,
     busy_blocks: Path | None = None,
+    cold_inbound: bool = False,
 ) -> tuple[int, str, dict]:
     """Run draft-compose, capturing the parsed JSON result via --json-out.
     Returns (exit_code, stdout, parsed_result_dict)."""
@@ -186,6 +197,7 @@ def run_draft_compose(
             scheduling_rules=scheduling_rules,
             search_window=search_window,
             busy_blocks=busy_blocks,
+            cold_inbound=cold_inbound,
         )
         env = os.environ.copy()
         result = subprocess.run(cmd, capture_output=True, text=True, env=env,
@@ -209,17 +221,34 @@ def run_draft_compose(
 
 def _format_telegram(parsed: dict) -> str | None:
     """Return a short Telegram message for a compose result, or None if
-    the parsed result is malformed and nothing meaningful to ping."""
+    the parsed result is malformed and nothing meaningful to ping.
+
+    For cold-recruiter drafts (fit_assessment present), the ping leads
+    with the fit tier so the operator can calibrate at a glance before opening
+    Gmail."""
     if not parsed:
         return None
     name = parsed.get("from_name") or parsed.get("from_email") or parsed.get("person_slug", "?")
     subject = parsed.get("subject", "(no subject)")
+    fit = parsed.get("fit_assessment") or {}
+    fit_tier = fit.get("tier", "")
+    fit_rationale = (fit.get("rationale") or "").strip()
+    matched_target = (fit.get("matched_target") or "").strip()
+
     if parsed.get("reply_needed") is True:
         draft_id = parsed.get("gmail_draft_id") or "?"
         objective = (parsed.get("objective") or "").strip()
         strategy = (parsed.get("strategy") or "").strip()
+        header = f"📧 Draft ready for {name}"
+        fit_line = ""
+        if fit_tier:
+            tier_emoji = {"A": "🟢", "B": "🟡", "C": "🔴",
+                          "not_a_target": "🔴", "unclear": "⚪"}.get(fit_tier, "⚪")
+            target_suffix = f" (matches {matched_target})" if matched_target else ""
+            fit_line = f"\nFit: {tier_emoji} {fit_tier}-tier{target_suffix} — {fit_rationale}"
         return (
-            f"📧 Draft ready for {name}\n"
+            f"{header}"
+            f"{fit_line}\n"
             f"Subject: {subject}\n"
             f"Objective: {objective}\n"
             f"Strategy: {strategy}\n"
@@ -364,14 +393,17 @@ def main() -> int:
     results = []
     for item in to_process:
         tid = item["thread_id"]
-        slug = item["slug"]
-        print(f"COMPOSING [{tid}] {slug} ...")
+        is_cold = item.get("status") == "queued_cold_recruiter"
+        slug = item.get("slug") if not is_cold else None
+        label = f"COLD-RECRUITER" if is_cold else (slug or "?")
+        print(f"COMPOSING [{tid}] {label} ...")
         rc, output, parsed = run_draft_compose(
             tid, slug, args.llm_backend,
             no_create_draft=args.no_create_draft,
             scheduling_rules=scheduling_rules,
             search_window=search_window,
             busy_blocks=busy_blocks_path,
+            cold_inbound=is_cold,
         )
 
         reply_needed = parsed.get("reply_needed") if parsed else None
@@ -388,6 +420,8 @@ def main() -> int:
         log[tid] = {
             "at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "slug": slug,
+            "cold_inbound": is_cold,
+            "fit_tier": (parsed.get("fit_assessment") or {}).get("tier", "") if parsed else "",
             "reply_needed": reply_needed,
             "gmail_draft_id": gmail_draft_id,
             "exit_code": rc,
