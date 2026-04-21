@@ -271,6 +271,17 @@ def run(
                     stats["facts_queued_for_review"] += 1
             facts = kept  # only the novel facts proceed to upsert
 
+        # Stamp known_by: every primary thread participant (From/To/Cc
+        # minus the operator, already resolved to slugs in `slugs`) is assumed
+        # to have seen whatever this message said. Downstream the
+        # compose layer uses this to skip redundant "as I told you" moments.
+        # Set outside the `if commit` so the field is present for
+        # both dry-run inspection and live upsert.
+        participant_slugs = sorted(slugs)
+        for f in facts:
+            if participant_slugs:
+                f["known_by"] = participant_slugs
+
         for f in facts:
             if commit:
                 result = upsert_fact(
@@ -286,6 +297,7 @@ def run(
                     recorded_at=now_iso,
                     audience_scope=f["audience_scope"],
                     mention_slugs=f.get("mention_slugs") or None,
+                    known_by=f.get("known_by") or None,
                     fact_type=f.get("fact_type", ""),
                     value=f.get("value"),
                 )

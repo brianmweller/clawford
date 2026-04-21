@@ -45,11 +45,21 @@ def build_recipient_context(
         recipient_person.get("relationship_type")
     )
 
+    recipient_slug = str(recipient_person.get("slug") or "").lower()
+
     shareable: list[dict] = []
     blocked: list[str] = []
     for fact in all_facts:
         if fact_visible_to_audience(fact.get("audience_scope"), target_audiences):
-            shareable.append(fact)
+            # Theory-of-mind tag: does the recipient already know this?
+            # known_by is a list of slugs that were addressed on the
+            # source email (or attendees of the source meeting). When the
+            # recipient's slug appears, the compose prompt is instructed
+            # to avoid presenting the fact as new information.
+            known_by = {str(s).lower() for s in (fact.get("known_by") or [])}
+            tagged = dict(fact)
+            tagged["recipient_knows"] = bool(recipient_slug) and recipient_slug in known_by
+            shareable.append(tagged)
         else:
             blocked.append(fact["id"])
 

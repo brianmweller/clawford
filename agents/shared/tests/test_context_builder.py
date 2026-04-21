@@ -126,3 +126,45 @@ def test_explicit_override_audiences_bypasses_relationship_mapping():
     shareable_ids = [f["id"] for f in ctx.facts_shareable]
     assert "f-fam" in shareable_ids
     assert "f-pro" not in shareable_ids
+
+
+# ─── recipient_knows annotation (Phase 5c) ───────────────────────────
+
+def test_recipient_knows_true_when_slug_in_known_by():
+    fact = _fact("f-1", scope=["professional"])
+    fact["known_by"] = ["test-person", "other-person"]
+    ctx = build_recipient_context(
+        recipient_person=_person(slug="test-person"),
+        all_facts=[fact],
+    )
+    assert ctx.facts_shareable[0]["recipient_knows"] is True
+
+
+def test_recipient_knows_false_when_slug_not_in_known_by():
+    fact = _fact("f-1", scope=["professional"])
+    fact["known_by"] = ["other-person", "someone-else"]
+    ctx = build_recipient_context(
+        recipient_person=_person(slug="test-person"),
+        all_facts=[fact],
+    )
+    assert ctx.facts_shareable[0]["recipient_knows"] is False
+
+
+def test_recipient_knows_false_when_known_by_missing():
+    fact = _fact("f-1", scope=["professional"])
+    # No known_by key at all — treat as "no one we've tracked knows" → False
+    ctx = build_recipient_context(
+        recipient_person=_person(slug="test-person"),
+        all_facts=[fact],
+    )
+    assert ctx.facts_shareable[0]["recipient_knows"] is False
+
+
+def test_recipient_knows_case_insensitive_match():
+    fact = _fact("f-1", scope=["professional"])
+    fact["known_by"] = ["Test-Person"]
+    ctx = build_recipient_context(
+        recipient_person=_person(slug="test-person"),
+        all_facts=[fact],
+    )
+    assert ctx.facts_shareable[0]["recipient_knows"] is True

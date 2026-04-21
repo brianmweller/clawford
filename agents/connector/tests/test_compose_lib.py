@@ -322,6 +322,22 @@ def test_prompt_includes_shareable_facts_but_never_blocked():
     assert "f-999-secret" not in prompt
 
 
+def test_prompt_tags_recipient_knows_facts():
+    ctx = _ctx()
+    ctx.facts_shareable = [
+        {"id": "f-known", "content": "Priya mentioned her chemo schedule.",
+         "recipient_knows": True},
+        {"id": "f-new", "content": "the operator is planning to visit next week.",
+         "recipient_knows": False},
+    ]
+    prompt = build_compose_prompt(ctx, _voice(), _inbound())
+    assert "[f-known] [RECIPIENT KNOWS]" in prompt
+    assert "[f-new] [RECIPIENT KNOWS]" not in prompt
+    # Prompt must explain the tag's semantics
+    assert "already been told" in prompt.lower()
+    assert ("do not" in prompt.lower()) or ("don't present" in prompt.lower())
+
+
 def test_prompt_includes_inbound_subject_and_body():
     prompt = build_compose_prompt(_ctx(), _voice(), _inbound())
     assert "Sunday lunch?" in prompt

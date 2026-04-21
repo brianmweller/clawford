@@ -107,7 +107,12 @@ def test_load_facts_for_subject_filters_across_months(tmp_path: Path):
     )
     (facts_dir / "2026-04.md").write_text(SAMPLE_FACTS, encoding="utf-8")
 
-    facts = load_facts_for_subject("priya-rivera", facts_dir)
+    # Pin now= close to the facts' dates so decay doesn't push either
+    # fact below the default 0.6 threshold. This test is about
+    # cross-month scanning, not decay behaviour.
+    from datetime import datetime, timezone
+    now = datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc)
+    facts = load_facts_for_subject("priya-rivera", facts_dir, now=now)
     assert len(facts) == 2
     assert {f["id"] for f in facts} == {"f-001", "f-010"}
 
@@ -603,6 +608,79 @@ def test_upsert_fact_omits_mention_slugs_line_when_none(tmp_path: Path):
     assert "mention_slugs" not in text
 
 
+def test_upsert_fact_writes_known_by_as_json_list(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    upsert_fact(
+        facts_dir=facts_dir,
+        subject="jamie-fitzgerald",
+        category="event",
+        content="Jamie is exploring new roles.",
+        source_agent="connector",
+        idempotency_key="jamie-exploring",
+        recorded_at="2026-04-21T12:00:00Z",
+        audience_scope=["professional"],
+        known_by=["jamie-fitzgerald", "sarah-chen"],
+    )
+    text = (facts_dir / "2026-04.md").read_text(encoding="utf-8")
+    assert '- **known_by:** ["jamie-fitzgerald", "sarah-chen"]' in text
+
+
+def test_upsert_fact_omits_known_by_when_empty(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    upsert_fact(
+        facts_dir=facts_dir,
+        subject="jamie-fitzgerald",
+        category="event",
+        content="solo note",
+        source_agent="connector",
+        idempotency_key="solo",
+        recorded_at="2026-04-21T12:00:00Z",
+        audience_scope=["personal"],
+        known_by=[],
+    )
+    text = (facts_dir / "2026-04.md").read_text(encoding="utf-8")
+    assert "known_by" not in text
+
+
+def test_parse_facts_file_roundtrips_known_by(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "2026-04.md").write_text(
+        "# Facts — 2026-04\n"
+        "\n---\n\n"
+        "- **id:** connector-jamie-1\n"
+        "- **content:** Jamie is exploring.\n"
+        "- **subject:** jamie-fitzgerald\n"
+        "- **category:** event\n"
+        "- **source_agent:** connector\n"
+        "- **confidence:** 0.9\n"
+        "- **recorded_at:** 2026-04-21T12:00:00Z\n"
+        '- **known_by:** ["jamie-fitzgerald", "sarah-chen"]\n',
+        encoding="utf-8",
+    )
+    facts = parse_facts_file(facts_dir / "2026-04.md")
+    assert facts[0]["known_by"] == ["jamie-fitzgerald", "sarah-chen"]
+
+
+def test_parse_facts_file_missing_known_by_is_empty_list(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "2026-04.md").write_text(
+        "# Facts — 2026-04\n"
+        "\n---\n\n"
+        "- **id:** x\n"
+        "- **content:** y\n"
+        "- **subject:** jamie-fitzgerald\n"
+        "- **category:** event\n"
+        "- **source_agent:** connector\n"
+        "- **confidence:** 0.9\n"
+        "- **recorded_at:** 2026-04-21T12:00:00Z\n",
+        encoding="utf-8",
+    )
+    facts = parse_facts_file(facts_dir / "2026-04.md")
+    assert facts[0].get("known_by", []) == []
+
+
 def test_parse_facts_file_extracts_mention_slugs(tmp_path: Path):
     p = tmp_path / "2026-04.md"
     p.write_text(
@@ -911,6 +989,92 @@ def test_reinforce_fact_by_id_searches_across_months(tmp_path: Path):
     )
     assert result["status"] == "reinforced"
     assert result["path"].endswith("2026-04.md")
+
+
+def test_load_facts_for_subject_applies_decay_by_default(tmp_path: Path):
+    # A fact recorded 180 days ago in category=event (90d half-life)
+    # should have effective = raw × 0.25. With raw=0.8, effective=0.20.
+    # That's below the default min_confidence=0.6 → should be filtered.
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "2025-10.md").write_text(
+        "# Facts — 2025-10\n"
+        "\n---\n\n"
+        "- **id:** connector-stale-event\n"
+        "- **content:** Old event claim.\n"
+        "- **subject:** jamie-fitzgerald\n"
+        "- **confidence:** 0.8\n"
+        "- **category:** event\n"
+        "- **source_agent:** connector\n"
+        "- **recorded_at:** 2025-10-23T12:00:00Z\n",
+        encoding="utf-8",
+    )
+    # Pass now= so test is deterministic.
+    from datetime import datetime, timezone
+    now = datetime(2026, 4, 21, 12, 0, tzinfo=timezone.utc)
+    out = load_facts_for_subject(
+        "jamie-fitzgerald", facts_dir, now=now,
+    )
+    assert out == []
+
+
+def test_load_facts_for_subject_preserves_identity_facts_regardless_of_age(tmp_path: Path):
+    # identity facts have no decay → old identity facts stay.
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "2020-01.md").write_text(
+        "# Facts — 2020-01\n"
+        "\n---\n\n"
+        "- **id:** connector-jamie-name\n"
+        "- **content:** Jamie Fitzgerald is Jamie's full name.\n"
+        "- **subject:** jamie-fitzgerald\n"
+        "- **confidence:** 0.9\n"
+        "- **category:** identity\n"
+        "- **source_agent:** connector\n"
+        "- **recorded_at:** 2020-01-01T12:00:00Z\n",
+        encoding="utf-8",
+    )
+    from datetime import datetime, timezone
+    now = datetime(2026, 4, 21, 12, 0, tzinfo=timezone.utc)
+    out = load_facts_for_subject(
+        "jamie-fitzgerald", facts_dir, now=now,
+    )
+    assert len(out) == 1
+    assert out[0]["effective_confidence"] == 0.9
+
+
+def test_load_facts_for_subject_sorts_by_effective_confidence(tmp_path: Path):
+    facts_dir = tmp_path / "facts"
+    facts_dir.mkdir()
+    (facts_dir / "2026-04.md").write_text(
+        "# Facts — 2026-04\n"
+        # Fresh, lower raw confidence
+        "\n---\n\n"
+        "- **id:** fresh-mid\n"
+        "- **content:** Fresh but middling.\n"
+        "- **subject:** jamie-fitzgerald\n"
+        "- **confidence:** 0.75\n"
+        "- **category:** event\n"
+        "- **source_agent:** connector\n"
+        "- **recorded_at:** 2026-04-20T12:00:00Z\n"
+        # Identity, slightly lower but no decay
+        "\n---\n\n"
+        "- **id:** stable-high\n"
+        "- **content:** Identity fact.\n"
+        "- **subject:** jamie-fitzgerald\n"
+        "- **confidence:** 0.85\n"
+        "- **category:** identity\n"
+        "- **source_agent:** connector\n"
+        "- **recorded_at:** 2020-01-01T12:00:00Z\n",
+        encoding="utf-8",
+    )
+    from datetime import datetime, timezone
+    now = datetime(2026, 4, 21, 12, 0, tzinfo=timezone.utc)
+    out = load_facts_for_subject(
+        "jamie-fitzgerald", facts_dir, now=now,
+    )
+    # Identity (0.85, no decay) > fresh-mid (≈0.75)
+    assert [f["id"] for f in out] == ["stable-high", "fresh-mid"]
 
 
 def test_load_facts_for_subject_respects_min_confidence_on_mention_matches(tmp_path: Path):

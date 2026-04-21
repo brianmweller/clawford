@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 
@@ -61,6 +62,7 @@ def parse_facts_file(path: Path) -> list[dict]:
             "source_agent": fields.get("source_agent", ""),
             "audience_scope": _parse_audience_scope(fields.get("audience_scope")),
             "mention_slugs": _parse_slug_list(fields.get("mention_slugs")),
+            "known_by": _parse_slug_list(fields.get("known_by")),
             "fact_type": fields.get("fact_type", ""),
             "value": _parse_value_json(fields.get("value")),
             "raw": raw_block,
@@ -126,19 +128,24 @@ def load_facts_for_subject(
     facts_dir: Path,
     *,
     min_confidence: float = DEFAULT_COMPOSER_MIN_CONFIDENCE,
+    now: datetime | None = None,
 ) -> list[dict]:
-    """Return every fact in facts_dir whose subject matches the slug
-    (case-insensitive) AND whose confidence is >= min_confidence.
+    """Return every fact in facts_dir whose subject (or mention_slugs)
+    matches the slug AND whose **effective** confidence is >= min_confidence.
+
+    Effective confidence applies the per-category decay curve from
+    ``agents.shared.decay`` — identity facts never decay, event/
+    logistics facts fall off faster. Each returned fact carries an
+    ``effective_confidence`` key, and results are sorted by it descending
+    so callers that truncate the list get the strongest signal first.
 
     The default min_confidence mirrors ``fact_extraction.REVIEW_CONFIDENCE``:
     facts below 0.6 are flagged in ``_pending_review.md`` for operator
     triage and must NOT leak into draft composition until promoted.
-    Centralizing the default here closes the gap that every caller used
-    to have to filter post-load.
 
     Callers who need the full set (audit tools, triage UIs, the pending-
     review loop itself) can pass ``min_confidence=0.0`` to disable the
-    filter.
+    filter. Pass ``now`` for deterministic age calculations in tests.
 
     Fast path: when ``brain/facts/_index.json`` is present AND fresh (no
     monthly file has been modified since the index was built), only the
@@ -162,6 +169,7 @@ def load_facts_for_subject(
                 facts_dir=facts_dir,
                 index=index,
                 min_confidence=min_confidence,
+                now=now,
             )
 
     # Slow path — full scan. Skip operator-internal files
@@ -172,24 +180,27 @@ def load_facts_for_subject(
     # Match both subject and mention_slugs — the latter surfaces facts
     # that name the target without being about them (e.g. a fact on
     # Jamie's slug that mentions Eliott surfaces for Eliott too).
-    out: list[dict] = []
+    from agents.shared.decay import effective_confidence, sort_by_effective_confidence
+
+    candidates: list[dict] = []
     seen: set[str] = set()
     for path in sorted(facts_dir.glob("*.md")):
         if path.name.startswith("_"):
             continue
         for fact in parse_facts_file(path):
-            if fact["confidence"] < min_confidence:
-                continue
             if fact["id"] in seen:
                 continue
             matches_subject = fact["subject"].lower() == target
             matches_mention = target in {
                 m.lower() for m in fact.get("mention_slugs") or []
             }
-            if matches_subject or matches_mention:
-                out.append(fact)
-                seen.add(fact["id"])
-    return out
+            if not (matches_subject or matches_mention):
+                continue
+            if effective_confidence(fact, now=now) < min_confidence:
+                continue
+            candidates.append(fact)
+            seen.add(fact["id"])
+    return sort_by_effective_confidence(candidates, now=now)
 
 
 def _load_via_index(
@@ -198,26 +209,33 @@ def _load_via_index(
     facts_dir: Path,
     index: dict,
     min_confidence: float,
+    now: datetime | None = None,
 ) -> list[dict]:
     """Fast-path helper: parse only the monthly files listed in the
-    index for this subject; apply the confidence filter; return."""
-    entries = (index.get("by_subject") or {}).get(target, [])
+    index (subject-indexed and mention-indexed); apply the effective-
+    confidence filter; sort by effective confidence descending."""
+    from agents.shared import brain_index as _bi
+    from agents.shared.decay import effective_confidence, sort_by_effective_confidence
+
+    entries = _bi.facts_for_subject(index, target)
     if not entries:
         return []
     months_needed: set[str] = {month for month, _fid in entries}
     want_ids: set[str] = {fid for _month, fid in entries}
-    out: list[dict] = []
+    candidates: list[dict] = []
+    seen: set[str] = set()
     for month in sorted(months_needed):
         path = facts_dir / f"{month}.md"
         if not path.exists():
             continue
         for fact in parse_facts_file(path):
-            if fact["id"] not in want_ids:
+            if fact["id"] not in want_ids or fact["id"] in seen:
                 continue
-            if fact["confidence"] < min_confidence:
+            if effective_confidence(fact, now=now) < min_confidence:
                 continue
-            out.append(fact)
-    return out
+            candidates.append(fact)
+            seen.add(fact["id"])
+    return sort_by_effective_confidence(candidates, now=now)
 
 
 _FACT_TEMPLATE = (
@@ -374,6 +392,7 @@ def upsert_fact(
     recorded_at: str,
     audience_scope: list[str] | None = None,
     mention_slugs: list[str] | None = None,
+    known_by: list[str] | None = None,
     fact_type: str = "",
     value: dict | None = None,
 ) -> dict:
@@ -437,6 +456,8 @@ def upsert_fact(
         entry += f"- **audience_scope:** {json.dumps(audience_scope)}\n"
     if mention_slugs:
         entry += f"- **mention_slugs:** {json.dumps(mention_slugs)}\n"
+    if known_by:
+        entry += f"- **known_by:** {json.dumps(known_by)}\n"
     if fact_type:
         entry += f"- **fact_type:** {fact_type}\n"
     if value is not None:

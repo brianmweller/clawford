@@ -208,7 +208,12 @@ def build_compose_prompt(
 
     facts_lines = []
     for f in context.facts_shareable:
-        facts_lines.append(f"  - [{f['id']}] {f['content']}")
+        # Theory-of-mind tag: facts the recipient has already been told
+        # get a leading marker so the LLM doesn't re-present them as new
+        # information. The context_builder sets recipient_knows based on
+        # whether the recipient's slug is in the fact's known_by list.
+        known_tag = " [RECIPIENT KNOWS]" if f.get("recipient_knows") else ""
+        facts_lines.append(f"  - [{f['id']}]{known_tag} {f['content']}")
     facts_block = "\n".join(facts_lines) if facts_lines else "  (none available)"
 
     history_lines = []
@@ -397,6 +402,15 @@ COMMUNICATION CONTEXT
 
 WHAT YOU MAY REFERENCE (facts that passed the audience filter — the ONLY
 facts about this person you know; do not invent or assume others)
+
+Facts tagged [RECIPIENT KNOWS] are things the recipient has already been told
+— either they were on the original email thread the fact came from, or they
+attended the meeting it was observed in. Do NOT present these as new
+information. You may still cite them sparingly when the reply's logic
+requires acknowledging shared context ("as I mentioned Tuesday..."), but
+the default is to leave them out. Facts without the tag are genuinely
+new-to-the-recipient — those are the ones worth surfacing when they advance
+the objective.
 {facts_block}
 
 EMAIL HISTORY — VOICE ANCHOR (these are the operator's actual prior messages to
