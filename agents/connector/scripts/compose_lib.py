@@ -139,6 +139,33 @@ def _render_self_context_block(self_profile: dict) -> str:
             parts.append(f"    - {s.get('theme', '?')}")
         parts.append("")
 
+    # Active search pipeline — load-bearing urgency signal for drafting.
+    # If the operator is in late stages with other opportunities, the reply
+    # stance shifts: he can be slightly more assertive about needing a
+    # near-term meeting, can truthfully say he's actively interviewing,
+    # and the recruiter will know he's not at idle capacity.
+    pipeline = self_profile.get("active_search_pipeline") or []
+    late_stage = self_profile.get("late_stage_searches") or []
+    if pipeline:
+        parts.append("  CURRENT ACTIVE SEARCH PIPELINE (load-bearing urgency + calendar context):")
+        for s in pipeline[:10]:
+            notes = (s.get("notes") or "").strip()
+            notes_tail = f" — {notes[:80]}" if notes else ""
+            parts.append(f"    - [{s.get('stage', '?'):20s}] {s.get('company', '?'):20s} "
+                         f"last signal {s.get('last_signal_date', '')}{notes_tail}")
+        if late_stage:
+            parts.append(f"    LATE-STAGE ENGAGEMENTS: {len(late_stage)} active "
+                         f"({', '.join(s.get('company', '?') for s in late_stage[:5])}).")
+            parts.append(f"    USE THIS: when late-stage engagements exist, the draft "
+                         f"MUST include a brief urgency line near the time proposal — "
+                         f"e.g., 'in late stages with a few other processes, so sooner "
+                         f"would be better if you can' or 'juggling a couple of active "
+                         f"interview loops, so any time this week would help.' This "
+                         f"matches how the operator actually replies — he names real constraints. "
+                         f"Do NOT name specific competitor companies. Do NOT omit the "
+                         f"signal — omitting it understates how hot the operator's market is.")
+        parts.append("")
+
     if profile_md:
         # Only include the profile's Self-description + top Track record
         # to keep prompt bounded. Full profile.md is too large.

@@ -296,6 +296,8 @@ def main() -> int:
             "current_targets": sp.current_targets,
             "strength_themes": sp.strength_themes,
             "employer_history": sp.employer_history,
+            "active_search_pipeline": sp.active_search_pipeline,
+            "late_stage_searches": sp.late_stage_searches,
         }
 
     prompt = build_compose_prompt(

@@ -54,6 +54,8 @@ class SelfProfile:
     strength_themes: list[dict] = field(default_factory=list)
     major_accomplishments: list[dict] = field(default_factory=list)
     tenets_authored: list[dict] = field(default_factory=list)
+    active_search_pipeline: list[dict] = field(default_factory=list)
+    recently_concluded_searches: list[dict] = field(default_factory=list)
 
     @property
     def current_targets(self) -> list[dict]:
@@ -67,6 +69,16 @@ class SelfProfile:
     @property
     def has_profile(self) -> bool:
         return bool(self.profile_md)
+
+    @property
+    def late_stage_searches(self) -> list[dict]:
+        """Searches in late-funnel stages — useful urgency signal for
+        Huckle's cold-recruiter drafting ('I'm in late stages with
+        others' context that otherwise lives only in the operator's head)."""
+        late_stages = {"onsite-panel", "final-round", "offer",
+                       "technical-interview", "hiring-manager"}
+        return [s for s in self.active_search_pipeline
+                if s.get("stage") in late_stages]
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +112,17 @@ def load_self_profile(self_dir: Path | None = None) -> SelfProfile:
         for fact_type in _FACT_TYPES:
             records = _load_fact_file(facts_dir / f"{fact_type}.json")
             _assign_facts(profile, fact_type, records)
+
+        # Search-status layer — produced by search-status-build.py
+        stages_path = facts_dir / "active_search_stages.json"
+        if stages_path.exists():
+            try:
+                raw = json.loads(stages_path.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    profile.active_search_pipeline = raw.get("active_searches") or []
+                    profile.recently_concluded_searches = raw.get("recently_concluded") or []
+            except (json.JSONDecodeError, OSError):
+                pass
 
     return profile
 
