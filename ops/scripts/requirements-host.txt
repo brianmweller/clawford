@@ -56,3 +56,10 @@ pytz
 # CRITICAL CVE in enforce mode. Baked in here so the gate is active
 # from the first deploy on a fresh host.
 pip-audit
+
+# Phase 3 cross-run fact dedupe (2026-04-21) — ONNX-based local
+# embedding model for semantic similarity in gmail-facts-mine. The
+# miner degrades open when this isn't installed, so absence is
+# non-fatal; presence upgrades the miner to catch cross-run semantic
+# duplicates in addition to the within-batch Jaccard pass.
+fastembed

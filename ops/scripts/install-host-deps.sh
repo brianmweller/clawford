@@ -80,6 +80,7 @@ REQUIRED = [
     "lxml",
     "dateutil",
     "pytz",
+    "fastembed",  # 2026-04-21 — Phase 3 local embedding for fact dedupe
     # stdlib / already-on-host sanity
     "json",
     "subprocess",
