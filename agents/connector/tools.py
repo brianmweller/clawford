@@ -578,6 +578,13 @@ def handle_nudge_action(slug: str, action: str) -> dict:
     people-scan.py reads this file and skips any slug whose until
     date is still in the future.
 
+    For action=done, also stamps the person file's last_interaction
+    to today (max-merged against any existing date). This means
+    pressing ✅ done actually resets the cadence clock, not just the
+    snooze window — essential because gmessages-mine only catches
+    Google Messages interactions, so email/Slack/IRL contacts are
+    invisible without this explicit-signal path.
+
     Returns a short summary dict suitable for the Telegram toast.
     """
     from datetime import date
@@ -609,10 +616,53 @@ def handle_nudge_action(slug: str, action: str) -> dict:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp, SNOOZES_PATH)
 
+    # ✅ done also bumps last_interaction. Best-effort — a missing
+    # person file, a transient Dropbox EROFS, or a fresher existing
+    # date should never break the snooze write above.
+    last_interaction_bumped = False
+    if action == "done":
+        last_interaction_bumped = _bump_last_interaction_for_slug(slug, today.isoformat())
+
     return {
         "status": "ok", "slug": slug, "action": action,
         "until": until, "days": days,
+        "last_interaction_bumped": last_interaction_bumped,
     }
+
+
+def _bump_last_interaction_for_slug(slug: str, date_iso: str) -> bool:
+    """Stamp ``people/<slug>.md`` with last_interaction=date_iso,
+    max-merged so a fresher existing date isn't rewound. Returns
+    True on a successful stamp, False otherwise (missing file,
+    max-merge decline, OSError). Never raises — the caller's
+    primary job (writing snoozes.json) already succeeded."""
+    try:
+        # daily_refresh owns the max-merge + atomic-write contract.
+        # Import at call-time because daily-refresh.py has a dashed
+        # filename and resolving the module once at import time
+        # adds workspace complexity we don't need here.
+        import importlib.util
+        scripts_dir = Path(__file__).parent / "scripts"
+        path = scripts_dir / "daily-refresh.py"
+        if not path.exists():
+            return False
+        spec = importlib.util.spec_from_file_location("_huckle_daily_refresh", path)
+        if spec is None or spec.loader is None:
+            return False
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        fp = brain.dropbox_brain_root() / "people" / f"{slug}.md"
+        if not fp.exists():
+            return False
+        return bool(mod.update_last_interaction(fp, date_iso))
+    except OSError:
+        return False
+    except Exception:
+        # Bumping last_interaction is a best-effort side channel;
+        # a pathological import or parse failure should never cause
+        # the button press itself to fail.
+        return False
 
 
 EXECUTORS: dict = {

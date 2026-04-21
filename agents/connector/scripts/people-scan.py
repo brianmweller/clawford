@@ -347,6 +347,13 @@ def run() -> dict:
             "relationship": person.get("relationship", ""),
             "relationship_type": person.get("relationship_type", ""),
             "preferred_channel": person.get("preferred_channel", ""),
+            # Raw contact values so morning-relationship-nudge can
+            # render clickable mailto:/tel: Telegram anchors instead
+            # of the plain channel label. Parsed from the person
+            # markdown above; guarded by the reachable-contact filter
+            # two blocks up (line 325) so at least one is populated.
+            "email": person.get("email", "") or "",
+            "phone": person.get("phone", "") or "",
             "tone": person.get("tone", ""),
             "context_notes": person.get("context_notes", ""),
             "last_interaction": last_interaction_str,

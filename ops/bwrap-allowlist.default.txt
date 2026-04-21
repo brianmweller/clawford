@@ -14,11 +14,14 @@
 # fixes browser-cron launch under bwrap. They're eligible now; see
 # Phase 1d of the brain-improvements plan for staged rollout.
 #
-# Brain writes: as of 2026-04-20, the profile RW-whitelists
-# `brain/{facts,people,commitments,queues}/` (isolation.py). Fact
-# miners, daily-refresh, and any other brain-write cron are safe to
-# list here. Writes to other brain paths (`brain/memory/`,
-# `brain/status/`, etc.) still hit EROFS — by design.
+# Brain writes: the profile RW-whitelists
+# `brain/{facts,people,commitments,queues,status,tasks,notes}/`
+# plus file-level bind for `brain/fleet-health.json` (isolation.py).
+# Fact miners, daily-refresh, calendar-index-build, task-sync, and
+# any other brain-write cron are safe to list here. Only
+# `brain/memory/` still hits EROFS — by design (fleet memory is
+# written via <brain>/agents/<agent_id>/, never the root).
+# Audit: agents/shared/tests/bwrap_write_surfaces.md.
 #
 # Lines starting with '#' or empty are ignored by the installer.
 
@@ -31,6 +34,7 @@ meetings-coach-krisp-facts-mine
 # All confirmed free of Camoufox/Playwright/Firefox by grep audit.
 connector-auto-compose
 connector-birthday-miner
+connector-gmail-sent-mine
 connector-gmail-watch-renew
 connector-inbox-triage
 family-calendar-calendar-index-build

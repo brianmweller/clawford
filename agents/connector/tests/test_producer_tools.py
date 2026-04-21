@@ -135,6 +135,110 @@ def test_handle_nudge_action_in_executors(nudge_tools):
     assert "handle_nudge_action" in nudge_tools.EXECUTORS
 
 
+# ── handle_nudge_action — done bumps last_interaction ────────────────
+# 2026-04-21: pressing ✅ done on the morning Relationship Check now
+# also stamps the person file's last_interaction to today. Without
+# this, people the operator already contacted keep resurfacing because
+# gmessages-mine misses email/Slack/IRL signals. Root-cause fix is
+# gmail-sent-mine (Fix 4B); this is the explicit-signal path.
+
+
+@pytest.fixture
+def nudge_with_brain(tmp_path, monkeypatch):
+    """Sandboxes both SNOOZES_PATH and the Dropbox brain so done-button
+    last_interaction stamping can be observed end-to-end."""
+    brain_root = tmp_path / "brain-root"
+    (brain_root / "people").mkdir(parents=True)
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(brain_root))
+
+    workspace = tmp_path / "connector-workspace"
+    workspace.mkdir()
+
+    # Force a fresh tools import so CLAWFORD_BRAIN_DROPBOX_ROOT is
+    # picked up by any module-scope brain root resolution.
+    for mod in list(sys.modules):
+        if mod in ("tools", "brain"):
+            del sys.modules[mod]
+    import tools
+    monkeypatch.setattr(tools, "WORKSPACE", str(workspace))
+    monkeypatch.setattr(tools, "SNOOZES_PATH", str(workspace / "snoozes.json"))
+
+    return tools, brain_root
+
+
+def test_handle_nudge_action_done_bumps_last_interaction(nudge_with_brain):
+    """✅ done → last_interaction stamped to today."""
+    from datetime import date
+    tools, brain_root = nudge_with_brain
+    fp = brain_root / "people" / "ellen-example.md"
+    fp.write_text(
+        "# Ellen Example\n"
+        "- **slug:** ellen-example\n"
+        "- **circles:** friends-close\n"
+        "- **email:** ellen@example.com\n"
+        "- **last_interaction:** 2026-01-01\n",
+        encoding="utf-8",
+    )
+    tools.handle_nudge_action(slug="ellen-example", action="done")
+    text = fp.read_text(encoding="utf-8")
+    today_iso = date.today().isoformat()
+    assert f"- **last_interaction:** {today_iso}" in text
+
+
+def test_handle_nudge_action_done_preserves_fresher_existing(nudge_with_brain):
+    """Max-merge: if the person file already has a newer
+    last_interaction (e.g., gmail-sent-mine stamped a fresher date
+    earlier today), done MUST NOT rewind it."""
+    from datetime import date, timedelta
+    tools, brain_root = nudge_with_brain
+    fresh = (date.today() + timedelta(days=7)).isoformat()  # pretend future stamp
+    fp = brain_root / "people" / "fresh-example.md"
+    fp.write_text(
+        "# Fresh Example\n"
+        "- **slug:** fresh-example\n"
+        "- **circles:** friends-close\n"
+        "- **email:** fresh@example.com\n"
+        f"- **last_interaction:** {fresh}\n",
+        encoding="utf-8",
+    )
+    tools.handle_nudge_action(slug="fresh-example", action="done")
+    text = fp.read_text(encoding="utf-8")
+    assert f"- **last_interaction:** {fresh}" in text, (
+        "max-merge must leave a fresher existing date untouched"
+    )
+
+
+def test_handle_nudge_action_snoozed_does_not_bump_last_interaction(
+    nudge_with_brain,
+):
+    """snoozed/ignored mean 'I don't want to see this for a while',
+    NOT 'I contacted them'. last_interaction must stay put."""
+    tools, brain_root = nudge_with_brain
+    fp = brain_root / "people" / "snoozed-example.md"
+    fp.write_text(
+        "# Snoozed Example\n"
+        "- **slug:** snoozed-example\n"
+        "- **circles:** friends-close\n"
+        "- **email:** snoozed@example.com\n"
+        "- **last_interaction:** 2026-01-01\n",
+        encoding="utf-8",
+    )
+    tools.handle_nudge_action(slug="snoozed-example", action="snoozed")
+    text = fp.read_text(encoding="utf-8")
+    assert "- **last_interaction:** 2026-01-01" in text
+
+
+def test_handle_nudge_action_done_missing_person_file_still_returns_ok(
+    nudge_with_brain,
+):
+    """If the slug doesn't have a person file (edge case: deleted
+    mid-day, typo, test fixture), the snooze write still succeeds;
+    don't raise."""
+    tools, brain_root = nudge_with_brain
+    result = tools.handle_nudge_action(slug="ghost", action="done")
+    assert result["status"] == "ok"
+
+
 # ---------------------------------------------------------------------------
 # get_person (delegates to brain.get_person)
 # ---------------------------------------------------------------------------

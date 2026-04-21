@@ -293,6 +293,59 @@ def test_select_items_drops_profile_view_notifications(mod):
     assert notif_ids == set(), f"low-signal notifications must be dropped, got {notif_ids}"
 
 
+def test_select_items_keeps_profile_view_rollup_when_exempt_flag_set(mod):
+    """2026-04-21: fetch-and-rank.py's `_build_profile_view_summary`
+    synthesizes a single rollup notification ("👁️ Profile visitors —
+    last 24h (N)") from multiple raw 'X viewed your profile' pings.
+    That rollup is the intended morning-brief output, but before this
+    fix `_filter_low_signal_notifications` was dropping it because the
+    summary body contained viewer names + the word "viewed" (detail
+    lines like "• Omar Shahine viewed your profile 2h").
+
+    The rollup opts out via `_exempt_low_signal=True`. Individual raw
+    pings (no flag) still get dropped — the 2026-04-18 fix for Omar
+    spam remains in force."""
+    rollup = {
+        "id": "pv-rollup",
+        "title": "\U0001f441️ Profile visitors — last 24h (3)",
+        "summary": (
+            "• Michelle Jaskierny — 2h\n"
+            "• Omar Shahine viewed your profile — 12h\n"
+            "• Huan Wang — 20h"
+        ),
+        "link": "https://www.linkedin.com/me/profile-views/",
+        "source": "linkedin",
+        "source_label": "LinkedIn Notification",
+        "topics": ["linkedin"],
+        "rank": 0.5,
+        "_is_notification": True,
+        "_exempt_low_signal": True,
+    }
+    articles = _mixed_feed(non_li=25, linkedin=0) + [rollup]
+    selected = mod.select_items(articles)
+    notif_ids = {s["id"] for s in selected if s.get("_is_notification")}
+    assert "pv-rollup" in notif_ids, (
+        f"profile-view rollup with _exempt_low_signal must survive the filter, got {notif_ids}"
+    )
+
+
+def test_filter_low_signal_notifications_honors_exempt_flag(mod):
+    """Unit-level: the filter pass-through gate is `_exempt_low_signal`.
+    Without the flag a matching title drops; with the flag it passes."""
+    without_flag = {
+        "title": "\U0001f441️ Profile visitors — last 24h (3)",
+        "summary": "• Omar Shahine viewed your profile — 12h",
+    }
+    with_flag = {
+        **without_flag,
+        "_exempt_low_signal": True,
+    }
+    kept_no = mod._filter_low_signal_notifications([without_flag])
+    kept_yes = mod._filter_low_signal_notifications([with_flag])
+    assert kept_no == [], "unexempted rollup-shaped notif must drop"
+    assert kept_yes == [with_flag], "exempted rollup must survive"
+
+
 def test_select_items_keeps_substantive_notifications(mod):
     """A mention, a new job, a comment, or a DM-preview notification is
     signal — those must survive the filter."""

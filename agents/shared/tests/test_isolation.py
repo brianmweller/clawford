@@ -219,8 +219,73 @@ def test_bwrap_command_binds_brain_commitments_and_queues_rw(tmp_path: Path) -> 
         )
 
 
+def test_bwrap_command_binds_brain_status_rw(tmp_path: Path) -> None:
+    """brain/status/ must be RW-bound. calendar-index-build.py writes
+    ``status/calendar-index.json`` atomically (tmpfile + os.replace);
+    without this bind the tmpfile write hits EROFS. See
+    ``agents/shared/tests/bwrap_write_surfaces.md`` for the audit."""
+    brain = tmp_path / "brain"
+    (brain / "status").mkdir(parents=True)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    cmd = isolation.bwrap_command(
+        agent_id="shopping", workspace=workspace, brain_root=brain,
+    )
+    status_dir = brain / "status"
+    assert _has_triple(cmd, "--bind-try", str(status_dir), str(status_dir))
+
+
+def test_bwrap_command_binds_brain_tasks_rw(tmp_path: Path) -> None:
+    """brain/tasks/ must be RW-bound. brain_tasks.py's QUEUE_RELPATH
+    resolves to ``tasks/queue.md`` and gcal-tasks-sync (in the bwrap
+    allowlist) writes to it."""
+    brain = tmp_path / "brain"
+    (brain / "tasks").mkdir(parents=True)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    cmd = isolation.bwrap_command(
+        agent_id="shopping", workspace=workspace, brain_root=brain,
+    )
+    tasks_dir = brain / "tasks"
+    assert _has_triple(cmd, "--bind-try", str(tasks_dir), str(tasks_dir))
+
+
+def test_bwrap_command_binds_brain_notes_rw(tmp_path: Path) -> None:
+    """brain/notes/ must be RW-bound. brain.py::append_inbox_note
+    writes to ``notes/inbox.md`` (append mode); notes-triage.py
+    (allowlisted via connector-inbox-triage) mutates the same file
+    when marking entries triaged."""
+    brain = tmp_path / "brain"
+    (brain / "notes").mkdir(parents=True)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    cmd = isolation.bwrap_command(
+        agent_id="shopping", workspace=workspace, brain_root=brain,
+    )
+    notes_dir = brain / "notes"
+    assert _has_triple(cmd, "--bind-try", str(notes_dir), str(notes_dir))
+
+
+def test_bwrap_command_binds_fleet_health_json_rw(tmp_path: Path) -> None:
+    """brain/fleet-health.json must be RW-bound at file-level.
+    ops/scripts/fleet-health.py writes it; any future agent cron that
+    patches it (partial status annotations) would hit EROFS without
+    this. File-level ``--bind-try`` — defensive since the file may
+    not exist on fresh deploys."""
+    brain = tmp_path / "brain"
+    brain.mkdir()
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    cmd = isolation.bwrap_command(
+        agent_id="shopping", workspace=workspace, brain_root=brain,
+    )
+    fh = brain / "fleet-health.json"
+    assert _has_triple(cmd, "--bind-try", str(fh), str(fh))
+
+
 def test_bwrap_command_brain_memory_stays_read_only(tmp_path: Path) -> None:
-    """The RW whitelist is explicit: facts, people, commitments, queues.
+    """The RW whitelist is explicit: facts, people, commitments,
+    queues, status, tasks, notes + fleet-health.json (file-level).
     Everything else under brain/ stays RO. brain/memory/ — where
     MEMORY.md and long-term context live — must NOT flip to RW; an
     agent's writes go to brain/agents/<agent_id>/MEMORY.md, not the

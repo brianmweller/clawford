@@ -130,6 +130,25 @@ def _days_ago_iso(days: int) -> str:
     return (datetime.now(timezone.utc).date() - timedelta(days=days)).isoformat()
 
 
+def test_run_entry_surfaces_email_and_phone_for_clickable_links(stub_brain):
+    """2026-04-21: morning-relationship-nudge renders clickable
+    mailto:/tel: anchors in the morning nudge, so the entries that
+    people-scan emits must carry the raw email / phone values (not
+    just the preferred_channel label). Regression cover to make sure
+    a future field cleanup doesn't drop them."""
+    _write_person(stub_brain.people, "ellen-example",
+                  email="ellen@example.com",
+                  last_interaction=_days_ago_iso(90))
+    result = stub_brain.ps.run()
+    ellen = next((p for p in result["overdue"] if p["slug"] == "ellen-example"), None)
+    assert ellen is not None, "ellen-example should be overdue in this fixture"
+    assert ellen["email"] == "ellen@example.com"
+    # _write_person hardcodes phone to em-dash ("—") which the parser
+    # normalizes to empty. Assert empty, not em-dash, so _render_contact_link's
+    # no-contact fallback kicks in correctly downstream.
+    assert ellen["phone"] == ""
+
+
 def test_run_demotes_approaching_person_with_upcoming_meeting(stub_brain):
     # Mohit: last_interaction 25 days ago, friends-close (30d cadence)
     # → would be "approaching" without the filter

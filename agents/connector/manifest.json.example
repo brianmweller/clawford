@@ -37,6 +37,8 @@
     "scripts/gmail-push-listener.py",
     "scripts/gmail_facts_mine_lib.py",
     "scripts/gmail-facts-mine.py",
+    "scripts/gmail_sent_mine_lib.py",
+    "scripts/gmail-sent-mine.py",
     "scripts/workflowy_facts_mine_lib.py",
     "scripts/workflowy-facts-mine.py"
   ],
@@ -122,6 +124,14 @@
       "name": "gmessages-mine",
       "cron": "0 */2 * * *",
       "message": "⚡ EXEC DISCIPLINE: run any `python3 <path>` command exactly as written — a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. Scrape Google Messages Web via the paired Camoufox profile and write per-contact last-message dates to cache/mined-gmessages.json. daily-refresh.py then reads that cache to stamp last_interaction on Messages contacts. Run: python3 ~/.clawford/connector-workspace/scripts/gmessages-mine.py. If status is 'ok', return EXACTLY the empty string (zero bytes, no narration). If status is 'degraded' with alert referencing profile missing/expired, deliver a short Telegram message so the operator knows to re-pair. Any other 'error' or 'degraded' state should also go to Telegram.",
+      "announce": false,
+      "no_deliver": true,
+      "enabled": false
+    },
+    {
+      "name": "gmail-sent-mine",
+      "cron": "15 */2 * * *",
+      "message": "⚡ EXEC DISCIPLINE: run any `python3 <path>` command exactly as written — a bare invocation, nothing appended, no shell wrapping, no chaining with other commands, no output redirection, no exit-code capture. Scripts always print one JSON line to stdout with a `status` field (ok/error/degraded); parse that final line to decide what to do. Walk the Gmail Sent folder and stamp last_interaction on matching people/*.md files so Huckle's cadence clock reflects email contact (not just Google Messages). Run: python3 ~/.clawford/connector-workspace/scripts/gmail-sent-mine.py --commit. Parse the final JSON line from stdout. If status is 'ok', return EXACTLY the empty string (zero bytes, no narration). If status is 'error', send a short Telegram alert naming the failure so the operator can investigate (token expired, Gmail quota, etc.). Offset 15 min from gmessages-mine so the two OAuth flows don't hammer Google simultaneously.",
       "announce": false,
       "no_deliver": true,
       "enabled": false

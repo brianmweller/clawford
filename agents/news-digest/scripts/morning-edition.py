@@ -199,9 +199,19 @@ _LOW_SIGNAL_NOTIFICATION_PATTERNS: tuple[str, ...] = (
 
 def _filter_low_signal_notifications(notifs: list[dict]) -> list[dict]:
     """Drop LinkedIn notifications whose title/summary is routine
-    platform-activity noise. See _LOW_SIGNAL_NOTIFICATION_PATTERNS."""
+    platform-activity noise. See _LOW_SIGNAL_NOTIFICATION_PATTERNS.
+
+    Items with ``_exempt_low_signal=True`` pass through unconditionally.
+    This flag is set by fetch-and-rank's `_build_profile_view_summary`
+    on the synthesized "Profile visitors — last 24h (N)" rollup, whose
+    summary lists viewer names alongside the literal text "viewed your
+    profile" — that content would otherwise trip the substring filter
+    and drop the very rollup the filter was meant to promote."""
     kept: list[dict] = []
     for n in notifs:
+        if n.get("_exempt_low_signal"):
+            kept.append(n)
+            continue
         blob = f"{n.get('title', '')}\n{n.get('summary', '')}".lower()
         if any(pat in blob for pat in _LOW_SIGNAL_NOTIFICATION_PATTERNS):
             continue

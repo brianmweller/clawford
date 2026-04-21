@@ -444,6 +444,11 @@ def _build_profile_view_summary(notifications: list[dict]) -> dict | None:
         "pub_date": datetime.now(timezone.utc).isoformat(),
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "_is_notification": True,
+        # Tell morning-edition's low-signal filter to pass this through.
+        # The summary body lists individual viewers alongside "viewed
+        # your profile", which would otherwise trip the substring
+        # blacklist and drop the rollup this function exists to build.
+        "_exempt_low_signal": True,
     }
 
 

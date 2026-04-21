@@ -66,6 +66,146 @@ def monday_pacific():
     return datetime(2026, 4, 20, 3, 0, tzinfo=ZoneInfo("America/Los_Angeles"))
 
 
+# ─── _render_contact_link: clickable mailto/tel over plain channel label ──
+
+
+def test_render_contact_link_email_preferred(mrn):
+    """When preferred_channel is 'email' and the entry has an email,
+    render a <a href="mailto:..."> anchor containing the email address."""
+    entry = {
+        "name": "Alice Smith",
+        "preferred_channel": "email",
+        "email": "alice@example.com",
+        "phone": "+14155550100",
+    }
+    out = mrn._render_contact_link(entry)
+    assert out == '<a href="mailto:alice@example.com">alice@example.com</a>'
+
+
+def test_render_contact_link_phone_channels_render_tel(mrn):
+    """Channels that map to phone (text, Messages, SMS, WhatsApp,
+    Signal, phone) must render a tel: anchor with the phone number."""
+    for channel in ("text", "Messages", "SMS", "whatsapp", "Signal", "phone"):
+        entry = {
+            "name": "Bob",
+            "preferred_channel": channel,
+            "email": "bob@example.com",
+            "phone": "+14155550100",
+        }
+        out = mrn._render_contact_link(entry)
+        assert out == '<a href="tel:+14155550100">+14155550100</a>', (
+            f"channel={channel!r} should render tel anchor"
+        )
+
+
+def test_render_contact_link_fills_from_available_when_preferred_missing(mrn):
+    """If preferred_channel asks for a phone number but the entry only
+    has an email, fall back to the email anchor (don't drop the link)."""
+    entry = {
+        "name": "Cara",
+        "preferred_channel": "text",
+        "email": "cara@example.com",
+        "phone": "",
+    }
+    out = mrn._render_contact_link(entry)
+    assert out == '<a href="mailto:cara@example.com">cara@example.com</a>'
+
+
+def test_render_contact_link_falls_back_to_channel_label_when_no_contacts(mrn):
+    """No email and no phone → don't try to build an anchor; fall back
+    to the plain channel label so the message is never empty."""
+    entry = {
+        "name": "Dan",
+        "preferred_channel": "text",
+        "email": "",
+        "phone": "",
+    }
+    out = mrn._render_contact_link(entry)
+    assert out == "text"
+
+
+def test_render_contact_link_empty_when_no_channel_and_no_contacts(mrn):
+    entry = {"name": "Eve", "preferred_channel": "", "email": "", "phone": ""}
+    assert mrn._render_contact_link(entry) == ""
+
+
+def test_render_contact_link_escapes_html_metacharacters_in_fallback(mrn):
+    """If for some reason a channel label contains an HTML-meta char
+    (&, <, >), the fallback must be HTML-escaped so it doesn't break
+    parse_mode=HTML delivery."""
+    entry = {
+        "name": "Finn",
+        "preferred_channel": "text & chat",
+        "email": "",
+        "phone": "",
+    }
+    out = mrn._render_contact_link(entry)
+    assert "&amp;" in out
+    assert "<" not in out
+    assert ">" not in out
+
+
+def test_format_nudge_renders_mailto_when_email_present(
+    mrn, tuesday_pacific
+):
+    """Integration: nudge body for a person with email + preferred_channel=email
+    contains a mailto anchor, NOT a plain 'email' label."""
+    scan = {
+        "status": "ok",
+        "overdue_total": 1,
+        "overdue_by_group": {
+            "family": [],
+            "friends": [],
+            "colleagues": [
+                {
+                    "slug": "thomas-example",
+                    "name": "Thomas Example",
+                    "preferred_channel": "email",
+                    "email": "thomas@example.com",
+                    "phone": "",
+                    "days_since": 120,
+                    "days_overdue": 30,
+                    "display_group": "colleagues",
+                }
+            ],
+        },
+        "summary": {"total": 42},
+    }
+    body = mrn.format_nudge(scan, tuesday_pacific)
+    assert '<a href="mailto:thomas@example.com">thomas@example.com</a>' in body
+
+
+def test_build_nudge_items_person_text_uses_contact_link(
+    mrn, tuesday_pacific
+):
+    """morning-fleet-deliver consumes cache/morning-items.json; the
+    person item's `text` field must carry the anchor so the Telegram
+    send renders it clickable."""
+    scan = {
+        "overdue_total": 1,
+        "overdue_by_group": {
+            "family": [],
+            "friends": [
+                {
+                    "slug": "bob",
+                    "name": "Bob",
+                    "preferred_channel": "text",
+                    "email": "",
+                    "phone": "+14155551234",
+                    "days_since": 60,
+                    "display_group": "friends",
+                }
+            ],
+            "colleagues": [],
+        },
+        "summary": {"total": 10},
+    }
+    items = mrn.build_nudge_items(scan, tuesday_pacific)
+    person_items = [i for i in items if i.get("type") == "person"]
+    assert len(person_items) == 1
+    assert '<a href="tel:+14155551234">+14155551234</a>' in person_items[0]["text"]
+
+
 # ─── format_nudge: happy paths ───────────────────────────────────────
 
 

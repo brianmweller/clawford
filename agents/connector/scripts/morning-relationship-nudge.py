@@ -14,6 +14,7 @@ SCRIPT_CONTRACT-compliant: always exits 0, prints one JSON line.
 """
 from __future__ import annotations
 
+import html
 import json
 import os
 import sys
@@ -55,14 +56,63 @@ def _run_script(script_name: str, *args: str, timeout: int = SUBPROCESS_TIMEOUT_
     return run_json_script(str(SCRIPTS_DIR / script_name), *args, timeout=timeout)
 
 
+# Channel labels that map to a phone number (tel: anchor) rather than
+# an email address. Case-insensitive match against preferred_channel.
+_PHONE_CHANNEL_TOKENS = frozenset({
+    "phone", "text", "messages", "sms", "whatsapp", "signal",
+})
+
+
+def _render_contact_link(entry: dict) -> str:
+    """Render the contact portion of a person line as clickable
+    Telegram HTML (mailto: or tel:) when the entry carries an email /
+    phone, falling back to the plain preferred_channel label when
+    neither value is present.
+
+    Preference logic:
+      1. Normalize preferred_channel → prefer email | prefer phone.
+      2. If the preferred side is populated, render it.
+      3. If the preferred side is empty but the other is populated,
+         render the other (don't drop the link).
+      4. If both sides are empty, fall back to the HTML-escaped
+         channel label (may be empty).
+
+    Callers send the rendered string as part of a parse_mode=HTML
+    Telegram message — any literal text that ends up in the anchor's
+    text node or in the fallback label is html.escape'd to keep the
+    markup valid."""
+    channel = (entry.get("preferred_channel") or "").strip()
+    email = (entry.get("email") or "").strip()
+    phone = (entry.get("phone") or "").strip()
+
+    prefers_email = channel.lower() == "email"
+    prefers_phone = channel.lower() in _PHONE_CHANNEL_TOKENS
+
+    if prefers_email and email:
+        escaped = html.escape(email)
+        return f'<a href="mailto:{escaped}">{escaped}</a>'
+    if prefers_phone and phone:
+        escaped = html.escape(phone)
+        return f'<a href="tel:{escaped}">{escaped}</a>'
+    # Preferred side missing — fall back to whichever is available.
+    if email:
+        escaped = html.escape(email)
+        return f'<a href="mailto:{escaped}">{escaped}</a>'
+    if phone:
+        escaped = html.escape(phone)
+        return f'<a href="tel:{escaped}">{escaped}</a>'
+    # No reachable contact — render the channel label as plain text.
+    return html.escape(channel)
+
+
 def _fmt_overdue_line(entry: dict) -> str:
     name = entry.get("name") or entry.get("slug") or "?"
     days_since = entry.get("days_since")
-    channel = (entry.get("preferred_channel") or "").strip()
+    contact = _render_contact_link(entry)
 
     days_part = f"{days_since} days" if days_since is not None else "never"
-    channel_part = f" · {channel}" if channel else ""
-    return f"  {name} — {days_part}{channel_part}"
+    contact_part = f" · {contact}" if contact else ""
+    return f"  {name} — {days_part}{contact_part}"
 
 
 # Display-group labels for the grouped nudge output.
@@ -130,14 +180,14 @@ def build_nudge_items(scan: dict, now_pacific: datetime) -> list[dict]:
         for entry in entries:
             name = entry.get("name") or entry.get("slug") or "?"
             days_since = entry.get("days_since")
-            channel = (entry.get("preferred_channel") or "").strip()
+            contact = _render_contact_link(entry)
             days_part = f"{days_since} days" if days_since is not None else "never"
-            channel_part = f" · {channel}" if channel else ""
+            contact_part = f" · {contact}" if contact else ""
             items.append({
                 "type": "person",
                 "slug": entry.get("slug", ""),
                 "group": group_key,
-                "text": f"{name} — {days_part}{channel_part}",
+                "text": f"{html.escape(name)} — {days_part}{contact_part}",
             })
 
     return items

@@ -200,14 +200,20 @@ def deliver_nudge_items_with_buttons(
             continue
         item_type = item.get("type", "")
         reply_markup = None
+        parse_mode = None
         if item_type == "person":
             slug = item.get("slug", "")
             if slug:
                 reply_markup = _nudge_buttons_for_slug(slug)
+            # morning-relationship-nudge embeds <a href="mailto:…"> /
+            # <a href="tel:…"> anchors in person items; Telegram only
+            # renders them as taps under parse_mode=HTML.
+            parse_mode = "HTML"
         ok = send_telegram(
             bot_token, chat_id, text,
             silent=not is_last,
             reply_markup=reply_markup,
+            parse_mode=parse_mode,
         )
         if ok:
             sent += 1
@@ -452,6 +458,7 @@ def send_telegram(
     text: str,
     silent: bool = False,
     reply_markup: dict | None = None,
+    parse_mode: str | None = None,
 ) -> bool:
     """Send a single message via the Telegram Bot API. Returns True on success.
 
@@ -462,6 +469,11 @@ def send_telegram(
 
     Pass `reply_markup` to attach an inline keyboard (used by the
     per-item news-digest delivery path for 👍/👎/📖 engagement buttons).
+
+    Pass `parse_mode="HTML"` when the text contains Telegram HTML
+    entities (e.g. <a href="mailto:…"> anchors in Huckle's relationship
+    nudge). Default (None) sends text unparsed — safest for content
+    that may contain bare '<' or '&' from upstream sources.
     """
     if not bot_token or not chat_id:
         return False
@@ -474,6 +486,8 @@ def send_telegram(
     }
     if reply_markup is not None:
         body["reply_markup"] = reply_markup
+    if parse_mode is not None:
+        body["parse_mode"] = parse_mode
     payload = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
         url,

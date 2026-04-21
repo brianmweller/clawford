@@ -92,7 +92,10 @@ def bwrap_command(
       - RO-binds the repo (so deploy-time copies of shared-lib
         modules, prompts, fixtures resolve)
       - RO-binds the brain root + per-agent-subdir RW + RW-whitelists
-        brain/{facts,people,commitments,queues} for shared writes
+        brain/{facts,people,commitments,queues,status,tasks,notes}
+        for shared writes, plus a file-level RW bind for
+        brain/fleet-health.json. Whitelist derived from the write-
+        surface audit at agents/shared/tests/bwrap_write_surfaces.md.
       - RO-binds ~/.codex (Codex OAuth token)
       - RW-binds the agent's own workspace
       - tmpfs /tmp + /var/tmp for per-invocation scratch
@@ -177,9 +180,11 @@ def bwrap_command(
     # targets. Pre-widening (2026-04-20) only <brain>/agents/<agent_id>/
     # was RW-bound; every other brain-path write hit EROFS silently.
     # daily-refresh surfaced this on brain/people/*.md starting
-    # 2026-04-18, and the new fact miners would have hit the same wall
-    # on brain/facts/YYYY-MM.md. The whitelist is explicit: facts,
-    # people, commitments, queues — the four shared write targets.
+    # 2026-04-18, calendar-index-build surfaced the same on
+    # brain/status/ on 2026-04-21. The whitelist is explicit and
+    # derived from the audit at tests/bwrap_write_surfaces.md:
+    #   facts, people, commitments, queues, status, tasks, notes
+    # plus file-level bind for brain/fleet-health.json.
     # brain/memory/ stays RO (agents write their own memory via
     # <brain>/agents/<agent_id>/, not the fleet memory root).
     if brain_root is not None:
@@ -191,9 +196,17 @@ def bwrap_command(
                 cmd += ["--bind", str(agent_brain), str(agent_brain)]
             # Shared RW whitelist. --bind-try so a brain root without
             # one of these subdirs yet (fresh deploy) doesn't crash.
-            for sub in ("facts", "people", "commitments", "queues"):
+            for sub in (
+                "facts", "people", "commitments", "queues",
+                "status", "tasks", "notes",
+            ):
                 sub_path = brain / sub
                 cmd += ["--bind-try", str(sub_path), str(sub_path)]
+            # File-level RW binds for top-level brain files that
+            # aren't under a subdir.
+            for fname in ("fleet-health.json",):
+                fpath = brain / fname
+                cmd += ["--bind-try", str(fpath), str(fpath)]
 
     # Workspace — read-write.
     if workspace.exists():

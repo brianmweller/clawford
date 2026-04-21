@@ -484,7 +484,7 @@ NUDGE_ITEMS = [
 
 def test_deliver_nudge_sends_one_message_per_item(fake_fleet):
     sent_args = []
-    def fake_send(bot_token, chat_id, text, silent=False, reply_markup=None):
+    def fake_send(bot_token, chat_id, text, silent=False, reply_markup=None, **_):
         sent_args.append({"text": text, "reply_markup": reply_markup})
         return True
     with patch.object(fake_fleet["mod"], "send_telegram", side_effect=fake_send):
@@ -503,9 +503,43 @@ def test_deliver_nudge_sends_one_message_per_item(fake_fleet):
     assert sent_args[5]["reply_markup"] is not None  # Alice
 
 
+def test_deliver_nudge_person_items_sent_with_html_parse_mode(fake_fleet):
+    """2026-04-21: morning-relationship-nudge emits clickable mailto:/
+    tel: anchors embedded in each person item's text. Telegram only
+    renders them as links when the sendMessage call carries
+    parse_mode=HTML — without it the raw tags arrive as unrendered
+    markup. Overview + group_header items should NOT set parse_mode
+    (they carry no HTML; keeping it unset avoids accidentally
+    forcing HTML parsing on stray '<' in future copy).
+
+    This is the contract deliver_nudge_items_with_buttons must uphold
+    for the Huckle clickable-contacts feature to work end-to-end."""
+    calls = []
+    def fake_send(bot_token, chat_id, text, silent=False, reply_markup=None,
+                  parse_mode=None):
+        calls.append({"text": text, "parse_mode": parse_mode})
+        return True
+
+    items = [
+        {"type": "overview", "text": "\U0001f431\U0001f91d overview"},
+        {"type": "group_header", "text": "\U0001f46a FAMILY (1)"},
+        {"type": "person", "slug": "bob",
+         "text": 'Bob — 30 days · <a href="tel:+14155551234">+14155551234</a>'},
+    ]
+    with patch.object(fake_fleet["mod"], "send_telegram", side_effect=fake_send):
+        fake_fleet["mod"].deliver_nudge_items_with_buttons(
+            "FAKE_TOKEN", "CHAT", items, footer_text=None,
+        )
+    assert calls[0]["parse_mode"] is None, "overview should not force HTML"
+    assert calls[1]["parse_mode"] is None, "group header should not force HTML"
+    assert calls[2]["parse_mode"] == "HTML", (
+        "person item with anchor must be sent parse_mode=HTML"
+    )
+
+
 def test_deliver_nudge_person_buttons_use_nudge_callback_data(fake_fleet):
     sent_args = []
-    def fake_send(bot_token, chat_id, text, silent=False, reply_markup=None):
+    def fake_send(bot_token, chat_id, text, silent=False, reply_markup=None, **_):
         sent_args.append(reply_markup)
         return True
     with patch.object(fake_fleet["mod"], "send_telegram", side_effect=fake_send):
@@ -527,7 +561,7 @@ def test_deliver_nudge_person_buttons_use_nudge_callback_data(fake_fleet):
 
 def test_deliver_nudge_skips_items_with_empty_text(fake_fleet):
     sent_args = []
-    def fake_send(bot_token, chat_id, text, silent=False, reply_markup=None):
+    def fake_send(bot_token, chat_id, text, silent=False, reply_markup=None, **_):
         sent_args.append(text)
         return True
     items = [
