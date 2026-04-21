@@ -108,6 +108,42 @@ def fetch_sent_messages_for_circle(
     return collected
 
 
+def build_recruiter_domain_query(domains: list[str], *, window_days: int = 365) -> str:
+    """Pure: build the Gmail search query for sent mail to any address in
+    the provided recruiter-platform domains. Empty domain list → empty
+    query (caller skips the Gmail call)."""
+    if not domains:
+        return ""
+    parts = " OR ".join(f"to:{d}" for d in domains)
+    return f"in:sent newer_than:{window_days}d ({parts})"
+
+
+def fetch_sent_messages_to_recruiters(
+    service,
+    domains: list[str],
+    *,
+    window_days: int = 365,
+    chunk_size: int = 12,
+    total_cap: int = 200,
+) -> list[str]:
+    """Return message IDs of sent mail to any recruiter-platform domain
+    within the last window_days. Chunks domains to avoid overly long
+    OR queries."""
+    collected: list[str] = []
+    for chunk in chunks(domains, chunk_size):
+        q = build_recruiter_domain_query(chunk, window_days=window_days)
+        if not q:
+            continue
+        resp = service.users().messages().list(
+            userId="me", q=q, maxResults=100,
+        ).execute()
+        for m in resp.get("messages", []):
+            collected.append(m["id"])
+            if len(collected) >= total_cap:
+                return collected
+    return collected
+
+
 def fetch_message_sample(service, message_id: str) -> dict | None:
     """Fetch full message + extract {to, date, body} — returns None on error."""
     try:
@@ -203,6 +239,10 @@ def main() -> int:
     ap.add_argument("--circle", help="Build profile for one circle (e.g. family-inner)")
     ap.add_argument("--all", action="store_true", help="Build profiles for all circles")
     ap.add_argument("--person", help="Build per-person override profile (e.g. ravi-rivera)")
+    ap.add_argument("--recruiter-mode", action="store_true",
+                    help="Build a recruiter voice profile by sampling sent mail to "
+                         "recruiter-platform domains (ATS systems, retained search, "
+                         "LinkedIn InMail). Writes cache/voice-profiles/recruiter.json.")
     ap.add_argument("--sample-size", type=int, default=30)
     ap.add_argument("--people-dir", type=Path)
     ap.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE)
@@ -220,13 +260,85 @@ def main() -> int:
     except (AttributeError, Exception):
         pass
 
-    modes = [bool(args.circle), bool(args.all), bool(args.person)]
+    modes = [bool(args.circle), bool(args.all), bool(args.person), bool(args.recruiter_mode)]
     if sum(modes) != 1:
-        print("ERROR: pass exactly one of --circle <name>, --all, or --person <slug>",
+        print("ERROR: pass exactly one of --circle <name>, --all, --person <slug>, or --recruiter-mode",
               file=sys.stderr)
         return 1
 
     people_dir = args.people_dir or (dropbox_brain_root() / "people")
+
+    # Recruiter-mode: mine sent mail to recruiter-platform domains, not
+    # a circle's people. Uses the same LLM extraction as circles.
+    if args.recruiter_mode:
+        from recruiter_detector_lib import RECRUITER_DOMAINS
+        domains = sorted(RECRUITER_DOMAINS)
+        print(f"Recruiter mode: querying sent mail to {len(domains)} recruiter-platform domains")
+        for d in domains:
+            print(f"  - {d}")
+        if args.dry_run:
+            q = build_recruiter_domain_query(domains[:5], window_days=365)
+            print(f"DRY RUN — sample query (first 5 domains): {q[:200]}...")
+            return 0
+        from googleapiclient.discovery import build as _build
+        from agents.shared.google_oauth import get_credentials
+        scopes = [
+            "https://www.googleapis.com/auth/calendar.readonly",
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.compose",
+        ]
+        creds = get_credentials(str(args.creds), str(args.token), scopes)
+        service = _build("gmail", "v1", credentials=creds)
+
+        # Fetch message IDs to recruiter domains (any address in those
+        # domains, unlike circle mode which uses a specific email list)
+        ids = fetch_sent_messages_to_recruiters(service, domains)
+        print(f"Found {len(ids)} sent messages to recruiter domains")
+        if not ids:
+            print("FAILED: no sent messages found to any recruiter domain")
+            return 1
+
+        # Sample + fetch bodies (reuses existing helper)
+        random.seed(1)
+        sampled_ids = random.sample(ids, min(args.sample_size, len(ids)))
+        samples: list[dict] = []
+        for mid in sampled_ids:
+            s = fetch_message_sample(service, mid)
+            if s:
+                s["body"] = s["body"][:1200]
+                samples.append(s)
+        print(f"Fetched {len(samples)} sample bodies")
+        if len(samples) < MIN_SAMPLES_FOR_PROFILE:
+            print(f"WARN: only {len(samples)} samples — voice extraction may be unreliable")
+
+        # Reuse the same prompt builder as circles
+        from voice_profile_lib import (  # noqa: E402
+            build_profile_extraction_prompt,
+            parse_profile_response,
+        )
+        prompt = build_profile_extraction_prompt("recruiter", samples)
+        print("Calling LLM (codex)...")
+        llm_text = call_codex(prompt)
+        profile = parse_profile_response(llm_text)
+        if "error" in profile:
+            print(f"FAILED: {profile['error']}")
+            return 1
+
+        result = {
+            "circle": "recruiter",
+            "samples_used": len(samples),
+            "extracted_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "llm_backend": args.llm_backend,
+            "profile": profile,
+        }
+        args.cache_dir.mkdir(parents=True, exist_ok=True)
+        path = args.cache_dir / "recruiter.json"
+        path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"Wrote {path}")
+        print(f"  greeting: {profile.get('typical_greeting')}")
+        print(f"  signoff:  {profile.get('typical_signoff')}")
+        print(f"  register: {profile.get('register')}")
+        return 0
 
     # Per-person profile mode: different flow, skip circle discovery
     if args.person:

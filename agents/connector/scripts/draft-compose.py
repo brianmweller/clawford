@@ -145,7 +145,10 @@ def _make_cold_recruiter_stub_person(inbound: dict) -> dict:
         "full_name": display_name,
         "relationship_type": "recruiter (unknown contact)",
         "tone": "professional",
-        "circles": ["professional-outer"],
+        # Primary circle 'recruiter' picks up cache/voice-profiles/recruiter.json
+        # when built via `voice-profile-build.py --recruiter-mode`. Falls back
+        # to professional-outer if recruiter.json isn't present.
+        "circles": ["recruiter", "professional-outer"],
         "communication_direction": "external",
         "social_distance": 0.9,
         "power_differential": 0.0,
