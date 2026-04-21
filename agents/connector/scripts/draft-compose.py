@@ -53,6 +53,7 @@ from compose_lib import (  # noqa: E402
     build_compose_prompt,
     parse_compose_result,
 )
+from compose_redundancy_lib import apply_redundancy_check          # noqa: E402
 from inbound_act_lib import classify_inbound_act                   # noqa: E402
 
 
@@ -370,6 +371,21 @@ def main() -> int:
 
     shareable_ids = {f["id"] for f in ctx.facts_shareable}
     parsed = parse_compose_result(llm_text, shareable_ids=shareable_ids)
+
+    # Second-pass redundancy check. Prunes sentences the recipient
+    # already knows — from the inbound message itself or from
+    # previously-seen facts (recipient_knows=True subset). Degrades
+    # open on any failure; never blocks the draft. Only fires when the
+    # backend is codex (stdout mode just returns the raw prompt).
+    if "error" not in parsed and args.llm_backend == "codex":
+        from agents.shared.llm import infer as _infer
+        parsed = apply_redundancy_check(
+            parsed,
+            inbound=inbound,
+            known_facts=ctx.facts_shareable,
+            infer_fn=lambda p, **kw: _infer(prompt=p, json_mode=True, timeout=kw.get("timeout", 90)),
+        )
+
     parsed = apply_post_processing(parsed, voice_profile)
 
     print()

@@ -246,12 +246,30 @@ def _format_telegram(parsed: dict) -> str | None:
                           "not_a_target": "🔴", "unclear": "⚪"}.get(fit_tier, "⚪")
             target_suffix = f" (matches {matched_target})" if matched_target else ""
             fit_line = f"\nFit: {tier_emoji} {fit_tier}-tier{target_suffix} — {fit_rationale}"
+        # Surface the second-pass redundancy prune count so the operator can
+        # eyeball whether the pruner is cutting too aggressively. Only
+        # appears when sentences were actually removed.
+        redundancy_line = ""
+        red = parsed.get("redundancy") or {}
+        removed_count = int(red.get("removed_count") or 0)
+        if removed_count:
+            sources: set[str] = set()
+            for r in red.get("removed") or []:
+                src = str((r or {}).get("source") or "")
+                if src == "inbound":
+                    sources.add("inbound")
+                elif src.startswith("fact:"):
+                    sources.add("known")
+            src_label = "inbound + known" if {"inbound", "known"}.issubset(sources) \
+                else ("inbound" if "inbound" in sources else "known" if "known" in sources else "redundant")
+            redundancy_line = f"\nTrimmed: {removed_count} sentence{'s' if removed_count != 1 else ''} ({src_label})"
         return (
             f"{header}"
             f"{fit_line}\n"
             f"Subject: {subject}\n"
             f"Objective: {objective}\n"
-            f"Strategy: {strategy}\n"
+            f"Strategy: {strategy}"
+            f"{redundancy_line}\n"
             f"Gmail Drafts (id={draft_id})"
         )
     if parsed.get("reply_needed") is False:
@@ -264,6 +282,33 @@ def _format_telegram(parsed: dict) -> str | None:
     return None
 
 
+def _build_recruiter_markup(parsed: dict) -> dict | None:
+    """Build an inline keyboard for cold-recruiter FYI messages:
+      [✅ Promote] [🚫 Not a fit]
+    Only attaches to drafts that carry a `fit_assessment` (cold-recruiter
+    runs) AND a thread_id we can encode into callback_data. For
+    `not_a_target` tier we skip the buttons — the operator can still
+    `/promote <thread_id>` manually but the happy path is dismiss.
+    """
+    if not parsed:
+        return None
+    fit = parsed.get("fit_assessment") or {}
+    tier = fit.get("tier", "")
+    if not tier:
+        return None
+    if tier == "not_a_target":
+        return None
+    thread_id = parsed.get("gmail_thread_id") or parsed.get("thread_id") or ""
+    if not thread_id:
+        return None
+    return {
+        "inline_keyboard": [[
+            {"text": "✅ Promote", "callback_data": f"recruiter:promote:{thread_id}"},
+            {"text": "\U0001f6ab Not a fit", "callback_data": f"recruiter:reject:{thread_id}"},
+        ]],
+    }
+
+
 def _maybe_send_telegram(parsed: dict, dry_run: bool) -> str:
     """Return a status string: 'sent', 'skipped_no_token', 'skipped_dry_run',
     'skipped_malformed', or 'error:<msg>'. Never raises."""
@@ -272,6 +317,7 @@ def _maybe_send_telegram(parsed: dict, dry_run: bool) -> str:
     msg = _format_telegram(parsed)
     if not msg:
         return "skipped_malformed"
+    markup = _build_recruiter_markup(parsed)
     try:
         from agents.shared.telegram_api import resolve_credentials, send_message
     except ImportError as e:
@@ -281,8 +327,10 @@ def _maybe_send_telegram(parsed: dict, dry_run: bool) -> str:
     except RuntimeError:
         return "skipped_no_token"
     try:
-        send_message(token, chat_id, msg, agent_id="connector",
-                     role_summary="draft-review")
+        send_message(
+            token, chat_id, msg, agent_id="connector",
+            role_summary="draft-review", reply_markup=markup,
+        )
         return "sent"
     except Exception as e:   # noqa: BLE001
         return f"error:send:{e}"
