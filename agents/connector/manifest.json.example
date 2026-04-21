@@ -24,6 +24,7 @@
     "scripts/inbox_triage_lib.py",
     "scripts/inbox-triage.py",
     "scripts/recruiter_detector_lib.py",
+    "scripts/recruiter_callback_lib.py",
     "scripts/auto-compose.py",
     "scripts/flux_import_lib.py",
     "scripts/facts-import-flux.py",
