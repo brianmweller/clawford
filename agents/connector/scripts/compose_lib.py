@@ -43,18 +43,21 @@ Respond with a JSON object with EXACTLY these fields, in this order:
 {
   "fit_assessment": {
     "tier":         "A | B | C | not_a_target | unclear",
-    "rationale":    "<one–two sentences citing evidence from SELF CONTEXT — which target_company entry, level-bar match, strength-theme alignment. If tier=unclear, say what info you need.>",
-    "matched_target": "<company name from target_companies if the role matches a current target, else empty>"
+    "domain_fit":   "strong | moderate | weak",
+    "level_fit":    "strong | moderate | weak",
+    "function_fit": "strong | moderate | weak",
+    "target_company_match": "<company name from the operator's target_companies if this IS one, else empty>",
+    "rationale":    "<two–three sentences. Name the specific domain / level / function signals that drove the tier. Cite evidence from SELF CONTEXT. Do NOT just say 'company is/isn't in target_companies' — explain the underlying fit.>"
   },
-  "reply_needed":           true | false,
-  "objective":              "<as usual; for cold recruiter inbounds the objective usually = engage-proportionate-to-fit>",
-  "current_state_and_gap":  "<as usual>",
-  "leverage":               "<as usual>",
-  "strategy":               "<two–three sentences tied to fit_assessment.tier: A → engage, propose next step; B → curious-but-non-committal, ask for specifics; C/not_a_target → polite decline, preserve relationship; unclear → ask clarifying question about the role>",
-  "recipient_model":        "<as usual — recruiters want to feel you read their pitch and are worth their time>",
-  "draft_text":             "<the email reply body, matching the tier-appropriate stance. No subject line.>",
-  "no_reply_fyi":           "<empty string — cold recruiter replies always draft, never silent>",
-  "reasoning_summary":      "<one sentence, leads with the fit tier: 'A-tier / Stripe CDO / engaged', 'not-a-target / declined politely', etc.>",
+  "reply_needed":           true,
+  "objective":              "<for interesting opportunities (A/B): 'accept the call and secure a time'. For decline-fit: 'preserve relationship'. For unclear: 'get one clarifying signal'.>",
+  "current_state_and_gap":  "<two–three sentences; avoid over-qualifying>",
+  "leverage":               "<two–three sentences; how the operator positions his background in one or two lines>",
+  "strategy":               "<two–three sentences. For A/B (interesting): TAKE THE CALL — propose specific times; do NOT load the email with scope questions. For decline-fit: polite one-line decline citing scope/timing not brand. For unclear: ONE specific clarifying question, nothing more.>",
+  "recipient_model":        "<as usual — recruiters want to feel you read their pitch and respect their time>",
+  "draft_text":             "<3-5 sentences for most tiers. Short. No monologue. Match the operator's voice (from recruiter voice profile). No corporate hedge phrases.>",
+  "no_reply_fyi":           "",
+  "reasoning_summary":      "<one sentence leading with tier + fit dimensions: 'B-tier / Reddit Sr Dir / strong domain+level+function / took the call'>",
   "cited_fact_ids":         ["<fact id>", ...]
 }
 """
@@ -419,30 +422,109 @@ TASK
 {_render_self_context_block(self_profile) if cold_inbound and self_profile else ""}
 
 {(
-    "FIT CHECK (cold recruiter inbound — this is step 0.5, before the " +
-    "reasoning steps below):\n" +
-    "  Compare the role described in the inbound against SELF CONTEXT:\n" +
-    "    - Does the company appear in CURRENT TARGET COMPANIES? If yes, " +
-    "which tier_opportunity?\n" +
-    "    - Does the implied role seniority pass the LEVEL & SCOPE BAR " +
-    "(owns a major lever OR C-suite-adjacent)? Cite which criterion.\n" +
-    "    - Do the strengths the operator can credibly claim match what the role " +
-    "needs?\n" +
-    "  Output the tier + rationale in the fit_assessment field of the JSON, " +
-    "then let the tier drive strategy:\n" +
-    "    A-tier + passes level bar → engage warmly, propose a concrete next " +
-    "step (15-30 min intro call, or a reply with specific availability).\n" +
-    "    B-tier → curious-but-non-committal: acknowledge, ask for role " +
-    "details (scope, reporting line, level), do NOT commit to a call yet.\n" +
-    "    C-tier / not_a_target → polite decline that preserves the " +
-    "relationship. Don't criticize the company; cite scope or timing, not " +
-    "brand.\n" +
-    "    unclear → ask one clarifying question about the role (level, " +
-    "scope, reporting line).\n" +
-    "  The draft should be concise (3-5 sentences for most tiers), in " +
-    "the operator's voice from the PROFILE EXCERPT. Recruiters skim — don't " +
-    "monologue. Reference target_company matches by name when relevant " +
-    "('I've been thinking about Stripe for a while, so yes happy to chat').\n\n"
+    "FIRST PRINCIPLE — BEFORE anything else, apply the recipient-"
+    "perspective frame:\n\n"
+    "  The recruiter invested time researching the operator and writing this "
+    "outreach. Every reply — engage, decline, or clarify — should leave "
+    "them feeling their pitch was actually read, considered, and treated "
+    "with respect. A brusque, procedural, or hedging reply reflects "
+    "badly on the operator regardless of whether the role is right.\n\n"
+    "  Before emitting the draft, ask yourself: WOULD THE RECRUITER "
+    "FEEL RESPECTED BY THIS REPLY? If the answer is 'maybe' or 'no,' "
+    "rewrite. Respect looks like: acknowledging a specific element of "
+    "their pitch (the role, the hiring manager they named, the problem "
+    "they described), responding to what they actually wrote rather "
+    "than boilerplate, and being honest about fit in a way that gives "
+    "them useful information. It does NOT require flattery or length — "
+    "short and substantive beats long and hedgy.\n\n"
+    "  Decline is always fine IF done respectfully. 'Not the right fit "
+    "right now, but appreciate you thinking of me' >> ghosting or "
+    "generic declines.\n\n"
+    "FIT CHECK (cold recruiter inbound — step 0.5, before the reasoning "
+    "steps below):\n\n"
+    "the operator evaluates opportunities on a COMPOSITE of three primary "
+    "dimensions, plus target_company as a supporting signal. Score each "
+    "dimension strong / moderate / weak based on evidence in the inbound "
+    "message vs SELF CONTEXT:\n\n"
+    "  1. DOMAIN FIT — does the company's business resonate with the operator's "
+    "background?\n"
+    "     Strong: marketplaces, two-sided platforms, content platforms, "
+    "consumer/community businesses, pricing, ads monetization, search/"
+    "ranking, personalization.\n"
+    "     Moderate: adjacent consumer/enterprise surfaces where the operator's "
+    "methods (causal ML, experimentation, org design) transfer.\n"
+    "     Weak: industries where the operator has no prior exposure (deep-tech "
+    "hardware, heavily regulated, pure B2B without consumer/marketplace "
+    "exposure).\n\n"
+    "  2. LEVEL FIT — passes the operator's level & scope bar?\n"
+    "     Strong: owns a major lever of company success (pricing, supply, "
+    "ranking, monetization, growth) OR directly C-suite-adjacent "
+    "(reports to CEO/CTO/CDO/EVP, or is a Head-of-function).\n"
+    "     Moderate: Senior Director reporting to EVP/SVP where scope is "
+    "unclear; may own a lever but hard to tell from inbound.\n"
+    "     Weak: Director several layers from exec; narrow scope; IC-only.\n\n"
+    "  3. FUNCTION FIT — does the role draw on the operator's strengths?\n"
+    "     Strong: applied ML + causal inference + economic modeling + "
+    "experimentation + marketplace systems thinking + org design.\n"
+    "     Moderate: some overlap — pure ML engineering, product analytics, "
+    "research leadership.\n"
+    "     Weak: research-only, pure engineering management, sales/GTM, "
+    "finance/ops.\n\n"
+    "  4. TARGET_COMPANY — is the company in the operator's explicit targets? "
+    "If yes, that's a strong supporting signal (elevates tier by one "
+    "step). If no, NOT disqualifying — interesting opportunities surface "
+    "outside the list all the time.\n\n"
+    "COMPOSITE TIER from dimensions:\n"
+    "  A: two or three dimensions STRONG, level not weak, AND (in "
+    "target_company OR frontier-AI lab OR strong-DS-brand OR unique "
+    "role scope worth pursuing).\n"
+    "  B: two dimensions strong OR one strong + one moderate + plausible "
+    "level fit. Reddit's Senior-Director-reporting-to-EVP with "
+    "economic-modeling-for-community-flywheel scope is B — strong "
+    "domain + moderate level + strong function.\n"
+    "  C: only one dimension strong and level weak; low-scale impact.\n"
+    "  not_a_target: all dimensions weak or level clearly below bar.\n"
+    "  unclear: not enough info in the inbound to score two of the three "
+    "dimensions.\n\n"
+    "STRATEGY by tier — THIS IS LOAD-BEARING, READ CAREFULLY:\n\n"
+    "  A or B (interesting): TAKE THE CALL. Acknowledge briefly, signal "
+    "which dimensions resonate (one phrase each, not an essay), then "
+    "propose specific times for an intro call. The CALL IS THE SCREEN — "
+    "scope questions belong there, not in the email. Do NOT ask for "
+    "reporting line / headcount / ownership / scope / mandate in the "
+    "email; those are conversational inputs. A 3-5 sentence note with "
+    "two or three concrete availability windows is the target shape.\n\n"
+    "  C or not_a_target: polite one-line decline that preserves the "
+    "relationship. Cite scope or timing, NOT brand. Don't criticize the "
+    "company or question their DS org. 2-3 sentences.\n\n"
+    "  unclear: one specific clarifying question about the SINGLE "
+    "load-bearing dimension you can't score (usually level). Not a wall "
+    "of questions. Example: 'Happy to learn more — can you share the "
+    "reporting line and team size?' Then propose time contingent on the "
+    "answer.\n\n"
+    "VOICE ANTI-PATTERNS (things the operator does NOT say in recruiter replies):\n"
+    "  - 'directionally interesting' — corporate hedge; reads as "
+    "distance when the reply is actually warm.\n"
+    "  - 'This looks/sounds interesting' — weak opening; start with "
+    "credentials or substance, not an abstract judgment.\n"
+    "  - Walls of scope questions ('Before we schedule time, would you "
+    "be open to sharing the reporting line, the size of the organization, "
+    "and how much direct ownership...') — reads as interrogation when "
+    "you're saying yes. Save these for the call.\n"
+    "  - Over-qualifying ('I'd want to understand X, Y, and Z before I "
+    "commit to a call') — if the opportunity is interesting, just take "
+    "the call.\n"
+    "  - 'in good faith,' 'in the weeds,' 'at the end of the day' — "
+    "business clichés.\n\n"
+    "VOICE PATTERNS TO KEEP (from the recruiter voice profile):\n"
+    "  - Credential-dense self-positioning in 2-3 sentences (when taking "
+    "the call): 'I lead X at Y; my background in Z lines up with A, B, C.'\n"
+    "  - Warm-but-restrained phrasings: 'would welcome the chance to '\n"
+    "    connect,' 'would be glad to compare notes,' 'happy to find time.'\n"
+    "  - Em dash for qualification / aside: 'Head of X reporting to the "
+    "CTO — the kind of scope I've been looking at.'\n"
+    "  - When declining: 'isn't quite the right fit for me right now' "
+    "rather than blunt 'no.'\n\n"
 ) if cold_inbound else ""}
 
 {(_COLD_INBOUND_SCHEMA_HINT if cold_inbound else _OUTPUT_SCHEMA_HINT)}"""

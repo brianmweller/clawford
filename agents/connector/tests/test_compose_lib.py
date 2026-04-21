@@ -154,8 +154,25 @@ def test_prompt_cold_inbound_requests_fit_assessment():
     )
     assert "fit_assessment" in prompt
     assert "FIT CHECK" in prompt
-    # Tier-driven strategy guidance
-    assert "A-tier" in prompt or "engage warmly" in prompt.lower()
+    # Composite dimensions
+    assert "DOMAIN FIT" in prompt
+    assert "LEVEL FIT" in prompt
+    assert "FUNCTION FIT" in prompt
+    # Take-the-call default for interesting tiers
+    assert "TAKE THE CALL" in prompt
+
+
+def test_prompt_cold_inbound_includes_recipient_respect_principle():
+    """The recipient-perspective frame must precede fit evaluation so
+    voice and stance don't read as dismissive even in decline cases."""
+    prompt = build_compose_prompt(
+        _ctx(), _voice(), _inbound(),
+        cold_inbound=True, self_profile=_self_profile(),
+    )
+    assert "RECIPIENT" in prompt.upper() or "recipient-perspective" in prompt.lower()
+    assert "respect" in prompt.lower()
+    # Explicit anti-pattern callouts
+    assert "directionally interesting" in prompt.lower()
 
 
 def test_prompt_warm_inbound_omits_self_context():
