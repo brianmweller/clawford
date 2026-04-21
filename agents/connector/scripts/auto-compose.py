@@ -36,8 +36,9 @@ import os
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent
@@ -49,7 +50,77 @@ for _p in Path(__file__).resolve().parents:
 
 DEFAULT_QUEUE = Path(os.path.expanduser("~/.clawford/connector-workspace/cache/triage-queue.json"))
 DEFAULT_LOG = Path(os.path.expanduser("~/.clawford/connector-workspace/cache/auto-compose-log.json"))
+DEFAULT_SCHEDULING_RULES = Path(os.path.expanduser("~/.clawford/connector-workspace/scheduling.rules.json"))
 CONNECTOR_TOKEN_ENV = "CONNECTOR_BOT_TOKEN"
+
+
+def default_scheduling_rules_path(path: Path = DEFAULT_SCHEDULING_RULES) -> Path | None:
+    """Return the scheduling rules path if it exists, else None.
+    Drafts compose without a slots block when the file is missing."""
+    return path if path.exists() else None
+
+
+def load_timezone_from_rules(path: Path) -> str:
+    """Read the 'timezone' field from a scheduling rules JSON, defaulting
+    to America/Los_Angeles if absent or malformed."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        tz = data.get("timezone")
+        if isinstance(tz, str) and tz:
+            return tz
+    except (OSError, json.JSONDecodeError):
+        pass
+    return "America/Los_Angeles"
+
+
+def compute_default_search_window(
+    timezone_str: str,
+    days_ahead: int = 14,
+    now: datetime | None = None,
+) -> str:
+    """Build a 'ISO-start/ISO-end/tz' window starting tomorrow 09:00 through
+    now+days_ahead 18:00 in the given tz. `now` is injectable for tests."""
+    tz = ZoneInfo(timezone_str)
+    current = now.replace(tzinfo=tz) if now and now.tzinfo is None else (now or datetime.now(tz))
+    start = (current + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+    end = (current + timedelta(days=days_ahead)).replace(hour=18, minute=0, second=0, microsecond=0)
+    return f"{start.strftime('%Y-%m-%dT%H:%M')}/{end.strftime('%Y-%m-%dT%H:%M')}/{timezone_str}"
+
+
+def build_draft_compose_cmd(
+    thread_id: str,
+    slug: str,
+    llm_backend: str,
+    json_out: Path,
+    *,
+    no_create_draft: bool = False,
+    scheduling_rules: Path | None = None,
+    search_window: str | None = None,
+    busy_blocks: Path | None = None,
+) -> list[str]:
+    """Assemble the draft-compose.py subprocess command. Pure: no I/O.
+
+    When scheduling_rules and search_window are both provided, the draft
+    pipeline computes OPEN SLOTS from them (optionally filtered by
+    busy_blocks). When either is omitted, the draft pipeline falls back
+    to freehand scheduling — the LLM guesses with no grounding.
+    """
+    cmd = [
+        sys.executable,
+        str(_SCRIPTS_DIR / "draft-compose.py"),
+        "--person-slug", slug,
+        "--gmail-thread-id", thread_id,
+        "--llm-backend", llm_backend,
+        "--json-out", str(json_out),
+    ]
+    if no_create_draft:
+        cmd.append("--no-create-draft")
+    if scheduling_rules and search_window:
+        cmd.extend(["--scheduling-rules", str(scheduling_rules)])
+        cmd.extend(["--search-window", search_window])
+    if busy_blocks:
+        cmd.extend(["--busy-blocks", str(busy_blocks)])
+    return cmd
 
 
 def load_log(path: Path) -> dict:
@@ -68,23 +139,30 @@ def save_log(path: Path, log: dict) -> None:
     tmp.replace(path)
 
 
-def run_draft_compose(thread_id: str, slug: str, llm_backend: str,
-                      no_create_draft: bool = False) -> tuple[int, str, dict]:
+def run_draft_compose(
+    thread_id: str,
+    slug: str,
+    llm_backend: str,
+    no_create_draft: bool = False,
+    scheduling_rules: Path | None = None,
+    search_window: str | None = None,
+    busy_blocks: Path | None = None,
+) -> tuple[int, str, dict]:
     """Run draft-compose, capturing the parsed JSON result via --json-out.
     Returns (exit_code, stdout, parsed_result_dict)."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as tf:
         json_out = Path(tf.name)
     try:
-        cmd = [
-            sys.executable,
-            str(_SCRIPTS_DIR / "draft-compose.py"),
-            "--person-slug", slug,
-            "--gmail-thread-id", thread_id,
-            "--llm-backend", llm_backend,
-            "--json-out", str(json_out),
-        ]
-        if no_create_draft:
-            cmd.append("--no-create-draft")
+        cmd = build_draft_compose_cmd(
+            thread_id=thread_id,
+            slug=slug,
+            llm_backend=llm_backend,
+            json_out=json_out,
+            no_create_draft=no_create_draft,
+            scheduling_rules=scheduling_rules,
+            search_window=search_window,
+            busy_blocks=busy_blocks,
+        )
         env = os.environ.copy()
         result = subprocess.run(cmd, capture_output=True, text=True, env=env,
                                 encoding="utf-8", errors="replace", timeout=600)
@@ -221,13 +299,26 @@ def main() -> int:
         print(json.dumps({"status": "ok", "dry_run": True, "would_process": len(to_process)}))
         return 0
 
+    scheduling_rules = default_scheduling_rules_path()
+    search_window = None
+    if scheduling_rules:
+        tz = load_timezone_from_rules(scheduling_rules)
+        search_window = compute_default_search_window(tz, days_ahead=14)
+        print(f"Scheduling rules: {scheduling_rules}")
+        print(f"Search window: {search_window}")
+        print()
+
     results = []
     for item in to_process:
         tid = item["thread_id"]
         slug = item["slug"]
         print(f"COMPOSING [{tid}] {slug} ...")
-        rc, output, parsed = run_draft_compose(tid, slug, args.llm_backend,
-                                               no_create_draft=args.no_create_draft)
+        rc, output, parsed = run_draft_compose(
+            tid, slug, args.llm_backend,
+            no_create_draft=args.no_create_draft,
+            scheduling_rules=scheduling_rules,
+            search_window=search_window,
+        )
 
         reply_needed = parsed.get("reply_needed") if parsed else None
         gmail_draft_id = parsed.get("gmail_draft_id") if parsed else None
