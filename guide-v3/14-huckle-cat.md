@@ -233,7 +233,7 @@ The broader pattern this instantiates: **passive ingestion over conversational l
 
 ## The correspondence layer
 
-The one-sentence ask from the operator: *start drafting my email replies.* The thirty-five-commit answer is the correspondence layer — a pipeline that reads a Gmail thread, classifies what the inbound message is actually asking for, picks a voice, composes a reply, and stages it as a Gmail draft (never sent). It runs on the same `~/.clawford/connector-workspace/` surface as the nudges but exercises a different slice of the shared brain: `people/`, `facts/`, `voice/`, `commitments/`. Everything below landed on 2026-04-19 and 2026-04-20 in about two days of elapsed time.
+The one-sentence ask from the operator: *start drafting my email replies.* The thirty-five-commit answer is the correspondence layer — a pipeline that reads a Gmail thread, classifies what the inbound message is actually asking for, picks a voice, composes a reply, and stages it as a Gmail draft (never sent). It runs on the same `~/.clawford/connector-workspace/` surface as the nudges but exercises a different slice of the shared brain: `people/`, `facts/`, `voice/`, `commitments/`. The bulk landed on 2026-04-19 and 2026-04-20; a second pass on 2026-04-21 tightened six rough edges reported on a real draft to a former colleague (see [Compose hardening](#compose-hardening)).
 
 ### Per-circle voice profiles
 
@@ -296,6 +296,35 @@ The implementation is two-phase. Phase one was a one-time retroactive pass — `
 
 The interop payoff: a parallel cognitive-exoskeleton project carries the same audience-scope concept on 7,090 facts about 288 subjects. A one-time importer reads that project's SQLite and writes the facts through `upsert_fact()` with the original `audience_scope` preserved, adding 352 pre-scoped facts to the Huckle brain on day one. The tags interoperate without translation — same vocabulary, same semantics — which means the scope-at-write-time rule is now shared across two independent projects.
 
+### Compose hardening
+
+An actual draft to a former colleague on 2026-04-21 — the first non-trivial output the operator reviewed in detail — surfaced six rough edges that shipped in a same-day fix pass. Worth naming each one explicitly; they're the kind of issues that drop out of the test suite but jump off the page when a human reads the output.
+
+- **Sign-off normalization.** The composition schema told the LLM *"no signature block"* while the voice-anchor rule downstream told it to match the history's closing literally. The LLM usually resolved the contradiction by dropping the canonical form ("Best,\nBrian" for the professional-outer circle) and emitting just "the operator" or nothing. The fix: strip the "no signature block" instruction, have `parse_compose_result()` in `compose_lib.py` normalize any trailing name-only or close-variant into the voice profile's canonical `profile_signoff`. A bare "the operator" becomes "Best,\nBrian"; an already-canonical draft is left alone.
+
+- **Dehardwrapping.** LLMs default to wrapping emitted prose at ~68 characters, and `EmailMessage.set_content()` in the MIME builder preserves those line breaks as CRLF. Gmail then rendered them as visible mid-paragraph breaks — a draft that looked like it was pasted from a terminal. The fix: a paragraph-aware unwrap in `parse_compose_result()` collapses hard-wrapped lines within each paragraph (blank lines still separate paragraphs). Bulleted and numbered lists are detected and preserved.
+
+- **Greeting vs. reply-opener disambiguation.** The voice profile carried both a `typical_greeting` ("Hi {name},") and a common pattern ("Opens replies with 'Thanks, {name}.'"). The LLM stacked both — "Hi Jamie,\n\nThanks, Jamie." — two name uses in two lines, unmistakably generated. The fix: the prompt now surfaces thread position and explicitly names the two forms as alternatives. Originating / reopening → greeting. Replying / following_up → reply-opener.
+
+- **Scheduling wired end-to-end.** `draft-compose.py` had accepted `--scheduling-rules` and `--search-window` for weeks, but the cron path (`auto-compose.py`) never passed them. Availability was always empty; the LLM freehanded times against working hours it didn't know. The fix: `auto-compose` now reads `~/.clawford/connector-workspace/scheduling.rules.json`, computes a 14-day window starting tomorrow 9am, and threads both through to `draft-compose`. OPEN SLOTS populate against the real working-hours + blackout + buffer rules.
+
+- **Calendar busy blocks.** The Gmail token already carried `calendar.readonly` scope. Nothing used it. A new `agents/shared/gcal_freebusy.py` helper calls `freebusy().query()` over the search window, merges overlapping intervals across any queried calendars, and passes the result as `--busy-blocks` to `draft-compose`. Proposed times no longer collide with existing meetings. Degrades open on any API failure — freehand scheduling is the fallback, not a crash.
+
+- **Recipient timezone.** Every person record can now carry an optional `timezone:` field (standard IANA name). When it's set and differs from the operator's, OPEN SLOTS render dual-tz: `Tue Apr 22 11:00–12:00 PDT (14:00–15:00 EDT their time)`. The prompt's RECIPIENT block also names the tz so the LLM knows what "after 4 pm" means for them. Absent: single-tz render, same as before.
+
+### Mentioned-but-not-addressed people
+
+A real-world case from the same 2026-04-21 thread: the colleague mentioned her two young children by name in an update. The miner extracted the claim correctly, but the claim's subject ended up attached to the colleague's slug because that's who the email addressed; the children had no email addresses and therefore no slug in the candidate set. Retrieving "facts that mention child A" at draft time was impossible — the fact lived on the mother's file with no cross-reference.
+
+The fix: an optional `mention_slugs` list on every fact, plus the beginnings of a kinship graph in person records.
+
+- `person.md` files can carry an optional `parent_slug:` field. That establishes the parent-child link without requiring the child to have contact details.
+- `build_candidate_slugs()` in `gmail_facts_mine_lib.py` returns two sets now: **primary** (the addressed people, same as before — these are the only valid `subject_slug` values) and **mention** (children of primary candidates via a reverse parent-to-children map, built once at miner startup). The LLM gets both lists in the prompt with an explicit rule: mention candidates may be cited in `mention_slugs` but MAY NOT be used as `subject_slug`.
+- `load_facts_for_subject()` unions by subject with by mention. Looking up "Arthur" returns both facts whose subject is `arthur-fitzgerald` (if any are mined directly) and facts whose subject is someone else but whose `mention_slugs` includes him.
+- `brain_index.py` gains a `by_mention` map alongside `by_subject`, so the fast path is symmetric.
+
+Single parent only in v1. Depth-1 traversal (no grandchildren via the same mechanism). Step-parent / multi-parent is a future extension via a `parent_slugs` plural field — not yet needed.
+
 ### The mining epic — brain learns on its own
 
 Up until 2026-04-20, Huckle's brain was a frozen snapshot. The one-time mining pipeline from step 0 produced the initial seed; the parallel-project fact import added 352 pre-scoped facts; a retroactive scope pass tagged the Huckle-native 257. Total: 596 facts, none of them updating. If the operator told a colleague over email "I'm raising a Series B next quarter," that fact never landed in the brain, and a draft to a different colleague three days later had no way to reference it.
@@ -327,13 +356,54 @@ The current behavior, landed 2026-04-20, is Flux-style reinforcement. On idempot
 
 The dedup invariant still holds. No matter how many times the same email gets reprocessed by a re-run, there's still exactly one fact block on disk for that idempotency key. Reinforcement rewrites that block in place; it never appends.
 
+### Within-batch and cross-run semantic dedupe
+
+Idempotency-key reinforcement only catches exact-hash collisions: same message, same subject, same content string. A real corpus throws two harder failure modes at the miner.
+
+**Within a single extraction.** The LLM sometimes emits the same claim twice in different wording inside one response — *"Jamie has started exploring new job opportunities outside of LinkedIn"* and *"Jamie started exploring opportunities outside LinkedIn."* Distinct content strings, distinct idempotency keys, both land on disk as separate facts. The fix (`_dedupe_within_batch()` in `fact_extraction.py`): group the batch by subject, compute Jaccard similarity on a stopword-stripped token set, collapse pairs at ≥ 0.6 similarity. Higher confidence survives; on tie the lexicographically-first idempotency key wins (determinism). Textual re-statements collapse; genuinely different claims pass through.
+
+**Across mining runs.** Today's miner writes *"Eliott is Jamie's son, born approx 2021-06"*; next week's miner on a different email writes *"Arthur, Jamie's son, is approaching 2.5 years old"* (and then re-derives the birthdate to 2023-10). Those are two distinct facts about two distinct children — but a semantic-similar claim from a third email would get minted as a third entry instead of reinforcing one of the existing two. Jaccard on bag-of-words misses this because the surface vocabulary is so different.
+
+The cross-run layer uses local embeddings — `fastembed` with `BAAI/bge-small-en-v1.5`, ONNX under the hood, CPU-only, 384-dim vectors, no API keys. `_dedupe_against_existing()` routes each new fact against the existing brain for the same subject via a structured short-circuit first:
+
+- Different `fact_type` → definitely not dupes, skip the embedding.
+- Same `fact_type` with a known-key conflict (different company, different year, different title, different `(domain, item)`) → skip the embedding.
+- Same `fact_type` with a matching key (same company, same year, etc.) → reinforce without embedding.
+- Otherwise → embed both contents, compute cosine.
+
+Cosine thresholds: `≥ 0.88` → reinforce in place (call `reinforce_fact_by_id()`, same confidence bump and cap as the idempotency path). `0.75 – 0.88` → enqueue on the pending-review queue for operator decision via the morning brief. `< 0.75` → NEW, proceed to upsert.
+
+The `embed()` wrapper degrades open: any import or runtime failure returns None, and the dedupe helper falls through to "NEW" instead of crashing the miner. On the 2026-04-21 deploy, the encoder produced cosine 0.973 for *"Jane prefers tea over coffee"* vs *"Jane likes tea rather than coffee"* and 0.415 for an unrelated sentence — the thresholds sort correctly without hand-tuning.
+
 ### Low-confidence flagging
 
 The mining pipeline writes everything at `confidence ≥ 0.3`, which is deliberately lower than the threshold the composer uses. A fact at `confidence = 0.5` might read plausibly on the person file — *she's possibly moving to Austin in June* — and would be overconfident to surface in a draft. Dropping it entirely loses information that might get reinforced on the next mining pass.
 
-The compromise mirrors the parallel project's pattern: facts at `[0.3, 0.6)` land in `brain/facts/YYYY-MM.md` with their real confidence value AND get a one-line pointer appended to `brain/facts/_pending_review.md` — a separate file the operator can skim periodically to confirm or delete low-confidence entries. The review pointer captures the fact id, confidence, source (`gmail:<msg-id>`, `krisp:<event-id>`, `workflowy:<node-id>`), the LLM's stated reason, and the content. Writes to the review file are atomic and idempotent on fact id; re-running the miner over the same window doesn't duplicate review entries.
+The compromise mirrors the parallel project's pattern: facts at `[0.3, 0.6)` land in `brain/facts/YYYY-MM.md` with their real confidence value AND get a one-line pointer appended to `brain/facts/_pending_review.md` — an audit trail the operator never actually has to read — plus a matching entry on the tap-to-resolve queue covered in the next section. The review pointer captures the fact id, confidence, source (`gmail:<msg-id>`, `krisp:<event-id>`, `workflowy:<node-id>`), the LLM's stated reason, and the content. Writes to the review file are atomic and idempotent on fact id; re-running the miner over the same window doesn't duplicate review entries.
 
-The composer-side gate is wired up: `load_facts_for_subject(..., min_confidence=0.6)` is the signature every compose path uses, and facts below the threshold never land in the recipient context. Facts that survive review get their confidence bumped over time through the reinforcement path above; facts that don't get deleted from both the month file and the review tracker. The review-pass UX is still a manual-file workflow and may become a conversational surface in a later pass.
+The composer-side gate is wired up: `load_facts_for_subject(..., min_confidence=0.6)` is the signature every compose path uses, and facts below the threshold never land in the recipient context. Facts that survive review get their confidence bumped to 0.95 (operator-promoted, via the brain-maintenance digest below); facts that don't get written to `_rejected.md` so subsequent mining passes skip the same claim by signature (subject + content hash).
+
+### Brain maintenance in the morning brief
+
+`_pending_review.md` used to be the decision surface. In practice it was a file nobody read: the operator isn't going to open a Dropbox markdown every few days to triage fourteen fact candidates, and the queue grew unboundedly. The 2026-04-21 pass replaced it with a **"Brain maintenance" section appended to the morning brief**, surfacing pending items as tap-to-resolve Telegram messages.
+
+The shape:
+
+- **0 items** → section suppressed. No noise on quiet days.
+- **1–5 items** → one message per item with an inline keyboard `[✅ Yes] [❌ No] [⏭ Skip]`. Yes promotes the fact to the canonical month file with confidence bumped to 0.95 and an `operator_confirmed_at` stamp. No removes it from the markdown trail and writes a signature to `_rejected.md`. Skip mutes the item for seven days.
+- **6+ items** → collapses to a single summary message *"12 items pending review — tap to expand"* with a `[📋 Expand]` button that re-delivers the full list.
+- **≥ 3 items** → a bulk footer appears: `[☑️ Approve remaining]` (accept everything above), `[🔕 Silence today]` (mute all visible until tomorrow morning).
+
+Sources feeding the queue:
+
+| Source | When | Prompt |
+|---|---|---|
+| `miner` | low-confidence fact extraction (`[0.3, 0.6)`) | *"Is this a durable fact worth remembering?"* |
+| `dedupe` | cross-run cosine match in the 0.75–0.88 band (ambiguous near-dup) | *"Possible duplicate of an existing fact — merge (reinforce) or keep separate?"* |
+
+The queue itself is an append-only JSONL at `cache/pending-review-queue.jsonl` with an idempotency check on `id`; the digest renderer filters out entries whose `muted_until` is in the future. Atomic rewrites (tmp + replace) handle the mute and remove cases so a crash mid-update can't corrupt the file.
+
+The host cron that ships the section fires at `2 12 * * *` (UTC — 5:02 AM PT, immediately after the fleet morning-brief delivery at `0 12`). The Telegram callback handlers live in `agents/shared/dispatcher.py` behind a `facts:*` prefix; the actual promote/reject/skip logic is in `agents/connector/scripts/facts_callback_lib.py` so it stays testable without a live Telegram session.
 
 ### Person cards as a surfacing layer
 
