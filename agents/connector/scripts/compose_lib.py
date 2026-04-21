@@ -72,6 +72,8 @@ def _render_self_context_block(self_profile: dict) -> str:
     current_targets (list), strength_themes (list), employer_history
     (list). Keys missing → that subsection is skipped.
     """
+    from datetime import date as _date
+
     parts: list[str] = []
 
     profile_md = self_profile.get("profile_md") or ""
@@ -85,11 +87,26 @@ def _render_self_context_block(self_profile: dict) -> str:
     parts.append("")
 
     if employers:
-        parts.append("  Current / most recent employer:")
-        # Most recent = latest end date
+        # Determine the operator's CURRENT status: currently employed vs
+        # between-roles / active-search. The most recent employer's
+        # end date drives this — if end is in the past, the operator is NOT
+        # at that company anymore.
+        today_iso = _date.today().isoformat()
         latest = max(employers, key=lambda e: e.get("end", ""))
-        parts.append(f"    {latest.get('title', '?')} at {latest.get('company', '?')} "
-                     f"({latest.get('start', '?')} → {latest.get('end', '?')})")
+        latest_end = (latest.get("end") or "").strip()
+        is_currently_employed = bool(latest_end) and latest_end > today_iso
+
+        if is_currently_employed:
+            parts.append("  CURRENT STATUS: currently employed")
+            parts.append(f"    {latest.get('title', '?')} at {latest.get('company', '?')} "
+                         f"({latest.get('start', '?')} → {latest.get('end', '?')})")
+        else:
+            parts.append("  CURRENT STATUS: post-employment / active executive search")
+            parts.append(f"    Most recent role (ended {latest_end or 'unknown'}): "
+                         f"{latest.get('title', '?')} at {latest.get('company', '?')}")
+            parts.append(f"    Today's date: {today_iso} — the operator is NOT currently at "
+                         f"{latest.get('company', '?')}. Recruiters who reached out "
+                         f"recently know this from LinkedIn.")
         parts.append("")
 
     if level_bar:
@@ -502,27 +519,57 @@ TASK
     "of questions. Example: 'Happy to learn more — can you share the "
     "reporting line and team size?' Then propose time contingent on the "
     "answer.\n\n"
+    "OPENER STRATEGY (load-bearing — the recruiter has already seen "
+    "the operator's LinkedIn and is reaching out with a specific pitch in mind):\n\n"
+    "  The LEVERAGE in a recruiter-reply is NOT rehashing your own "
+    "credentials. The recruiter already has them — they researched the operator "
+    "before reaching out. Leading with 'I lead X at Y' or 'My background "
+    "is in Z' is redundant at best, self-centered at worst. It reads as "
+    "'I didn't read your note carefully; here's my resume.'\n\n"
+    "  INSTEAD: the opener should engage with THEIR pitch. What specific "
+    "element of what they wrote caught the operator's eye? Name it. Show the operator "
+    "read the note. Examples:\n"
+    "    - 'The combination of economic modeling and community-growth "
+    "scope is exactly where I find myself most useful.' (engages with "
+    "Michelle's framing of Roelof's mandate)\n"
+    "    - 'Roelof van Zwol's name and the Ads Monetization + DS "
+    "combination is an interesting match with my background.' "
+    "(acknowledges the specific hiring manager + domain)\n"
+    "    - 'The Head-of-AI-Science framing at CTO-reporting scope is "
+    "exactly the level I've been looking at.' (engages with level + "
+    "reporting line)\n\n"
+    "  Credentials come LATER (if at all) as confirmation of fit, not "
+    "the lead. Often a single phrase is enough: 'maps to my background "
+    "in causal ML + marketplace systems.' Sometimes omit entirely — "
+    "the recruiter has LinkedIn.\n\n"
+    "  OBJECTIVE / STRATEGY reasoning should name the knowledge gap: "
+    "the recruiter knows the operator's background but NOT what he's optimizing "
+    "for next, or his current status (between roles, actively searching, "
+    "etc.). The reply's leverage is showing the operator engaged with THEIR "
+    "pitch and is serious about this specific role.\n\n"
     "VOICE ANTI-PATTERNS (things the operator does NOT say in recruiter replies):\n"
+    "  - 'I lead X at Y' as an OPENER in reply context (redundant with "
+    "LinkedIn; use only for FIRST-CONTACT outreach the operator initiates).\n"
+    "  - 'My background is in X, Y, Z' as an OPENER — same redundancy.\n"
     "  - 'directionally interesting' — corporate hedge; reads as "
     "distance when the reply is actually warm.\n"
-    "  - 'This looks/sounds interesting' — weak opening; start with "
-    "credentials or substance, not an abstract judgment.\n"
-    "  - Walls of scope questions ('Before we schedule time, would you "
-    "be open to sharing the reporting line, the size of the organization, "
-    "and how much direct ownership...') — reads as interrogation when "
-    "you're saying yes. Save these for the call.\n"
-    "  - Over-qualifying ('I'd want to understand X, Y, and Z before I "
-    "commit to a call') — if the opportunity is interesting, just take "
-    "the call.\n"
+    "  - 'This looks/sounds interesting' — weak opening; say what "
+    "specifically caught your eye.\n"
+    "  - Walls of scope questions before committing to a call — save "
+    "for the call.\n"
+    "  - Over-qualifying before a call ('I'd want to understand X, Y, "
+    "and Z before I commit') — if interesting, just take the call.\n"
+    "  - Present-tense references to past employers. If the operator's most "
+    "recent role ENDED (check SELF CONTEXT.CURRENT STATUS), don't write "
+    "'I lead X at Y' — write 'I most recently led X at Y' or just refer "
+    "to the work without present-tense.\n"
     "  - 'in good faith,' 'in the weeds,' 'at the end of the day' — "
     "business clichés.\n\n"
     "VOICE PATTERNS TO KEEP (from the recruiter voice profile):\n"
-    "  - Credential-dense self-positioning in 2-3 sentences (when taking "
-    "the call): 'I lead X at Y; my background in Z lines up with A, B, C.'\n"
-    "  - Warm-but-restrained phrasings: 'would welcome the chance to '\n"
-    "    connect,' 'would be glad to compare notes,' 'happy to find time.'\n"
-    "  - Em dash for qualification / aside: 'Head of X reporting to the "
-    "CTO — the kind of scope I've been looking at.'\n"
+    "  - Warm-but-restrained phrasings: 'would welcome the chance to "
+    "connect,' 'would be glad to compare notes,' 'happy to find time.'\n"
+    "  - Em dash for qualification / aside: 'Head of X reporting to "
+    "the CTO — the kind of scope I've been looking at.'\n"
     "  - When declining: 'isn't quite the right fit for me right now' "
     "rather than blunt 'no.'\n\n"
 ) if cold_inbound else ""}
