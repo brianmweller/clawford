@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -60,7 +61,7 @@ fabricating.
 
 Source: {source}
 {source_hints}
-
+{statement_date_line}
 Candidate subjects (you may ONLY pick from these slugs — never invent a
 new slug):
 {candidate_block}
@@ -79,6 +80,26 @@ Rules of thumb for audience_scope:
 - Identity facts that are intimate (health, beliefs, marital status) → ["personal"]
 - If truly generic (harmless everywhere) → ["public"]
 
+AGE NORMALIZATION (IMPORTANT — ages rot, birthdates don't):
+When the source material states a person's age (e.g. "Eliott is almost 5,"
+"the twins just turned 3," "baby is 10 months"), DO NOT store the raw age
+string. Instead, use the STATEMENT DATE above to compute an approximate
+birth month/year and store THAT as the fact. Reader LLMs will compute
+current age from today's date.
+
+Format the content as:
+  "<Name> is <relationship>, born approx <YYYY-MM> (age ~<N> as of <STATEMENT_DATE>)"
+
+Example — if the statement date is 2026-04-21 and the source says
+"Eliott is approaching 5":
+  content: "Eliott is Jamie's son, born approx 2021-06 (age ~5 as of 2026-04-21)"
+  category: "identity"
+  confidence: 0.6  (approximate — widen the month to +/- 2 months mentally)
+
+Do the same for age ranges ("2.5" → month offset back 2.5 years from the
+statement date). For "baby"/"newborn", use +/- 6 months. Never store just
+"age 5" — that's worthless in 12 months.
+
 Confidence scale:
 - 0.8+ = fact stated explicitly (e.g. "I'm starting a new job at Acme")
 - 0.5-0.7 = strongly implied but not stated (e.g. signature block mentions a new company)
@@ -96,6 +117,24 @@ Output a JSON object with a single "facts" array. Each fact has:
 SOURCE MATERIAL
 {text}
 """
+
+
+def _statement_date_iso(source_context: dict) -> str:
+    """Derive the ISO date the source was authored. Accepts:
+      - internal_date: Gmail epoch-ms string
+      - statement_date: pre-computed "YYYY-MM-DD" string (Krisp/Workflowy)
+    Returns "" when neither is present or parseable."""
+    raw = source_context.get("statement_date")
+    if isinstance(raw, str) and len(raw) == 10:
+        return raw
+    internal = source_context.get("internal_date")
+    if internal:
+        try:
+            ms = int(internal)
+            return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+        except (TypeError, ValueError):
+            return ""
+    return ""
 
 
 def build_extraction_prompt(
@@ -117,10 +156,17 @@ def build_extraction_prompt(
             hints.append(f"- {k}: {v}")
     hints_block = "\n".join(hints) if hints else "(no metadata)"
 
+    statement_date = _statement_date_iso(source_context)
+    statement_date_line = (
+        f"\nSTATEMENT DATE (use for AGE NORMALIZATION below): {statement_date}\n"
+        if statement_date else ""
+    )
+
     cand_lines = "\n".join(f"- {s}" for s in sorted(candidate_slugs))
     return _PROMPT_TEMPLATE.format(
         source=source,
         source_hints=hints_block,
+        statement_date_line=statement_date_line,
         candidate_block=cand_lines or "(none)",
         valid_tags=", ".join(sorted(VALID_SCOPE_TAGS)),
         text=text,

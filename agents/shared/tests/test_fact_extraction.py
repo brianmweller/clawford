@@ -546,3 +546,50 @@ def test_append_pending_review_idempotent_on_same_id(mod, tmp_path):
     mod.append_pending_review(facts_dir, fact)
     text = (facts_dir / "_pending_review.md").read_text(encoding="utf-8")
     assert text.count("Unique content") == 1
+
+
+# --- age normalization: store approx birthdates, not age strings ---
+
+def test_prompt_surfaces_statement_date_when_internal_date_present(mod):
+    # Gmail miner passes internalDate as epoch-ms str; the extraction
+    # prompt needs to translate that to an ISO date so the LLM can do
+    # age math. 1713704568000 = 2024-04-21.
+    source_context = {
+        "source": "gmail",
+        "message_id": "m1",
+        "internal_date": "1713704568000",
+    }
+    prompt = mod.build_extraction_prompt(
+        text="hello",
+        source_context=source_context,
+        candidate_slugs={"jamie-fitzgerald"},
+    )
+    assert "2024-04-21" in prompt
+    assert "STATEMENT DATE" in prompt or "statement date" in prompt.lower()
+
+
+def test_prompt_includes_age_normalization_rule(mod):
+    prompt = mod.build_extraction_prompt(
+        text="hello",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"someone"},
+    )
+    # Must name the rule: convert ages → approximate birth date
+    low = prompt.lower()
+    assert "age" in low and ("birth" in low or "birthday" in low or "birthdate" in low)
+    # Must instruct NOT to store raw age strings ("approaching 5")
+    assert (
+        "approximate" in low
+        or "approx" in low
+    )
+
+
+def test_prompt_gives_concrete_age_normalization_example(mod):
+    prompt = mod.build_extraction_prompt(
+        text="hello",
+        source_context={"source": "gmail", "message_id": "m1"},
+        candidate_slugs={"someone"},
+    )
+    # Concrete worked example — "approaching 5" on 2026-04 → born ~2021-06
+    # The LLM gets the arithmetic right much more reliably with an example.
+    assert "approaching 5" in prompt.lower() or "approaching 3" in prompt.lower() or "'age" in prompt.lower()
