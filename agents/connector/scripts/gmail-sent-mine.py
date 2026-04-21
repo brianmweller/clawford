@@ -258,8 +258,12 @@ def main(argv: list[str] | None = None) -> int:
                     help="Bootstrap window when cursor is empty/stale")
     ap.add_argument("--max-messages", type=int, default=200)
     ap.add_argument("--commit", action="store_true",
-                    help="Write last_interaction stamps. Default is dry-run.")
-    ap.add_argument("--dry-run", action="store_true")
+                    help="No-op — commit is now the default. Kept for "
+                    "invocation compatibility.")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="Scan + report stats, but don't stamp "
+                    "last_interaction, advance the cursor, or write "
+                    "the summary file.")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args(argv)
 
@@ -271,7 +275,10 @@ def main(argv: list[str] | None = None) -> int:
     brain = dropbox_brain_root()
     people_dir = args.people_dir or (brain / "people")
 
-    commit = args.commit and not args.dry_run
+    # Default is commit; the cron wrapper (script-contract-host.sh)
+    # invokes with no extra args, and a dry-run cron is worthless.
+    # Use --dry-run for manual smoke tests.
+    commit = not args.dry_run
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     operator_emails = set(load_operator().emails)
 

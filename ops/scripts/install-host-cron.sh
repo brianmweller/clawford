@@ -130,6 +130,13 @@ CONTRACT_ENTRIES=(
   "45 */2 * * *|family-calendar-whatsapp-chat-alert|/home/openclaw/.clawford/family-calendar-workspace/scripts/whatsapp-chat-alert.py|FAMILYCAL_BOT_TOKEN|180"
   "0 12 * * *|family-calendar-whatsapp-schedule-post|/home/openclaw/.clawford/family-calendar-workspace/scripts/whatsapp-schedule-post.py|FAMILYCAL_BOT_TOKEN|120"
   "0 */2 * * *|connector-gmessages-mine|/home/openclaw/.clawford/connector-workspace/scripts/gmessages-mine.py|CONNECTOR_BOT_TOKEN|300"
+  # Gmail Sent-folder miner (2026-04-21): stamps last_interaction on
+  # matching people/*.md from the operator's sent email. Huckle's cadence
+  # clock was previously Google-Messages-only, so email-only contacts
+  # (Thomas/Yendrick at Example Corp) kept resurfacing despite recent email.
+  # Offset 15 min from gmessages-mine so the two OAuth flows don't
+  # hammer Google simultaneously. Defaults to commit mode.
+  "15 */2 * * *|connector-gmail-sent-mine|/home/openclaw/.clawford/connector-workspace/scripts/gmail-sent-mine.py|CONNECTOR_BOT_TOKEN|120"
   "0 10 * * *|connector-daily-refresh|/home/openclaw/.clawford/connector-workspace/scripts/daily-refresh.py|CONNECTOR_BOT_TOKEN|600"
   "30 10 * * *|connector-morning-relationship-nudge|/home/openclaw/.clawford/connector-workspace/scripts/morning-relationship-nudge.py|CONNECTOR_BOT_TOKEN|300"
   "0 8,20 * * *|connector-notes-triage-alert|/home/openclaw/.clawford/connector-workspace/scripts/notes-triage-alert.py|CONNECTOR_BOT_TOKEN|180"
