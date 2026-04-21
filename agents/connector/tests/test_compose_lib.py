@@ -201,7 +201,10 @@ def test_prompt_renders_voice_profile_when_present():
     prompt = build_compose_prompt(_ctx(), voice, _inbound())
     assert "LEARNED VOICE PROFILE" in prompt
     assert "Hey {name}" in prompt
-    assert "Love, the operator" in prompt
+    # Signoff is appended post-process, not rendered into the prompt —
+    # keeping it out prevents the LLM from emitting one itself.
+    assert "Love, the operator" not in prompt
+    assert "appended post-process" in prompt
     assert "double-dash em-dashes" in prompt
     assert "no formal salutations" in prompt
     assert "Thanks --" in prompt
@@ -568,3 +571,55 @@ def test_prompt_tells_llm_not_to_hardwrap():
     # Belt-and-suspenders: explicit prompt instruction alongside the
     # deterministic post-process.
     assert "hard-wrap" in prompt.lower() or "hardwrap" in prompt.lower()
+
+
+# --- greeting vs reply-opener disambiguation ---
+
+def _voice_with_profile(thread_position: str = "replying") -> dict:
+    v = _voice()
+    v["thread_position"] = thread_position
+    v["profile_present"] = True
+    v["profile_greeting"] = "Hi {name},"
+    v["profile_signoff"] = "Best,\nBrian"
+    v["profile_register"] = "consultative"
+    v["profile_patterns"] = [
+        "Opens replies with 'Thanks, {name}.' or 'Thank you, {name}.' before any substance",
+        "Contractions are near-universal",
+    ]
+    v["profile_anti_patterns"] = []
+    v["profile_opening_phrases"] = ["Hi {name},", "Thanks, {name}."]
+    v["profile_distinctive_traits"] = "Consultative-warm."
+    return v
+
+
+def test_prompt_flags_greeting_and_opener_as_alternatives():
+    prompt = build_compose_prompt(_ctx(), _voice_with_profile(), _inbound())
+    # The profile section must explicitly tell the LLM these are
+    # mutually exclusive — don't stack "Hi Jamie," and "Thanks, Jamie."
+    assert "ALTERNATIVES" in prompt or "alternatives" in prompt
+    assert "never both" in prompt.lower() or "not both" in prompt.lower() or "one or the other" in prompt.lower()
+
+
+def test_prompt_surfaces_thread_position_for_opener_choice():
+    # When replying, the reply-opener ("Thanks, {name}.") is idiomatic;
+    # when originating, the greeting ("Hi {name},") is. The prompt must
+    # name thread_position so the LLM can pick correctly.
+    prompt_reply = build_compose_prompt(_ctx(), _voice_with_profile("replying"), _inbound())
+    prompt_orig = build_compose_prompt(_ctx(), _voice_with_profile("originating"), _inbound())
+    # Thread position must appear in both (already surfaced via thread_guidance),
+    # plus the opener-choice rule must reference it
+    assert "thread_position" in prompt_reply.lower() or "replying" in prompt_reply.lower()
+    assert "originating" in prompt_orig.lower() or "thread_position" in prompt_orig.lower()
+
+
+def test_prompt_does_not_stack_both_opener_forms_in_example():
+    # Acceptance guard: the prompt must not include anywhere text that
+    # models the doubled-name failure (like a sample showing both).
+    prompt = build_compose_prompt(_ctx(), _voice_with_profile(), _inbound())
+    # Case-insensitive search for a "Hi Name,\n\nThanks, Name." pattern
+    # (our failure mode) — shouldn't appear as an example.
+    lowered = prompt.lower()
+    assert not (
+        "hi jamie,\n\nthanks, jamie" in lowered
+        or "hi {name},\n\nthanks, {name}" in lowered
+    )

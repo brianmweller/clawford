@@ -84,16 +84,29 @@ def build_compose_prompt(
         patterns = "\n".join(f"    - {p}" for p in voice.get("profile_patterns", [])) or "    (none)"
         antis = "\n".join(f"    - {a}" for a in voice.get("profile_anti_patterns", [])) or "    (none)"
         openings = ", ".join(f'"{o}"' for o in voice.get("profile_opening_phrases", [])) or "(none)"
+        thread_position = voice.get("thread_position", "replying")
         profile_section = (
             "\nLEARNED VOICE PROFILE (distilled from the operator's prior sent mail to people\n"
             "in this circle — these patterns OVERRIDE abstract register guidance when\n"
             "they disagree)\n"
             f"  Typical greeting:   {voice.get('profile_greeting')}\n"
-            f"  Typical signoff:    {voice.get('profile_signoff')}\n"
+            f"  Typical signoff:    (appended post-process — do not emit)\n"
             f"  Common patterns:\n{patterns}\n"
             f"  Anti-patterns (avoid these):\n{antis}\n"
             f"  Opening phrases to match: {openings}\n"
             f"  Distinctive trait:  {voice.get('profile_distinctive_traits')}\n"
+            "\n"
+            f"  OPENER CHOICE (thread_position={thread_position}): the typical\n"
+            "  greeting and any 'Thanks, {name}.' / 'Thank you, {name}.' reply\n"
+            "  opener in Common patterns are ALTERNATIVES — use ONE, never both\n"
+            "  in the same message. Choose by thread_position:\n"
+            "    - originating / reopening: lead with the typical greeting\n"
+            "      ('Hi Jamie,' style) and proceed into substance.\n"
+            "    - replying / following_up: lead with the reply-opener\n"
+            "      ('Thanks, Jamie.' / 'Thank you, Jamie.') as its own line,\n"
+            "      then proceed into substance. Do NOT also open with the\n"
+            "      typical greeting — that stacks the name twice in quick\n"
+            "      succession and reads as generated.\n"
         )
 
     return f"""You are drafting an email reply on the operator's behalf. Do NOT send it — the operator will review.
