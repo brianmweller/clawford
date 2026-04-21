@@ -44,7 +44,8 @@
     "scripts/workflowy_facts_mine_lib.py",
     "scripts/workflowy-facts-mine.py",
     "scripts/facts_callback_lib.py",
-    "scripts/brain-maintenance-digest.py"
+    "scripts/brain-maintenance-digest.py",
+    "scripts/compose_redundancy_lib.py"
   ],
   "state_files": [
     {
