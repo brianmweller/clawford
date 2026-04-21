@@ -1,11 +1,12 @@
 # The shared brain
 
-*Last updated: 2026-04-21 · Reading time: ~16 min · Difficulty: moderate*
+*Last updated: 2026-04-21 · Reading time: ~22 min · Difficulty: moderate*
 
 **TL;DR**
 
 - The shared brain is what turns a *pile of agents* into a *fleet*. It's a directory of plain markdown files with a small structured schema on top — no database, no vendor, no API.
 - Four core primitives: **facts** (knowledge that decays), **commitments** (promises that resolve), **tasks** (action items), **notes** (raw inputs awaiting triage). Plus per-person profile files and per-agent status/rules files.
+- A parallel [`self/` subtree](#the-self-layer-a-brain-about-the-operator) mirrors the shape for a single subject — the operator — with a four-layer synthesis pipeline (classifier → archives → structured facts → narrative profile) that feeds Huckle's cold-recruiter drafting path.
 - Two halves, two sync mechanisms. `ops/brain/*` is **git-tracked** and flows local → VPS via `deploy.py`. `~/Dropbox/clawford-backup/*` is **Dropbox-synced bidirectionally**. The split is enforced structurally by `agents/shared/brain.py`.
 - All writes are appends. Every entry carries an agent ID and a timestamp; the file is its own changelog. Multiple agents writing the same file simultaneously is a designed-for case, not a bug.
 - This is the single most underrated piece of infrastructure in the whole fleet. It survived the migration off the OpenClaw platform untouched, because it never depended on the platform — it's just files on disk.
@@ -50,7 +51,7 @@ IDs are globally unique. Format: `<agent-name>-<YYYY-MM-DD>-<seq>`, where `seq` 
 
 Every entry in the brain falls into one of four shapes. The schema is intentionally narrow, because every additional shape is one more thing every agent has to know how to read.
 
-- **Facts.** Things known to be true at a point in time. Each fact carries a `decay` field — `never` for identity facts (someone's name, their relationship to the household), `7d` for logistics (someone's travel plans, where a delivery is), `14d` for soft signal (a rumour, an inferred preference). The decay is a hint to readers, not a hard expiry — facts past their decay date are still readable but flagged as stale, and the agent that wrote the fact is responsible for refreshing it if it still applies. Facts also carry an `audience_scope` field (see below) that gates which recipient circles a fact can surface in — a family fact never reaches a professional draft. Since 2026-04-20, facts also carry an optional `last_reinforced_at` timestamp; a re-observation of the same idempotency key bumps this value and nudges `confidence` up by 0.05 (capped at 0.95) rather than silently skipping the second write. Absent the field, readers treat it as equal to `recorded_at` (the fact has never been reinforced). Since 2026-04-21, facts also carry an optional `mention_slugs` list — other people named in the fact who aren't its subject — which the retrieval path unions with the subject match so "facts about Arthur" can surface a fact whose subject is Arthur's mother.
+- **Facts.** Things known to be true at a point in time. Each fact carries a `decay` field — `never` for identity facts (someone's name, their relationship to the household), `7d` for logistics (someone's travel plans, where a delivery is), `14d` for soft signal (a rumour, an inferred preference). The decay is a hint to readers, not a hard expiry — facts past their decay date are still readable but flagged as stale, and the agent that wrote the fact is responsible for refreshing it if it still applies. Facts also carry an `audience_scope` field (see below) that gates which recipient circles a fact can surface in — a family fact never reaches a professional draft. Since 2026-04-20, facts also carry an optional `last_reinforced_at` timestamp; a re-observation of the same idempotency key bumps this value and nudges `confidence` up by 0.05 (capped at 0.95) rather than silently skipping the second write. Absent the field, readers treat it as equal to `recorded_at` (the fact has never been reinforced). Since 2026-04-21, facts also carry an optional `mention_slugs` list — other people named in the fact who aren't its subject — which the retrieval path unions with the subject match so "facts about Arthur" can surface a fact whose subject is Arthur's mother; and an optional `known_by` list of slugs believed to have been told the fact (thread participants, meeting attendees), used by the draft composer to skip presenting already-known information as new.
 - **Commitments.** Promises with a resolution date. "I told Sam I'd send the photos by Friday" is a commitment. Commitments have status `open`, `done`, or `dropped`. The agent that opened a commitment is responsible for resolving it, but anyone with the right ID can mark it done.
 - **Tasks.** Action items the human needs to do. Lighter than a commitment — no external party promised, no resolution date required. Used by the meeting agent to surface follow-ups, by the news agent to flag things worth following up on, etc.
 - **Notes.** Raw inputs that haven't been triaged into one of the above yet. The connector agent dumps everything here first, then promotes individual entries to facts/commitments/tasks during its triage pass.
@@ -87,6 +88,24 @@ The 2026-04-21 fix keeps the subject-candidate gate intact and adds an orthogona
 
 Person records can carry an optional `parent_slug:` field, which is what lets the miner even know that a minor child belongs to a primary candidate. `build_parent_to_children_map()` builds the reverse index at miner startup, and the extraction prompt surfaces the mention candidates to the LLM with an explicit rule: *cite these in `mention_slugs`, MAY NOT use as `subject_slug`*. Single parent only in v1; depth-1 traversal; no step-parent support yet. The mechanism is deliberately narrow — the parent-slug graph gets wider treatment if and when the need shows up, not preemptively.
 
+## Decay-weighted retrieval
+
+Stored `confidence` is the epistemic value the miner wrote at mint time. Effective confidence — what the retrieval path actually uses — is that number discounted by age through `0.5^(age_days / half_life)`, with per-category half-lives in `agents/shared/decay.py`. Identity, relationship, and birthdate facts have `half_life = None` and don't decay at all; role and employer (365 d), preference (180 d), event and health (90 d), and logistics / rumour / guess (30 d) cover the rest. A fact past one half-life has its confidence halved; past two, quartered; and at the default 0.6 composer threshold, a 90-day-old event at raw 0.8 drops out of compose context automatically.
+
+`last_reinforced_at` takes precedence over `recorded_at` in the age calculation. Reinforcement *is* a re-observation and resets the decay clock — it's the mechanism by which an older-but-still-true fact stays above the retrieval threshold instead of aging out on a fixed schedule. Identity facts mined months before the reinforcement pattern existed are intentionally insulated: their `half_life = None` means the reinforcement mechanic is moot for them.
+
+The curve runs at query time, not at write time. Nothing gets mutated by reading; `load_facts_for_subject()` just annotates each returned fact with `effective_confidence` and sorts the list descending, so callers that truncate hit the strongest-signal facts first. Malformed or missing timestamps degrade open: the formula returns raw confidence rather than penalizing a fact for a bad date. Per-category tuning is a one-line edit to `HALF_LIFE_DAYS`; the formula is centralized so every retrieval path gets the same weighting.
+
+## Theory of mind — known_by
+
+The early composer made a specific, repeatable mistake. A recipient would write the operator a paragraph about a career exploration, the miner would faithfully extract *"Jane has started exploring new roles,"* and three days later, drafting back to the same recipient, the composer would proudly cite the fact in the reply — telling Jane what Jane had just told the operator. *As you know, you're exploring new roles.* Every re-observation of the miner strengthened the fact; none of them knew Jane had *put it there in the first place*.
+
+The fix keeps the fact model unchanged and adds an optional list field: `known_by` on every fact names the slugs believed to have been told it. Gmail miner populates it from the primary candidate set of the source message (From + To + Cc minus the operator). Krisp would populate from attendees. Workflowy stays empty — the operator's private notes have no participants. When another source is added, the miner for that source decides what "was told" means in its world and fills the list accordingly.
+
+At retrieval time, `build_recipient_context()` tags each fact with a `recipient_knows: bool` based on whether the current recipient's slug is in `known_by`. The draft composer renders a `[RECIPIENT KNOWS]` marker on those facts in the WHAT YOU MAY REFERENCE block, and the prompt carries a rule: *don't present these as new information; cite sparingly only when reinforcing*. The LLM sees the tag and adjusts framing — the difference between *"as I mentioned Tuesday"* (shared context) and *"you're exploring new roles"* (stale confabulation).
+
+`known_by` is forward-compatible the same way `audience_scope` was: facts that don't carry it are treated as "no one tracked has been told," which is the conservative default — every draft surfaces them as new-to-recipient. Operator tooling (`backfill-known-by.py`) closed the gap for pre-existing facts by mining Flux's message database and the Gmail API for provenance; see [Ch 14 — Huckle Cat](14-huckle-cat.md) for the backfill walkthrough. The next source to plumb through is the meetings-coach debrief files — Krisp attendee lists carry the same semantic and just haven't been wired yet.
+
 ## Person cards as a surfacing layer for facts
 
 People cards (`brain/people/<slug>.md`) are the human-readable summary of who a person is — slug, circles, relationship, `last_interaction`, tone, short context notes. They're what [Ch 14 — Huckle Cat](14-huckle-cat.md) reads when composing a reply, and what the morning relationship nudge reads when deciding who's overdue.
@@ -104,6 +123,33 @@ Huckle's correspondence layer mines the operator's sent mail to produce per-circ
 They live in `cache/voice-profiles/` in the connector's workspace rather than in the shared brain proper. Two reasons. First, they're large enough — a per-circle profile is a few KB of extracted style features — that Dropbox sync costs are meaningful if they churn. Second, voice profiles are a Huckle-specific asset today; no other agent reads or writes them. Holding them as agent-workspace state rather than brain state lets Huckle rebuild or invalidate them without coordinating with the rest of the fleet.
 
 That's the rule of thumb for the brain/workspace boundary: **share state that two or more agents need to agree on. Keep agent-private state in the agent's workspace.** Voice profiles are derivative — they're computed from sent mail — so recomputation is cheap and cross-agent agreement isn't required. Facts are authoritative truth about people, so they live in the brain.
+
+## The self/ layer — a brain about the operator
+
+The brain so far has been a brain about *other people*: ~400 people files, ~600 facts scoped by audience. It has nothing about the operator themselves. That asymmetry is not ideology — it's convenience — and it started biting the moment Huckle's compose loop was asked to draft a reply to a cold recruiter with no counterpart people file and no historical context. A second subtree under `clawford-backup/` now carries the mirror: everything the brain knows about the operator's professional history, active target list, leadership style, level & scope bar, and pipeline status. Same shape as the rest of the brain — markdown + JSON on disk, regenerate-from-below semantics, no database — but with a single subject.
+
+The self-brain lives at `~/Dropbox/clawford-backup/self/` and fans out across eight artifacts:
+
+| Artifact | Shape | Source |
+|----------|-------|--------|
+| `profile.md` | Narrative markdown — track record, strengths, leadership style, level & scope bar, target-role shape | Stage 1.2 synthesis over the structured facts + priority raw docs |
+| `archives/<role>.md` | Per-role synthesised extracts — scope, OKRs owned, tenets authored, major accomplishments, feedback themes | Stage 3 synthesis grouped by role or search round |
+| `archive-index.json` | Per-file classification — role, class, signal score, chronological date | Stage 1 classifier over `Personal/Bio/`, `Personal/Job Search/`, `Archive/<employer>/`, Workflowy |
+| `facts/{employer,major_accomplishment,target_company,tenet_authored,strength_theme}.json` | Typed fact tables with schemas | Stage 4 structured extraction from archives |
+| `facts/active_search_stages.json` | Per-company stage entries for in-flight interviews | `search-status-build.py` over Gmail + Workflowy |
+| `role-timeline.md` | Hand-editable chronology — start/end dates per employment span | Operator authors once; downstream stages route by `chronological_date` |
+| `search-timeline.md` | Hand-editable chronology — start/end dates per round of job search | Operator authors once; same routing pattern |
+| `linkedin-profile-current.pdf` | Authoritative bio input for profile synthesis | Operator exports from LinkedIn periodically |
+
+The architecture deliberately mirrors the four-primitive brain on the other side. People files → `profile.md`. `brain/facts/YYYY-MM.md` → `self/facts/*.json`. `brain/people/<slug>.md`'s `## Recent observations` section → `self/archives/<role>.md`. The boundary between the two subtrees is strict: anything about other people goes in the main brain; anything about the operator goes in `self/`. The Huckle-specific importer pipeline that builds `self/` is covered in [Ch 14 — The professional brain](14-huckle-cat.md#the-professional-brain); this section is the architectural slot.
+
+Three design rules carry over from the main brain and three are unique to this subtree.
+
+**Carry-over rules.** Writes are regenerable from the layer below. Raw source material (the employer archives, the LinkedIn PDF) is referenced by path, never copied into the brain. Confidentiality is enforced by the synthesis prompt, which speaks in terms of the operator's scope and outcomes rather than quoting proprietary strategy verbatim.
+
+**Rules unique to `self/`.** Chronological tagging is load-bearing: every record in `archive-index.json` carries a `chronological_date` and a `date_source` so the per-role synthesis can route to the right bucket. A class-based override routes anything tagged `job_search_material` to the matching search round regardless of the date heuristic, because a decision-framework doc authored during employment at one company but about looking at a different company belongs to the search round, not the employer archive. And the timeline files are hand-edited, not synthesised — the operator's role spans are ground truth, and making the synthesiser infer them from filenames would re-introduce the drift the classifier is trying to eliminate.
+
+The self-brain is new enough that it carries no named incidents of its own yet; the scar tissue lives entirely in the four-iteration calibration arc documented in Ch 14's [§ The calibration draft](14-huckle-cat.md#the-calibration-draft). The architectural lesson that survives that arc is that **a compose path needs to know both sides of the relationship.** The people-and-facts brain covers the recipient side. The self-brain covers the operator side. Both are necessary to draft a reply that reads like the operator wrote it — which is the actual product goal of the whole correspondence layer.
 
 ## What the brain is *not*
 

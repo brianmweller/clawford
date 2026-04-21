@@ -1,8 +1,8 @@
 # Huckle Cat 🐱🤝 — the connector agent
 
-*Last updated: 2026-04-21 · Reading time: ~35 min · Difficulty: hard*
+*Last updated: 2026-04-21 · Reading time: ~50 min · Difficulty: hard*
 
-> **TL;DR.** Huckle Cat is the relationship agent — the one that inverts the usual shape of a Clawford agent. Instead of wrapping a single external API the way Mr Fixit wraps the fleet's own heartbeat or Mistress Mouse wraps Google Calendar, Huckle Cat is built **around the shared brain itself**. His input is six disparate data sources (Gmail, Google Calendar, Google Contacts, Google Messages, meeting transcripts, and Workflowy) and his output is a relationship intelligence layer: ~280 people files in the brain with names, emails, phones, circles, last-interaction timestamps, enriched context notes, and facts pulled from email signatures. He composes a morning relationship nudge at 5 AM PT (overdue / approaching / healthy), triages a shared notes inbox twice a day, and keeps `last_interaction` fresh via a daily re-mining pass. He was the last agent in the fleet to deploy, and he is the only one where the [mining pipeline](#the-mining-pipeline) runs **before** the first cron fires — by design.
+> **TL;DR.** Huckle Cat is the relationship agent — the one that inverts the usual shape of a Clawford agent. Instead of wrapping a single external API the way Mr Fixit wraps the fleet's own heartbeat or Mistress Mouse wraps Google Calendar, Huckle Cat is built **around the shared brain itself**. His input is six disparate data sources (Gmail, Google Calendar, Google Contacts, Google Messages, meeting transcripts, and Workflowy) and his output is a relationship intelligence layer: ~280 people files in the brain with names, emails, phones, circles, last-interaction timestamps, enriched context notes, and facts pulled from email signatures. He composes a morning relationship nudge at 5 AM PT (overdue / approaching / healthy), triages a shared notes inbox twice a day, and keeps `last_interaction` fresh via a daily re-mining pass. A second parallel brain under `self/` — four layers synthesised from the operator's career archives — feeds a [cold-recruiter drafting path](#the-professional-brain) that detects unknown ATS senders, scores a composite fit across domain / level / function dimensions, and drafts replies that read like the operator wrote them. He was the last agent in the fleet to deploy, and he is the only one where the [mining pipeline](#the-mining-pipeline) runs **before** the first cron fires — by design.
 
 ## Meet the agent
 
@@ -405,6 +405,24 @@ The queue itself is an append-only JSONL at `cache/pending-review-queue.jsonl` w
 
 The host cron that ships the section fires at `2 12 * * *` (UTC — 5:02 AM PT, immediately after the fleet morning-brief delivery at `0 12`). The Telegram callback handlers live in `agents/shared/dispatcher.py` behind a `facts:*` prefix; the actual promote/reject/skip logic is in `agents/connector/scripts/facts_callback_lib.py` so it stays testable without a live Telegram session.
 
+### Decay-weighted retrieval
+
+Static confidence gets a fact wrong in both directions over time. A fact the miner minted at 0.8 two years ago is treated the same as one minted yesterday; a fact that got reinforced across six observations bleeds confidence because the extraction model averaged its own cautious 0.6. The correspondence layer was compensating for both by over-trusting stored values.
+
+The fix is query-time, not write-time: `load_facts_for_subject()` applies `0.5^(age_days / half_life)` at retrieval and surfaces the result as `effective_confidence` on each returned fact. Per-category half-lives live in `agents/shared/decay.py`: identity / relationship / birthdate don't decay (None sentinel); role and employer get 365 days; preference gets 180; event and health 90; logistics / rumour / guess 30; default 180. `last_reinforced_at` takes precedence over `recorded_at` in the age calculation so a fact re-observed this week doesn't get penalized for the months since the original write.
+
+The default `min_confidence=0.6` is now effective, not stored. A 180-day-old event at raw 0.8 lands at effective 0.2 and drops from compose context automatically; an 8-year-old identity fact at raw 0.9 stays at 0.9 and never falls off. Tuning is per-category — one-line edits to `HALF_LIFE_DAYS` — rather than per-fact, because individual facts shouldn't have to declare their own curves and the classifier that emitted the `category` field is the right level for "how fast does this kind of claim age out."
+
+### Theory of mind — known_by
+
+The recurring draft-composer failure was sending a recipient back the fact they had just told the operator. Jane would write the operator about her career exploration; the miner would extract *"Jane has started exploring new roles"* with its emails-are-participants-by-default provenance; a week later a reply to Jane would cite the extracted fact as if it were news to her. Every re-observation made the fact more confident; none of them tracked that Jane herself was the source.
+
+Every fact now carries an optional `known_by` list — slugs believed to have been told the fact. Gmail miner populates it from the primary candidate set (From / To / Cc minus the operator). Workflowy miner leaves it empty (the operator's private notes, no participants). Other sources fill it with whatever "was there when it was observed" means in their world. At retrieval time, `build_recipient_context()` tags each shareable fact with `recipient_knows: bool` based on whether the current recipient's slug is in `known_by`; `compose_lib.py` renders a `[RECIPIENT KNOWS]` marker in the prompt's WHAT YOU MAY REFERENCE block, and the prompt carries a rule telling the LLM not to present tagged facts as new information.
+
+The forward path covers new facts, but the backfill is where the bulk of the value lives. Two source types have recoverable participant lineage: Flux-imported facts whose `source_detail` is a bare integer (Flux's `Message.id`) can be resolved by opening Flux's SQLite and pulling `sender_address` + `recipient_address` for that row; Gmail-miner-era facts (`source_detail` starts with `gmail:`) can be re-fetched via the Gmail API for the message's From/To/Cc headers. A one-time pass (`agents/shared/scripts/backfill-known-by.py`, dry-run default, `--commit` with tarball backup) resolved 361 of 619 facts on the 2026-04-21 brain: 352 Flux-sourced, 9 Gmail-sourced. The 258 unresolved entries fall into three buckets where no participant backref exists — `LLM-extracted from interaction data` (the old scope-augment retroactive pass), `birthday-miner/...` entries (no participant concept), and krisp debrief titles (resolver deferred until attendee-list mining lands on the meetings-coach side). Those stay empty and default to "new to every recipient," which is the conservative fallback.
+
+Of the 352 Flux resolutions, 299 landed as `known_by = [subject]` — 1-on-1 threads where the fact's subject is the only non-the operator participant. That's a narrower win than the multi-person case, but still the right signal: drafts back TO the subject carry the tag and the composer stops re-telling them. The remaining 53 multi-person resolutions — CC'd threads, group emails, spouses on the same message — are where the feature earns its keep. Miner runs from 2026-04-21 forward stamp `known_by` natively; the backfill script is a one-shot, idempotent on already-tagged blocks so re-runs are safe no-ops.
+
 ### Person cards as a surfacing layer
 
 High-confidence facts (≥ 0.7) also append a one-line observation to the subject's `brain/people/<slug>.md` under a `## Recent observations` section — append-only, trimmed to ten entries. The card is not a second source of truth; the fact file stays authoritative. The appended line is a surfacing mechanism so a glance at the card tells the operator what's new about Sarah, without having to scan the monthly fact files. Miners skip the append silently when no card exists yet — the fact itself still writes — because a single mined observation shouldn't be enough to conjure a new subject into the brain. The durable-storage pattern lives in [Ch 16 — The shared brain](16-shared-brain.md); this paragraph is the miner's use of it.
@@ -442,6 +460,111 @@ The initial rollout surfaced a real gap in the profile. The pre-widening default
 The right fix was to widen the profile, not to keep the miners exempt. The 2026-04-20 pass added three things to the bwrap default: an RW whitelist for `brain/{facts,people,commitments,queues}/` (the shared write targets; every other path under `brain/` stays RO), an RO bind for `~/.codex/` (so the Codex token loader resolves inside the namespace), and a tmpfs at `/dev/shm` (so SysV shared memory works and browser-driven crons can join the allowlist too). The three miners went on the allowlist in the same commit, and within a day every non-Fixit cron in the fleet followed. The profile widening is covered end-to-end in Ch 19's Defense Layer 7.
 
 > 🔦 **Tip.** When a new brain-writing cron joins the fleet, check whether its write target is already in the RW whitelist. If it isn't, widen the profile first — don't carve out a per-cron exception. The whitelist is explicit by design so it stays a short, auditable list.
+
+## The professional brain
+
+Every narrative in this chapter so far is about the people in the operator's *personal* life — family, friends, known colleagues, the people in the operator's Google Contacts. The correspondence layer, the audience-scope tags, the per-circle voice profiles — they all assume the recipient already has a people file. They have no answer for a different failure: a cold inbound from a recruiter the brain has never seen, to an operator whose career matters more to them than any specific draft ever will.
+
+Before 2026-04-21 the triage code's blanket skip for unknown senders caught those inbounds and dropped them silently. The operator was catching them by hand. The fix is a second brain — structurally parallel to the people-and-facts brain, scoped to the operator themselves — plus three surgical edits to the existing triage + compose path. The result is that a cold inbound from a retained-search recruiter routes into the same four-step composition loop as any other thread, reads a fit assessment off the operator's professional profile, and stages a draft that reads like the operator wrote it.
+
+This gets its own top-level section rather than another subsection of the correspondence layer because the data layer is large and separable. The operator-side brain — the `self/` subtree on Dropbox — is architecturally analogous to the people-and-facts brain that the rest of this chapter builds on, with the same shape (facts, archives, a directory on Dropbox) but a single subject: the operator. The architectural slot for it lives in [Ch 16 — The shared brain](16-shared-brain.md#the-self-layer-a-brain-about-the-operator); this section is how Huckle builds and consumes it.
+
+### The four layers
+
+The self-brain lives at `~/Dropbox/clawford-backup/self/` and has four layers, each generated by its own script and each consumable on its own:
+
+| Layer | Input | Output |
+|-------|-------|--------|
+| **Stage 1 — classifier** | `Personal/Bio/`, `Personal/Job Search/`, `Archive/<employer>/`, Workflowy export | `self/archive-index.json` — per-file `{role, class, signal_score, summary, chronological_date}` |
+| **Stage 3 — per-role archives** | Signal-bearing records from the index, grouped by role or search round | `self/archives/<role>.md` — scope, OKRs owned, tenets authored, major accomplishments, feedback themes |
+| **Stage 4 — structured facts** | `self/archives/*.md`, re-parsed into typed schemas | `self/facts/{employer,major_accomplishment,target_company,tenet_authored,strength_theme}.json` |
+| **Stage 1.2 — narrative profile** | Structured facts + priority raw docs (LinkedIn PDF, career bios) | `self/profile.md` — track record, excited by, great at, leadership style, level & scope bar, target-role shape |
+
+The numbering is historical; Stage 1.2 landed after Stage 1 was already named, and renaming would have churned the test suite. The pipeline order is 1 → 3 → 4 → 1.2.
+
+Each layer is regenerable from the layer below it. The archive index is deterministic against the filesystem. The per-role archives re-synthesise from the index. The structured facts re-extract from the archives. The profile re-renders from the facts. Hand-edit any of them and the downstream re-generation respects the edit. Raw archive files at `~/Dropbox/Archive/<employer>/` are never copied into the brain — the classifier summaries are 30 words apiece, and the profile speaks only to scope, decisions, and outcomes. Proprietary strategy stays on disk at its original path; the brain carries what generalises across the operator's arc.
+
+### Chronology is load-bearing
+
+The operator's career spans roughly a decade across several roles at different employers, interleaved with distinct rounds of job search. Reasoning across that arc without respecting the chronology is how the self-brain learns the wrong lessons — classifying a 2020 strategic doc as current thinking, promoting a 2022 target company that no longer matters.
+
+Two hand-editable files under `self/` carry the chronology:
+
+- `role-timeline.md` — one row per employment span with `start_date`, `end_date`, and a short role description. Rows cover the whole arc, including between-job periods.
+- `search-timeline.md` — one row per round of job-seeking with similar spans. Treating job search as its own class of "role" matters because the artefacts a search produces (decision frameworks, company-by-company notes, target-list spreadsheets) share a shape across rounds and deserve to be synthesised together, not fragmented across whichever employer happened to be current at the time the search concluded.
+
+The Stage 3 synthesiser routes every signal-bearing record to the matching role or search round by the classifier's `chronological_date` field, which falls back through a small hierarchy: explicit dates in the document text → filename date patterns → `mtime`. A class-based override routes anything tagged `job_search_material` to the search-round bucket regardless of date — a decision-framework doc authored during employment at one company but about looking at a different company belongs to the search round, not the employer archive.
+
+### Recruiter detection
+
+The existing triage path classifies every inbound thread into one of five statuses before the compose loop decides whether to draft a reply. The relevant one here is `skipped_unknown_sender` — the catch-all that drops any sender whose email isn't in `email_to_slug`. That status was silent data loss for recruiters; they are by definition unknown senders the first time they reach out.
+
+The fix is a heuristic detector that runs *before* the `unknown_sender` skip and, on a hit, reroutes the thread to a new `queued_cold_recruiter` status that feeds the compose loop. Three signal shapes contribute:
+
+1. **Domain suffix match.** 22 ATS and retained-search domains compiled into a set. Ends-with match, so `mail.greenhouse-mail.io` and `hire.lever.co` both trigger. This is the strongest signal; a message from an ATS domain is essentially definitionally a recruiter outreach.
+2. **Subject + snippet phrase match.** A bag of lexical patterns that repeat across recruiter outreach: *"reaching out regarding"*, *"your background"*, *"came across your profile"*, *"opportunity,"* plus level vocabulary — *Director*, *Head of*, *VP*. Not sufficient alone, but a hit plus an ambiguous domain (LinkedIn InMail) promotes to recruiter.
+3. **Negative-phrase veto.** Phrases that look like recruiter outreach but aren't — *"your order"*, *"your subscription"*, *"payment failed"*. One hit here vetoes the detection.
+
+The detector returns a `(bool, confidence, signals)` tuple; the reason field persists on the queue entry so the Telegram FYI can explain *why* a message was flagged. There's a narrow carve-out in the service-account filter: `is_likely_service_account` catches a lot of genuine recruiter traffic (noreply addresses with ATS suffixes), so a positive recruiter-domain match skips the service-account drop. Getting that exemption wrong was the thing that silently dropped the first real recruiter inbound the pipeline ever saw.
+
+### The FIT CHECK — composite, not a target-list gate
+
+When the compose loop runs on a cold recruiter thread with `--cold-inbound`, it injects a SELF CONTEXT block into the prompt carrying the profile narrative, the level-and-scope bar, the operator's employer history (most recent first, with end dates), and the active + recently-concluded search pipeline from the search-status layer. Then a Step 0.5 — the FIT CHECK — runs before the usual four-step loop.
+
+The first cut of the FIT CHECK was a binary gate on `target_company`: on the list → engage, off the list → decline. That was the wrong shape for two reasons. Real A-list opportunities surface outside the curated list — there's no way to know ahead of time that a frontier lab is about to pitch a specific role. And some target-list companies turn out to be the wrong fit once the role details land, regardless of brand.
+
+The current FIT CHECK scores three dimensions independently:
+
+- **Domain fit.** Does the company's business resonate with the operator's background? Marketplaces, two-sided platforms, content platforms, and consumer/community businesses score strong. Adjacent enterprise surfaces where causal methods transfer score moderate. Industries with no prior exposure score weak.
+- **Level fit.** Does the role pass the operator's level & scope bar? Owning a major lever of company success (pricing, supply, ranking, monetisation, growth) or sitting C-suite-adjacent scores strong. Senior Director reporting to EVP with unclear scope scores moderate. Director several layers from exec scores weak.
+- **Function fit.** Does the role draw on the operator's strengths? Applied ML + causal inference + experimentation scores strong. Pure ML engineering or research leadership scores moderate. Research-only, pure eng management, or sales scores weak.
+
+`target_company` is a *supporting* signal that elevates the composite tier by one step when it hits — not the primary gate. The composite tier (A, B, C, not_a_target, unclear) drives the strategy selection: A and B *take the call*, C politely declines, unclear asks one clarifying question. The LLM emits `fit_assessment: {tier, rationale, domain_fit, level_fit, function_fit, target_company_match}` alongside the draft text, and the Telegram FYI displays the tier with a coloured indicator so the operator can calibrate at a glance.
+
+### The level & scope bar
+
+Level fit weights heavier than the other two dimensions because a role that misses the operator's level bar is a non-starter regardless of how strong domain and function look. The bar is stated explicitly in `profile.md` and lifted into the compose prompt as a dedicated section:
+
+- The role owns a major lever of company success. Pricing, supply, ranking, monetisation, growth — things where the scope map is the company's actual economics, not a subsidiary function.
+- OR the role is directly C-suite-adjacent. Reports to CEO / CTO / CDO / EVP, or is a Head-of-function at a company whose function organisation flows through a Head.
+
+Anything else is below the bar. A *Director of Data Science* title three layers from the exec team, with ownership of a narrow measurement function, is structurally disqualifying — not because the work isn't real but because the scope doesn't match the operator's track record of owning company-level levers. The bar is deliberately harsher than domain and function; those score on a strong / moderate / weak scale, while level short-circuits to weak whenever the inbound doesn't surface evidence for one of the two conditions above.
+
+Naming the bar in the prompt was the single highest-value edit of the whole professional-brain pass. Before it, the LLM hedged on level fit; after, it would still write the respectful decline but it stopped trying to talk itself into engagement with roles whose scope obviously didn't match.
+
+### Recruiter voice profile
+
+The five per-circle voice profiles from the correspondence layer cover family, friends, and professional peers. None cover the register the operator uses when writing *to recruiters* — distinct from professional-outer, more compact, less chatty, signature-forward. A draft composed against the professional-outer voice reads like a peer catch-up; a draft composed against the recruiter voice reads like an executive response.
+
+The fix is a new mode on the voice-profile builder: `--recruiter-mode` queries Gmail for sent messages to the 22 recruiter-platform domains from the detector's allowlist and extracts a separate voice fingerprint scoped to that sample. The output lands at `cache/voice-profiles/recruiter.json` alongside the per-circle files, and compose loads it instead of any circle profile when `--cold-inbound` is passed.
+
+The sample is necessarily smaller than the circle samples — the operator has sent fewer cold-recruiter replies than professional-outer emails over two years — but it clears the minimum-sample floor, and distinctive closing patterns (*"Thanks for thinking of me."*) pin down the register reliably.
+
+### The search-status layer
+
+A cold inbound doesn't arrive in a vacuum. The operator often has several searches in late-stage progress already, and a new inbound that would be an eager *take the call* in a quiet period is a polite *let me circle back in two weeks* when the pipeline is crowded. The draft has to know which mode the operator is in, or it will sound mismatched.
+
+`search-status-build.py` mines Gmail and Workflowy over a 90-day rolling window and synthesises the active pipeline via a single LLM call:
+
+- **Gmail evidence.** Threads from recruiter-platform domains (same set the detector uses) get parsed for interview-stage signals: phone screen scheduled, onsite invitation, offer extended, passed, ghosted.
+- **Workflowy evidence.** Meeting nodes whose titles match interview-prep patterns (*"Interview prep — <company>"*, *"<company> onsite"*) get parsed for stage inference by surrounding dates.
+- **Synthesis.** The LLM reconciles the two sources per company and emits a stage taxonomy entry: `initial-outreach`, `engaged`, `recruiter-screen`, `hiring-manager`, `technical-interview`, `onsite-panel`, `final-round`, `offer`, `accepted`, `declined`, `passed`, `ghosted`.
+
+Output lands at `self/search-status.md` (human-readable) and `self/facts/active_search_stages.json` (programmatic). The compose-side consumer is the SELF CONTEXT block: when the operator is in late-stage engagement with two or more companies, the prompt injects a mandatory *"ACTIVE PIPELINE — keep briefings tight; avoid proposing long intros when urgent pipeline conflicts"* directive that bubbles up as a one-line urgency note in the draft itself. On the first pass the directive was phrased as *"use sparingly"* — which the LLM interpreted as *"don't use at all"*; tightening it to *"MUST include brief urgency line when late-stage count ≥ 2"* fixed that in one edit.
+
+### The calibration draft
+
+A real inbound from a retained-search recruiter on 2026-04-21 became the calibration test for the whole professional-brain stack. The recruiter pitched a senior role at a major consumer platform, with economic-modeling-for-community-flywheel scope and a named reporting line to an EVP. Four iterations of draft review surfaced four distinct gaps — each one a different layer of the architecture failing in a different way.
+
+- **Iteration 1 — the target-list gate.** The first draft tiered the opportunity as B and politely declined on the grounds that the company wasn't on the explicit target list. That was wrong: the role was strong on domain (marketplace dynamics), moderate on level (senior reporting to EVP), and strong on function (economic modeling, causal inference). A target-list miss shouldn't have gated engagement against a two-strong / one-moderate profile. The fix was the composite FIT CHECK — three dimensions with target_company as a supporting elevator, not a gate.
+
+- **Iteration 2 — "directionally interesting."** The second draft engaged politely and asked four scope questions (reporting line, headcount, ownership, mandate) to "learn more." That was the wrong shape for a cold recruiter reply. The recruiter had done the work to research the operator and pitch a specific role; a wall of clarifying questions pushed the work back onto them. The fix was a load-bearing rule in the strategy section: **the call is the screen.** Scope questions belong on the intro call, not in the email. A 3–5 sentence reply acknowledging one or two specific elements of the pitch plus two or three concrete availability windows was the target shape.
+
+- **Iteration 3 — lying about current employment.** The third draft opened with *"I lead <function> at <current employer>."* The operator wasn't at that employer anymore; the profile synthesis was reading the most recent employer record as "current" based on row ordering rather than the end date. The fix was an explicit end-date comparison at compose time: if `today > end_date`, the SELF CONTEXT block renders as *"post-employment / active executive search"* rather than *"currently employed at <X>."* Getting that flag right means the draft can engage with the recruiter from the correct register — someone actively listening to opportunities, not someone humble-bragging about a current role.
+
+- **Iteration 4 — credentials-first opener.** The fourth draft led with the operator's resume even though the recruiter had LinkedIn-sourced the outreach. *"My background is in economic modeling and causal inference"* is redundant; the recruiter said as much in their opening line. The fix was an OPENER STRATEGY directive: the opener engages with *their* pitch, not the operator's credentials. What specific element of their note resonated? Name one or two, conversationally. Credentials come later as confirmation of fit, if at all. A final anti-redundancy rule — no *"Senior Director role"* restatement when the recruiter already used the title — was the last regression.
+
+The shipped draft is not a monument to a perfect pipeline. It's a monument to four specific edits, each made against a specific failure mode, each surfacing a different layer of the architecture. The four-layer self-brain is what the operator's professional context looks like. The FIT CHECK is how the pipeline judges a role against that context. The recipient-respect first principle is how the draft reads from the other side of the wire. The calibration inbound is where all three of those stopped being theoretical and started producing something the operator would actually sign their name to.
 
 ## Deployment walkthrough
 
@@ -485,6 +608,8 @@ This is the overlay on [Ch 08 — Your first agent](08-your-first-agent.md). The
 
 > 🧨 **Pitfall.** Treating the shared-brain `people/` directory as append-only. **Why:** the mining pipeline and the ongoing crons both modify files in `people/`, and if any of those modifications are not atomic, concurrent writes between the local laptop (the operator editing a people file by hand) and the VPS crons (the daily-refresh cron updating `last_interaction`) can lose data silently. **How to avoid:** all writes to people files go through `agents.shared.brain.update_people_file`, which does a read-modify-atomic-write with a Dropbox-aware lock file. Do not edit people files by hand on the VPS. Editing on the local laptop is fine because the VPS crons are idempotent against the local edits; the lock file prevents the race.
 
+> 🧨 **Pitfall.** Shipping cold-recruiter drafting without the detector library on the VPS. **Why:** `agents/<agent>/manifest.json` is PII-bearing and gitignored; the tracked `.example` template and the live manifest drift over time as different sessions add scripts. A cold recruiter inbound on the first live test routed to `queued_cold_recruiter` on the local laptop but hit `ImportError` on the VPS because the detector library wasn't in the copy that had been deployed. **How to avoid:** every time a new script lands in an agent's manifest, edit BOTH `agents/<agent>/manifest.json` (live, gitignored) AND `agents/<agent>/manifest.json.example` (tracked template) in the same commit. Before SCP-ing the live manifest to the VPS, diff against the VPS copy to catch drift from parallel sessions — SCP without the diff clobbers entries that landed out-of-order on the other side.
+
 > 🧨 **Pitfall.** LLM enrichment cost scaling linearly with contact count. **Why:** the enrichment pass runs one LLM call per candidate, regardless of whether the candidate is high-tier or marketing. On a first deploy of 280 people, that is `\~$3`. On a second-pass mining run of 600 people (because the gmail history grew or because a new source was added), it is `\~$6`. There is no safeguard against runaway spending — if a bug in the aggregator produces 5000 candidates, the enrichment pass will cheerfully run 5000 LLM calls. **How to avoid:** the aggregator has a candidate-count guard: if the final candidate list exceeds 1000, the pipeline hard-stops with `"Candidate count {N} exceeds safety ceiling — investigate before proceeding"` and the operator has to explicitly override with `--i-know-what-i-am-doing`. Do not disable the guard lightly.
 
 ## See also
@@ -493,4 +618,5 @@ This is the overlay on [Ch 08 — Your first agent](08-your-first-agent.md). The
 - [Ch 08 — Your first agent](08-your-first-agent.md) — the general deploy walkthrough
 - [Ch 12 — Mistress Mouse 🐭📅](12-mistress-mouse.md) — canonical Google OAuth pattern
 - [Ch 13 — Sergeant Murphy 🐷🔍](13-sergeant-murphy.md) — the cache-is-not-a-delivery-queue rule that all of Huckle Cat's orchestrators follow
+- [Ch 16 — The shared brain](16-shared-brain.md) — the `self/` layer's architectural slot and the two-subtree brain split
 - [Ch 17 — Auth architectures](17-auth-architectures.md) — the cross-agent auth reference (pending)
