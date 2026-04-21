@@ -48,7 +48,11 @@ from agents.shared.brain import dropbox_brain_root                  # noqa: E402
 from agents.shared.context_builder import build_recipient_context  # noqa: E402
 from agents.shared.facts import load_facts_for_subject             # noqa: E402
 from agents.shared.voice import compose_voice_guidance             # noqa: E402
-from compose_lib import build_compose_prompt, parse_compose_result  # noqa: E402
+from compose_lib import (  # noqa: E402
+    apply_post_processing,
+    build_compose_prompt,
+    parse_compose_result,
+)
 from inbound_act_lib import classify_inbound_act                   # noqa: E402
 
 
@@ -301,6 +305,7 @@ def main() -> int:
 
     shareable_ids = {f["id"] for f in ctx.facts_shareable}
     parsed = parse_compose_result(llm_text, shareable_ids=shareable_ids)
+    parsed = apply_post_processing(parsed, voice_profile)
 
     print()
     print("=" * 72)

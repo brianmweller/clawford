@@ -15,6 +15,7 @@ references to audience-filtered facts).
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 
 from agents.shared.context_builder import RecipientContext
@@ -29,7 +30,7 @@ Respond with a JSON object with EXACTLY these fields, in this order:
   "leverage":               "<two–three sentences: what SPECIFIC assets does the operator have here — named people who can vouch, prior moves already made, concrete shared context, proof points? Enumerate at least one. If there is genuinely no leverage, say so plainly.>",
   "strategy":               "<two–three sentences: the concrete tactical move. If reply_needed=true, this is what the draft will DO (MUST deploy the leverage). If reply_needed=false, this is why silence is the right move and what it protects.>",
   "recipient_model":        "<two–three sentences. Answer BOTH: (1) what are they expecting task-wise? and (2) what EMOTIONAL OUTCOME do they want from the reply — to feel appreciated, useful, heard, forgiven, reassured, etc.? Gift-givers want the gift to feel loved, not tolerated. Advice-givers want acknowledgment the advice landed. Well-wishers want engagement with what they said. Closeout-senders want the thread to end gracefully. If the draft nails the task but misses the emotional transaction, the reply reads as cold.>",
-  "draft_text":             "<when reply_needed=true: the email reply body, no subject line, no signature block. Match the voice anchors from history LITERALLY — sentence length, contractions, hedging, sign-off. When reply_needed=false: empty string.>",
+  "draft_text":             "<when reply_needed=true: the email reply body, no subject line. The canonical sign-off will be appended post-process, so you don't need to add one — if you naturally close with the sign-off anyway, we'll normalize. Match the voice anchors from history LITERALLY — sentence length, contractions, hedging. When reply_needed=false: empty string.>",
   "no_reply_fyi":           "<when reply_needed=false: one short sentence the operator will read on Telegram — what arrived, why no reply is needed, any watch-for-later note. When reply_needed=true: empty string.>",
   "reasoning_summary":      "<one sentence anchored in objective + strategy — what the operator reads on Telegram alongside the draft (or alongside no_reply_fyi) to decide whether to ship/override.>",
   "cited_fact_ids":         ["<fact id>", ...]
@@ -347,3 +348,93 @@ def parse_compose_result(llm_text: str, shareable_ids: set[str]) -> dict:
         "reasoning_summary": reasoning,
         "cited_fact_ids": cited_clean,
     }
+
+
+# Common sign-off openers the LLM may emit even though we instruct otherwise.
+# Order matters only for readability; the regex below uses alternation.
+_SIGNOFF_OPENERS = (
+    "best", "love", "cheers", "warmly", "thanks", "thank you",
+    "sincerely", "regards", "kind regards", "take care", "talk soon",
+    "all the best", "many thanks",
+)
+
+
+def _is_signoff_line(line: str, name: str) -> bool:
+    """True when this line looks like part of a sign-off.
+
+    Matches:
+      - The bare first name on its own line ("the operator")
+      - "-- the operator" / "— the operator" dash-prefixed variants
+      - Closing words alone ("Best," / "Love," / "Cheers")
+      - Closing words followed by the name ("Best, the operator")
+    Keeps the matcher narrow so substantive short lines like "Thanks!"
+    at the end of a paragraph don't get eaten.
+    """
+    s = line.strip()
+    if not s:
+        return False
+    low = s.lower()
+    name_low = name.lower()
+    if low == name_low:
+        return True
+    if re.fullmatch(rf"[-—–]+\s*{re.escape(name_low)}\.?", low):
+        return True
+    openers = "|".join(re.escape(o) for o in _SIGNOFF_OPENERS)
+    if re.fullmatch(rf"({openers}),?", low):
+        return True
+    if re.fullmatch(rf"({openers}),?\s+{re.escape(name_low)}\.?", low):
+        return True
+    return False
+
+
+def _normalize_signoff(body: str, signoff: str) -> str:
+    """Strip any trailing sign-off-like lines and append the canonical signoff.
+
+    The canonical form is whatever the voice profile specifies. Up to 3
+    trailing lines are inspected (covers "Best,\\nBrian" plus a wrapped
+    dash-line variant); anything further up is left alone.
+    """
+    if not signoff:
+        return body.rstrip()
+    # Extract the name token from the signoff: either the whole last line
+    # ("the operator") or, for single-line forms ("Love, the operator"), the last
+    # alphabetic word.
+    last_line = signoff.strip().splitlines()[-1].strip()
+    name_tokens = re.findall(r"[A-Za-z][A-Za-z'\-]*", last_line)
+    name = name_tokens[-1] if name_tokens else last_line
+    lines = body.splitlines()
+    while lines and not lines[-1].strip():
+        lines.pop()
+    stripped = 0
+    while lines and stripped < 3:
+        if _is_signoff_line(lines[-1], name):
+            lines.pop()
+            stripped += 1
+            while lines and not lines[-1].strip():
+                lines.pop()
+        else:
+            break
+    cleaned = "\n".join(lines).rstrip()
+    if not cleaned:
+        return signoff
+    return f"{cleaned}\n\n{signoff}"
+
+
+def apply_post_processing(parsed: dict, voice_profile: dict | None) -> dict:
+    """Apply deterministic post-LLM transforms to a parsed compose result.
+
+    Currently: normalize the trailing sign-off to the voice profile's
+    canonical form when the result carries a non-empty draft.
+    """
+    if not isinstance(parsed, dict) or parsed.get("error"):
+        return parsed
+    if not parsed.get("reply_needed"):
+        return parsed
+    draft = parsed.get("draft_text", "") or ""
+    if not draft.strip():
+        return parsed
+    signoff = ((voice_profile or {}).get("profile_signoff") or "").strip()
+    if signoff:
+        draft = _normalize_signoff(draft, signoff)
+    parsed["draft_text"] = draft
+    return parsed

@@ -21,7 +21,11 @@ sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from agents.shared.context_builder import RecipientContext
 
-from compose_lib import build_compose_prompt, parse_compose_result  # type: ignore
+from compose_lib import (  # type: ignore
+    apply_post_processing,
+    build_compose_prompt,
+    parse_compose_result,
+)
 
 
 def _ctx(**overrides):
@@ -387,3 +391,84 @@ def test_parse_empty_cited_ids_is_valid():
     result = parse_compose_result(txt, shareable_ids={"f-001"})
     assert result["cited_fact_ids"] == []
     assert "error" not in result
+
+
+# --- apply_post_processing: signoff normalization ---
+
+def _parsed_with(draft: str, reply_needed: bool = True) -> dict:
+    return {
+        "reply_needed": reply_needed,
+        "objective": "x",
+        "current_state_and_gap": "x",
+        "leverage": "x",
+        "strategy": "x",
+        "recipient_model": "x",
+        "draft_text": draft,
+        "no_reply_fyi": "" if reply_needed else "noted",
+        "reasoning_summary": "x",
+        "cited_fact_ids": [],
+    }
+
+
+def test_signoff_appended_when_absent():
+    parsed = _parsed_with("Thanks for reaching out. Let's catch up soon.")
+    out = apply_post_processing(parsed, {"profile_signoff": "Best,\nBrian"})
+    assert out["draft_text"].endswith("Best,\nBrian")
+    assert out["draft_text"].startswith("Thanks for reaching out")
+
+
+def test_signoff_normalizes_bare_name_to_full_form():
+    # LLM emitted "the operator" alone; canonical is "Best,\nBrian"
+    draft = "Let's catch up.\n\nBrian"
+    out = apply_post_processing(_parsed_with(draft), {"profile_signoff": "Best,\nBrian"})
+    assert out["draft_text"].endswith("Best,\nBrian")
+    # Must not leave a stray "the operator" before the normalized signoff
+    assert "the operator\n\nBest,\nBrian" not in out["draft_text"]
+
+
+def test_signoff_not_duplicated_when_already_canonical():
+    draft = "Let's catch up.\n\nBest,\nBrian"
+    out = apply_post_processing(_parsed_with(draft), {"profile_signoff": "Best,\nBrian"})
+    assert out["draft_text"].count("the operator") == 1
+    assert out["draft_text"].endswith("Best,\nBrian")
+
+
+def test_signoff_replaces_close_variant():
+    # LLM emitted "Best, the operator" single-line; canonical is two lines
+    draft = "Let's catch up.\n\nBest, the operator"
+    out = apply_post_processing(_parsed_with(draft), {"profile_signoff": "Best,\nBrian"})
+    assert out["draft_text"].endswith("Best,\nBrian")
+    assert out["draft_text"].count("the operator") == 1
+
+
+def test_signoff_single_line_variant():
+    # Some circles use "Love, the operator" as one-line
+    draft = "Miss you.\n\nBrian"
+    out = apply_post_processing(_parsed_with(draft), {"profile_signoff": "Love, the operator"})
+    assert out["draft_text"].endswith("Love, the operator")
+    assert out["draft_text"].count("the operator") == 1
+
+
+def test_signoff_noop_when_profile_missing():
+    parsed = _parsed_with("Let's catch up.\n\nBrian")
+    out = apply_post_processing(parsed, None)
+    assert out["draft_text"] == "Let's catch up.\n\nBrian"
+
+
+def test_signoff_noop_when_reply_not_needed():
+    parsed = _parsed_with("", reply_needed=False)
+    out = apply_post_processing(parsed, {"profile_signoff": "Best,\nBrian"})
+    assert out["draft_text"] == ""
+
+
+def test_signoff_noop_when_error():
+    parsed = {"error": "bad json", "draft_text": ""}
+    out = apply_post_processing(parsed, {"profile_signoff": "Best,\nBrian"})
+    assert out.get("draft_text", "") == ""
+
+
+def test_prompt_no_longer_forbids_signature_block():
+    # Schema hint used to say "no signature block" which contradicted the
+    # history-matching rule. We now append the signoff post-process.
+    prompt = build_compose_prompt(_ctx(), _voice(), _inbound())
+    assert "no signature block" not in prompt
