@@ -94,8 +94,18 @@ def test_build_profile_prompt_requests_required_sections():
     """Prompt must request the profile sections."""
     prompt = build_profile_prompt(_FACTS, _ARCHIVES, _PRIORITY_DOCS)
     for heading in ["Self-description", "Track record", "Excited by",
-                    "Great at", "Leadership", "Target-role"]:
+                    "Great at", "Leadership", "Level & scope bar", "Target-role"]:
         assert heading in prompt
+
+
+def test_build_profile_prompt_level_bar_mentions_both_criteria():
+    """The Level & scope bar section must encode the operator's two
+    conditions: own a major lever OR work directly with C-suite."""
+    prompt = build_profile_prompt(_FACTS, _ARCHIVES, _PRIORITY_DOCS)
+    text = prompt.lower()
+    assert "major lever" in text or "own" in text
+    assert "c-suite" in text
+    assert "pricing" in text or "supply" in text   # examples of levers
 
 
 def test_build_profile_prompt_mentions_downstream_consumers():

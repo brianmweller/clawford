@@ -97,6 +97,38 @@ def _load_priority_raw_docs(index_path: Path, max_chars: int = PRIORITY_RAW_CHAR
     return out
 
 
+def _load_self_reference_docs(self_dir: Path, max_chars: int = PRIORITY_RAW_CHARS) -> list[tuple[str, str]]:
+    """Auto-discover reference docs the operator places directly under self/
+    (e.g., linkedin-profile-current.pdf, resume snapshots). These are
+    priority-flagged by convention: if the operator drops them in self/, they
+    matter for profile synthesis.
+
+    Discovers: self/linkedin-*.{pdf,docx,md,txt}, self/resume-*.*,
+    self/cv-*.*, self/bio-*.*
+    """
+    if not self_dir.exists():
+        return []
+    patterns = [
+        "linkedin-*.pdf", "linkedin-*.docx", "linkedin-*.md", "linkedin-*.txt",
+        "resume-*.pdf", "resume-*.docx",
+        "cv-*.pdf", "cv-*.docx",
+        "bio-*.pdf", "bio-*.docx", "bio-*.md",
+    ]
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for pattern in patterns:
+        for path in sorted(self_dir.glob(pattern)):
+            key = str(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            rec = {"path": str(path)}
+            content = fetch_raw_content(rec, workflowy_texts=None, max_chars=max_chars)
+            if content:
+                out.append((str(path), content))
+    return out
+
+
 def _write_profile_atomic(out_path: Path, body_md: str, stats: dict) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     header = (
@@ -153,9 +185,13 @@ def main() -> int:
         print(f"WARN: no structured facts under {facts_dir} — profile will be archive-only", file=sys.stderr)
 
     priority_docs = _load_priority_raw_docs(index_path)
+    self_refs = _load_self_reference_docs(brain / "self")
+    # Combine — self/ reference docs are always treated as priority
+    priority_docs = self_refs + priority_docs
 
     print(f"\nLoaded: {len(archives)} archives, {len(facts)} fact types, "
-          f"{len(priority_docs)} priority-flagged raw docs")
+          f"{len(priority_docs)} priority-flagged raw docs "
+          f"({len(self_refs)} from self/, {len(priority_docs) - len(self_refs)} from archive-index)")
     for fact_type, records in facts.items():
         print(f"  facts/{fact_type}: {len(records)} records")
     for path, content in priority_docs:

@@ -22,6 +22,7 @@ _SECTIONS = [
     "Great at",
     "Anti-patterns",
     "Leadership / operating style",
+    "Level & scope bar",
     "Target-role shape",
 ]
 
@@ -168,12 +169,46 @@ One paragraph (~100 words) + bullet list of named tenets. Draw from
 tenet_authored facts directly (list them). Capture the through-line:
 org-builder, framework-author, causal-rigor, partner-multiplier.
 
+## Level & scope bar
+the operator has a HARD FILTER on what role he'll take next. State it
+explicitly so Huckle and Murphy can use it as a fit-eval criterion.
+The two conditions (at least ONE must hold):
+
+  (a) The role must OWN A MAJOR LEVER OF THE COMPANY'S SUCCESS —
+      pricing, supply growth, personalization, ranking, content
+      strategy, marketplace dynamics, etc. Not a support function
+      reporting into someone else's lever.
+  (b) The role must be SENIOR ENOUGH TO WORK DIRECTLY WITH THE
+      C-SUITE on company strategy. CTO / CDO / Head of [major
+      function] / VP-of-[strategic-area] scope. Not a Director-
+      reporting-into-VP role unless the Director scope IS a major
+      lever per (a).
+
+Write this as a short, direct paragraph in the operator's voice (active
+first-person, specific). Anchor in the LinkedIn summary framing where
+he says "I partner with C-suite leaders to turn data and AI into
+strategic weapons." Then two bullets, one per criterion, each with a
+one-line elaboration of what that looks like in practice.
+
 ## Target-role shape
-Bullet list organized by tier_opportunity:
-  - A-opportunity companies (both A and B tier_company): list them
-    with role_type
-  - B-opportunity: briefer
-Reference the target_company facts directly.
+This section is ABOUT FUTURE ROLES the operator is looking at. It is NOT a
+recap of past employers.
+
+HARD EXCLUSION: any target_company record with outcome='landed' or
+outcome='declined' is a HISTORICAL search artifact, not a current
+target. DO NOT include it in this section AT ALL — not as a
+"precedent", not as "historical context", not as any form of
+mention. Past landings belong in Track record (which you already
+wrote). This section is forward-looking only.
+
+INCLUDE, strictly filtered by the Level & scope bar above:
+  - A-opportunity companies with outcome='targeted' or 'in-progress':
+    list with role_type. These are the forward-looking target set.
+  - B-opportunity: briefer; only if role_type is C-suite-adjacent or
+    owns a major lever.
+
+Reference the target_company facts directly. If a company appears in
+target_company with outcome='landed', skip it entirely in this section.
 
 CONFIDENTIALITY & VOICE RULES:
   - Do NOT quote proprietary strategy verbatim from raw docs.
