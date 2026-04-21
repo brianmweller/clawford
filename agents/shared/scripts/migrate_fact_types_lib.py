@@ -27,9 +27,13 @@ from typing import Iterable
 
 # Reuse the same validators the miner uses so the migration and the
 # extractor agree on what a well-formed `value` looks like per type.
+# fact_extraction imports `agents.shared.operator`, so repo root needs
+# to be on sys.path too — not just the agents/shared dir.
 _shared = Path(__file__).resolve().parent.parent
-if str(_shared) not in sys.path:
-    sys.path.insert(0, str(_shared))
+_repo = _shared.parent.parent
+for _p in (_shared, _repo):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 from fact_extraction import (  # type: ignore[import-not-found]
     _VALIDATORS,
