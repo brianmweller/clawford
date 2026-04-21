@@ -623,3 +623,58 @@ def test_prompt_does_not_stack_both_opener_forms_in_example():
         "hi jamie,\n\nthanks, jamie" in lowered
         or "hi {name},\n\nthanks, {name}" in lowered
     )
+
+
+# --- recipient timezone awareness ---
+
+def _ctx_with_tz(tz: str):
+    ctx = _ctx()
+    ctx.recipient_person = dict(ctx.recipient_person)
+    ctx.recipient_person["timezone"] = tz
+    return ctx
+
+
+def test_prompt_surfaces_recipient_timezone_when_present():
+    prompt = build_compose_prompt(_ctx_with_tz("America/New_York"), _voice(), _inbound())
+    # RECIPIENT block must include the tz so the LLM knows what
+    # "after 4pm" means for them
+    assert "America/New_York" in prompt or "New_York" in prompt
+
+
+def test_prompt_omits_recipient_tz_line_when_unknown():
+    prompt = build_compose_prompt(_ctx(), _voice(), _inbound())
+    # The tz line renders only when present; absence means no hint,
+    # which is better than "timezone: unknown"
+    assert "Time zone: " not in prompt or "Time zone: America" in prompt
+
+
+def test_open_slots_render_dual_tz_when_recipient_differs():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    PT = ZoneInfo("America/Los_Angeles")
+    slots = [
+        (datetime(2026, 4, 21, 11, 0, tzinfo=PT), datetime(2026, 4, 21, 11, 30, tzinfo=PT)),
+    ]
+    ctx = _ctx_with_tz("America/New_York")
+    prompt = build_compose_prompt(ctx, _voice(), _inbound(), availability_slots=slots)
+    # Should show something like "11:00 PT / 14:00 ET" or include both offsets.
+    # Accept any rendering that shows the 14:00 translation.
+    assert "14:00" in prompt
+
+
+def test_open_slots_single_tz_when_recipient_matches():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    PT = ZoneInfo("America/Los_Angeles")
+    slots = [
+        (datetime(2026, 4, 21, 11, 0, tzinfo=PT), datetime(2026, 4, 21, 11, 30, tzinfo=PT)),
+    ]
+    ctx = _ctx_with_tz("America/Los_Angeles")
+    prompt = build_compose_prompt(ctx, _voice(), _inbound(), availability_slots=slots)
+    # Same tz: don't duplicate
+    # 11:00 should appear once in the slots section, not twice
+    slots_idx = prompt.find("OPEN SLOTS (propose")
+    assert slots_idx != -1
+    slots_section_end = prompt.find("\n\n", slots_idx + 50)
+    slots_section = prompt[slots_idx:slots_section_end]
+    assert slots_section.count("11:00") == 1

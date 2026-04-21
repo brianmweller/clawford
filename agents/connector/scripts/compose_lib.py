@@ -70,13 +70,26 @@ def build_compose_prompt(
         f"  - {m.get('date','?')}: {m.get('title','')}" for m in context.meeting_summaries
     ) or "  (none)"
 
+    recipient_tz_str = person.get("timezone") or ""
+    recipient_tz = None
+    if recipient_tz_str:
+        try:
+            from zoneinfo import ZoneInfo
+            recipient_tz = ZoneInfo(recipient_tz_str)
+        except Exception:  # noqa: BLE001 - bad tz string → skip dual render
+            recipient_tz = None
+
     slots_section = ""
     if availability_slots:
         slot_lines = []
         for s, e in availability_slots:
-            slot_lines.append(
-                f"  - {s.strftime('%a %b %d %H:%M')}–{e.strftime('%H:%M %Z')}"
-            )
+            base = f"  - {s.strftime('%a %b %d %H:%M')}–{e.strftime('%H:%M %Z')}"
+            # Dual-tz render when recipient tz differs from slot tz.
+            if recipient_tz is not None and str(recipient_tz) != str(s.tzinfo):
+                rs = s.astimezone(recipient_tz)
+                re_ = e.astimezone(recipient_tz)
+                base += f"  ({rs.strftime('%H:%M')}–{re_.strftime('%H:%M %Z')} their time)"
+            slot_lines.append(base)
         slots_section = "\nOPEN SLOTS (propose these if the sender asked to schedule):\n" + "\n".join(slot_lines) + "\n"
 
     profile_section = ""
@@ -205,7 +218,7 @@ summary for the operator's Telegram ping instead.
 RECIPIENT
   Name: {name}
   Relationship: {person.get("relationship_type", "unknown")}
-  Slug: {person.get("slug", "")}
+  Slug: {person.get("slug", "")}{(chr(10) + "  Time zone: " + recipient_tz_str) if recipient_tz_str else ""}
 
 VOICE CALIBRATION
   Register: {voice.get("register")} — {voice.get("register_guidance")}
