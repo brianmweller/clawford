@@ -262,6 +262,11 @@ TASK
         want to book one?" beats "happy to grab dinner if you're
         around" every time.
 
+  FORMATTING: emit each paragraph as a single unwrapped line separated
+  by a blank line. Do NOT hard-wrap prose at any column width — Gmail
+  handles rendering. Hard wraps become visible mid-paragraph linebreaks
+  and look like the email was pasted from a terminal.
+
   DATE RE-ANCHORING: if the inbound is stale (sent days or weeks ago)
   and references relative dates like "next week," re-anchor those to
   TODAY. "Next week" means the week starting Monday from today's
@@ -420,11 +425,35 @@ def _normalize_signoff(body: str, signoff: str) -> str:
     return f"{cleaned}\n\n{signoff}"
 
 
+_BULLET_RE = re.compile(r"^\s*([-*•]|\d+[.)])\s")
+
+
+def _dehardwrap(body: str) -> str:
+    """Un-hard-wrap LLM-emitted prose paragraph-by-paragraph.
+
+    LLMs default to wrapping prose at ~68 chars; Gmail renders those as
+    visible mid-paragraph linebreaks. Collapse within a paragraph while
+    preserving blank-line separators. Paragraphs containing bullet /
+    numbered list markers keep their internal line breaks.
+    """
+    if not body.strip():
+        return body
+    paragraphs = re.split(r"\n\s*\n", body)
+    out = []
+    for p in paragraphs:
+        lines = [l.rstrip() for l in p.splitlines()]
+        if any(_BULLET_RE.match(l) for l in lines if l.strip()):
+            out.append("\n".join(l for l in lines))
+        else:
+            out.append(" ".join(l.strip() for l in lines if l.strip()))
+    return "\n\n".join(out)
+
+
 def apply_post_processing(parsed: dict, voice_profile: dict | None) -> dict:
     """Apply deterministic post-LLM transforms to a parsed compose result.
 
-    Currently: normalize the trailing sign-off to the voice profile's
-    canonical form when the result carries a non-empty draft.
+    Order matters: dehardwrap first (so paragraph shape is canonical),
+    then sign-off normalization (operates on the last non-blank line).
     """
     if not isinstance(parsed, dict) or parsed.get("error"):
         return parsed
@@ -433,6 +462,7 @@ def apply_post_processing(parsed: dict, voice_profile: dict | None) -> dict:
     draft = parsed.get("draft_text", "") or ""
     if not draft.strip():
         return parsed
+    draft = _dehardwrap(draft)
     signoff = ((voice_profile or {}).get("profile_signoff") or "").strip()
     if signoff:
         draft = _normalize_signoff(draft, signoff)

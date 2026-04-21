@@ -472,3 +472,99 @@ def test_prompt_no_longer_forbids_signature_block():
     # history-matching rule. We now append the signoff post-process.
     prompt = build_compose_prompt(_ctx(), _voice(), _inbound())
     assert "no signature block" not in prompt
+
+
+# --- apply_post_processing: dehardwrap ---
+
+def test_dehardwrap_collapses_wrapped_prose():
+    # LLMs love to hard-wrap at ~68 chars; Gmail renders those as visible
+    # early linebreaks. Post-process joins wrapped lines.
+    wrapped = (
+        "I'd be happy to catch up and hear more about what you're exploring --\n"
+        "and where you'd most value a perspective as you think through next\n"
+        "steps."
+    )
+    out = apply_post_processing(_parsed_with(wrapped), None)
+    assert "\n" not in out["draft_text"].rstrip(), out["draft_text"]
+
+
+def test_dehardwrap_preserves_paragraph_breaks():
+    wrapped = (
+        "Hi Jamie,\n"
+        "\n"
+        "I'm glad the frameworks have been useful, and no worries at all\n"
+        "about the missed note.\n"
+        "\n"
+        "Would Wednesday 9:30-12pm PT or Thursday 2-5pm PT work for a\n"
+        "catch-up call?"
+    )
+    out = apply_post_processing(_parsed_with(wrapped), None)
+    paragraphs = out["draft_text"].split("\n\n")
+    assert len(paragraphs) == 3
+    assert paragraphs[0] == "Hi Jamie,"
+    assert "I'm glad the frameworks have been useful, and no worries at all about the missed note." in paragraphs[1]
+    assert "Wednesday 9:30-12pm PT or Thursday 2-5pm PT" in paragraphs[2]
+
+
+def test_dehardwrap_preserves_bullet_lists():
+    wrapped = (
+        "Here are a few times that work:\n"
+        "\n"
+        "- Tuesday 10am-12pm\n"
+        "- Wednesday 2-4pm\n"
+        "- Thursday 9-11am\n"
+        "\n"
+        "Let me know which fits."
+    )
+    out = apply_post_processing(_parsed_with(wrapped), None)
+    # The bullet paragraph must keep its internal line breaks
+    assert "- Tuesday 10am-12pm\n- Wednesday 2-4pm\n- Thursday 9-11am" in out["draft_text"]
+
+
+def test_dehardwrap_preserves_numbered_lists():
+    wrapped = (
+        "Two options:\n"
+        "\n"
+        "1. Lunch Tuesday\n"
+        "2. Dinner Thursday"
+    )
+    out = apply_post_processing(_parsed_with(wrapped), None)
+    assert "1. Lunch Tuesday\n2. Dinner Thursday" in out["draft_text"]
+
+
+def test_dehardwrap_and_signoff_compose():
+    # Combined: hard-wrapped body with bare "the operator" sign-off; canonical
+    # signoff is "Best,\nBrian". After post-process, paragraphs should be
+    # unwrapped AND the signoff normalized.
+    draft = (
+        "Hi Jamie,\n"
+        "\n"
+        "Glad the frameworks have been useful, and no worries at all about\n"
+        "the missed note. Hope things have settled down.\n"
+        "\n"
+        "the operator"
+    )
+    out = apply_post_processing(
+        _parsed_with(draft),
+        {"profile_signoff": "Best,\nBrian"},
+    )
+    assert out["draft_text"].endswith("Best,\nBrian")
+    assert (
+        "Glad the frameworks have been useful, and no worries at all about "
+        "the missed note. Hope things have settled down."
+        in out["draft_text"]
+    )
+    assert out["draft_text"].count("the operator") == 1
+
+
+def test_dehardwrap_does_not_touch_single_line_paragraphs():
+    short = "Yes!"
+    out = apply_post_processing(_parsed_with(short), None)
+    assert out["draft_text"] == "Yes!"
+
+
+def test_prompt_tells_llm_not_to_hardwrap():
+    prompt = build_compose_prompt(_ctx(), _voice(), _inbound())
+    # Belt-and-suspenders: explicit prompt instruction alongside the
+    # deterministic post-process.
+    assert "hard-wrap" in prompt.lower() or "hardwrap" in prompt.lower()
