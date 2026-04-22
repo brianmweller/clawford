@@ -122,6 +122,7 @@ def build_draft_compose_cmd(
     search_window: str | None = None,
     busy_blocks: Path | None = None,
     cold_inbound: bool = False,
+    operator_hint: str | None = None,
 ) -> list[str]:
     """Assemble the draft-compose.py subprocess command. Pure: no I/O.
 
@@ -154,6 +155,8 @@ def build_draft_compose_cmd(
         cmd.extend(["--search-window", search_window])
     if busy_blocks:
         cmd.extend(["--busy-blocks", str(busy_blocks)])
+    if operator_hint and operator_hint.strip():
+        cmd.extend(["--operator-hint", operator_hint.strip()])
     return cmd
 
 
@@ -182,6 +185,7 @@ def run_draft_compose(
     search_window: str | None = None,
     busy_blocks: Path | None = None,
     cold_inbound: bool = False,
+    operator_hint: str | None = None,
 ) -> tuple[int, str, dict]:
     """Run draft-compose, capturing the parsed JSON result via --json-out.
     Returns (exit_code, stdout, parsed_result_dict)."""
@@ -198,6 +202,7 @@ def run_draft_compose(
             search_window=search_window,
             busy_blocks=busy_blocks,
             cold_inbound=cold_inbound,
+            operator_hint=operator_hint,
         )
         env = os.environ.copy()
         result = subprocess.run(cmd, capture_output=True, text=True, env=env,
@@ -352,6 +357,13 @@ def main() -> int:
                     choices=["codex", "claude-cli", "stdout"])
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--force", help="Re-process this thread ID even if logged")
+    ap.add_argument("--operator-hint", default=None,
+                    help="Operator-supplied hint for /reply: stylistic "
+                         "('make it warmer') or factual ('mention that I "
+                         "accepted') guidance passed through to the compose "
+                         "prompt. Applies to every thread in this run — most "
+                         "useful when combined with --force <tid> for a "
+                         "single-thread regenerate.")
     ap.add_argument("--max", type=int, default=5,
                     help="Cap on threads processed per run. Defaults to 5 as a safety "
                          "rail for cron invocations. Pass a larger number for manual bulk runs.")
@@ -460,6 +472,7 @@ def main() -> int:
             search_window=search_window,
             busy_blocks=busy_blocks_path,
             cold_inbound=is_cold,
+            operator_hint=args.operator_hint,
         )
 
         reply_needed = parsed.get("reply_needed") if parsed else None

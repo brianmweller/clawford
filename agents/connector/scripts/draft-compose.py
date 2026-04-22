@@ -175,6 +175,12 @@ def main() -> int:
     ap.add_argument("--gmail-creds", default="~/.clawford/connector-workspace/credentials.json")
     ap.add_argument("--no-create-draft", action="store_true",
                     help="Run full pipeline (fetch + LLM) but SKIP the Gmail drafts().create() step — simulation only")
+    ap.add_argument("--operator-hint", default=None,
+                    help="Operator-supplied hint injected at the top of the "
+                         "compose prompt — overrides conflicting defaults. "
+                         "Use for 'make it warmer', 'mention that I've already "
+                         "accepted', 'shorter, please'. Either stylistic or "
+                         "factual; both are treated as authoritative.")
     ap.add_argument("--json-out", type=Path, help="Write full parsed result + metadata to this path as JSON")
     ap.add_argument("--print-prompt-only", action="store_true")
     ap.add_argument("--llm-backend", default="codex",
@@ -306,6 +312,7 @@ def main() -> int:
         availability_slots=availability_slots,
         cold_inbound=args.cold_inbound,
         self_profile=self_profile_dict,
+        operator_hint=args.operator_hint,
     )
 
     print("=" * 72)

@@ -261,6 +261,40 @@ def test_cold_inbound_parser_tolerates_missing_compelling_angle():
     assert parsed["draft_text"].startswith("Appreciate")
 
 
+def test_prompt_operator_hint_injected_at_top_with_override_framing():
+    """When operator_hint is passed, the compose prompt must carry an
+    OPERATOR HINT block at the TOP (before the 5-step reasoning) and
+    explicitly frame the hint as overriding voice / history / brain
+    defaults. Hint wording must appear verbatim."""
+    hint = "regenerate — two sentences shorter, drop the scope questions"
+    prompt = build_compose_prompt(
+        _ctx(), _voice(), _inbound(),
+        operator_hint=hint,
+    )
+    assert "OPERATOR HINT" in prompt
+    assert hint in prompt
+    # Must precede the 5-step reasoning
+    hint_pos = prompt.index("OPERATOR HINT")
+    obj_pos = prompt.index("OBJECTIVE")
+    assert hint_pos < obj_pos, "hint must be at the top, before reasoning"
+    # Authoritative-override framing must be explicit
+    assert "overrides" in prompt.lower() or "override" in prompt.lower()
+
+
+def test_prompt_no_operator_hint_block_when_hint_absent():
+    prompt = build_compose_prompt(_ctx(), _voice(), _inbound())
+    assert "OPERATOR HINT" not in prompt
+
+
+def test_prompt_operator_hint_empty_string_does_not_inject_block():
+    """Passing an empty/whitespace hint must behave identically to
+    omitting it — no OPERATOR HINT block in the prompt."""
+    prompt = build_compose_prompt(
+        _ctx(), _voice(), _inbound(), operator_hint="   ",
+    )
+    assert "OPERATOR HINT" not in prompt
+
+
 def test_prompt_cold_inbound_without_profile_still_builds():
     """If SELF CONTEXT data is missing (profile hasn't been synthesized
     yet), the prompt should still render a valid fit-check structure

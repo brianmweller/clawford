@@ -365,7 +365,7 @@ def force_prep(meeting_id: str) -> dict:
 _WORKFLOWY_SYNC = str(_SCRIPTS_DIR / "workflowy-sync.py")
 
 
-def push_meeting_prep_to_workflowy(meeting_id: str) -> dict:
+def prep_meeting(meeting_id: str) -> dict:
     """Push the professional-prep block for a specific meeting to
     Workflowy. Creates/finds the meeting node under the operator's
     Notes workspace and adds labeled sections (Framing, Recipient
@@ -676,7 +676,7 @@ TOOLS: list[dict] = [
     },
     {
         "type": "function",
-        "name": "push_meeting_prep_to_workflowy",
+        "name": "prep_meeting",
         "description": (
             "For a specific professional meeting (recruiter screen, "
             "hiring manager, interview), push the 8-field prep "
@@ -686,8 +686,9 @@ TOOLS: list[dict] = [
             "node if it doesn't exist yet (anchored under top-level "
             "'Notes > <year> > <month> > <date>'). Idempotent — "
             "re-running skips any agenda section that already exists. "
-            "Use when the operator says 'push the prep to Workflowy for [meeting]' "
-            "or similar. For general (non-professional) meetings this "
+            "Use when the operator says '/prep-meeting <id>', 'prep me for "
+            "this meeting', or 'push the prep to Workflowy for "
+            "<meeting>'. For general (non-professional) meetings this "
             "returns status=skipped; prep belongs only on "
             "recruiter/hiring meetings."
         ),
@@ -801,7 +802,7 @@ EXECUTORS: dict = {
     "dismiss_debrief": dismiss_debrief,
     "replace_action_items": replace_action_items,
     "force_prep": force_prep,
-    "push_meeting_prep_to_workflowy": push_meeting_prep_to_workflowy,
+    "prep_meeting": prep_meeting,
     "force_debrief": force_debrief,
     "propose_coaching_toggle": propose_coaching_toggle,
     "confirm_coaching_toggle": confirm_coaching_toggle,

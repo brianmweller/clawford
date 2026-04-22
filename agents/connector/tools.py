@@ -470,15 +470,28 @@ TOOLS: list[dict] = [
         "type": "function",
         "name": "reply_to_thread",
         "description": (
-            "Draft a reply for a specific Gmail thread on demand. Runs "
-            "the same triage + compose pipeline as the auto-compose "
-            "cron (handles both known senders and cold-recruiter "
-            "inbounds, produces a staged Gmail draft) — but forces "
-            "immediate processing instead of waiting for the half-hour "
-            "cron tick. Use when the operator says '/reply <thread_id>' or "
-            "'draft a reply to that thread now' or 'compose something "
-            "for <thread_id>'. Returns the triage classification + the "
-            "compose result including gmail_draft_id."
+            "Regenerate a reply for a specific Gmail thread with an "
+            "optional operator hint that steers the draft. This is the "
+            "iterative-feedback path alongside the autonomous half-hour "
+            "auto-compose cron: the cron writes a draft every tick, "
+            "this tool lets the operator shape it with real-time context the "
+            "cron can't know.\n"
+            "\n"
+            "Use the `hint` param for:\n"
+            "  - stylistic override: 'make it warmer', 'two sentences "
+            "shorter', 'drop the scope questions'\n"
+            "  - factual context: 'mention I already accepted the "
+            "offer', 'flag that I'm traveling next week', 'the hiring "
+            "manager followed up separately, reference that'\n"
+            "\n"
+            "Both kinds of hint land as authoritative overrides at the "
+            "top of the compose prompt — they take precedence over "
+            "voice anchors, history, and any conflicting brain facts.\n"
+            "\n"
+            "Called without a hint, it's the 'compose now, don't wait "
+            "for the cron' path. Called with a hint, it's the "
+            "'regenerate with this' iteration path. Produces a new "
+            "Gmail draft either way."
         ),
         "parameters": {
             "type": "object",
@@ -486,6 +499,14 @@ TOOLS: list[dict] = [
                 "thread_id": {
                     "type": "string",
                     "description": "Gmail thread ID to reply to",
+                },
+                "hint": {
+                    "type": "string",
+                    "description": (
+                        "Optional operator hint — stylistic or factual "
+                        "guidance. Injected at the top of the compose "
+                        "prompt as an authoritative override."
+                    ),
                 },
             },
             "required": ["thread_id"],
@@ -769,20 +790,38 @@ def promote_recruiter_by_thread_id(thread_id: str) -> dict:
     return _handle_recruiter_callback("promote", thread_id)
 
 
-def reply_to_thread(thread_id: str) -> dict:
-    """Operator-invoked draft composition for a specific Gmail thread.
-    Runs the same pipeline the auto-compose cron does — single-thread
-    triage (adds the thread to the queue + classifies known/cold), then
-    forces a compose on that thread (bypassing the processed-log skip).
-    Produces a Gmail draft the operator can open + send.
+def reply_to_thread(thread_id: str, hint: str | None = None) -> dict:
+    """Operator-invoked draft composition for a specific Gmail thread,
+    with an optional operator hint that steers the compose prompt.
 
-    Use when the operator says '/reply <thread_id>' or 'draft a reply to that
-    thread now' — i.e., he doesn't want to wait for the half-hour
-    auto-compose cron tick.
+    The hint is the main reason this tool exists alongside the
+    auto-compose cron — the cron produces an autonomous draft every
+    half hour, but it can't take iterative feedback. The hint path
+    lets the operator shape the draft with either:
+
+      - stylistic guidance: 'make it warmer', 'two sentences shorter',
+        'drop the scope questions'
+      - factual context: 'mention that I already accepted the offer',
+        'flag that I'm traveling next week', 'I heard back from the
+        hiring manager, reference that'
+
+    Both kinds of hint are injected at the top of the compose prompt
+    as authoritative overrides — they take precedence over voice
+    anchors, history defaults, and any conflicting brain facts.
+
+    Runs the same pipeline the cron does under the hood: single-thread
+    triage (classifies known vs cold) + forced compose (bypasses
+    processed-log skip). Produces a new Gmail draft.
+
+    Use when the operator says '/reply <thread_id> <hint>' or 'regenerate
+    that draft but shorter' or 'redo the reply, mention that I heard
+    back'. Called with no hint, it's still useful for 'compose now,
+    don't wait for the cron'.
     """
     tid = (thread_id or "").strip()
     if not tid:
         return {"status": "error", "error": "thread_id is required"}
+    hint_str = (hint or "").strip() or None
 
     scripts_dir = Path(__file__).parent / "scripts"
     inbox_triage = str(scripts_dir / "inbox-triage.py")
@@ -797,9 +836,13 @@ def reply_to_thread(thread_id: str) -> dict:
         return {"status": "error", "stage": "triage",
                 "error": triage.get("__error__", "triage script error")}
 
-    # Step 2: force compose on that specific thread.
+    # Step 2: force compose on that specific thread, threading the
+    # operator hint through if present.
+    compose_args = [auto_compose, "--force", tid, "--max", "1"]
+    if hint_str:
+        compose_args.extend(["--operator-hint", hint_str])
     compose = subprocess_helpers.run_json_script(
-        auto_compose, "--force", tid, "--max", "1", timeout=180,
+        *compose_args, timeout=180,
     )
     if subprocess_helpers.is_subprocess_error(compose):
         return {"status": "error", "stage": "compose",
@@ -809,6 +852,7 @@ def reply_to_thread(thread_id: str) -> dict:
     return {
         "status": "ok",
         "thread_id": tid,
+        "hint_applied": bool(hint_str),
         "triage_classification": triage.get("classification"),
         "compose": compose,
     }

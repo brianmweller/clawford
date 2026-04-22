@@ -203,6 +203,7 @@ def build_compose_prompt(
     *,
     cold_inbound: bool = False,
     self_profile: dict | None = None,
+    operator_hint: str | None = None,
 ) -> str:
     person = context.recipient_person
     name = person.get("full_name") or person.get("slug", "them")
@@ -287,7 +288,28 @@ def build_compose_prompt(
             "      succession and reads as generated.\n"
         )
 
-    return f"""You are drafting an email reply on the operator's behalf. Do NOT send it — the operator will review.
+    # Operator hint block — when the operator manually invokes /reply with a
+    # hint ("make it warmer", "he already accepted, mention that I'm
+    # pausing the search", "2 sentences shorter"), the hint is appended
+    # to the USER prompt at the top so it takes precedence over the
+    # voice / history / brain defaults. The hint may carry either
+    # stylistic guidance OR factual context the brain doesn't have yet;
+    # either way, treat it as authoritative ground truth for this draft.
+    operator_hint_block = ""
+    if operator_hint and operator_hint.strip():
+        operator_hint_block = (
+            "OPERATOR HINT (load-bearing — applies to THIS draft only, "
+            "overrides conflicting defaults from voice / history / brain):\n"
+            f"  {operator_hint.strip()}\n\n"
+            "If the hint adds factual context (dates, decisions, status "
+            "updates), treat it as more recent than anything in the brain "
+            "and weave it into the draft accordingly. If the hint is "
+            "stylistic (shorter, warmer, less formal), apply it to the "
+            "final draft_text AND to the reasoning that produces it — "
+            "don't just append a cosmetic pass at the end.\n\n"
+        )
+
+    return f"""{operator_hint_block}You are drafting an email reply on the operator's behalf. Do NOT send it — the operator will review.
 
 Not every inbound deserves a reply, and a draft without an explicit
 objective is a pleasantry, not a reply. A draft without identified

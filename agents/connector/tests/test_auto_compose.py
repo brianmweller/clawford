@@ -66,6 +66,42 @@ def test_recruiter_markup_returns_none_without_thread_id():
     assert auto_compose._build_recruiter_markup(parsed) is None
 
 
+# --- operator_hint threading ---
+
+def test_build_cmd_includes_operator_hint_when_provided():
+    cmd = auto_compose.build_draft_compose_cmd(
+        thread_id="tid-1",
+        slug="jamie-fitzgerald",
+        llm_backend="codex",
+        json_out=Path("/tmp/out.json"),
+        operator_hint="make it warmer",
+    )
+    assert "--operator-hint" in cmd
+    idx = cmd.index("--operator-hint")
+    assert cmd[idx + 1] == "make it warmer"
+
+
+def test_build_cmd_omits_operator_hint_flag_when_none():
+    cmd = auto_compose.build_draft_compose_cmd(
+        thread_id="tid-1",
+        slug="jamie-fitzgerald",
+        llm_backend="codex",
+        json_out=Path("/tmp/out.json"),
+    )
+    assert "--operator-hint" not in cmd
+
+
+def test_build_cmd_omits_operator_hint_flag_when_empty():
+    cmd = auto_compose.build_draft_compose_cmd(
+        thread_id="tid-1",
+        slug="jamie-fitzgerald",
+        llm_backend="codex",
+        json_out=Path("/tmp/out.json"),
+        operator_hint="   ",
+    )
+    assert "--operator-hint" not in cmd
+
+
 # --- build_draft_compose_cmd ---
 
 def test_build_cmd_includes_required_args():
