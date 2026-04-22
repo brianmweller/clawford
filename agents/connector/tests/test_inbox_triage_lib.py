@@ -166,6 +166,35 @@ def test_thread_with_unknown_non_recruiter_unknown_stays_skipped():
     assert result["status"] == "skipped_unknown_sender"
 
 
+def test_rejected_recruiter_short_circuits_before_detector():
+    """Once the operator has tapped 🚫 Not a fit on a prior cold-recruiter FYI,
+    future inbounds from the same sender return skipped_rejected_recruiter
+    and never reach the detector."""
+    thread = _thread("t1", [
+        _message("no-reply@greenhouse-mail.io", "Tue, 15 Apr 2026 10:00:00 -0700",
+                 subject="Opportunity — Director of Data Science at Stripe",
+                 body_snippet="Hi the operator, reaching out..."),
+    ])
+    result = classify_thread_for_triage(
+        thread, operator_emails=BRIAN_ADDRESSES, email_to_slug={},
+        rejected_recruiters={"no-reply@greenhouse-mail.io"},
+    )
+    assert result["status"] == "skipped_rejected_recruiter"
+
+
+def test_rejected_recruiters_default_none_unchanged_behavior():
+    """Omitting rejected_recruiters must not change existing classification."""
+    thread = _thread("t1", [
+        _message("no-reply@greenhouse-mail.io", "Tue, 15 Apr 2026 10:00:00 -0700",
+                 subject="Opportunity — Director of Data Science",
+                 body_snippet="Reaching out about a role..."),
+    ])
+    result = classify_thread_for_triage(
+        thread, operator_emails=BRIAN_ADDRESSES, email_to_slug={},
+    )
+    assert result["status"] == "queued_cold_recruiter"
+
+
 def test_linkedin_inmail_with_exec_role_subject_queued_cold():
     """Ambiguous LinkedIn messages-noreply + exec-outreach subject → cold recruiter."""
     thread = _thread("t1", [

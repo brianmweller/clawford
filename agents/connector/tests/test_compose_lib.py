@@ -184,6 +184,83 @@ def test_prompt_warm_inbound_omits_self_context():
     assert "FIT CHECK" not in prompt
 
 
+def test_prompt_cold_inbound_carries_schedule_plus_filter_directive():
+    """The email's job is SCHEDULE + FILTER, not demonstrate fit. The
+    prompt must (a) name compelling_angle as the one load-bearing filter
+    signal, (b) explicitly forbid fit-pitch content, and (c) frame the
+    power dynamic (the operator is being pitched, not auditioning)."""
+    prompt = build_compose_prompt(
+        _ctx(), _voice(), _inbound(),
+        cold_inbound=True, self_profile=_self_profile(),
+    )
+    assert "MUST-CARRY" in prompt.upper()
+    assert "COMPELLING ANGLE" in prompt
+    assert "SCHEDULE" in prompt.upper()
+    # Explicit anti-pitch directive — the email does NOT demonstrate fit.
+    assert "DO NOT" in prompt.upper()
+    assert ("fit-pitch" in prompt.lower() or "pitch fit" in prompt.lower()
+            or "pitching fit" in prompt.lower())
+    # Power-dynamic framing — being pitched, not auditioning.
+    assert "pitch" in prompt.lower() and ("courted" in prompt.lower()
+            or "not auditioning" in prompt.lower() or "low-status" in prompt.lower())
+    # compelling_angle is in the schema, fit_signal is NOT.
+    assert '"compelling_angle"' in prompt
+    assert '"fit_signal"' not in prompt
+
+
+def test_cold_inbound_parser_preserves_compelling_angle():
+    """parse_compose_result must carry compelling_angle through to the
+    output dict for cold inbounds so Telegram FYI can surface it."""
+    from compose_lib import parse_compose_result
+    sample = {
+        "fit_assessment": {
+            "tier": "B", "domain_fit": "strong", "level_fit": "moderate",
+            "function_fit": "strong", "target_company_match": "",
+            "rationale": "strong domain + function, moderate level",
+        },
+        "reply_needed": True,
+        "objective": "Get the call on the calendar; surface honest filter.",
+        "current_state_and_gap": "They have LinkedIn; they don't know current status.",
+        "compelling_angle": "community-flywheel shape isn't something I see often",
+        "leverage": "Already-warm ask; respond in kind with engagement + angle.",
+        "strategy": "Take the call; propose two times.",
+        "recipient_model": "She needs yes/no + filter signal; fit comes on the call.",
+        "draft_text": "Engagement + angle + times.",
+        "no_reply_fyi": "",
+        "reasoning_summary": "B-tier / took the call",
+        "cited_fact_ids": [],
+    }
+    import json as _json
+    parsed = parse_compose_result(_json.dumps(sample), shareable_ids=set())
+    assert "community-flywheel" in parsed["compelling_angle"]
+    assert parsed["fit_assessment"]["tier"] == "B"
+    # fit_signal is deliberately NOT a schema field anymore.
+    assert "fit_signal" not in parsed
+
+
+def test_cold_inbound_parser_tolerates_missing_compelling_angle():
+    """For decline-fit tiers the LLM may legitimately omit
+    compelling_angle — parser must not reject."""
+    from compose_lib import parse_compose_result
+    sample = {
+        "fit_assessment": {"tier": "not_a_target", "rationale": "out of scope"},
+        "reply_needed": True,
+        "objective": "Preserve relationship.",
+        "current_state_and_gap": "They don't know the operator declines politely.",
+        "leverage": "No engagement required.",
+        "strategy": "Polite decline citing scope.",
+        "recipient_model": "They need a clean no.",
+        "draft_text": "Appreciate you thinking of me — not the right fit.",
+        "no_reply_fyi": "",
+        "reasoning_summary": "not_a_target / decline",
+        "cited_fact_ids": [],
+    }
+    import json as _json
+    parsed = parse_compose_result(_json.dumps(sample), shareable_ids=set())
+    assert "error" not in parsed
+    assert parsed["draft_text"].startswith("Appreciate")
+
+
 def test_prompt_cold_inbound_without_profile_still_builds():
     """If SELF CONTEXT data is missing (profile hasn't been synthesized
     yet), the prompt should still render a valid fit-check structure

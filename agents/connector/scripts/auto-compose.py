@@ -239,6 +239,7 @@ def _format_telegram(parsed: dict) -> str | None:
         draft_id = parsed.get("gmail_draft_id") or "?"
         objective = (parsed.get("objective") or "").strip()
         strategy = (parsed.get("strategy") or "").strip()
+        compelling = (parsed.get("compelling_angle") or "").strip()
         header = f"📧 Draft ready for {name}"
         fit_line = ""
         if fit_tier:
@@ -246,6 +247,12 @@ def _format_telegram(parsed: dict) -> str | None:
                           "not_a_target": "🔴", "unclear": "⚪"}.get(fit_tier, "⚪")
             target_suffix = f" (matches {matched_target})" if matched_target else ""
             fit_line = f"\nFit: {tier_emoji} {fit_tier}-tier{target_suffix} — {fit_rationale}"
+        # Cold-inbound angle line — the honest "why listening now"
+        # filter signal. Only renders when populated; decline-fit tiers
+        # legitimately omit it.
+        hook_lines = ""
+        if compelling:
+            hook_lines += f"\nAngle: {compelling}"
         # Surface the second-pass redundancy prune count so the operator can
         # eyeball whether the pruner is cutting too aggressively. Only
         # appears when sentences were actually removed.
@@ -265,7 +272,8 @@ def _format_telegram(parsed: dict) -> str | None:
             redundancy_line = f"\nTrimmed: {removed_count} sentence{'s' if removed_count != 1 else ''} ({src_label})"
         return (
             f"{header}"
-            f"{fit_line}\n"
+            f"{fit_line}"
+            f"{hook_lines}\n"
             f"Subject: {subject}\n"
             f"Objective: {objective}\n"
             f"Strategy: {strategy}"

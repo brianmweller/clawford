@@ -656,6 +656,89 @@ def _handle_facts_callback(
         )
 
 
+# recruiter:<action>:<thread_id> — Huckle Cat cold-recruiter buttons
+# on auto-compose FYI messages. Promote converts the ephemeral stub
+# into a real people file so Murphy can find the contact next week and
+# future inbounds route as `queued` (known). Reject records the sender
+# so future messages short-circuit to skipped_rejected_recruiter.
+_RECRUITER_TOAST = {
+    "promote": "✅ Promoting...",
+    "reject": "\U0001f6ab Rejected",
+}
+
+
+def _handle_recruiter_callback(
+    cfg: AgentConfig, chat_id: str,
+    action: str, arg: str, cbq_id: str,
+) -> None:
+    """Route a recruiter:* callback to the connector's
+    handle_recruiter_callback executor."""
+    telegram_api.answer_callback_query(
+        cfg.token, cbq_id, text=_RECRUITER_TOAST.get(action, "Noted"),
+    )
+    executor = cfg.executors.get("handle_recruiter_callback")
+    if executor is None:
+        log.warning("no handle_recruiter_callback executor on %s", cfg.agent_id)
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            f"No handler for recruiter:{action}.",
+            skip_review=True,
+        )
+        return
+    try:
+        result = executor(action=action, arg=arg)
+    except Exception as exc:
+        log.warning("handle_recruiter_callback failed: %s", exc)
+        telegram_api.send_message(
+            cfg.token, chat_id, f"Failed: {exc}",
+            skip_review=True,
+        )
+        return
+    if not isinstance(result, dict):
+        return
+    status = result.get("status", "ok")
+    if status == "ok" and action == "promote":
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            f"✅ Promoted {result.get('name', result.get('slug', ''))} — "
+            f"slug `{result.get('slug', '')}`. Future inbounds from this sender "
+            f"will route as known.",
+            skip_review=True,
+        )
+    elif status == "ok" and action == "reject":
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            f"\U0001f6ab Rejected — future inbounds from "
+            f"`{result.get('from_email', '')}` will be skipped.",
+            skip_review=True,
+        )
+    elif status == "already_promoted":
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            f"Already promoted (slug `{result.get('slug', '')}`).",
+            skip_review=True,
+        )
+    elif status == "already_rejected":
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            "Already rejected.",
+            skip_review=True,
+        )
+    elif status == "not_found":
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            f"Thread not found in current triage queue ({action}). "
+            f"The queue entry may have aged out of the polling window.",
+            skip_review=True,
+        )
+    elif status == "error":
+        telegram_api.send_message(
+            cfg.token, chat_id,
+            f"Failed: {result.get('detail', 'unknown')}",
+            skip_review=True,
+        )
+
+
 # debrief_{save,dismiss}:<event_id> — Sergeant Murphy post-meeting
 # buttons. Save appends action items to commitments/active.md; Dismiss
 # deletes the pending file. 'See more' is a native Telegram URL button
@@ -789,6 +872,15 @@ def _try_callback_shortcut(
         if len(parts) >= 3:
             _, action, arg = parts
             _handle_facts_callback(cfg, chat_id, action, arg, cbq_id)
+            return True
+
+    # Cold-recruiter promote/reject buttons (Huckle Cat):
+    # recruiter:<action>:<thread_id>
+    if data.startswith("recruiter:"):
+        parts = data.split(":", 2)
+        if len(parts) >= 3:
+            _, action, arg = parts
+            _handle_recruiter_callback(cfg, chat_id, action, arg, cbq_id)
             return True
 
     return False

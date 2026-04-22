@@ -50,12 +50,13 @@ Respond with a JSON object with EXACTLY these fields, in this order:
     "rationale":    "<two–three sentences. Name the specific domain / level / function signals that drove the tier. Cite evidence from SELF CONTEXT. Do NOT just say 'company is/isn't in target_companies' — explain the underlying fit.>"
   },
   "reply_needed":           true,
-  "objective":              "<for interesting opportunities (A/B): 'accept the call and secure a time'. For decline-fit: 'preserve relationship'. For unclear: 'get one clarifying signal'.>",
-  "current_state_and_gap":  "<two–three sentences; avoid over-qualifying>",
-  "leverage":               "<two–three sentences; how the operator positions his background in one or two lines>",
-  "strategy":               "<two–three sentences. For A/B (interesting): TAKE THE CALL — propose specific times; do NOT load the email with scope questions. For decline-fit: polite one-line decline citing scope/timing not brand. For unclear: ONE specific clarifying question, nothing more.>",
-  "recipient_model":        "<as usual — recruiters want to feel you read their pitch and respect their time>",
-  "draft_text":             "<3-5 sentences for most tiers. Short. No monologue. Match the operator's voice (from recruiter voice profile). No corporate hedge phrases.>",
+  "objective":              "<for A/B: 'get the call on the calendar and surface honest filter signal'. The email's job is to SCHEDULE, not to pitch fit — Michelle already did the fit-pattern-matching or she wouldn't be reaching out. For decline-fit: 'preserve relationship'. For unclear: 'get one clarifying signal'.>",
+  "current_state_and_gap":  "<two–three sentences. The recruiter has the operator's LinkedIn (background) and has already made a fit hypothesis. What she does NOT know is his current status, what would make him prioritize this over other options, and whether to schedule. The reply closes THAT gap — not a fit-pitch gap.>",
+  "compelling_angle":       "<one phrase (not a sentence) — the honest 'why this role, why listening now' hook. This is FILTER signal for the recruiter, not a pitch: it tells her what the operator is responding to and what he's gated on, so she can decide whether to keep selling or reframe. If the operator is late-stage elsewhere, say what specifically about this shape pulls him anyway. No boilerplate enthusiasm. Example: 'the community-flywheel shape isn't a problem shape I see often' — not 'excited about the opportunity'. For decline-fit, leave empty.>",
+  "leverage":               "<two–three sentences. For A/B: the ask is already warm — Michelle pitched specifically, not blasted. The leverage is responding in kind: engage with ONE element of her pitch + surface the compelling_angle + propose times. Do NOT pitch fit back at her — she did the fit-matching work. For decline-fit: what preserves the relationship without brand criticism.>",
+  "strategy":               "<two–three sentences. For A/B (interesting): TAKE THE CALL — propose specific times; weave compelling_angle into the draft as honest filter signal. Do NOT load the email with scope questions. Do NOT pitch the operator's credentials / fit — the recruiter already did that work; restating it inverts the power dynamic (the operator is being pitched, not auditioning). For decline-fit: polite one-line decline citing scope/timing not brand. For unclear: ONE specific clarifying question, nothing more.>",
+  "recipient_model":        "<two–three sentences. (1) TASK: the recruiter needs a clean yes/no on whether the operator wants the call + concrete availability. (2) FILTER SIGNAL: she wants to know what the operator is responding to so she can decide how to use the 30 minutes — keep selling, reframe, or qualify out. She does NOT need a fit-pitch in the email; she's already made her fit hypothesis. The call is where fit gets demonstrated.>",
+  "draft_text":             "<3-5 sentences for A/B. MUST carry: (1) engagement with ONE specific element of their pitch (not three — LLM-parallelism tell), (2) compelling_angle hook — honest 'why listening now' woven in as filter signal (one phrase), (3) concrete availability (two time windows). Do NOT include a fit-pitch / credentials restatement — that belongs on the call. Three beats: engage, angle, schedule. Short. No monologue. Match the operator's voice (from recruiter voice profile). No corporate hedge phrases.>",
   "no_reply_fyi":           "",
   "reasoning_summary":      "<one sentence leading with tier + fit dimensions: 'B-tier / Reddit Sr Dir / strong domain+level+function / took the call'>",
   "cited_fact_ids":         ["<fact id>", ...]
@@ -578,6 +579,42 @@ TASK
     "for next, or his current status. The reply's leverage is showing "
     "the operator engaged with THEIR pitch and is serious about this specific "
     "role.\n\n"
+    "POWER DYNAMIC — THE EMAIL IS SCHEDULING, NOT PITCHING:\n\n"
+    "  The recruiter is reaching out to the operator, not the other way around. "
+    "She has already read his LinkedIn, already made a fit hypothesis, "
+    "and is pitching HIM on the role. That matters for the voice:\n\n"
+    "    - the operator is being courted, not auditioning. A reply that pitches "
+    "fit inverts that — it reads as low-status and signals over-eagerness. "
+    "It also pre-commits the operator to a framing before he's heard the role "
+    "details, narrowing his own scope pre-screen.\n"
+    "    - The recruiter does NOT need advocate-ready evidence from the "
+    "email. She gets that from the 30-minute call. The email gets the "
+    "call on the calendar.\n"
+    "    - Therefore: DO NOT include a fit-pitch / credentials "
+    "restatement / 'here's why I'm a match' line. The recruiter has "
+    "LinkedIn; pitching fit back at her is redundant and low-status.\n\n"
+    "MUST-CARRY CONTENT (the email has ONE job — get the call on the "
+    "calendar — but carries one load-bearing filter signal alongside):\n\n"
+    "  The email's job is SCHEDULE + FILTER. The CALL is where fit gets "
+    "demonstrated and evaluated. Two different media, two different roles.\n\n"
+    "  The draft carries THREE beats:\n\n"
+    "    1. ENGAGEMENT — one specific element of her pitch that caught "
+    "the operator's eye. Not three (LLM-parallelism tell). Show the operator read the "
+    "note.\n\n"
+    "    2. COMPELLING ANGLE — one honest 'why listening now' phrase. "
+    "This is FILTER signal for the recruiter, not a pitch: it tells her "
+    "what the operator is responding to so she can decide whether to keep "
+    "selling, reframe, or qualify him out. If the operator is late-stage with "
+    "other companies (check SELF CONTEXT ACTIVE PIPELINE), the angle "
+    "should acknowledge that reality honestly. Avoid boilerplate "
+    "('excited about the opportunity,' 'intrigued'). Example: 'the "
+    "community-flywheel shape isn't a problem shape I see often' or "
+    "'AI safety at frontier-lab scale is a natural extension of where "
+    "I've been pointed.'\n\n"
+    "    3. CONCRETE AVAILABILITY — two specific time windows. The "
+    "scheduling move is the whole point.\n\n"
+    "  Three beats, not three paragraphs. Fit demonstration happens on "
+    "the CALL — do NOT sneak a fit-pitch in as a fourth beat.\n\n"
     "DO NOT RESTATE INFORMATION THE RECRUITER ALREADY PROVIDED:\n"
     "  - They told you the role title (Senior Director / Head of X / "
     "VP). Don't write 'the Senior Director role' in your reply — they "
@@ -732,6 +769,15 @@ def parse_compose_result(llm_text: str, shareable_ids: set[str]) -> dict:
             "rationale": str(fit.get("rationale", "")),
             "matched_target": str(fit.get("matched_target", "")),
         }
+
+    # Cold-inbound path: preserve compelling_angle — the honest "why
+    # listening now" filter signal the reply carries. Email's job is
+    # schedule + filter, not pitch, so fit_signal is deliberately NOT
+    # part of the schema (that's the call's job). Missing or empty is
+    # acceptable for decline-fit / unclear tiers.
+    compelling_angle = parsed.get("compelling_angle")
+    if isinstance(compelling_angle, str):
+        out["compelling_angle"] = compelling_angle.strip()
 
     return out
 

@@ -128,6 +128,98 @@ def test_format_brief_surfaces_open_commitments(
     assert body.count("Open with") == 1
 
 
+def test_format_brief_renders_professional_prep_when_meeting_type_set(
+    mod, gcal_today, tuesday_pacific
+):
+    """A meeting with meeting_type='recruiter-screen' and llm_prep should
+    render the professional block instead of (or alongside) the generic
+    commit summary."""
+    prep = {
+        "meetings": [{
+            "meeting_id": "evt-today-1",
+            "meeting_type": "recruiter-screen",
+            "self_context": {
+                "target_company": {"company": "Anthropic", "tier_company": "A"},
+                "active_pipeline_stage": {"stage": "hiring-manager"},
+            },
+            "llm_prep": {
+                "prep_summary": "First recruiter screen with a frontier AI lab.",
+                "recipient_model": "Michelle needs to advance the operator to hiring manager.",
+                "objective": "Evaluate match + pitch fit if it clears the bar.",
+                "fit_pitch": "Led marketplace causal-science orgs across Example Corp and LinkedIn.",
+                "compelling_angle": "AI safety + large-scale inference is a natural extension.",
+                "fit_evidence": [
+                    "Shipped marketplace-scale causal systems at prior role",
+                    "Authored FLEX operating model at LinkedIn",
+                    "Decade of experience owning exec-adjacent levers",
+                ],
+                "evaluation_questions": [
+                    "What's the team's current roadmap priority?",
+                    "How does the role interact with Anthropic's safety org?",
+                    "What's the expected scope for the first 90 days?",
+                ],
+                "red_flags": ["Unclear reporting line in the inbound"],
+            },
+            "context": {},
+        }],
+    }
+    prep_lookup = {"evt-today-1": prep}
+    body = mod.format_brief(gcal_today["events"], None, prep_lookup, tuesday_pacific)
+    assert "recruiter-screen" in body
+    assert "Anthropic" in body
+    assert "hiring-manager" in body
+    assert "First recruiter screen" in body
+    assert "Michelle needs" in body
+    assert "Evaluate match" in body
+    assert "marketplace causal-science" in body
+    assert "AI safety" in body
+    assert "safety org" in body
+    assert "FLEX operating model" in body
+    assert "reporting line" in body
+
+
+def test_format_brief_general_meeting_keeps_existing_shape(
+    mod, gcal_today, tuesday_pacific
+):
+    """meeting_type='general' (or missing) → no professional block rendered."""
+    prep = {
+        "meetings": [{
+            "meeting_id": "evt-today-1",
+            "meeting_type": "general",
+            "context": {"commitments": []},
+        }],
+    }
+    body = mod.format_brief(
+        gcal_today["events"], None, {"evt-today-1": prep}, tuesday_pacific,
+    )
+    assert "recruiter-screen" not in body
+    assert "Ask:" not in body
+    assert "Red flags" not in body
+
+
+def test_format_brief_falls_through_to_header_only_on_llm_prep_error(
+    mod, gcal_today, tuesday_pacific
+):
+    """When llm_prep has an 'error' key, render the header + self_context
+    only (no Ask/Surface/Red flags) and let the generic commit summary
+    (if any) render below."""
+    prep = {
+        "meetings": [{
+            "meeting_id": "evt-today-1",
+            "meeting_type": "recruiter-screen",
+            "self_context": {"target_company": None, "active_pipeline_stage": None},
+            "llm_prep": {"error": "timeout"},
+            "context": {"commitments": []},
+        }],
+    }
+    body = mod.format_brief(
+        gcal_today["events"], None, {"evt-today-1": prep}, tuesday_pacific,
+    )
+    assert "recruiter-screen" in body
+    assert "Ask:" not in body
+    assert "Surface:" not in body
+
+
 def test_format_brief_tomorrow_preview(mod, gcal_today, tuesday_pacific):
     body = mod.format_brief(gcal_today["events"], None, {}, tuesday_pacific)
     assert "TOMORROW PREVIEW" in body

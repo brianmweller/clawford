@@ -85,15 +85,63 @@ def filter_upcoming(events: list, now_utc: datetime) -> list:
     return upcoming
 
 
-def _open_commitments_from_prep(prep: dict) -> list:
+def _meeting_result(prep: dict) -> dict | None:
     if not isinstance(prep, dict):
-        return []
+        return None
     meetings = prep.get("meetings") or []
     if not meetings:
+        return None
+    m = meetings[0]
+    return m if isinstance(m, dict) else None
+
+
+def _open_commitments_from_prep(prep: dict) -> list:
+    m = _meeting_result(prep)
+    if m is None:
         return []
-    ctx = (meetings[0] or {}).get("context") or {}
+    ctx = m.get("context") or {}
     commitments = ctx.get("commitments") or []
     return [c for c in commitments if c.get("status") in ("open", "overdue")]
+
+
+def _professional_compact_lines(prep: dict) -> list[str]:
+    """Compact professional-meeting prep block for the 15-min alert:
+    one header line + one question + one talking point. Returns [] when
+    the meeting isn't professional or llm_prep has an error."""
+    m = _meeting_result(prep)
+    if m is None:
+        return []
+    meeting_type = m.get("meeting_type", "general")
+    if meeting_type == "general":
+        return []
+
+    lines: list[str] = []
+    target = (m.get("self_context") or {}).get("target_company")
+    stage = (m.get("self_context") or {}).get("active_pipeline_stage")
+    header = f"\U0001f4bc {meeting_type}"
+    if isinstance(target, dict) and target.get("company"):
+        header += f" · target {target['company']}"
+    if isinstance(stage, dict) and stage.get("stage"):
+        header += f" · pipeline {stage['stage']}"
+    lines.append(header)
+
+    llm_prep = m.get("llm_prep") or {}
+    if "error" in llm_prep:
+        return lines
+
+    compelling = (llm_prep.get("compelling_angle") or "").strip()
+    if compelling:
+        lines.append(f"✨ Why: {compelling}")
+
+    questions = (llm_prep.get("evaluation_questions")
+                 or llm_prep.get("questions_to_ask") or [])
+    if questions:
+        lines.append(f"\U0001f4ac Ask: {questions[0]}")
+    evidence = (llm_prep.get("fit_evidence")
+                or llm_prep.get("talking_points") or [])
+    if evidence:
+        lines.append(f"\U0001f4e2 Drop-in: {evidence[0]}")
+    return lines
 
 
 def format_alert(event: dict, prep: dict, agenda: list, now_utc: datetime) -> str:
@@ -116,6 +164,9 @@ def format_alert(event: dict, prep: dict, agenda: list, now_utc: datetime) -> st
     ]
     if names_str:
         lines.append(f"\U0001f465 {names_str}")
+
+    # Professional-meeting compact prep block — only when classifier hit.
+    lines.extend(_professional_compact_lines(prep))
 
     open_commits = _open_commitments_from_prep(prep)
     if open_commits:

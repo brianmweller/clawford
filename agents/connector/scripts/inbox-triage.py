@@ -45,10 +45,12 @@ from inbox_triage_lib import (                                      # noqa: E402
     classify_thread_for_triage,
     upsert_thread_in_queue,
 )
+from recruiter_callback_lib import load_rejected_recruiters         # noqa: E402
 
 DEFAULT_TOKEN = Path(os.path.expanduser("~/.clawford/connector-workspace/token.json"))
 DEFAULT_CREDS = Path(os.path.expanduser("~/.clawford/connector-workspace/credentials.json"))
 DEFAULT_QUEUE = Path(os.path.expanduser("~/.clawford/connector-workspace/cache/triage-queue.json"))
+DEFAULT_REJECTED = Path(os.path.expanduser("~/.clawford/connector-workspace/cache/rejected-recruiters.jsonl"))
 
 
 def fetch_recent_threads(service, window_days: int, max_threads: int = 50) -> list[dict]:
@@ -106,6 +108,10 @@ def main() -> int:
     email_to_slug = build_email_to_slug_map(people_dir)
     print(f"People map: {len(email_to_slug)} email->slug entries from {people_dir}")
 
+    rejected_recruiters = load_rejected_recruiters(DEFAULT_REJECTED)
+    if rejected_recruiters:
+        print(f"Rejected recruiters: {len(rejected_recruiters)} senders (short-circuit)")
+
     if not args.token.exists():
         print(f"ERROR: Gmail token not found at {args.token}", file=sys.stderr)
         print("Run: python3 gcal-auth.py", file=sys.stderr)
@@ -130,6 +136,7 @@ def main() -> int:
             thread,
             operator_emails=load_operator().emails,
             email_to_slug=email_to_slug,
+            rejected_recruiters=rejected_recruiters,
         )
         print(f"  classified: {result['status']}")
         if result["status"] == "queued":
@@ -175,6 +182,7 @@ def main() -> int:
             t,
             operator_emails=load_operator().emails,
             email_to_slug=email_to_slug,
+            rejected_recruiters=rejected_recruiters,
         )
         buckets[result["status"]] = buckets.get(result["status"], 0) + 1
         if result["status"] == "queued":

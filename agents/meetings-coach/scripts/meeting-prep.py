@@ -48,6 +48,16 @@ for _p in Path(__file__).resolve().parents:
         break
 
 from agents.shared.scan_fields import scan_fields  # noqa: E402
+from agents.shared.self_profile import load_self_profile  # noqa: E402
+
+# meeting_prep_professional_lib is in the same scripts/ directory.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from meeting_prep_professional_lib import (  # noqa: E402
+    build_llm_prep,
+    classify_meeting_type,
+    match_attendee_to_search_stage,
+    match_attendee_to_target,
+)
 
 WORKSPACE = os.path.expanduser("~/.clawford/meetings-coach-workspace")
 CACHE_DIR = os.path.join(WORKSPACE, "cache")
@@ -365,6 +375,49 @@ def prep_meeting(event, force=False):
         result["context_sources"].append(f"commitments:{len(result['context']['commitments'])}")
     if agenda_items:
         result["context_sources"].append(f"workflowy:{len(agenda_items)} agenda items")
+
+    # Professional-meeting enrichment: classify + LLM prep block when the
+    # meeting looks like a recruiter screen / hiring-manager / panel.
+    # Degrades open when self/ is missing, when no attendee matches any
+    # classifier signal, or when the LLM call fails.
+    attendees_for_classifier = [
+        {
+            "email": c.get("email", ""),
+            "name": c.get("name", ""),
+            "person_data": c.get("person_data"),
+        }
+        for c in attendee_contexts
+    ]
+    self_profile = load_self_profile()
+    meeting_type = classify_meeting_type(
+        event, attendees_for_classifier, self_profile,
+    )
+    result["meeting_type"] = meeting_type
+
+    if meeting_type != "general" and self_profile.has_profile:
+        target_match = match_attendee_to_target(
+            attendees_for_classifier, self_profile,
+        )
+        stage_match = match_attendee_to_search_stage(
+            attendees_for_classifier, self_profile,
+        )
+        result["self_context"] = {
+            "level_bar": self_profile.level_bar_text,
+            "target_company": target_match,
+            "active_pipeline_stage": stage_match,
+            "strength_themes": [
+                t.get("theme") or t.get("content") or ""
+                for t in (self_profile.strength_themes or [])[:5]
+                if t.get("theme") or t.get("content")
+            ],
+        }
+        result["llm_prep"] = build_llm_prep(
+            event=event,
+            attendees_resolved=attendees_for_classifier,
+            self_profile=self_profile,
+            meeting_type=meeting_type,
+        )
+        result["context_sources"].append(f"meeting_type:{meeting_type}")
 
     # Cache result
     os.makedirs(CACHE_DIR, exist_ok=True)

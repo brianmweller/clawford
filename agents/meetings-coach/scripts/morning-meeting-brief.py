@@ -107,13 +107,23 @@ def _attendee_names(event: dict) -> str:
     return ", ".join(names)
 
 
-def _open_commit_summary(prep: dict | None) -> str | None:
+def _meeting_result(prep: dict | None) -> dict | None:
+    """meeting-prep.py returns {"meetings": [result_dict]} even for a single
+    meeting. Extract the first result or None."""
     if not isinstance(prep, dict):
         return None
     meetings = prep.get("meetings") or []
     if not meetings:
         return None
-    ctx = (meetings[0] or {}).get("context") or {}
+    m = meetings[0]
+    return m if isinstance(m, dict) else None
+
+
+def _open_commit_summary(prep: dict | None) -> str | None:
+    m = _meeting_result(prep)
+    if m is None:
+        return None
+    ctx = m.get("context") or {}
     commits = [c for c in ctx.get("commitments", []) if c.get("status") in ("open", "overdue")]
     if not commits:
         return None
@@ -121,6 +131,84 @@ def _open_commit_summary(prep: dict | None) -> str | None:
     to_whom = (first.get("to_whom") or "?").strip()
     what = (first.get("what") or "").strip()
     return f"Open with {to_whom}: {what}"
+
+
+_MEETING_TYPE_EMOJI = {
+    "recruiter-screen": "\U0001f4de",   # 📞
+    "hiring-manager": "\U0001f393",     # 🎓
+    "hiring-panel": "\U0001f3af",       # 🎯
+}
+
+
+def _fmt_professional_prep(m: dict) -> list[str]:
+    """Render the professional-prep block for a meeting whose
+    meeting_type != 'general'. Falls through to the generic renderer
+    (caller's responsibility) when llm_prep carries an error — the
+    self_context header is still useful on its own."""
+    lines: list[str] = []
+    meeting_type = m.get("meeting_type", "")
+    emoji = _MEETING_TYPE_EMOJI.get(meeting_type, "\U0001f4bc")  # 💼
+
+    self_ctx = m.get("self_context") or {}
+    target = self_ctx.get("target_company")
+    stage = self_ctx.get("active_pipeline_stage")
+
+    header_bits = [f"{emoji} {meeting_type}"]
+    if isinstance(target, dict) and target.get("company"):
+        tier = target.get("tier_company") or "?"
+        header_bits.append(f"target: {target['company']} (tier {tier})")
+    if isinstance(stage, dict) and stage.get("stage"):
+        header_bits.append(f"pipeline: {stage['stage']}")
+    lines.append("   " + " · ".join(header_bits))
+
+    llm_prep = m.get("llm_prep") or {}
+    if "error" in llm_prep:
+        # LLM call failed — surface the header only and let the generic
+        # commit_summary path (if any) render underneath.
+        return lines
+
+    prep_summary = (llm_prep.get("prep_summary") or "").strip()
+    if prep_summary:
+        lines.append(f"   {prep_summary}")
+
+    objective = (llm_prep.get("objective") or "").strip()
+    if objective:
+        lines.append(f"   \U0001f3af Objective: {objective}")
+
+    recipient = (llm_prep.get("recipient_model") or "").strip()
+    if recipient:
+        lines.append(f"   \U0001f91d They need: {recipient}")
+
+    fit_pitch = (llm_prep.get("fit_pitch") or "").strip()
+    if fit_pitch:
+        lines.append("   \U0001f3a4 Pitch:")
+        lines.append(f"     {fit_pitch}")
+
+    compelling = (llm_prep.get("compelling_angle") or "").strip()
+    if compelling:
+        lines.append(f"   ✨ Why this: {compelling}")
+
+    evidence = (llm_prep.get("fit_evidence")
+                or llm_prep.get("talking_points") or [])
+    if evidence:
+        lines.append("   \U0001f4e2 Drop-in evidence:")
+        for e in evidence[:3]:
+            lines.append(f"     • {e}")
+
+    questions = (llm_prep.get("evaluation_questions")
+                 or llm_prep.get("questions_to_ask") or [])
+    if questions:
+        lines.append("   \U0001f4ac Ask:")
+        for q in questions[:3]:
+            lines.append(f"     • {q}")
+
+    flags = llm_prep.get("red_flags") or []
+    if flags:
+        lines.append("   \U0001f6a9 Red flags:")
+        for f in flags[:3]:
+            lines.append(f"     • {f}")
+
+    return lines
 
 
 def _fmt_meeting_line(event: dict, prep: dict | None) -> list[str]:
@@ -134,6 +222,14 @@ def _fmt_meeting_line(event: dict, prep: dict | None) -> list[str]:
     location = (event.get("location") or "").strip()
     if location:
         lines.append(f"   \U0001f4cd {location}")
+
+    # Professional-meeting prep block — only when classifier landed a
+    # non-'general' type and self/ was loaded. Gracefully falls through
+    # to the generic commit summary when the prep fails.
+    m = _meeting_result(prep)
+    if m is not None and m.get("meeting_type", "general") != "general":
+        lines.extend(_fmt_professional_prep(m))
+
     summary = _open_commit_summary(prep)
     if summary:
         lines.append(f"   \U0001f4cc {summary}")

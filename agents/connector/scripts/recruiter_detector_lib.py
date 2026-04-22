@@ -12,51 +12,19 @@ Pure function. No network, no filesystem. Tested with fixtures.
 from __future__ import annotations
 
 import re
+import sys
+from pathlib import Path
 
+for _p in Path(__file__).resolve().parents:
+    if (_p / "agents" / "shared").is_dir():
+        if str(_p) not in sys.path:
+            sys.path.insert(0, str(_p))
+        break
 
-# ---------------------------------------------------------------------------
-# ATS / recruiting platform domains (HIGH confidence signal)
-# ---------------------------------------------------------------------------
-
-
-# Domains used by applicant-tracking systems and recruiting platforms.
-# Match is done by suffix (e.g., ends with these), so subdomain variants
-# like "hire.lever.co" or "mail.greenhouse-mail.io" also match.
-RECRUITER_DOMAINS: set[str] = {
-    "greenhouse-mail.io",
-    "greenhousemail.io",
-    "lever.co",
-    "ashbyhq.com",
-    "hire.withgoogle.com",
-    "applytojob.com",
-    "workable.com",
-    "smartrecruiters.com",
-    "breezy.hr",
-    "jobvite.com",
-    "icims.com",
-    "bamboohr.com",
-    "notion.so",   # Notion careers emails; risky but acceptable
-    "mail.notion.so",
-    "mail.hire.com",
-    "rivierapartners.com",   # retained exec search
-    "russellreynolds.com",   # retained exec search
-    "heidrick.com",
-    "spencerstuart.com",
-    "egonzehnder.com",
-    "truesearch.com",
-    "ondeckexec.com",
-}
-
-
-# Retained-search / exec recruiting firms — same HIGH confidence signal
-# as ATS but listed separately for readability. Folded into
-# RECRUITER_DOMAINS above.
-
-# Domains that are AMBIGUOUS on their own — LinkedIn messages, for
-# example, could be recruiter OR a friend. Require additional signals.
-AMBIGUOUS_DOMAINS: set[str] = {
-    "linkedin.com",   # messages-noreply@linkedin.com is often InMail
-}
+from agents.shared.recruiter_domains import (  # noqa: E402
+    AMBIGUOUS_DOMAINS,
+    RECRUITER_DOMAINS,
+)
 
 
 # ---------------------------------------------------------------------------

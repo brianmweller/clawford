@@ -1228,6 +1228,7 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "retry_policy.py",
     "reviewer.py",           # P0.1 — outbound action classifier
     "scan_fields.py",        # P0.4 — wire-in helper (per-agent ingest)
+    "recruiter_domains.py",  # 2026-04-22 — fleet-shared ATS/retained-search domain set
     "self_profile.py",       # 2026-04-21 — the operator's professional brain loader for Huckle cold-recruiter drafting
     "state_introspection.py",  # 2026-04-20 — host-cron log parser for get_recent_runs
     "subprocess_helpers.py",

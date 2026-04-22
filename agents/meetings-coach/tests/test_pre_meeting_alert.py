@@ -127,6 +127,67 @@ def test_format_alert_no_agenda_section_when_empty(mod, gcal, prep_board):
     assert "Agenda" not in msg
 
 
+def test_format_alert_renders_professional_compact_block(mod, gcal):
+    """A recruiter meeting should carry a compact prep header + one
+    question + one talking point (not the full morning-brief shape)."""
+    now_utc = datetime(2026, 4, 15, 23, 0, tzinfo=timezone.utc)
+    event = next(e for e in gcal["events"] if e["id"] == "evt-in-window-1")
+    prep = {
+        "meetings": [{
+            "meeting_id": event["id"],
+            "meeting_type": "recruiter-screen",
+            "self_context": {
+                "target_company": {"company": "Anthropic", "tier_company": "A"},
+                "active_pipeline_stage": {"stage": "hiring-manager"},
+            },
+            "llm_prep": {
+                "compelling_angle": "AI safety meets scale — natural extension.",
+                "evaluation_questions": ["Top question?", "Question 2", "Question 3"],
+                "fit_evidence": ["Top drop-in", "TP2", "TP3"],
+                "red_flags": [],
+            },
+            "context": {"commitments": []},
+        }],
+    }
+    msg = mod.format_alert(event, prep, [], now_utc)
+    assert "recruiter-screen" in msg
+    assert "Anthropic" in msg
+    assert "hiring-manager" in msg
+    assert "AI safety" in msg
+    assert "Top question?" in msg
+    assert "Top drop-in" in msg
+    # Only one of each (compact) — Question 2 should NOT appear.
+    assert "Question 2" not in msg
+    assert "TP2" not in msg
+
+
+def test_format_alert_skips_professional_block_for_general_meeting(mod, gcal, prep_alexis):
+    now_utc = datetime(2026, 4, 15, 23, 0, tzinfo=timezone.utc)
+    event = next(e for e in gcal["events"] if e["id"] == "evt-in-window-1")
+    # prep_alexis fixture has no meeting_type — should not render professional block.
+    msg = mod.format_alert(event, prep_alexis, [], now_utc)
+    assert "recruiter-screen" not in msg
+    assert "Ask:" not in msg
+
+
+def test_format_alert_degrades_to_header_only_on_llm_prep_error(mod, gcal):
+    now_utc = datetime(2026, 4, 15, 23, 0, tzinfo=timezone.utc)
+    event = next(e for e in gcal["events"] if e["id"] == "evt-in-window-1")
+    prep = {
+        "meetings": [{
+            "meeting_id": event["id"],
+            "meeting_type": "hiring-panel",
+            "self_context": {"target_company": None, "active_pipeline_stage": None},
+            "llm_prep": {"error": "timeout"},
+            "context": {"commitments": []},
+        }],
+    }
+    msg = mod.format_alert(event, prep, [], now_utc)
+    assert "hiring-panel" in msg
+    assert "Ask:" not in msg
+    assert "Surface:" not in msg
+
+
 # ─── sent-alerts.json dedup ──────────────────────────────────────────
 
 

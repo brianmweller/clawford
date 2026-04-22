@@ -468,6 +468,28 @@ TOOLS: list[dict] = [
     },
     {
         "type": "function",
+        "name": "promote_recruiter_by_thread_id",
+        "description": (
+            "Promote a cold-recruiter queue entry to a real people/<slug>.md "
+            "file. The normal path is the ✅ Promote button on the auto-compose "
+            "FYI message; use this tool only when the operator types `/promote "
+            "<thread_id>` manually (e.g., because he dismissed the button or "
+            "is following up via chat). Returns {status, slug, name, path} on "
+            "success or {status, detail} on error."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "thread_id": {
+                    "type": "string",
+                    "description": "Gmail thread ID from the cold-recruiter queue entry",
+                },
+            },
+            "required": ["thread_id"],
+        },
+    },
+    {
+        "type": "function",
         "name": "draft_reply",
         "description": (
             "Generate a draft message for a person. With no inbound text, "
@@ -689,6 +711,39 @@ def _handle_facts_callback(action: str, arg: str) -> dict:
     )
 
 
+def _handle_recruiter_callback(action: str, arg: str) -> dict:
+    """Executor wrapper for the shared dispatcher's recruiter:* callbacks.
+    Resolves connector-scoped paths (people_dir, workspace_dir, queue)
+    at call time."""
+    import importlib.util
+    scripts_dir = Path(__file__).parent / "scripts"
+    spec = importlib.util.spec_from_file_location(
+        "_recruiter_callback_lib", scripts_dir / "recruiter_callback_lib.py",
+    )
+    if spec is None or spec.loader is None:
+        return {"status": "error", "action": action, "detail": "import failure"}
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    people_dir = brain.dropbox_brain_root() / "people"
+    workspace_dir = Path(WORKSPACE)
+    queue_path = workspace_dir / "cache" / "triage-queue.json"
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return mod.handle_recruiter_callback(
+        action, arg,
+        people_dir=people_dir,
+        workspace_dir=workspace_dir,
+        queue_path=queue_path,
+        now_iso=now_iso,
+    )
+
+
+def promote_recruiter_by_thread_id(thread_id: str) -> dict:
+    """Manual fallback when the Telegram button is unavailable (e.g., the
+    cold-recruiter FYI was dismissed or the user is replying via chat).
+    Runs the same promote flow the recruiter:promote callback runs."""
+    return _handle_recruiter_callback("promote", thread_id)
+
+
 EXECUTORS: dict = {
     "get_morning_nudge": get_morning_nudge,
     "get_upcoming_meetings": get_upcoming_meetings,
@@ -701,6 +756,8 @@ EXECUTORS: dict = {
     "confirm_remember": confirm_remember,
     "handle_nudge_action": handle_nudge_action,
     "handle_facts_callback": lambda action, arg: _handle_facts_callback(action, arg),
+    "handle_recruiter_callback": lambda action, arg: _handle_recruiter_callback(action, arg),
+    "promote_recruiter_by_thread_id": promote_recruiter_by_thread_id,
     "get_person": get_person,
     "get_commitments": get_commitments,
     "dismiss_triage_n": dismiss_triage_n,

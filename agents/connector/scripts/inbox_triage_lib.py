@@ -71,6 +71,7 @@ def classify_thread_for_triage(
     *,
     operator_emails: set[str],
     email_to_slug: dict[str, str],
+    rejected_recruiters: set[str] | None = None,
 ) -> dict:
     thread_id = thread.get("id", "")
     latest = latest_message(thread)
@@ -99,6 +100,14 @@ def classify_thread_for_triage(
 
     if from_email in {a.lower() for a in operator_emails}:
         return {**base, "status": "skipped_brian_last"}
+
+    # Rejected-recruiter short-circuit: once the operator taps 🚫 Not a fit on a
+    # prior cold-recruiter FYI, future inbounds from the same sender
+    # don't re-run the detector or re-draft. Checked before the
+    # service-account filter so a rejected ATS sender doesn't waste
+    # detector cycles.
+    if rejected_recruiters and from_email in rejected_recruiters:
+        return {**base, "status": "skipped_rejected_recruiter"}
 
     # Recruiter-domain exemption: ATS / retained-search platforms often
     # send from no-reply@ prefixes that trip the service-account

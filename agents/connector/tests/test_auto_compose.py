@@ -22,6 +22,50 @@ auto_compose = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(auto_compose)
 
 
+# --- _build_recruiter_markup ---
+
+def test_recruiter_markup_returns_none_for_non_cold_compose():
+    # No fit_assessment means this is a known-sender draft, not cold recruiter.
+    parsed = {
+        "reply_needed": True,
+        "gmail_thread_id": "t-known",
+        "person_slug": "jamie-fitzgerald",
+    }
+    assert auto_compose._build_recruiter_markup(parsed) is None
+
+
+def test_recruiter_markup_returns_keyboard_for_a_tier():
+    parsed = {
+        "reply_needed": True,
+        "gmail_thread_id": "t-cold-abc",
+        "fit_assessment": {"tier": "A", "rationale": "strong"},
+    }
+    markup = auto_compose._build_recruiter_markup(parsed)
+    assert markup is not None
+    row = markup["inline_keyboard"][0]
+    assert row[0]["text"].startswith("✅")  # ✅
+    assert row[0]["callback_data"] == "recruiter:promote:t-cold-abc"
+    assert row[1]["callback_data"] == "recruiter:reject:t-cold-abc"
+
+
+def test_recruiter_markup_returns_none_for_not_a_target():
+    parsed = {
+        "reply_needed": True,
+        "gmail_thread_id": "t-notarget",
+        "fit_assessment": {"tier": "not_a_target"},
+    }
+    assert auto_compose._build_recruiter_markup(parsed) is None
+
+
+def test_recruiter_markup_returns_none_without_thread_id():
+    parsed = {
+        "reply_needed": True,
+        "fit_assessment": {"tier": "B"},
+        # no gmail_thread_id
+    }
+    assert auto_compose._build_recruiter_markup(parsed) is None
+
+
 # --- build_draft_compose_cmd ---
 
 def test_build_cmd_includes_required_args():
