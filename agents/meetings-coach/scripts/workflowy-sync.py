@@ -192,18 +192,26 @@ def find_child_by_name(children, target):
     return None
 
 
-def find_meeting_root_id(nodes, root_name="Meeting"):
+def find_meeting_root_id(nodes, root_name="Notes"):
     """Return the id of the top-level node named ``root_name`` (or None).
 
     Anchors ``find_or_create_date_path`` to a specific workspace so a
-    2026 year subtree under ``Notes`` (or any other top-level tree) does
-    NOT get picked up by accident. The 2026-04-21 Reddit-recruiter
-    test hit this when the meeting landed under
-    ``Notes > 2026 > April 2026`` instead of ``Meeting > 2026 > …``.
+    2026 year subtree under a deep-nested look-alike does NOT get
+    picked up. The 2026-04-22 Reddit-recruiter test caught this the
+    hard way: a stray ``Meeting`` text fragment at depth 7 inside an
+    old 2024 meeting's ``📝 Notes`` section had a ``2026`` child, and
+    the prior fallback picked it up — silently creating new meetings
+    nested seven levels deep inside an unrelated archive.
 
-    Top-level nodes have ``parent_id`` of ``None`` or missing. If the
-    exact name isn't found at the top level, fall back to any node
-    with that name (some workspaces nest roots under hidden parents).
+    **Only top-level nodes match.** ``parent_id`` must be ``None`` or
+    the empty string. If nothing matches, return ``None`` so the
+    caller can fail loudly rather than land in the wrong place.
+
+    Default ``root_name`` is ``"Notes"`` — the operator's real
+    top-level meeting archive on the reference Workflowy (production
+    meetings like Sophia Ying Li and Mohit Kothari live at
+    ``Notes > <year> > <month> > <date> > <attendee>``). Override via
+    ``meeting-config.json``'s ``workflowy.meeting_root_name``.
     """
     for n in nodes:
         pid = n.get("parent_id")
@@ -211,10 +219,6 @@ def find_meeting_root_id(nodes, root_name="Meeting"):
             name = strip_html((n.get("name") or "").strip())
             if name == root_name:
                 return n.get("id")
-    for n in nodes:
-        name = strip_html((n.get("name") or "").strip())
-        if name == root_name:
-            return n.get("id")
     return None
 
 
@@ -706,7 +710,7 @@ def cmd_create_nodes():
     # conventional "Meeting" top-level node) so we don't accidentally
     # land under a sibling workspace (e.g. "Notes") whose 2026 year
     # node happens to come up first in the export. 2026-04-21 bug.
-    root_name = (config.get("workflowy") or {}).get("meeting_root_name", "Meeting")
+    root_name = (config.get("workflowy") or {}).get("meeting_root_name", "Notes")
     meeting_root_id = None
     try:
         nodes = get_export(api_key=api_key)

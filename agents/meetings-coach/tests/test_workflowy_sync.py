@@ -41,29 +41,46 @@ _spec.loader.exec_module(wf)
 
 def _nodes():
     """Export fixture:
-      Meeting (top-level)
-        2026 (meeting_2026)
-          April 2026 (meeting_april)
-            Wed, Apr 22, 2026 (meeting_apr22)
-              existing-meeting (m_existing)
-      Notes (top-level)                   ← unrelated workspace
+      Notes (top-level)                  ← real meeting workspace
         2026 (notes_2026)
           April 2026 (notes_april)
             Wed, Apr 22, 2026 (notes_apr22)
+              existing-meeting (m_existing)
+      OtherRoot (top-level)              ← unrelated top-level workspace
+        2026 (other_2026)
+          April 2026 (other_april)
+            Wed, Apr 22, 2026 (other_apr22)
+      Notes > 2024 > ... > 📝 Notes > Meeting (depth 7)   ← stale
+        fragment with its own 2026 subtree. find_meeting_root_id
+        MUST NOT resolve to this — the 2026-04-22 bug.
     """
     return [
-        {"id": "meeting_root", "parent_id": None, "name": "Meeting"},
-        {"id": "meeting_2026", "parent_id": "meeting_root", "name": "2026"},
-        {"id": "meeting_april", "parent_id": "meeting_2026", "name": "April 2026"},
-        {"id": "meeting_apr22", "parent_id": "meeting_april",
-         "name": "Wed, Apr 22, 2026"},
-        {"id": "m_existing", "parent_id": "meeting_apr22",
-         "name": "Prior meeting"},
+        # Real meeting workspace
         {"id": "notes_root", "parent_id": None, "name": "Notes"},
         {"id": "notes_2026", "parent_id": "notes_root", "name": "2026"},
         {"id": "notes_april", "parent_id": "notes_2026", "name": "April 2026"},
         {"id": "notes_apr22", "parent_id": "notes_april",
          "name": "Wed, Apr 22, 2026"},
+        {"id": "m_existing", "parent_id": "notes_apr22",
+         "name": "Prior meeting"},
+        # Unrelated top-level workspace with its own 2026 subtree
+        {"id": "other_root", "parent_id": None, "name": "OtherRoot"},
+        {"id": "other_2026", "parent_id": "other_root", "name": "2026"},
+        {"id": "other_april", "parent_id": "other_2026", "name": "April 2026"},
+        {"id": "other_apr22", "parent_id": "other_april",
+         "name": "Wed, Apr 22, 2026"},
+        # Stale "Meeting" fragment deep inside an old meeting's notes —
+        # the trap that caught Phase 2's first push.
+        {"id": "notes_2024", "parent_id": "notes_root", "name": "2024"},
+        {"id": "notes_jul24", "parent_id": "notes_2024", "name": "July 2024"},
+        {"id": "notes_jul31", "parent_id": "notes_jul24",
+         "name": "Wed, Jul 31, 2024"},
+        {"id": "old_meeting", "parent_id": "notes_jul31",
+         "name": "Old meeting #Tag"},
+        {"id": "old_preduring", "parent_id": "old_meeting", "name": "Pre / during"},
+        {"id": "old_notes", "parent_id": "old_preduring", "name": "📝  Notes"},
+        {"id": "stale_meeting", "parent_id": "old_notes", "name": "Meeting"},
+        {"id": "stale_2026", "parent_id": "stale_meeting", "name": "2026"},
     ]
 
 
@@ -89,18 +106,31 @@ class _FakeAPI:
 # ---------------------------------------------------------------------------
 
 
-def test_find_meeting_root_id_returns_top_level_named_meeting():
-    assert wf.find_meeting_root_id(_nodes(), "Meeting") == "meeting_root"
+def test_find_meeting_root_id_returns_top_level_named_notes():
+    """the operator's real meeting workspace root is top-level 'Notes'."""
+    assert wf.find_meeting_root_id(_nodes(), "Notes") == "notes_root"
 
 
 def test_find_meeting_root_id_not_found_returns_none():
-    assert wf.find_meeting_root_id(_nodes(), "Inbox") is None
+    """Fail loud when root_name doesn't match ANY top-level node —
+    don't silently fall back to deeper matches."""
+    assert wf.find_meeting_root_id(_nodes(), "NonExistentRoot") is None
 
 
-def test_find_meeting_root_id_default_root_name_is_meeting():
-    """Default root_name should be 'Meeting' — the convention name
-    the operator's Workflowy uses."""
-    assert wf.find_meeting_root_id(_nodes()) == "meeting_root"
+def test_find_meeting_root_id_ignores_stale_deep_nested_match():
+    """REGRESSION: a stray 'Meeting' text fragment at depth 7 inside an
+    old meeting's 📝 Notes section must NOT be treated as a root. The
+    2026-04-22 Reddit-recruiter test landed its whole meeting there
+    because the prior fallback resolved to this decoy."""
+    # No top-level 'Meeting' exists in the fixture; only a deep-nested
+    # 'Meeting' fragment. Must return None, not stale_meeting.
+    assert wf.find_meeting_root_id(_nodes(), "Meeting") is None
+
+
+def test_find_meeting_root_id_default_root_name_is_notes():
+    """Default root_name should be 'Notes' — the operator's real top-level
+    meeting archive, where production meetings (Sophia, Mohit) live."""
+    assert wf.find_meeting_root_id(_nodes()) == "notes_root"
 
 
 # ---------------------------------------------------------------------------
@@ -116,11 +146,11 @@ def test_date_path_under_meeting_root_uses_meeting_year(monkeypatch):
 
     date_id = wf.find_or_create_date_path(
         datetime(2026, 4, 22), _nodes(),
-        root_id="meeting_root",
+        root_id="notes_root",
     )
     # Already exists under meeting_root path — should return existing id,
     # NOT create anything new.
-    assert date_id == "meeting_apr22"
+    assert date_id == "notes_apr22"
     assert fake.calls == []
 
 
@@ -132,12 +162,12 @@ def test_date_path_creates_missing_day_under_correct_root(monkeypatch):
 
     date_id = wf.find_or_create_date_path(
         datetime(2026, 4, 25), _nodes(),
-        root_id="meeting_root",
+        root_id="notes_root",
     )
     assert date_id.startswith("new_")
     # Exactly one create_node call, parent must be meeting_april.
     assert len(fake.calls) == 1
-    assert fake.calls[0]["parent_id"] == "meeting_april"
+    assert fake.calls[0]["parent_id"] == "notes_april"
     assert "Apr 25, 2026" in fake.calls[0]["name"]
 
 
@@ -171,7 +201,7 @@ def test_date_path_converts_utc_datetime_to_pt_date(monkeypatch):
     utc_dt = datetime(2026, 4, 22, 2, 0, tzinfo=timezone.utc)
     wf.find_or_create_date_path(
         utc_dt, _nodes(),
-        root_id="meeting_root",
+        root_id="notes_root",
         tz="America/Los_Angeles",
     )
     # Tue Apr 21 doesn't exist under meeting_april; one day-create
@@ -192,10 +222,10 @@ def test_date_path_pt_aware_datetime_passes_through(monkeypatch):
     pt_dt = datetime(2026, 4, 22, 10, 0, tzinfo=ZoneInfo("America/Los_Angeles"))
     date_id = wf.find_or_create_date_path(
         pt_dt, _nodes(),
-        root_id="meeting_root",
+        root_id="notes_root",
         tz="America/Los_Angeles",
     )
-    assert date_id == "meeting_apr22"
+    assert date_id == "notes_apr22"
     assert fake.calls == []
 
 
@@ -221,7 +251,7 @@ def test_create_meeting_node_uses_position_bottom_for_substructure(monkeypatch):
         hashtags=["JobSearch", "Reddit"],
         attendees=[{"email": "michelle@rivierapartners.com", "name": "Michelle"}],
         api_key="k",
-        root_id="meeting_root",
+        root_id="notes_root",
         tz="America/Los_Angeles",
     )
 
@@ -256,12 +286,12 @@ def test_create_meeting_node_title_includes_hashtags(monkeypatch):
         hashtags=["JobSearch", "Reddit"],
         attendees=[],
         api_key="k",
-        root_id="meeting_root",
+        root_id="notes_root",
         tz="America/Los_Angeles",
     )
-    # First create should be the meeting node itself under meeting_apr22.
+    # First create should be the meeting node itself under notes_apr22.
     meeting_creates = [
-        c for c in fake.calls if c["parent_id"] == "meeting_apr22"
+        c for c in fake.calls if c["parent_id"] == "notes_apr22"
     ]
     assert meeting_creates
     assert "Michelle Leist" in meeting_creates[0]["name"]
