@@ -22,3 +22,7 @@
 
 # Crontab fragments and host-cron wrappers — same hazard as .sh.
 *.cron      text eol=lf
+
+# Git hooks (no extension) — same bash hazard; git invokes them on
+# the VPS and \r anywhere kills the shebang.
+ops/git-hooks/*     text eol=lf

@@ -1,6 +1,6 @@
 # Intro to agents
 
-*Last updated: 2026-04-17 · Reading time: ~15 min · Difficulty: moderate*
+*Last updated: 2026-04-22 · Reading time: ~15 min · Difficulty: moderate*
 
 **TL;DR**
 
@@ -110,6 +110,14 @@ python3 agents/shared/deploy.py shopping --yes-updates
 The first time I hit this, I spent an hour re-deriving why a local `deploy.py` kept complaining about six missing config files (`IDENTITY.md`, `TOOLS.md`, `AGENTS.md`, and friends). The hydrated PII versions of those files don't exist on the dev box — they live only on the VPS, gitignored — and the local mirror had no `fix-it-workspace/` directory at all because the laptop had never been a real deploy source. A `grep` for `scp\|rsync\|ssh` inside `deploy.py` came back empty and the fog cleared. The local invocation was writing to a directory nothing on the production host would ever read.
 
 **Useful exception.** A local `--dry-run` against a fully-hydrated checkout can validate a manifest change without touching the VPS. In practice, SSH'ing to the VPS and running the dry-run there is faster than hydrating PII files locally, so this exception almost never gets used.
+
+### Why step 3 is a separate step at all
+
+Step 1's `tools.py` and its subprocess shell-outs run straight out of `~/repo/agents/<agent>/` — the moment the VPS `git pull` lands, the dispatcher's next tool call reads the updated code. That path is auto-synced.
+
+Every agent's *cron*, though, invokes from `~/.clawford/<agent>-workspace/scripts/`, which is a deploy-managed copy. Without step 3, `git pull` silently leaves the cron path running yesterday's code while on-demand tool calls run today's — a split-brain failure mode that's caught the build more than once. The on-demand path "works," the cron keeps firing, everything looks green, but the cron's behaviour is wrong in ways that take hours to trace.
+
+A git `post-merge` hook (installed via `ops/scripts/install-git-hooks.sh`, symlinks the tracked copy at `ops/git-hooks/post-merge` into `.git/hooks/`) makes step 3 automatic. After a successful `git pull` on the VPS, the hook runs `deploy.py --all --yes-updates --skip-files --skip-pip-audit` and prints the sync log. Workspace scripts stay in lockstep with the repo without a second command. The three-step mental model above is still what the hook is doing — the automation is worth seeing through, not around.
 
 ### When the VPS working tree is dirty
 

@@ -2,7 +2,7 @@
 
 # What is Clawford?
 
-*Last updated: 2026-04-17 · Reading time: ~5 min · Difficulty: easy*
+*Last updated: 2026-04-22 · Reading time: ~5 min · Difficulty: easy*
 
 **TL;DR**
 
@@ -18,7 +18,7 @@ Every morning at 5am, a fox named Mr Fixit checks that the lights are still on i
 
 Clawford is what I call the thing that runs him, his four public coworkers, and the small file-based shared memory they all write into. The animals themselves teleported in from [Richard Scarry's Busytown](https://www.richardscarry.com/characters-1) — I borrowed them wholesale and put them to work here, for reasons that will not become clearer. It lives on a $30/month Hetzner box, stitched together with plain host crontab, `codex`, Dropbox, Telegram, some Python, and a great deal of hard-won regret.
 
-(A sixth animal, a shopping agent, runs privately out of a separate repo — retailer automation sits on the wrong side of vendor terms of service to publish openly. This guide covers the five agents the public repo ships.)
+(A sixth animal, a shopping agent, runs privately out of a separate repo — retailer automation sits on the wrong side of vendor terms of service to publish openly. This guide covers the five animals the public repo ships.)
 
 ## What Clawford tries to do
 

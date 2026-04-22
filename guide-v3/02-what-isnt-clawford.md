@@ -1,6 +1,6 @@
 # What Isn't Clawford?
 
-*Last updated: 2026-04-17 · Reading time: ~20 min · Difficulty: moderate*
+*Last updated: 2026-04-20 · Reading time: ~20 min · Difficulty: moderate*
 
 **TL;DR**
 

@@ -1,0 +1,26 @@
+#!/bin/bash
+# post-merge — auto-sync workspace scripts after git pull.
+#
+# Agent dispatch (tools.py + subprocess shell-outs) runs straight out
+# of ~/repo and is refreshed by plain `git pull`. But every agent
+# cron (gcal-fetch, meeting-prep, workflowy-sync, etc.) invokes from
+# ~/.clawford/<agent>-workspace/scripts/, which is a deploy.py-managed
+# copy. Without this hook, `git pull` silently leaves the cron path
+# on the old code — the "deploy_yes_updates" / "deploy_path_is_ssh_
+# pull" trap that's bitten us more than once.
+#
+# Install: ln -sf ../../ops/git-hooks/post-merge .git/hooks/post-merge
+# (see ops/scripts/install-git-hooks.sh)
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+DEPLOY="$REPO_ROOT/agents/shared/deploy.py"
+
+if [ ! -f "$DEPLOY" ]; then
+  exit 0
+fi
+
+echo "[post-merge] syncing workspace scripts via deploy.py --all ..."
+python3 "$DEPLOY" --all --yes-updates --skip-files --skip-pip-audit \
+  || echo "[post-merge] deploy.py exited non-zero — workspace may be stale, review output above"

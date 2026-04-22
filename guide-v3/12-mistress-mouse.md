@@ -1,6 +1,6 @@
 # Mistress Mouse 🐭📅 — the family-calendar agent
 
-*Last updated: 2026-04-18 · Reading time: ~20 min · Difficulty: hard*
+*Last updated: 2026-04-20 · Reading time: ~20 min · Difficulty: hard*
 
 > **TL;DR.** Mistress Mouse is the household-logistics agent: she reads a family's Google Calendars, composes a morning briefing delivered at 5 AM PT, fires 60/30/15-minute reminders for the events that matter today, parses activity-provider emails (school closures, cancellations, signup windows), and surfaces Google Calendar invites that actually need a response. She is also the first agent in a Clawford fleet to go through Google OAuth — the local-auth-then-SCP pattern she pioneered is the same pattern [Sergeant Murphy](13-sergeant-murphy.md) and [Huckle Cat](14-huckle-cat.md) reuse. Read [the routing boundary section](#the-routing-boundary-with-sergeant-murphy) before deploying her alongside Sergeant Murphy.
 
