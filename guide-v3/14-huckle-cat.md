@@ -1,6 +1,6 @@
 # Huckle Cat 🐱🤝 — the connector agent
 
-*Last updated: 2026-04-22 · Reading time: ~55 min · Difficulty: hard*
+*Last updated: 2026-04-22 · Reading time: ~60 min · Difficulty: hard*
 
 > **TL;DR.** Huckle Cat is the relationship agent — the one that inverts the usual shape of a Clawford agent. Instead of wrapping a single external API the way Mr Fixit wraps the fleet's own heartbeat or Mistress Mouse wraps Google Calendar, Huckle Cat is built **around the shared brain itself**. His input is six disparate data sources (Gmail, Google Calendar, Google Contacts, Google Messages, meeting transcripts, and Workflowy) and his output is a relationship intelligence layer: ~280 people files in the brain with names, emails, phones, circles, last-interaction timestamps, enriched context notes, and facts pulled from email signatures. He composes a morning relationship nudge at 5 AM PT (overdue / approaching / healthy), triages a shared notes inbox twice a day, and keeps `last_interaction` fresh via a daily re-mining pass. A second parallel brain under `self/` — four layers synthesised from the operator's career archives — feeds a [cold-recruiter drafting path](#the-professional-brain) that detects unknown ATS senders, scores a composite fit across domain / level / function dimensions, and drafts replies that read like the operator wrote them. He was the last agent in the fleet to deploy, and he is the only one where the [mining pipeline](#the-mining-pipeline) runs **before** the first cron fires — by design.
 
@@ -595,6 +595,50 @@ The revised schema drops `fit_signal` entirely. `compelling_angle` stays — bec
 The LLM's own `recipient_model` reasoning moved in the right direction once the prompt carried the power-dynamic framing explicitly. The model now articulates the distinction unprompted: *"A short, specific, respectful note will feel engaged; a fit-pitch would feel redundant and slightly awkward because she is the one recruiting him."* That's the durable fix — the reasoning step encodes the stance upstream of the output, so drafts stop drifting into pitch register even when the voice profile's "warm-but-restrained" patterns tempt the LLM toward over-explaining.
 
 The three-beat email contract that came out of this is now encoded as a MUST-CARRY section in the compose prompt: **engage with one specific element of their pitch + compelling_angle as honest filter signal + concrete availability**. Four paragraphs would be wrong. Four sentences are right.
+
+### Operator hints — the iterative regenerator
+
+Auto-compose writes a draft every thirty minutes. It can't take feedback. When the operator reads the draft and wants "the same reply but warmer" or "the same reply but mention that I already accepted," the cron model has no answer.
+
+The fix is a Telegram-invoked `/reply` tool that takes an optional `hint` string, threaded from the tool call through `auto-compose.py --operator-hint ...` → `draft-compose.py --operator-hint ...` → `compose_lib.build_compose_prompt(operator_hint=...)`. The hint lands at the top of the compose prompt as a labeled block that explicitly frames itself as *overriding* voice anchors, history defaults, and any conflicting brain facts:
+
+```
+OPERATOR HINT (load-bearing — applies to THIS draft only,
+overrides conflicting defaults from voice / history / brain):
+  <hint text>
+
+If the hint adds factual context (dates, decisions, status
+updates), treat it as more recent than anything in the brain and
+weave it into the draft accordingly. If the hint is stylistic
+(shorter, warmer, less formal), apply it to the final draft_text
+AND to the reasoning that produces it — don't just append a
+cosmetic pass at the end.
+```
+
+Two kinds of hint the pattern covers:
+
+- **Stylistic** — *"make it warmer"*, *"two sentences shorter"*, *"drop the scope questions"*. These steer voice and structure. Important: the prompt instructs the LLM to apply them to the *reasoning*, not just the output — a "make it shorter" pass that trims the final prose without rethinking what to say leaves the reply less coherent than one that regenerates the strategy with shortness as a constraint.
+
+- **Factual** — *"mention that I already accepted the offer"*, *"flag that I'm traveling next week"*, *"the hiring manager followed up separately, reference that"*. These inject information the brain doesn't have yet. The prompt treats factual hints as *more recent than anything in the brain* — authoritative, not a mere suggestion.
+
+The hint is the only reason `/reply` exists as an operator tool at all. Without it, the tool duplicates auto-compose's work: the autonomous cron already drafts every thread every half hour, and the Telegram FYI already surfaces the draft. A manual "/reply" without a hint is just "don't wait thirty minutes" — marginal value. The hint pattern closes the one gap the cron can't: the operator's real-time context that the autonomous pipeline doesn't have.
+
+### Fuzzy reference resolution — operators don't speak thread_ids
+
+The first cut of `/reply` took a Gmail thread_id as its argument. Immediate operator rejection: *"We are never going to have the thread ID handy."* Thread IDs are sixteen-character hex strings — nobody recognises them in running conversation. The operator says *"the recruiter email"*, *"that Tuesday thread"*, or *"the family admin message"*.
+
+The resolver bridges that gap. `_resolve_thread_descriptor(descriptor)` scans the auto-compose log + triage queue + the operator's people directory and matches against whatever shape the operator supplied:
+
+- **Explicit thread_id** (hex, 14–22 chars) — pass through directly. Edge case for programmatic callers.
+- **Full email** (`person@example.com`) — match against queue `from_email`.
+- **Person name** (first name or full) — resolve via `brain.get_person` with first-name fallback; then match the person's slug against log `slug` field and the person's email against queue `from_email`.
+- **Substring on sender / subject** — case-insensitive search across `from_email`, `from_header`, and `subject` on every known thread.
+
+Every match carries a `match_reason` string that enumerates which signals fired: a typical four-signal hit looks like `"slug=<slug> + person_email=<addr> + email_substring + header_substring"`. On ambiguity (multiple candidates), the resolver returns `status: ambiguous` with the candidate list — the Telegram LLM then asks which one the operator meant, rendering the candidate subjects inline. On not-found, the resolver returns recent threads to offer as disambiguation options.
+
+The underlying data sources are the log (persistent, all processed threads) and the triage queue (transient, rolling window). The log has subject + slug; the queue has from_email + from_header. Union-by-thread_id across both gives a single merged candidate pool with the richest metadata either source had.
+
+This same fuzzy-resolver pattern should generalise to any operator tool that needs to point at a specific thing-in-context. A `/promote` by sender name for cold-recruiter promotion is the obvious second application; the existing tool takes a thread_id but the same resolver would accept a descriptor and map to the right queue entry.
 
 ## Deployment walkthrough
 

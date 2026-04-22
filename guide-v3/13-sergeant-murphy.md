@@ -1,6 +1,6 @@
 # Sergeant Murphy 🐷🔍 — the meetings-coach agent
 
-*Last updated: 2026-04-22 · Reading time: ~30 min · Difficulty: hard*
+*Last updated: 2026-04-22 · Reading time: ~35 min · Difficulty: hard*
 
 > **TL;DR.** Sergeant Murphy is the meetings agent — not a calendar agent, a meetings agent. He composes a morning meeting brief at 5 AM PT with factual context for every meeting on the day (no invented talking points), fires pre-meeting alerts 15–45 minutes ahead with the real agenda, scans meeting transcripts from an MCP-speaking transcription provider after each meeting to stage action items + decisions for confirmation, tracks the commitments that actually get confirmed, and runs a coaching analysis against a configured set of communication growth areas. He is the **second** Google-OAuth agent in the fleet (after [Mistress Mouse](12-mistress-mouse.md)) and he sits on the other side of [§ the routing boundary](12-mistress-mouse.md#the-routing-boundary-with-sergeant-murphy): Workflowy-presence events are his, non-Workflowy events are Mistress Mouse's. Read [§ The 5x resend incident](#the-5x-resend-incident) before deploying the post-meeting scan. It is the reason the rest of the fleet treats "cache files are not a delivery queue" as a named design rule.
 
@@ -224,6 +224,35 @@ The Workflowy push path exposed three latent bugs in the meeting-node helpers �
 All three bugs had the same failure mode: the production path worked *most of the time* because the non-deterministic defaults happened to pick the right thing, and the subset of cases that didn't trip any of them flew under the radar. A one-off calibration meeting on the operator's real Workflowy was what forced the fix — exactly the class of latent bug a fuzz-test wouldn't have caught, but a live integration test did.
 
 The Workflowy convention itself (per the operator's template): title = `"{Attendee Name} #{CamelCaseTag1} #{CamelCaseTag2}"`, structure = `Pre / during > 📔 Agenda + 📝 Notes ; Post-meeting > ✅ Takeaways`, briefing content goes inside Agenda as nested-per-field bullets, Notes stays empty pre-meeting (it's the live-capture surface during the call). The prep renderer follows this convention; Murphy's cron-driven meeting creation uses the same.
+
+### The depth-7 decoy — a second workflowy-sync scar
+
+One bug from the calibration arc deserves its own sub-section because the failure mode generalises — any fleet-wide search that takes the *first* match in an unordered export is a latent bug waiting for the export order to change.
+
+After fixing the initial three workflowy-sync bugs and deploying, a second calibration push against the operator's real Workflowy landed a test meeting in a physically absurd location: `Notes > 2024 > July 2024 > Wed, Jul 31, 2024 > <old-meeting-title> > Pre / during > 📝 Notes > Meeting > 2026 > April 2026 > Wed, Apr 22, 2026 > <attendee> #JobSearch #<company>`. Seven levels deep, nested inside an unrelated 2024 meeting's live-note section.
+
+Root cause: `find_meeting_root_id` had a permissive fallback. If no top-level node named `"Meeting"` existed, it scanned the whole tree for *any* node with that name. The operator's Workflowy had a stray `Meeting` text fragment at depth 7 — a leftover from when the operator had sketched the template convention inside a 2024 meeting's notes section. The fallback happily matched it. The function then built a complete `2026 > April 2026 > Wed, Apr 22, 2026 > <meeting>` subtree under that fragment.
+
+Compounding error: the default `root_name` was `"Meeting"` — the operator's *template heading*, not the actual top-level workspace. Production meetings all lived under top-level `"Notes"`, which hosts the full year-based archive. The operator named his template "Meeting" and his archive "Notes"; I conflated the two.
+
+Two fixes, both essential:
+
+1. **Remove the match-anywhere fallback.** `find_meeting_root_id` now only returns top-level nodes (`parent_id` is None or empty). Returns `None` when nothing matches — callers must fail loud, not fall back to a decoy.
+2. **Default `root_name = "Notes"`** — the real archive name. Overridable via `meeting-config.json`'s `workflowy.meeting_root_name`.
+
+The regression test encodes the exact decoy shape: a fixture with top-level `"Notes"` + a stray `"Meeting"` fragment at depth 7. `find_meeting_root_id(fixture, "Meeting")` must return `None`, not the decoy id.
+
+Broader lesson: when a lookup returns *something* rather than nothing, it feels like success. It isn't. The correct shape is "return the expected match or `None`" — never "return the closest thing I could find." Permissive fallbacks are confident wrong answers, which are worse than loud errors.
+
+### Auto-push: symmetric with Huckle
+
+The original design ran Murphy's meeting-prep on every meeting during the morning brief, rendered the prep block inside the Telegram message, and stopped there. Operators had to say `/prep-meeting <id>` manually to get the same prep structure pushed into the actual Workflowy meeting node where they'd be taking the call.
+
+Symmetry bug. Huckle's auto-compose writes Gmail drafts silently — the operator wakes up to drafts already staged. Murphy was asking for manual intervention every morning.
+
+The fix is a post-prep step inside `morning-meeting-brief.py::run`. After the loop that generates `prep_lookup` for each of today's meetings, a second loop filters for `meeting_type != "general"` and calls `workflowy-sync.py --push-prep-meeting <eid>` for each. The dedup helper from the earlier pass makes this idempotent — a meeting whose prep was already pushed yesterday won't double-populate today. Silent-fails: any push error increments `workflowy_push_failures` and lands in `sources_failed`, but the morning brief still emits.
+
+The full chain from morning-brief onward for a professional meeting: gcal fetch → real-meeting filter → per-meeting prep via `meeting-prep.py` (classifier + 8-field llm_prep) → Workflowy node create-or-find via the `Notes > <year> > <month> > <date>` path → Agenda sections pushed with dedup → Telegram briefing renders the full block inline. All of it runs before the operator is awake.
 
 ## Deployment walkthrough
 
