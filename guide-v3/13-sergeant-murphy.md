@@ -165,7 +165,7 @@ Phase 2 extended the self-brain to a second consumer — this one. Three surgica
 
 `classify_meeting_type(event, attendees_resolved, self_profile) -> {"recruiter-screen" | "hiring-manager" | "hiring-panel" | "general"}` runs as a short heuristic ladder after attendee resolution. First match wins:
 
-1. Any resolved attendee carries `relationship_type: recruiter` (a [promoted cold-recruiter stub](14-huckle-cat.md#stub-promotion-cold-recruiter-becomes-a-real-contact)) → `recruiter-screen`. Strongest signal — explicit operator decision.
+1. Any resolved attendee carries `relationship_type: recruiter` (a [kept cold-recruiter stub](14-huckle-cat.md#keep-vs-dismiss-cold-recruiter-lifecycle)) → `recruiter-screen`. Strongest signal — explicit operator decision.
 2. Any attendee's domain matches the shared `RECRUITER_DOMAINS` set (ATS + retained-search platforms) → `recruiter-screen`. Same domain list Huckle's detector uses; single source of truth at `agents/shared/recruiter_domains.py` so the two agents agree.
 3. Any attendee's domain matches a company in `self_profile.current_targets` → `hiring-panel` by default, `hiring-manager` if the event title carries a manager-1:1 keyword (*"manager chat"*, *"1:1 with"*).
 4. Event title matches a hiring-process keyword (*"phone screen"*, *"intro call"*, *"interview"*, *"onsite"*) AND at least one attendee is a known contact → `recruiter-screen`.
