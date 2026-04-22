@@ -34,6 +34,117 @@ GOOGLE_TOKEN_PATH = os.path.join(WORKSPACE, "token.json")
 
 BASE_URL = "https://workflowy.com/api/v1"
 
+
+# Interviewer / host name patterns in event description bodies.
+# Recruiter invites (Adobe, Greenhouse, custom) ship the interviewer
+# in the description body rather than as a proper attendee. First
+# match wins; trailing parenthetical titles and pronouns trim.
+_INTERVIEWER_PATTERNS = [
+    re.compile(r"Interviewer\(?s?\)?:\s*([^\n\r]+)", re.IGNORECASE),
+    re.compile(r"\bHost\(?s?\)?:\s*([^\n\r]+)", re.IGNORECASE),
+    re.compile(r"\bWith:\s*([^\n\r]+)", re.IGNORECASE),
+    re.compile(r"\bMeeting with:\s*([^\n\r]+)", re.IGNORECASE),
+]
+
+
+def _extract_interviewer_from_description(description: str) -> str:
+    """Return the first recognizable interviewer/host name in a
+    description body, or '' if none found. Strips trailing
+    parentheticals and commas so 'Alyssa Bonefas (Adobe)' returns
+    'Alyssa Bonefas'."""
+    if not description:
+        return ""
+    for pat in _INTERVIEWER_PATTERNS:
+        m = pat.search(description)
+        if not m:
+            continue
+        raw = m.group(1).strip()
+        # Strip trailing parenthetical + any trailing punctuation.
+        raw = re.sub(r"\s*\([^)]*\)\s*$", "", raw)
+        raw = raw.rstrip(".,;:")
+        # If comma-separated list, keep just the first name.
+        if "," in raw:
+            raw = raw.split(",", 1)[0].strip()
+        return raw
+    return ""
+
+
+def _camelcase(text: str) -> str:
+    """'Adobe Inc.' → 'AdobeInc'. Empty / None → ''."""
+    if not text:
+        return ""
+    return "".join(
+        p[:1].upper() + p[1:]
+        for p in re.findall(r"[A-Za-z0-9]+", text) if p
+    )
+
+
+def derive_meeting_title(prep: dict) -> tuple[str, list[str]]:
+    """Return (title, hashtags) for the Workflowy meeting node.
+
+    Title precedence:
+      1. First non-empty attendees[].name
+      2. Interviewer/host name parsed from context.description
+      3. 'Unknown'
+
+    Hashtags:
+      - Always includes 'JobSearch'
+      - Adds the company CamelCase when derivable:
+          (a) self_context.target_company.company — operator-curated
+              target, takes precedence (e.g. 'Adobe Inc.' → AdobeInc)
+          (b) Company stem inferred from an in-house ATS organizer
+              domain ('schedule@interview.adobe.com' → Adobe).
+              Skipped for 3rd-party ATS platforms (greenhouse, lever),
+              which don't identify the interviewing company.
+    """
+    # Lazy import — recruiter_domains lives in agents/shared/, and
+    # workflowy-sync.py is a top-level script that runs without that
+    # on sys.path until the dispatcher adds it. The few call sites
+    # that hit this helper all run under the agent's sys.path.
+    try:
+        from recruiter_domains import extract_company_from_ats_domain
+    except ImportError:  # pragma: no cover — test harness path
+        shared_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__)))),
+            "shared",
+        )
+        if shared_dir not in sys.path:
+            sys.path.insert(0, shared_dir)
+        from recruiter_domains import extract_company_from_ats_domain  # noqa
+
+    # --- title ---
+    title = "Unknown"
+    for att in (prep.get("attendees") or []):
+        name = (att.get("name") or "").strip()
+        if name:
+            title = name
+            break
+    if title == "Unknown":
+        desc = (prep.get("context") or {}).get("description") or ""
+        fallback = _extract_interviewer_from_description(desc)
+        if fallback:
+            title = fallback
+
+    # --- hashtags ---
+    hashtags = ["JobSearch"]
+    self_ctx = prep.get("self_context") or {}
+    target = self_ctx.get("target_company") or {}
+    target_company = (target.get("company") or "").strip()
+    if target_company:
+        camel = _camelcase(target_company)
+        if camel:
+            hashtags.append(camel)
+    else:
+        organizer = prep.get("organizer") or ""
+        if isinstance(organizer, dict):
+            organizer = organizer.get("email") or ""
+        inferred = extract_company_from_ats_domain(organizer)
+        if inferred:
+            hashtags.append(inferred)
+
+    return title, hashtags
+
 # Matches Workflowy date headings: "Tue, Feb 11, 2026"
 DATE_NODE_RE = re.compile(
     r"^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), "
@@ -954,23 +1065,10 @@ def cmd_push_prep_meeting(event_id):
         }))
         return
 
-    # Derive title + hashtags. Convention: attendee name + #JobSearch +
-    # CamelCased company. When target_company matches, use that; else
-    # leave company tag empty.
-    attendees = prep.get("attendees") or []
-    title = (attendees[0].get("name") or "Unknown") if attendees else "Unknown"
-    hashtags = ["JobSearch"]
-    self_ctx = prep.get("self_context") or {}
-    target = self_ctx.get("target_company") or {}
-    company = (target.get("company") or "").strip()
-    if company:
-        import re as _re
-        camel = "".join(
-            p[:1].upper() + p[1:]
-            for p in _re.findall(r"[A-Za-z0-9]+", company) if p
-        )
-        if camel:
-            hashtags.append(camel)
+    # Derive title + hashtags — see derive_meeting_title for the
+    # precedence rules (attendees > description parse > Unknown, and
+    # target_company > organizer-domain inference for the tag).
+    title, hashtags = derive_meeting_title(prep)
 
     # Parse meeting_date from prep.start.
     start = prep.get("start") or ""

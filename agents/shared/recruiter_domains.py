@@ -103,3 +103,43 @@ def is_recruiter_domain(email_or_domain: str) -> bool:
     if len(parts) >= 3 and parts[0] in _ATS_SUBDOMAIN_PREFIXES:
         return True
     return False
+
+
+def extract_company_from_ats_domain(email_or_domain: str) -> str | None:
+    """Return the capitalized company stem from an in-house ATS
+    subdomain, or None when no company can be inferred.
+
+    Examples:
+      'schedule@interview.adobe.com' → 'Adobe'
+      'no-reply@recruiting.amazon.com' → 'Amazon'
+      'talent.google.com' → 'Google'
+      'no-reply@greenhouse-mail.io' → None   (3rd-party ATS platform)
+      'jane@lever.co' → None                 (3rd-party ATS platform)
+      'boss@example.com' → None              (not recruiter-adjacent)
+
+    Used by the Workflowy title-derivation path so recruiter invites
+    with no attendees still get a company hashtag. Deliberately
+    conservative — only 'prefix.company.tld' forms with a recognized
+    ATS prefix resolve, since anything else risks mis-attributing a
+    friend's employer (`alice@google.com`) as the interview target.
+    """
+    if not email_or_domain:
+        return None
+    text = email_or_domain.lower().strip()
+    domain = text.partition("@")[2] if "@" in text else text
+    if not domain:
+        return None
+    # Third-party ATS platforms (greenhouse, lever, etc.) are just
+    # message carriers — never treat their domain as the company.
+    for rd in RECRUITER_DOMAINS:
+        if domain == rd or domain.endswith("." + rd):
+            return None
+    parts = domain.split(".")
+    if len(parts) < 3 or parts[0] not in _ATS_SUBDOMAIN_PREFIXES:
+        return None
+    # prefix.company.tld (or prefix.company.co.uk) — take the label
+    # right after the prefix as the company stem.
+    stem = parts[1]
+    if not stem or not stem.isalnum():
+        return None
+    return stem[:1].upper() + stem[1:]

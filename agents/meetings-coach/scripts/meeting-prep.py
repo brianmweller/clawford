@@ -328,6 +328,8 @@ def prep_meeting(event, force=False):
         "start": event.get("start", ""),
         "end": event.get("end", ""),
         "attendees": [],
+        "organizer": event.get("organizer"),
+        "location": event.get("location"),
         "context": {
             "facts": [],
             "commitments": [],

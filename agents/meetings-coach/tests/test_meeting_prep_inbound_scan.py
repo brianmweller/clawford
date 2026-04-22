@@ -90,6 +90,45 @@ def test_clean_event_produces_no_warnings(mp) -> None:
     assert names == ["Alice Rivera", "Sam Smith"]
 
 
+def test_prep_preserves_organizer_and_location(mp) -> None:
+    """Downstream consumers (Workflowy title derivation) need organizer
+    and location from the source event. meeting-prep.py used to drop
+    them, forcing an extra gcal-fetch round-trip."""
+    event = {
+        "id": "evt-with-organizer",
+        "summary": "Meeting Confirmation - Sam Smith",
+        "description": "Adobe Leadership Chat\nInterviewer(s): Alyssa Bonefas",
+        "start": "2026-04-23T21:45:00+00:00",
+        "end": "2026-04-23T22:15:00+00:00",
+        "attendees": [],
+        "organizer": "schedule@interview.adobe.com",
+        "location": "2164692610",
+    }
+    result = mp.prep_meeting(event, force=True)
+
+    assert result["organizer"] == "schedule@interview.adobe.com"
+    assert result["location"] == "2164692610"
+
+
+def test_prep_preserves_organizer_dict_shape(mp) -> None:
+    """GCal's native organizer shape is a dict; passthrough must
+    preserve that so workflowy-sync's derivation handles both forms."""
+    event = {
+        "id": "evt-dict-organizer",
+        "summary": "Final round",
+        "description": "",
+        "start": "2026-04-24T17:00:00+00:00",
+        "end": "2026-04-24T18:00:00+00:00",
+        "attendees": [],
+        "organizer": {"email": "no-reply@recruiting.amazon.com",
+                      "displayName": "Amazon Interviews"},
+    }
+    result = mp.prep_meeting(event, force=True)
+
+    assert isinstance(result["organizer"], dict)
+    assert result["organizer"]["email"] == "no-reply@recruiting.amazon.com"
+
+
 # ---------------------------------------------------------------------------
 # Red-team: injection in description
 # ---------------------------------------------------------------------------

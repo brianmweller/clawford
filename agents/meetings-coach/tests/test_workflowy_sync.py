@@ -347,6 +347,127 @@ def test_push_prep_sections_skips_empty_item_lists(monkeypatch):
     assert len(fake.calls) == 2  # one for Pitch section, one for item
 
 
+# ---------------------------------------------------------------------------
+# derive_meeting_title — title/hashtags derivation from a prep dict.
+#
+# Problem: recruiter invites from big-company in-house ATS systems
+# (Adobe, Amazon, Google) carry no attendees on the invite — the
+# interviewer is only named in the description body. Fall back to
+# parsing the description + organizer-domain to get a useful title
+# instead of the previous 'Unknown #JobSearch'.
+# ---------------------------------------------------------------------------
+
+
+def _prep(**overrides):
+    """Minimal prep-cache shape for derivation tests. Mirrors what
+    meeting-prep.py writes: attendees list, context.description,
+    top-level organizer/location, self_context.target_company."""
+    base = {
+        "attendees": [],
+        "context": {"description": ""},
+        "organizer": None,
+        "location": None,
+        "self_context": {"target_company": None},
+    }
+    base.update(overrides)
+    return base
+
+
+def test_derive_title_prefers_named_attendee():
+    prep = _prep(attendees=[{"name": "Michelle Leist", "email": ""}])
+    title, tags = wf.derive_meeting_title(prep)
+    assert title == "Michelle Leist"
+    assert "JobSearch" in tags
+
+
+def test_derive_title_from_description_interviewer():
+    """Adobe-style invite: no attendees, interviewer in description."""
+    prep = _prep(
+        context={"description": (
+            "Your meeting time has been confirmed.\n"
+            "Adobe Leadership Chat (30 minutes)\n"
+            "Interviewer(s): Alyssa Bonefas\n"
+        )},
+        organizer="schedule@interview.adobe.com",
+    )
+    title, tags = wf.derive_meeting_title(prep)
+    assert title == "Alyssa Bonefas"
+    assert "JobSearch" in tags
+    assert "Adobe" in tags
+
+
+def test_derive_title_from_description_with_pattern():
+    """Alternative phrasing: 'With: <name>'."""
+    prep = _prep(
+        context={"description": "Phone screen\nWith: Jane Cooper\n"},
+        organizer="scheduler@recruiting.amazon.com",
+    )
+    title, tags = wf.derive_meeting_title(prep)
+    assert title == "Jane Cooper"
+    assert "Amazon" in tags
+
+
+def test_derive_title_from_description_host_pattern():
+    prep = _prep(
+        context={"description": "Intro call\nHost: Priya Sharma\n"},
+    )
+    title, _ = wf.derive_meeting_title(prep)
+    assert title == "Priya Sharma"
+
+
+def test_derive_company_strips_ats_subdomain():
+    """'schedule@interview.adobe.com' → company 'Adobe', not
+    'Interview' (the ATS prefix) and not 'interview.adobe' (raw)."""
+    prep = _prep(organizer="schedule@interview.adobe.com")
+    _, tags = wf.derive_meeting_title(prep)
+    assert "Adobe" in tags
+
+
+def test_derive_company_from_plain_ats_domain():
+    """'hire.withgoogle.com' has no ATS prefix but IS a RECRUITER_DOMAINS
+    entry — skip the company tag (Google is the host here, but the operator
+    might be interviewing anywhere; don't guess)."""
+    prep = _prep(organizer="no-reply@hire.withgoogle.com")
+    _, tags = wf.derive_meeting_title(prep)
+    # Don't misattribute "withgoogle" as the company.
+    assert "Withgoogle" not in tags
+    assert "Hire" not in tags
+
+
+def test_derive_company_target_wins_over_organizer():
+    """When the operator has a curated target_company, trust that over
+    the organizer-domain inference (operator > heuristic)."""
+    prep = _prep(
+        organizer="schedule@interview.adobe.com",
+        self_context={"target_company": {"company": "Adobe Inc."}},
+    )
+    _, tags = wf.derive_meeting_title(prep)
+    assert "AdobeInc" in tags  # existing CamelCase convention
+    assert "Adobe" not in tags  # don't duplicate
+
+
+def test_derive_title_unknown_when_no_signal():
+    """No attendees, no description patterns, no organizer → fall
+    back to the existing 'Unknown' behavior."""
+    prep = _prep(
+        context={"description": "Random event text with no hints."},
+    )
+    title, tags = wf.derive_meeting_title(prep)
+    assert title == "Unknown"
+    assert tags == ["JobSearch"]
+
+
+def test_derive_title_ignores_empty_attendee_name():
+    """Attendee with empty name string shouldn't short-circuit to
+    empty title — keep falling back."""
+    prep = _prep(
+        attendees=[{"name": "", "email": "x@y.com"}],
+        context={"description": "Interviewer(s): Sam Rivera"},
+    )
+    title, _ = wf.derive_meeting_title(prep)
+    assert title == "Sam Rivera"
+
+
 def test_create_meeting_node_title_includes_hashtags(monkeypatch):
     fake = _FakeAPI()
     monkeypatch.setattr(wf, "create_node", fake.create_node)
