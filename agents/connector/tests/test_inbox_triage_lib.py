@@ -119,12 +119,26 @@ def test_thread_with_known_sender_last_is_queued():
 
 def test_thread_with_service_sender_last_is_skipped():
     thread = _thread("t1", [
-        _message("noreply@linkedin.com", "Tue, 15 Apr 2026 10:00:00 -0700"),
+        _message("notifications@stripe.com", "Tue, 15 Apr 2026 10:00:00 -0700"),
     ])
     result = classify_thread_for_triage(
         thread, operator_emails=BRIAN_ADDRESSES, email_to_slug={},
     )
     assert result["status"] == "skipped_service"
+
+
+def test_ambiguous_domain_without_recruiter_signal_falls_to_unknown():
+    """LinkedIn notification-style sender with no recruiter phrasing
+    is no longer bucketed as skipped_service — AMBIGUOUS_DOMAINS are
+    exempt from the service-account short-circuit. With no recruiter
+    signals it lands in skipped_unknown_sender (still not drafted)."""
+    thread = _thread("t1", [
+        _message("noreply@linkedin.com", "Tue, 15 Apr 2026 10:00:00 -0700"),
+    ])
+    result = classify_thread_for_triage(
+        thread, operator_emails=BRIAN_ADDRESSES, email_to_slug={},
+    )
+    assert result["status"] == "skipped_unknown_sender"
 
 
 def test_thread_with_unknown_sender_last_is_skipped():
@@ -217,6 +231,26 @@ def test_linkedin_inmail_with_exec_role_subject_queued_cold():
     )
     assert ok
     assert conf >= 0.5
+
+
+def test_linkedin_inmail_with_exec_role_subject_routes_cold_not_service():
+    """LinkedIn InMail from a recruiter (inmail-hit-reply@linkedin.com with
+    'via LinkedIn' in display name) must NOT short-circuit as
+    skipped_service. linkedin.com is in AMBIGUOUS_DOMAINS — the triage
+    should defer to the recruiter detector, which will upgrade this to
+    queued_cold_recruiter on the strength of subject signals."""
+    thread = _thread("t1", [
+        _message(
+            "Iman Recruiter via LinkedIn <inmail-hit-reply@linkedin.com>",
+            "Wed, 22 Apr 2026 13:52:00 -0700",
+            subject="Connecting re: Senior Director of Data Science & Analytics for Adobe Firefly",
+            body_snippet="Hi the operator, I'm part of the Adobe recruiting team reaching out about an executive role...",
+        ),
+    ])
+    result = classify_thread_for_triage(
+        thread, operator_emails=BRIAN_ADDRESSES, email_to_slug={},
+    )
+    assert result["status"] == "queued_cold_recruiter"
 
 
 def test_thread_with_empty_messages_is_skipped():

@@ -23,19 +23,24 @@ from __future__ import annotations
 from email.utils import parseaddr
 
 from flux_import_lib import is_likely_service_account
-from recruiter_detector_lib import RECRUITER_DOMAINS, is_likely_recruiter
+from recruiter_detector_lib import AMBIGUOUS_DOMAINS, RECRUITER_DOMAINS, is_likely_recruiter
 
 
 def _is_recruiter_domain(email: str) -> bool:
     """True if the email's domain matches a known ATS / recruiting
-    platform. Used to exempt such emails from the service-account
-    filter, since ATS mails often use no-reply@ prefixes but are NOT
-    service notifications — they're recruiter outreach."""
+    platform OR an ambiguous-but-recruiter-adjacent domain (LinkedIn
+    InMail). Used to exempt such emails from the service-account filter
+    so the recruiter detector gets a chance to classify on content —
+    ambiguous-domain hits without recruiter phrasing fall through to
+    skipped_unknown_sender downstream."""
     if not email or "@" not in email:
         return False
     domain = email.partition("@")[2].lower()
     for rd in RECRUITER_DOMAINS:
         if domain == rd or domain.endswith("." + rd):
+            return True
+    for ad in AMBIGUOUS_DOMAINS:
+        if domain == ad or domain.endswith("." + ad):
             return True
     return False
 
