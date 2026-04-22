@@ -97,20 +97,22 @@ def derive_meeting_title(prep: dict) -> tuple[str, list[str]]:
               Skipped for 3rd-party ATS platforms (greenhouse, lever),
               which don't identify the interviewing company.
     """
-    # Lazy import — recruiter_domains lives in agents/shared/, and
-    # workflowy-sync.py is a top-level script that runs without that
-    # on sys.path until the dispatcher adds it. The few call sites
-    # that hit this helper all run under the agent's sys.path.
+    # Lazy import — recruiter_domains lives in agents/shared/. Try
+    # direct import first (works when the dispatcher has shared on
+    # sys.path). Fall back to walking both candidate layouts:
+    #   repo:      agents/meetings-coach/scripts/ → ../../shared/
+    #   workspace: .../scripts/ → ../agents/shared/
     try:
         from recruiter_domains import extract_company_from_ats_domain
     except ImportError:  # pragma: no cover — test harness path
-        shared_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__)))),
-            "shared",
-        )
-        if shared_dir not in sys.path:
-            sys.path.insert(0, shared_dir)
+        here = os.path.dirname(os.path.abspath(__file__))
+        candidates = [
+            os.path.normpath(os.path.join(here, "..", "..", "shared")),
+            os.path.normpath(os.path.join(here, "..", "agents", "shared")),
+        ]
+        for c in candidates:
+            if os.path.isdir(c) and c not in sys.path:
+                sys.path.insert(0, c)
         from recruiter_domains import extract_company_from_ats_domain  # noqa
 
     # --- title ---
