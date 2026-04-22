@@ -431,12 +431,21 @@ _POST_MEETING_SCAN = str(_SCRIPTS_DIR / "post-meeting-scan.py")
 
 def _load_meeting_candidates(
     window_days_back: int = 1, window_days_forward: int = 7,
+    include_non_real: bool = False,
 ) -> list[_FuzzyCandidate]:
     """Build a meeting-candidate pool from the cached gcal-fetch events
     files under the workspace. One Candidate per real meeting, with
     attendees concatenated into the searchable name/email fields so
     'the Michelle call' matches a meeting where Michelle is one of
-    several attendees."""
+    several attendees.
+
+    include_non_real=True bypasses the gcal-fetch is_real_meeting
+    classifier — needed for time-descriptor resolution, where the
+    operator has named a specific clock time and the classifier's
+    "no attendees, no video link → skip" heuristic is wrong for
+    recruiter invites (Adobe, Greenhouse, etc. title themselves
+    'Meeting Confirmation' with the interviewer only in the
+    description body)."""
     cache = Path(WORKSPACE) / "cache"
     if not cache.exists():
         return []
@@ -458,7 +467,7 @@ def _load_meeting_candidates(
             eid = ev.get("id", "")
             if not eid or eid in seen_ids:
                 continue
-            if not ev.get("is_real_meeting", True):
+            if not include_non_real and not ev.get("is_real_meeting", True):
                 # Respect the gcal-fetch classifier where present.
                 continue
             start = (ev.get("start") or "")
@@ -635,10 +644,13 @@ def _resolve_meeting_descriptor(descriptor: str) -> dict:
     # matching. If the descriptor parses to a time AND we have a pool,
     # the match (or miss) is authoritative — don't fall through to
     # substring matching, which would match a 3pm-literal in a title.
+    # Uses an expanded pool (include_non_real=True) so recruiter
+    # invites with no attendees + phone-code location still resolve.
     tz = ZoneInfo(os.environ.get("TZ", DEFAULT_TZ))
     target_time = _parse_time_descriptor(descriptor, tz)
-    if target_time is not None and pool:
-        hits = _match_by_time(target_time, pool)
+    time_pool = _load_meeting_candidates(include_non_real=True)
+    if target_time is not None and time_pool:
+        hits = _match_by_time(target_time, time_pool)
         if len(hits) == 1:
             c = hits[0]
             return {

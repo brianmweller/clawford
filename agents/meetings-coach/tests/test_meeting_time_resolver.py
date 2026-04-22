@@ -228,6 +228,44 @@ def test_plain_name_still_resolves(tools_mod):
     assert result["meeting_id"] == "alyssa_call_xyz"
 
 
+def test_time_descriptor_overrides_is_real_meeting_filter(tools_mod):
+    """Recruiter invites (Adobe, Greenhouse, etc.) often carry
+    is_real_meeting=false because no attendees are explicit on the
+    invite — the interviewer lives only in the description body, and
+    the 'location' is a phone code not a video link. When the operator
+    names a specific clock time, trust them: include these events in
+    the candidate pool regardless of the classifier verdict."""
+    cache = Path(tools_mod.CACHE)
+    tomorrow = _today() + timedelta(days=1)
+    _write_events(cache, [
+        {"id": "recruiter_invite_xyz",
+         "summary": "Meeting Confirmation - Sam Smith",
+         "start": _iso(tomorrow, 14, 45),
+         "is_real_meeting": False,
+         "attendees": []},
+    ])
+
+    result = tools_mod._resolve_meeting_descriptor("tomorrow 2:45pm")
+    assert result["status"] == "ok", result
+    assert result["meeting_id"] == "recruiter_invite_xyz"
+
+
+def test_plain_name_still_filters_noise(tools_mod):
+    """Complement to above: plain-name / title paths still honor
+    is_real_meeting=false (stops 'cleaners arrive'-type events from
+    polluting fuzzy substring matches)."""
+    cache = Path(tools_mod.CACHE)
+    tomorrow = _today() + timedelta(days=1)
+    _write_events(cache, [
+        {"id": "not_real_xyz", "summary": "Cleaners arrive",
+         "start": _iso(tomorrow, 13, 30),
+         "is_real_meeting": False, "attendees": []},
+    ])
+
+    result = tools_mod._resolve_meeting_descriptor("cleaners")
+    assert result["status"] == "not_found"
+
+
 def test_prep_meeting_accepts_time_descriptor(tools_mod, monkeypatch):
     """End-to-end: the LLM calls prep_meeting('tomorrow 2:45pm') and
     it shells out with the resolved event id."""
