@@ -684,6 +684,48 @@ def create_meeting_node(meeting_date, title, hashtags=None, attendees=None,
     return meeting_node_id
 
 
+def push_prep_sections_to_agenda(agenda_id, sections, api_key=None):
+    """Create labeled sections under an Agenda node, skipping any whose
+    label already exists. Each section is ``{"label": str, "items":
+    list[str]}``; items become nested child bullets under the section
+    parent.
+
+    Idempotency rule: if the exact label is already a direct child of
+    ``agenda_id``, skip the whole section. Re-running the prep push on
+    the same meeting therefore produces no duplicates. An operator who
+    wants to refresh a section should delete it from Workflowy first.
+
+    Empty-item sections are not emitted as empty parents — skipped
+    silently (distinct from ``skipped`` in the return, which only
+    counts labels that collide with existing nodes).
+
+    Returns ``{"created": [label, ...], "skipped": [label, ...]}``.
+    """
+    existing = get_children(agenda_id, api_key=api_key)
+    existing_labels = {
+        strip_html((c.get("name") or "").strip()) for c in existing
+    }
+
+    created: list[str] = []
+    skipped: list[str] = []
+    for section in sections:
+        label = (section.get("label") or "").strip()
+        items = section.get("items") or []
+        if not label or not items:
+            continue
+        if label in existing_labels:
+            skipped.append(label)
+            continue
+        parent = create_node(agenda_id, label,
+                             position="bottom", api_key=api_key)
+        pid = extract_node_id(parent)
+        for item in items:
+            create_node(pid, str(item),
+                        position="bottom", api_key=api_key)
+        created.append(label)
+    return {"created": created, "skipped": skipped}
+
+
 def find_agenda_node(meeting_node_id, api_key=None):
     """Find the Agenda node under a meeting node."""
     children = get_children(meeting_node_id, api_key=api_key)
@@ -861,6 +903,147 @@ def cmd_push_bullets(event_id):
     }, indent=2))
 
 
+def cmd_push_prep_meeting(event_id):
+    """Push the professional-prep block for a specific meeting to
+    Workflowy. Creates (or finds) the meeting node anchored under the
+    configured meeting-root, then adds labeled sections to Agenda with
+    dedup.
+
+    Input: reads ``cache/prep-<event_id>-<today_pt>.json`` which is
+    meeting-prep.py's per-event output (including the 8-field
+    llm_prep block for professional meetings).
+
+    Output (SCRIPT_CONTRACT-compliant JSON envelope):
+      {status: ok, meeting_node_id, created: [labels], skipped: [labels]}
+    For general meetings (no llm_prep), returns status=skipped.
+    """
+    import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
+
+    api_key = get_api_key()
+    config = {}
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH) as f:
+            config = json.load(f)
+    root_name = (config.get("workflowy") or {}).get("meeting_root_name", "Notes")
+    operator_tz = config.get("timezone", "America/Los_Angeles")
+
+    # Read prep cache (use PT date to match meeting-prep.py's file naming
+    # convention; today in PT, not UTC).
+    today_pt = _dt.datetime.now(timezone.utc).astimezone(
+        _ZI(operator_tz)
+    ).strftime("%Y-%m-%d")
+    prep_path = os.path.join(CACHE_DIR, f"prep-{event_id}-{today_pt}.json")
+    if not os.path.exists(prep_path):
+        print(json.dumps({
+            "status": "error",
+            "message": f"No prep cache for {event_id} on {today_pt}",
+        }))
+        sys.exit(1)
+
+    with open(prep_path, encoding="utf-8") as f:
+        prep = json.load(f)
+
+    meeting_type = prep.get("meeting_type", "general")
+    llm_prep = prep.get("llm_prep") or {}
+    if meeting_type == "general" or "error" in llm_prep:
+        print(json.dumps({
+            "status": "skipped",
+            "reason": "not a professional meeting or llm_prep failed",
+            "meeting_type": meeting_type,
+        }))
+        return
+
+    # Derive title + hashtags. Convention: attendee name + #JobSearch +
+    # CamelCased company. When target_company matches, use that; else
+    # leave company tag empty.
+    attendees = prep.get("attendees") or []
+    title = (attendees[0].get("name") or "Unknown") if attendees else "Unknown"
+    hashtags = ["JobSearch"]
+    self_ctx = prep.get("self_context") or {}
+    target = self_ctx.get("target_company") or {}
+    company = (target.get("company") or "").strip()
+    if company:
+        import re as _re
+        camel = "".join(
+            p[:1].upper() + p[1:]
+            for p in _re.findall(r"[A-Za-z0-9]+", company) if p
+        )
+        if camel:
+            hashtags.append(camel)
+
+    # Parse meeting_date from prep.start.
+    start = prep.get("start") or ""
+    if "T" in start:
+        meeting_date = _dt.datetime.fromisoformat(start.replace("Z", "+00:00"))
+    else:
+        meeting_date = _dt.datetime.strptime(start, "%Y-%m-%d")
+
+    # Resolve the top-level "Notes" root.
+    nodes = get_export(api_key=api_key)
+    root_id = find_meeting_root_id(nodes, root_name)
+    if root_id is None:
+        print(json.dumps({
+            "status": "error",
+            "message": f"top-level '{root_name}' node not found",
+        }))
+        sys.exit(1)
+
+    meeting_node_id = create_meeting_node(
+        meeting_date=meeting_date,
+        title=title,
+        hashtags=hashtags,
+        attendees=[{"email": a.get("email", ""), "name": a.get("name", "")}
+                   for a in attendees],
+        api_key=api_key,
+        config=config,
+        root_id=root_id,
+        tz=operator_tz,
+    )
+
+    agenda_id = find_agenda_node(meeting_node_id, api_key=api_key)
+    if agenda_id is None:
+        print(json.dumps({
+            "status": "error",
+            "message": "Agenda node not found under freshly-created meeting",
+        }))
+        sys.exit(1)
+
+    # Build sections list from the 8-field prep, preserving intended
+    # reading order. Single-value fields wrap to a [value] list.
+    sections = []
+    def _add(label, value):
+        if isinstance(value, str):
+            if value.strip():
+                sections.append({"label": label, "items": [value.strip()]})
+        elif isinstance(value, list):
+            items = [str(x).strip() for x in value if str(x).strip()]
+            if items:
+                sections.append({"label": label, "items": items})
+
+    _add("\U0001f437\U0001f50d Framing", llm_prep.get("prep_summary"))
+    _add("\U0001f91d Recipient model", llm_prep.get("recipient_model"))
+    _add("\U0001f3af Objective", llm_prep.get("objective"))
+    _add("✨ Why this role", llm_prep.get("compelling_angle"))
+    _add("\U0001f3a4 Pitch", llm_prep.get("fit_pitch"))
+    _add("\U0001f4e2 Evidence", llm_prep.get("fit_evidence"))
+    _add("\U0001f6a9 Red flags", llm_prep.get("red_flags"))
+    _add("\U0001f4ac Questions to ask", llm_prep.get("evaluation_questions"))
+
+    push_result = push_prep_sections_to_agenda(
+        agenda_id=agenda_id, sections=sections, api_key=api_key,
+    )
+
+    print(json.dumps({
+        "status": "ok",
+        "meeting_node_id": meeting_node_id,
+        "meeting_type": meeting_type,
+        "created": push_result["created"],
+        "skipped": push_result["skipped"],
+        "title": f"{title} {' '.join('#' + h for h in hashtags)}",
+    }, indent=2))
+
+
 def cmd_read_agenda(event_id):
     """Read existing agenda items from Workflowy for a meeting."""
     api_key = get_api_key()
@@ -966,6 +1149,12 @@ def main():
             print(json.dumps({"status": "error", "message": "--push-bullets requires EVENT_ID"}))
             sys.exit(1)
         cmd_push_bullets(sys.argv[idx + 1])
+    elif "--push-prep-meeting" in sys.argv:
+        idx = sys.argv.index("--push-prep-meeting")
+        if idx + 1 >= len(sys.argv):
+            print(json.dumps({"status": "error", "message": "--push-prep-meeting requires EVENT_ID"}))
+            sys.exit(1)
+        cmd_push_prep_meeting(sys.argv[idx + 1])
     elif "--read-agenda" in sys.argv:
         idx = sys.argv.index("--read-agenda")
         if idx + 1 >= len(sys.argv):
@@ -975,7 +1164,7 @@ def main():
     elif "--sync" in sys.argv:
         cmd_sync()
     else:
-        print(json.dumps({"status": "error", "message": "Usage: --create-nodes | --push-bullets EVENT_ID | --read-agenda EVENT_ID | --sync"}))
+        print(json.dumps({"status": "error", "message": "Usage: --create-nodes | --push-bullets EVENT_ID | --push-prep-meeting EVENT_ID | --read-agenda EVENT_ID | --sync"}))
         sys.exit(1)
 
 

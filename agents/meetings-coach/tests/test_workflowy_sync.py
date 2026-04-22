@@ -273,6 +273,80 @@ def test_create_meeting_node_uses_position_bottom_for_substructure(monkeypatch):
         )
 
 
+def test_push_prep_sections_creates_each_labeled_section(monkeypatch):
+    """A fresh Agenda gets each labeled section with its nested items."""
+    fake = _FakeAPI()
+    monkeypatch.setattr(wf, "create_node", fake.create_node)
+    monkeypatch.setattr(wf, "get_children", lambda pid, api_key=None: [])
+
+    result = wf.push_prep_sections_to_agenda(
+        agenda_id="agenda_123",
+        sections=[
+            {"label": "🐷🔍 Framing", "items": ["one-line framing"]},
+            {"label": "📢 Evidence", "items": ["a", "b", "c"]},
+        ],
+        api_key="k",
+    )
+
+    assert set(result["created"]) == {"🐷🔍 Framing", "📢 Evidence"}
+    assert result["skipped"] == []
+    # 2 section parents + 1 framing item + 3 evidence items = 6 create calls
+    assert len(fake.calls) == 6
+    # Every call must use position="bottom"
+    for c in fake.calls:
+        assert c["position"] == "bottom"
+
+
+def test_push_prep_sections_skips_labels_already_present(monkeypatch):
+    """If a section label already exists under Agenda, skip it entirely
+    — idempotency rule. Re-running the push should not duplicate."""
+    fake = _FakeAPI()
+    existing = [
+        {"id": "ex_framing", "name": "🐷🔍 Framing", "parent_id": "agenda_123"},
+        {"id": "ex_evidence", "name": "📢 Evidence", "parent_id": "agenda_123"},
+    ]
+    monkeypatch.setattr(wf, "create_node", fake.create_node)
+    monkeypatch.setattr(
+        wf, "get_children",
+        lambda pid, api_key=None: existing if pid == "agenda_123" else [],
+    )
+
+    result = wf.push_prep_sections_to_agenda(
+        agenda_id="agenda_123",
+        sections=[
+            {"label": "🐷🔍 Framing", "items": ["fresh framing"]},
+            {"label": "📢 Evidence", "items": ["a"]},
+            {"label": "🎤 Pitch", "items": ["a new pitch"]},
+        ],
+        api_key="k",
+    )
+
+    assert result["created"] == ["🎤 Pitch"]
+    assert set(result["skipped"]) == {"🐷🔍 Framing", "📢 Evidence"}
+    # Only 2 calls: Pitch section + its 1 item.
+    assert len(fake.calls) == 2
+
+
+def test_push_prep_sections_skips_empty_item_lists(monkeypatch):
+    """Sections with no items are skipped entirely (not emitted as
+    empty parents)."""
+    fake = _FakeAPI()
+    monkeypatch.setattr(wf, "create_node", fake.create_node)
+    monkeypatch.setattr(wf, "get_children", lambda pid, api_key=None: [])
+
+    result = wf.push_prep_sections_to_agenda(
+        agenda_id="agenda_123",
+        sections=[
+            {"label": "🎤 Pitch", "items": ["a pitch"]},
+            {"label": "🚩 Red flags", "items": []},  # empty — skip
+        ],
+        api_key="k",
+    )
+    assert result["created"] == ["🎤 Pitch"]
+    assert result["skipped"] == []  # empty != skipped; just not created
+    assert len(fake.calls) == 2  # one for Pitch section, one for item
+
+
 def test_create_meeting_node_title_includes_hashtags(monkeypatch):
     fake = _FakeAPI()
     monkeypatch.setattr(wf, "create_node", fake.create_node)

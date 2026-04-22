@@ -362,6 +362,31 @@ def force_prep(meeting_id: str) -> dict:
     return result
 
 
+_WORKFLOWY_SYNC = str(_SCRIPTS_DIR / "workflowy-sync.py")
+
+
+def push_meeting_prep_to_workflowy(meeting_id: str) -> dict:
+    """Push the professional-prep block for a specific meeting to
+    Workflowy. Creates/finds the meeting node under the operator's
+    Notes workspace and adds labeled sections (Framing, Recipient
+    model, Objective, Why this role, Pitch, Evidence, Red flags,
+    Questions to ask) to its Agenda, skipping any that already exist.
+
+    Returns the Workflowy meeting node id + which labels were newly
+    created vs skipped. For general (non-professional) meetings this
+    is a no-op that returns status=skipped — operator prep belongs
+    only on recruiter/hiring meetings."""
+    meeting_id = (meeting_id or "").strip()
+    if not meeting_id:
+        return {"status": "error", "error": "meeting_id is required"}
+    result = subprocess_helpers.run_json_script(
+        _WORKFLOWY_SYNC, "--push-prep-meeting", meeting_id, timeout=120,
+    )
+    if subprocess_helpers.is_subprocess_error(result):
+        return {"status": "error", "error": result.get("__error__", "script error")}
+    return result
+
+
 def force_debrief() -> dict:
     """Run post-meeting-scan.py on demand — processes any recently-ended
     meetings with transcripts, stages debriefs, sends Telegram messages.
@@ -651,6 +676,34 @@ TOOLS: list[dict] = [
     },
     {
         "type": "function",
+        "name": "push_meeting_prep_to_workflowy",
+        "description": (
+            "For a specific professional meeting (recruiter screen, "
+            "hiring manager, interview), push the 8-field prep "
+            "(framing, recipient model, objective, why this role, "
+            "pitch, evidence, red flags, questions to ask) to the "
+            "meeting's Workflowy Agenda node. Creates the meeting "
+            "node if it doesn't exist yet (anchored under top-level "
+            "'Notes > <year> > <month> > <date>'). Idempotent — "
+            "re-running skips any agenda section that already exists. "
+            "Use when the operator says 'push the prep to Workflowy for [meeting]' "
+            "or similar. For general (non-professional) meetings this "
+            "returns status=skipped; prep belongs only on "
+            "recruiter/hiring meetings."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "meeting_id": {
+                    "type": "string",
+                    "description": "GCal event id from the meetings cache",
+                },
+            },
+            "required": ["meeting_id"],
+        },
+    },
+    {
+        "type": "function",
         "name": "force_debrief",
         "description": (
             "Run the post-meeting scan on demand — processes any recently-"
@@ -748,6 +801,7 @@ EXECUTORS: dict = {
     "dismiss_debrief": dismiss_debrief,
     "replace_action_items": replace_action_items,
     "force_prep": force_prep,
+    "push_meeting_prep_to_workflowy": push_meeting_prep_to_workflowy,
     "force_debrief": force_debrief,
     "propose_coaching_toggle": propose_coaching_toggle,
     "confirm_coaching_toggle": confirm_coaching_toggle,

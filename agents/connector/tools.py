@@ -468,6 +468,31 @@ TOOLS: list[dict] = [
     },
     {
         "type": "function",
+        "name": "reply_to_thread",
+        "description": (
+            "Draft a reply for a specific Gmail thread on demand. Runs "
+            "the same triage + compose pipeline as the auto-compose "
+            "cron (handles both known senders and cold-recruiter "
+            "inbounds, produces a staged Gmail draft) — but forces "
+            "immediate processing instead of waiting for the half-hour "
+            "cron tick. Use when the operator says '/reply <thread_id>' or "
+            "'draft a reply to that thread now' or 'compose something "
+            "for <thread_id>'. Returns the triage classification + the "
+            "compose result including gmail_draft_id."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "thread_id": {
+                    "type": "string",
+                    "description": "Gmail thread ID to reply to",
+                },
+            },
+            "required": ["thread_id"],
+        },
+    },
+    {
+        "type": "function",
         "name": "promote_recruiter_by_thread_id",
         "description": (
             "Promote a cold-recruiter queue entry to a real people/<slug>.md "
@@ -744,6 +769,51 @@ def promote_recruiter_by_thread_id(thread_id: str) -> dict:
     return _handle_recruiter_callback("promote", thread_id)
 
 
+def reply_to_thread(thread_id: str) -> dict:
+    """Operator-invoked draft composition for a specific Gmail thread.
+    Runs the same pipeline the auto-compose cron does — single-thread
+    triage (adds the thread to the queue + classifies known/cold), then
+    forces a compose on that thread (bypassing the processed-log skip).
+    Produces a Gmail draft the operator can open + send.
+
+    Use when the operator says '/reply <thread_id>' or 'draft a reply to that
+    thread now' — i.e., he doesn't want to wait for the half-hour
+    auto-compose cron tick.
+    """
+    tid = (thread_id or "").strip()
+    if not tid:
+        return {"status": "error", "error": "thread_id is required"}
+
+    scripts_dir = Path(__file__).parent / "scripts"
+    inbox_triage = str(scripts_dir / "inbox-triage.py")
+    auto_compose = str(scripts_dir / "auto-compose.py")
+
+    # Step 1: classify + upsert into triage queue (handles both known
+    # senders and cold-recruiter routing).
+    triage = subprocess_helpers.run_json_script(
+        inbox_triage, "--thread-id", tid, timeout=60,
+    )
+    if subprocess_helpers.is_subprocess_error(triage):
+        return {"status": "error", "stage": "triage",
+                "error": triage.get("__error__", "triage script error")}
+
+    # Step 2: force compose on that specific thread.
+    compose = subprocess_helpers.run_json_script(
+        auto_compose, "--force", tid, "--max", "1", timeout=180,
+    )
+    if subprocess_helpers.is_subprocess_error(compose):
+        return {"status": "error", "stage": "compose",
+                "error": compose.get("__error__", "compose script error"),
+                "triage_classification": triage.get("classification")}
+
+    return {
+        "status": "ok",
+        "thread_id": tid,
+        "triage_classification": triage.get("classification"),
+        "compose": compose,
+    }
+
+
 EXECUTORS: dict = {
     "get_morning_nudge": get_morning_nudge,
     "get_upcoming_meetings": get_upcoming_meetings,
@@ -758,6 +828,7 @@ EXECUTORS: dict = {
     "handle_facts_callback": lambda action, arg: _handle_facts_callback(action, arg),
     "handle_recruiter_callback": lambda action, arg: _handle_recruiter_callback(action, arg),
     "promote_recruiter_by_thread_id": promote_recruiter_by_thread_id,
+    "reply_to_thread": reply_to_thread,
     "get_person": get_person,
     "get_commitments": get_commitments,
     "dismiss_triage_n": dismiss_triage_n,
