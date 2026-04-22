@@ -18,6 +18,15 @@ import memory_writer  # type: ignore
 import pending_actions  # type: ignore
 import state_introspection  # type: ignore
 import subprocess_helpers  # type: ignore
+from fuzzy_resolver import (  # type: ignore
+    Candidate as _FuzzyCandidate,
+    resolve_fuzzy_descriptor as _shared_resolve,
+)
+
+try:
+    import brain as _brain  # type: ignore
+except ImportError:  # pragma: no cover — workspace-install guardrail
+    _brain = None
 
 
 def _load_post_meeting_scan():
@@ -347,38 +356,205 @@ _MEETING_PREP = str(_SCRIPTS_DIR / "meeting-prep.py")
 _POST_MEETING_SCAN = str(_SCRIPTS_DIR / "post-meeting-scan.py")
 
 
-def force_prep(meeting_id: str) -> dict:
-    """Run meeting-prep.py for a specific event on demand. Returns the
-    prep bundle: attendees, facts, open commitments. Use for `/prep
-    [meeting]` — the LLM then formats the prep for the operator."""
-    meeting_id = (meeting_id or "").strip()
-    if not meeting_id:
-        return {"status": "error", "error": "meeting_id is required"}
+# ---------------------------------------------------------------------------
+# Meeting-descriptor resolver — P0 application of the shared
+# fuzzy-resolver pattern. Operators describe meetings by attendee or
+# title ("the Michelle call", "the board meeting"), never by GCal
+# event_id. The resolver bridges that gap.
+# ---------------------------------------------------------------------------
+
+
+def _load_meeting_candidates(
+    window_days_back: int = 1, window_days_forward: int = 7,
+) -> list[_FuzzyCandidate]:
+    """Build a meeting-candidate pool from the cached gcal-fetch events
+    files under the workspace. One Candidate per real meeting, with
+    attendees concatenated into the searchable name/email fields so
+    'the Michelle call' matches a meeting where Michelle is one of
+    several attendees."""
+    cache = Path(WORKSPACE) / "cache"
+    if not cache.exists():
+        return []
+
+    today = datetime.now(
+        ZoneInfo(os.environ.get("TZ", "America/Los_Angeles"))
+    ).date()
+    candidates: list[_FuzzyCandidate] = []
+    seen_ids: set[str] = set()
+
+    # Walk events-*.json files within the window; each may hold a
+    # multi-day window of events (gcal-fetch --days N).
+    for path in sorted(cache.glob("events-*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        for ev in (data.get("events") or []):
+            eid = ev.get("id", "")
+            if not eid or eid in seen_ids:
+                continue
+            if not ev.get("is_real_meeting", True):
+                # Respect the gcal-fetch classifier where present.
+                continue
+            start = (ev.get("start") or "")
+            # Drop events too far outside our window.
+            try:
+                ev_date = datetime.fromisoformat(
+                    start.replace("Z", "+00:00") if "T" in start else start
+                ).date()
+                delta = (ev_date - today).days
+                if delta < -window_days_back or delta > window_days_forward:
+                    continue
+            except (ValueError, TypeError):
+                pass
+
+            attendees = ev.get("attendees") or []
+            # Concatenate attendees so a substring like "michelle"
+            # matches even on a multi-attendee meeting.
+            names = [
+                (a.get("name") or "").strip()
+                for a in attendees if isinstance(a, dict)
+            ]
+            emails = [
+                (a.get("email") or "").strip().lower()
+                for a in attendees if isinstance(a, dict)
+            ]
+            seen_ids.add(eid)
+            candidates.append(_FuzzyCandidate(
+                id=eid,
+                display=f"{ev.get('summary', '(untitled)')}",
+                last_seen=start,
+                name=" ; ".join(n for n in names if n),
+                email=" ; ".join(e for e in emails if e),
+                subject=ev.get("summary", ""),
+                extras=dict(ev),
+            ))
+    return candidates
+
+
+def _resolve_meeting_descriptor(descriptor: str) -> dict:
+    """Map a fuzzy operator descriptor to a GCal event_id.
+
+    Thin wrapper over agents/shared/fuzzy_resolver. Accepts:
+      - explicit event_id (broad regex; GCal ids are alphanumeric +
+        underscore, length ~10+)
+      - attendee name (first or full) — resolved via brain.get_person
+        when available; falls back to substring on the concatenated
+        attendee-names field
+      - attendee email
+      - meeting title substring
+    """
+    pool = _load_meeting_candidates()
+    person_resolver = None
+    if _brain is not None:
+        person_resolver = lambda n: _brain.get_person(n)  # noqa: E731
+
+    result = _shared_resolve(
+        descriptor,
+        candidates=pool,
+        id_pattern=r"^[A-Za-z0-9_]{10,}$",
+        person_resolver=person_resolver,
+    )
+
+    if result.status == "ok":
+        matched = result.matched
+        return {
+            "status": "ok",
+            "meeting_id": result.id,
+            "matched": (
+                {**(matched.extras or {}),
+                 "match_reason": matched.match_reason}
+                if matched else {"meeting_id": result.id}
+            ),
+        }
+    if result.status == "ambiguous":
+        return {
+            "status": "ambiguous",
+            "candidates": [
+                {
+                    "meeting_id": c.id,
+                    "title": c.subject[:80] if c.subject else "",
+                    "start": c.last_seen,
+                    "attendees": c.name,
+                    "match_reason": c.match_reason,
+                }
+                for c in (result.candidates or [])
+            ],
+        }
+    return {
+        "status": "not_found",
+        "reason": result.reason
+        or f"no meeting matches {descriptor!r}",
+        "recent_meetings": [
+            {
+                "meeting_id": c.id,
+                "title": c.subject[:80] if c.subject else "",
+                "start": c.last_seen,
+            }
+            for c in (result.recent or [])
+        ],
+    }
+
+
+def force_prep(meeting: str) -> dict:
+    """Run meeting-prep.py for a specific event on demand, identified
+    by fuzzy reference. Returns the prep bundle: attendees, facts,
+    open commitments, and — for professional meetings — the 8-field
+    llm_prep block.
+
+    `meeting` accepts any of:
+      - attendee name ('Michelle', 'Jamie Fitzgerald')
+      - attendee email
+      - meeting title substring ('board meeting', 'Reddit')
+      - explicit GCal event_id
+
+    Use for `/prep [meeting]` — the LLM formats the returned data for
+    the operator. On ambiguity, returns candidates[] for the LLM to offer
+    choices on Telegram."""
+    ref = (meeting or "").strip()
+    if not ref:
+        return {"status": "error", "error": "meeting is required"}
+    resolution = _resolve_meeting_descriptor(ref)
+    if resolution.get("status") != "ok":
+        return {**resolution, "descriptor": ref}
+
+    meeting_id = resolution["meeting_id"]
     result = subprocess_helpers.run_json_script(
         _MEETING_PREP, "--meeting-id", meeting_id, timeout=60,
     )
     if subprocess_helpers.is_subprocess_error(result):
-        return {"status": "error", "error": result.get("__error__", "script error")}
+        return {"status": "error",
+                "error": result.get("__error__", "script error"),
+                "resolved_meeting_id": meeting_id}
     return result
 
 
 _WORKFLOWY_SYNC = str(_SCRIPTS_DIR / "workflowy-sync.py")
 
 
-def prep_meeting(meeting_id: str) -> dict:
+def prep_meeting(meeting: str) -> dict:
     """Push the professional-prep block for a specific meeting to
-    Workflowy. Creates/finds the meeting node under the operator's
-    Notes workspace and adds labeled sections (Framing, Recipient
-    model, Objective, Why this role, Pitch, Evidence, Red flags,
-    Questions to ask) to its Agenda, skipping any that already exist.
+    Workflowy, identified by fuzzy reference (attendee name, email,
+    title substring, or explicit event_id).
+
+    Creates/finds the meeting node under the operator's Notes
+    workspace and adds labeled sections (Framing, Recipient model,
+    Objective, Why this role, Pitch, Evidence, Red flags, Questions
+    to ask) to its Agenda, skipping any that already exist.
 
     Returns the Workflowy meeting node id + which labels were newly
     created vs skipped. For general (non-professional) meetings this
     is a no-op that returns status=skipped — operator prep belongs
-    only on recruiter/hiring meetings."""
-    meeting_id = (meeting_id or "").strip()
-    if not meeting_id:
-        return {"status": "error", "error": "meeting_id is required"}
+    only on recruiter/hiring meetings. On ambiguity, returns
+    candidates[] for the LLM to offer choices."""
+    ref = (meeting or "").strip()
+    if not ref:
+        return {"status": "error", "error": "meeting is required"}
+    resolution = _resolve_meeting_descriptor(ref)
+    if resolution.get("status") != "ok":
+        return {**resolution, "descriptor": ref}
+
+    meeting_id = resolution["meeting_id"]
     result = subprocess_helpers.run_json_script(
         _WORKFLOWY_SYNC, "--push-prep-meeting", meeting_id, timeout=120,
     )
@@ -658,49 +834,69 @@ TOOLS: list[dict] = [
         "type": "function",
         "name": "force_prep",
         "description": (
-            "Run meeting-prep.py for a specific calendar event on demand. "
-            "Returns attendees, facts about them, and open commitments. "
-            "Use for `/prep [meeting name or id]` or when the operator asks "
-            "'what do I need to know before my 3pm with Alice'."
+            "Run meeting-prep for a specific calendar event on demand, "
+            "identified by fuzzy reference. Returns attendees, facts, "
+            "open commitments, and (for recruiter / hiring meetings) "
+            "the 8-field llm_prep block.\n"
+            "\n"
+            "`meeting` accepts ANY of:\n"
+            "  - attendee name: 'Michelle', 'Jamie Fitzgerald'\n"
+            "  - attendee email\n"
+            "  - meeting title substring: 'board meeting', 'Reddit'\n"
+            "  - explicit GCal event_id\n"
+            "\n"
+            "Use for `/prep [meeting]` or 'what do I need to know "
+            "before my 3pm with Alice'. On ambiguity, returns "
+            "candidates[] for LLM-driven disambiguation."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "meeting_id": {
+                "meeting": {
                     "type": "string",
-                    "description": "GCal event id from today's meetings cache",
+                    "description": (
+                        "Fuzzy reference to the meeting — attendee name "
+                        "or email, title substring, or event_id"
+                    ),
                 },
             },
-            "required": ["meeting_id"],
+            "required": ["meeting"],
         },
     },
     {
         "type": "function",
         "name": "prep_meeting",
         "description": (
-            "For a specific professional meeting (recruiter screen, "
-            "hiring manager, interview), push the 8-field prep "
-            "(framing, recipient model, objective, why this role, "
-            "pitch, evidence, red flags, questions to ask) to the "
-            "meeting's Workflowy Agenda node. Creates the meeting "
-            "node if it doesn't exist yet (anchored under top-level "
-            "'Notes > <year> > <month> > <date>'). Idempotent — "
-            "re-running skips any agenda section that already exists. "
-            "Use when the operator says '/prep-meeting <id>', 'prep me for "
-            "this meeting', or 'push the prep to Workflowy for "
-            "<meeting>'. For general (non-professional) meetings this "
-            "returns status=skipped; prep belongs only on "
-            "recruiter/hiring meetings."
+            "Push the 8-field professional-meeting prep to Workflowy, "
+            "identified by fuzzy reference. Creates the meeting node "
+            "if it doesn't exist yet (Notes > <year> > <month> > "
+            "<date>) and populates its Agenda with labeled sections "
+            "(Framing, Recipient model, Objective, Why this role, "
+            "Pitch, Evidence, Red flags, Questions to ask). "
+            "Idempotent — re-running skips existing sections.\n"
+            "\n"
+            "`meeting` accepts ANY of:\n"
+            "  - attendee name, attendee email, title substring, or "
+            "explicit event_id\n"
+            "\n"
+            "Use when the operator says '/prep-meeting Michelle', 'prep the "
+            "Anthropic call', or similar. For general (non-"
+            "professional) meetings returns status=skipped — prep "
+            "belongs only on recruiter/hiring meetings. On ambiguity, "
+            "returns candidates[] for LLM-driven disambiguation."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "meeting_id": {
+                "meeting": {
                     "type": "string",
-                    "description": "GCal event id from the meetings cache",
+                    "description": (
+                        "Fuzzy reference to the meeting — attendee "
+                        "name or email, title substring, or event_id"
+                    ),
                 },
             },
-            "required": ["meeting_id"],
+            "required": ["meeting"],
         },
     },
     {

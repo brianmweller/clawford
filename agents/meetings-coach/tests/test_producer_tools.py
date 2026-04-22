@@ -115,24 +115,27 @@ def test_confirm_missing_debrief(tools_mod):
 # ---------------------------------------------------------------------------
 
 
-def test_force_prep_shells_out_with_meeting_id(tools_mod, monkeypatch):
+def test_force_prep_shells_out_with_resolved_meeting_id(tools_mod, monkeypatch):
+    """Passing a full-length event_id-shaped descriptor (>= 10
+    alphanum/underscore chars) triggers id_passthrough in the fuzzy
+    resolver, so force_prep shells out with that id verbatim."""
     captured = {}
 
     def fake_run(script_path, *args, **kwargs):
         captured["script"] = script_path
         captured["args"] = list(args)
-        return {"status": "ok", "meeting_id": "abc123", "prep": "..."}
+        return {"status": "ok", "meeting_id": "abc123def4567890", "prep": "..."}
 
     import subprocess_helpers  # type: ignore
     monkeypatch.setattr(subprocess_helpers, "run_json_script", fake_run)
     monkeypatch.setattr(subprocess_helpers, "is_subprocess_error", lambda r: False)
 
-    result = tools_mod.force_prep("abc123")
+    result = tools_mod.force_prep("abc123def4567890")
     assert result["status"] == "ok"
     assert captured["script"].endswith("meeting-prep.py")
     assert "--meeting-id" in captured["args"]
     idx = captured["args"].index("--meeting-id")
-    assert captured["args"][idx + 1] == "abc123"
+    assert captured["args"][idx + 1] == "abc123def4567890"
 
 
 def test_force_prep_surfaces_error(tools_mod, monkeypatch):
@@ -144,7 +147,9 @@ def test_force_prep_surfaces_error(tools_mod, monkeypatch):
     monkeypatch.setattr(
         subprocess_helpers, "is_subprocess_error", lambda r: "__error__" in r,
     )
-    result = tools_mod.force_prep("missing")
+    # Use a descriptor that passes through as an id but points at a
+    # non-existent meeting — subprocess wrapper returns the error.
+    result = tools_mod.force_prep("missing0000000000")
     assert result["status"] == "error"
 
 

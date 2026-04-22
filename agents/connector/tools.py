@@ -16,6 +16,10 @@ import memory_writer  # type: ignore
 import pending_actions  # type: ignore
 import state_introspection  # type: ignore
 import subprocess_helpers  # type: ignore
+from fuzzy_resolver import (  # type: ignore
+    Candidate as _FuzzyCandidate,
+    resolve_fuzzy_descriptor as _shared_resolve,
+)
 
 AGENT_ID = "connector"
 
@@ -951,120 +955,81 @@ def _load_thread_candidates(
     return candidates
 
 
+def _thread_candidate_from_dict(d: dict) -> _FuzzyCandidate:
+    """Adapt the connector's local candidate dict shape to the shared
+    Candidate dataclass. `extras` carries the full dict through so
+    callers that want fields like `reply_needed` / `fit_tier` /
+    `cold_inbound` can still reach them via result.matched.extras."""
+    return _FuzzyCandidate(
+        id=d.get("thread_id", ""),
+        display=(d.get("subject") or "")[:80],
+        last_seen=d.get("last_seen", ""),
+        email=(d.get("from_email") or "").lower(),
+        name=d.get("from_header", ""),
+        subject=d.get("subject", ""),
+        slug=d.get("slug") or "",
+        extras=dict(d),
+    )
+
+
 def _resolve_thread_descriptor(
     descriptor: str,
     *,
     only_queue_statuses: list[str] | None = None,
 ) -> dict:
-    """Turn a fuzzy operator string into a Gmail thread_id.
+    """Thin wrapper over agents/shared/fuzzy_resolver for Gmail threads.
 
-    Accepts any of:
-      - explicit thread_id (hex, 14–22 chars) — passes through
-      - full email ('jane@lever.co') — matches from_email
-      - person name ('first' / 'first last') — resolved via
-        brain.get_person (with first-name fallback) to slug / emails
-      - subject substring — matches log + queue
-
-    only_queue_statuses: restrict matching to queue entries whose
-    status is in the list (e.g., ['queued_cold_recruiter'] for
-    /promote flows that only operate on un-acted queue state).
-
-    Returns:
-      {"status": "ok", "thread_id": tid, "matched": {...}}
-      {"status": "ambiguous", "candidates": [...]}
-      {"status": "not_found", "reason": str, "recent_threads": [...]}
+    Builds the connector's log + queue candidate pool (optionally
+    status-filtered for /keep flows), hands it to the shared resolver
+    along with Gmail's thread-id regex and brain.get_person as the
+    person resolver, then re-shapes the generic ResolutionResult back
+    to the thread-specific ``{status, thread_id, matched, candidates,
+    recent_threads}`` dict existing call sites expect.
     """
-    s = (descriptor or "").strip()
-    if not s:
-        return {"status": "not_found", "reason": "empty descriptor"}
-
-    candidates = _load_thread_candidates(
+    dicts = _load_thread_candidates(
         only_queue_statuses=only_queue_statuses,
     )
+    pool = [_thread_candidate_from_dict(d) for d in dicts.values()]
 
-    # 1. Explicit thread_id shape — pass through (even if not in log,
-    #    Gmail will 404 if invalid; better to attempt than reject).
-    if _THREAD_ID_RE.match(s):
-        matched = candidates.get(s, {"thread_id": s, "source": "passthrough"})
-        return {"status": "ok", "thread_id": s, "matched": matched}
+    result = _shared_resolve(
+        descriptor,
+        candidates=pool,
+        id_pattern=r"^[0-9a-f]{14,22}$",
+        person_resolver=brain.get_person,
+    )
 
-    # 2. Try person lookup — this handles 'Michelle' (first-name fallback)
-    #    and 'Michelle Leist' (exact slug) via brain.get_person.
-    target_slug = None
-    target_emails: list[str] = []
-    person = None
-    try:
-        person = brain.get_person(s)
-    except Exception:
-        person = None
-    if person:
-        target_slug = person.get("slug")
-        raw = person.get("raw", "") or ""
-        target_emails = [e.lower() for e in _EMAIL_RE.findall(raw)]
-
-    # 3. Score every candidate.
-    slow = s.lower()
-    matches: list[dict] = []
-    for c in candidates.values():
-        reasons: list[str] = []
-        subj = (c.get("subject") or "").lower()
-        from_email = (c.get("from_email") or "").lower()
-        from_header = (c.get("from_header") or "").lower()
-        slug = c.get("slug") or ""
-
-        if target_slug and slug == target_slug:
-            reasons.append(f"slug={target_slug}")
-        if target_emails and from_email in target_emails:
-            reasons.append(f"person_email={from_email}")
-        # Email match: the descriptor itself looks like an email
-        if "@" in slow and slow == from_email:
-            reasons.append(f"email_exact")
-        # Substring on sender email / header (useful for partial names
-        # in a display-name: 'michelle' matches '"Michelle Leist" <...>').
-        if slow in from_email and slow != "":
-            reasons.append("email_substring")
-        if slow in from_header and slow != "":
-            reasons.append("header_substring")
-        # Subject substring
-        if slow in subj and slow != "":
-            reasons.append("subject_substring")
-
-        if reasons:
-            matches.append({**c, "match_reason": " + ".join(reasons)})
-
-    if not matches:
-        # Return recent threads to help the caller disambiguate —
-        # auto-compose log entries sorted by most-recent 'at' timestamp.
-        recent = sorted(
-            candidates.values(),
-            key=lambda c: c.get("last_seen", ""),
-            reverse=True,
-        )[:5]
+    if result.status == "ok":
+        matched = result.matched
         return {
-            "status": "not_found",
-            "reason": f"no thread matches {descriptor!r}",
-            "recent_threads": [
-                {"thread_id": r["thread_id"],
-                 "from_email": r.get("from_email", ""),
-                 "subject": r.get("subject", "")[:80],
-                 "last_seen": r.get("last_seen", "")}
-                for r in recent
+            "status": "ok",
+            "thread_id": result.id,
+            "matched": (
+                {**(matched.extras or {}),
+                 "match_reason": matched.match_reason}
+                if matched else {"thread_id": result.id}
+            ),
+        }
+    if result.status == "ambiguous":
+        return {
+            "status": "ambiguous",
+            "candidates": [
+                {**(c.extras or {}), "match_reason": c.match_reason}
+                for c in (result.candidates or [])
             ],
         }
-    if len(matches) == 1:
-        return {"status": "ok",
-                "thread_id": matches[0]["thread_id"],
-                "matched": matches[0]}
-
-    # Rank ambiguous matches: most-recent first, then slug matches
-    # (strongest signal) ahead of substring-only.
-    def _rank(m):
-        r = m.get("match_reason", "")
-        strong = ("slug=" in r) or ("person_email=" in r) or ("email_exact" in r)
-        return (0 if strong else 1, -1 * (m.get("last_seen", "") or ""))
-    matches_sorted = sorted(matches, key=_rank)
-    return {"status": "ambiguous",
-            "candidates": matches_sorted[:8]}
+    return {
+        "status": "not_found",
+        "reason": result.reason or f"no thread matches {descriptor!r}",
+        "recent_threads": [
+            {
+                "thread_id": c.id,
+                "from_email": c.email,
+                "subject": (c.subject or "")[:80],
+                "last_seen": c.last_seen,
+            }
+            for c in (result.recent or [])
+        ],
+    }
 
 
 def reply_to_message(message_ref: str, hint: str | None = None) -> dict:
