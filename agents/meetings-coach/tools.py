@@ -9,6 +9,7 @@ import glob as glob_mod
 import importlib.util
 import json
 import os
+import re
 import subprocess
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -496,6 +497,123 @@ def _load_meeting_candidates(
     return candidates
 
 
+# Time-descriptor parser: "tomorrow 2:45pm", "3pm today", "14:45
+# tomorrow", bare "3pm". Operators describe meetings by clock time at
+# least as often as by name; the fuzzy resolver can't match on a time
+# because its candidate fields are text. This parser returns the target
+# datetime (in the user's TZ) and the _time_window_match branch below
+# walks the candidate pool comparing start timestamps.
+
+_WEEKDAY_NAMES = {
+    "monday": 0, "mon": 0,
+    "tuesday": 1, "tue": 1, "tues": 1,
+    "wednesday": 2, "wed": 2,
+    "thursday": 3, "thu": 3, "thur": 3, "thurs": 3,
+    "friday": 4, "fri": 4,
+    "saturday": 5, "sat": 5,
+    "sunday": 6, "sun": 6,
+}
+
+_TIME_RE = re.compile(
+    r"""
+    (?P<hour>\d{1,2})
+    (?: [:.] (?P<minute>\d{2}) )?
+    \s*
+    (?P<ampm> am | pm | a\.m\.? | p\.m\.? )?
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _parse_time_descriptor(descriptor: str, tz: ZoneInfo) -> datetime | None:
+    """Parse 'tomorrow 2:45pm' / '3pm today' / 'thu 10am' / '14:45' into
+    a concrete datetime in ``tz``. Returns None if no time token found
+    or if the time alone (no am/pm, hour > 23) is unparseable."""
+    s = (descriptor or "").strip().lower()
+    if not s:
+        return None
+
+    today = datetime.now(tz).date()
+    day_offset: int | None = None
+    if re.search(r"\btomorrow\b", s):
+        day_offset = 1
+    elif re.search(r"\btoday\b", s):
+        day_offset = 0
+    elif re.search(r"\byesterday\b", s):
+        day_offset = -1
+    else:
+        # Weekday forms: "thu 10am", "monday 2pm". Pick the next
+        # occurrence (today if today's weekday matches — the caller can
+        # disambiguate via multiple matches).
+        for token, wday in _WEEKDAY_NAMES.items():
+            if re.search(rf"\b{token}\b", s):
+                diff = (wday - today.weekday()) % 7
+                day_offset = diff
+                break
+
+    target_date = today + timedelta(days=day_offset) if day_offset is not None else today
+
+    # Strip the day phrase so the time regex doesn't chomp "2" from
+    # "monday". Leave am/pm markers intact.
+    time_text = s
+    for token in ("tomorrow", "today", "yesterday", *_WEEKDAY_NAMES.keys()):
+        time_text = re.sub(rf"\b{token}\b", " ", time_text)
+    time_text = re.sub(r"\bat\b", " ", time_text)
+
+    m = _TIME_RE.search(time_text)
+    if not m:
+        return None
+
+    hour = int(m.group("hour"))
+    minute = int(m.group("minute") or 0)
+    ampm = (m.group("ampm") or "").replace(".", "").lower()
+
+    if ampm.startswith("p") and hour < 12:
+        hour += 12
+    elif ampm.startswith("a") and hour == 12:
+        hour = 0
+    elif not ampm:
+        # Bare number with no am/pm. 24h only accepts 0-23; reject
+        # values like "45" that _TIME_RE matched from "2:45" via the
+        # fall-through path.
+        if hour > 23 or minute > 59:
+            return None
+        # Ambiguous short hours ("3") without am/pm could be either,
+        # but we treat them as 24h: if the user meant 3pm they would
+        # write "3pm". Keep as-is.
+
+    if hour > 23 or minute > 59:
+        return None
+
+    return datetime(target_date.year, target_date.month, target_date.day,
+                    hour, minute, tzinfo=tz)
+
+
+def _match_by_time(
+    target: datetime,
+    candidates: list[_FuzzyCandidate],
+    window_minutes: int = 5,
+) -> list[_FuzzyCandidate]:
+    """Return candidates whose start timestamp falls within
+    ±window_minutes of target. Candidates without a parseable start are
+    skipped."""
+    out: list[_FuzzyCandidate] = []
+    delta = timedelta(minutes=window_minutes)
+    for c in candidates:
+        raw = (c.last_seen or "").strip()
+        if not raw:
+            continue
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=target.tzinfo)
+        if abs(dt - target) <= delta:
+            out.append(c)
+    return out
+
+
 def _resolve_meeting_descriptor(descriptor: str) -> dict:
     """Map a fuzzy operator descriptor to a GCal event_id.
 
@@ -507,8 +625,52 @@ def _resolve_meeting_descriptor(descriptor: str) -> dict:
         attendee-names field
       - attendee email
       - meeting title substring
+      - time reference ('tomorrow 2:45pm', '3pm today', '14:45
+        tomorrow', bare '3pm' which defaults to today) — matched
+        against candidate start within ±5 min
     """
     pool = _load_meeting_candidates()
+
+    # Time-descriptor branch: strong signal, runs before fuzzy string
+    # matching. If the descriptor parses to a time AND we have a pool,
+    # the match (or miss) is authoritative — don't fall through to
+    # substring matching, which would match a 3pm-literal in a title.
+    tz = ZoneInfo(os.environ.get("TZ", DEFAULT_TZ))
+    target_time = _parse_time_descriptor(descriptor, tz)
+    if target_time is not None and pool:
+        hits = _match_by_time(target_time, pool)
+        if len(hits) == 1:
+            c = hits[0]
+            return {
+                "status": "ok",
+                "meeting_id": c.id,
+                "match": {**(c.extras or {}),
+                          "match_reason": f"time={target_time.isoformat()}"},
+            }
+        if len(hits) > 1:
+            return {
+                "status": "ambiguous",
+                "candidates": [
+                    {"meeting_id": c.id,
+                     "title": (c.subject or "")[:80],
+                     "start": c.last_seen,
+                     "attendees": c.name,
+                     "match_reason": f"time={target_time.isoformat()}"}
+                    for c in hits
+                ],
+            }
+        # Parsed a time, matched nothing — return not_found with a
+        # time-specific reason rather than falling through to fuzzy.
+        # A time miss isn't something substring can rescue.
+        return {
+            "status": "not_found",
+            "reason": (
+                f"no meeting at {target_time.strftime('%H:%M')} on "
+                f"{target_time.date().isoformat()}"
+            ),
+            "recent_meetings": [],
+        }
+
     person_resolver = None
     if _brain is not None:
         person_resolver = lambda n: _brain.get_person(n)  # noqa: E731
@@ -557,6 +719,9 @@ def force_prep(meeting: str) -> dict:
       - attendee name ('Michelle', 'Jamie Fitzgerald')
       - attendee email
       - meeting title substring ('board meeting', 'Reddit')
+      - time reference ('tomorrow 2:45pm', '3pm today', '14:45
+        tomorrow', 'thu 10am') — resolver matches candidate start
+        within ±5 min, so this is a primary path, not a fallback
       - explicit GCal event_id
 
     Use for `/prep [meeting]` — the LLM formats the returned data for
@@ -914,6 +1079,10 @@ TOOLS: list[dict] = [
             "  - attendee name: 'Michelle', 'Jamie Fitzgerald'\n"
             "  - attendee email\n"
             "  - meeting title substring: 'board meeting', 'Reddit'\n"
+            "  - time reference: 'tomorrow 2:45pm', '3pm today', "
+            "'14:45 tomorrow', 'thu 10am'. Pass these straight "
+            "through — do NOT ask the operator for an email, title, or "
+            "event id when he's already named a time.\n"
             "  - explicit GCal event_id\n"
             "\n"
             "Use for `/prep [meeting]` or 'what do I need to know "
@@ -949,6 +1118,9 @@ TOOLS: list[dict] = [
             "`meeting` accepts ANY of:\n"
             "  - attendee name, attendee email, title substring, or "
             "explicit event_id\n"
+            "  - time reference: 'tomorrow 2:45pm', '3pm today', "
+            "'thu 10am'. Pass straight through; don't ask the operator for "
+            "an event id when he's already given a time.\n"
             "\n"
             "Use when the operator says '/prep-meeting Michelle', 'prep the "
             "Anthropic call', or similar. For general (non-"

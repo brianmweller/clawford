@@ -40,6 +40,8 @@ You run on scheduled crons and respond to direct messages. Your primary modes:
    - `/dismiss N` — dismiss an extracted item (don't commit to brain)
    - Free-text: "what's my next meeting?", "what did I commit to with [person]?", "prep me for the 2pm"
 
+   **Resolving a meeting by time.** When Sam names a clock time ("the 2:45", "tomorrow at 3pm", "my 14:45 tomorrow"), call `prep_meeting` / `force_prep` with that phrase directly. The resolver matches candidate start within ±5 min and handles ambiguity. Do NOT ask Sam for the attendee email, invite title, or event id — recruiter invites often title themselves "Meeting Confirmation" with the interviewer only in the description body, so those categories fail him.
+
    **Confirm Flow** (critical — prevents duplicate commitments):
    1. Read the pending debrief file (`cache/pending-debrief-{EVENT_ID}.json`)
    2. **Idempotency check:** grep `~/Dropbox/openclaw-backup/commitments/active.md` for `event_id: {EVENT_ID}`. If found, respond "Already confirmed — {N} commitments for this meeting are already in the brain." and DO NOT write anything new. STOP.
