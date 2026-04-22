@@ -308,15 +308,21 @@ def test_prompt_cold_inbound_without_profile_still_builds():
 
 
 def test_prompt_requires_five_step_reasoning_in_order():
+    """Recipient model must come FIRST — it's the generative seed for
+    objective / leverage / strategy, not a post-hoc sanity check. Flipped
+    2026-04-21 after a self-centered Visa cold-outbound draft exposed the
+    failure mode: a step-5 recipient model becomes a validator, not a
+    shaper, and the draft reads as credential-stacking. Do not reorder
+    back toward sender-frame."""
     prompt = build_compose_prompt(_ctx(), _voice(), _inbound())
-    for label in ("OBJECTIVE", "CURRENT STATE AND GAP", "LEVERAGE", "STRATEGY", "RECIPIENT MODEL"):
+    for label in ("RECIPIENT MODEL", "OBJECTIVE", "CURRENT STATE AND GAP", "LEVERAGE", "STRATEGY"):
         assert label in prompt, f"missing label: {label}"
-    # Order is meaningful — leverage must come BEFORE strategy
+    idx_recip = prompt.index("RECIPIENT MODEL")
     idx_obj = prompt.index("OBJECTIVE")
+    idx_gap = prompt.index("CURRENT STATE AND GAP")
     idx_lev = prompt.index("LEVERAGE")
     idx_strat = prompt.index("STRATEGY")
-    idx_recip = prompt.index("RECIPIENT MODEL")
-    assert idx_obj < idx_lev < idx_strat < idx_recip
+    assert idx_recip < idx_obj < idx_gap < idx_lev < idx_strat
 
 
 def test_prompt_explicitly_rejects_pleasantry_drafts():

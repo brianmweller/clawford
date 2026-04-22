@@ -2,13 +2,15 @@
 
 build_compose_prompt: assembles the LLM prompt from a RecipientContext,
 voice-guidance bundle, the inbound email, and optional availability slots.
-The prompt forces a structured four-step reasoning pass — objective,
-state/gap, strategy, theory-of-mind — BEFORE any prose is written. A draft
-without an explicit intent is a pleasantry, not a reply; the shape of the
-output enforces that discipline.
+The prompt forces a structured five-step reasoning pass — recipient model,
+objective, state/gap, leverage, strategy — BEFORE any prose is written.
+Recipient model is step 1 by design: it's the generative seed for every
+step that follows, not a post-hoc sanity check. A draft without an
+explicit intent is a pleasantry, not a reply; the shape of the output
+enforces that discipline.
 
 parse_compose_result: normalizes the JSON the LLM returns, validates the
-four reasoning fields are populated, and strips any cited_fact_ids that
+five reasoning fields are populated, and strips any cited_fact_ids that
 weren't in the shareable set (defense against the LLM hallucinating
 references to audience-filtered facts).
 """
@@ -25,11 +27,11 @@ _OUTPUT_SCHEMA_HINT = """\
 Respond with a JSON object with EXACTLY these fields, in this order:
 {
   "reply_needed":           true | false,
-  "objective":              "<one sentence: what is the operator trying to achieve? If reply_needed=false, the objective is what the operator gains by NOT replying (preserving the recipient's frame, respecting their closeout, etc.).>",
-  "current_state_and_gap":  "<two–three sentences: given the context, where does the operator stand relative to the objective, and what is missing to close the gap?>",
-  "leverage":               "<two–three sentences: what SPECIFIC assets does the operator have here — named people who can vouch, prior moves already made, concrete shared context, proof points? Enumerate at least one. If there is genuinely no leverage, say so plainly.>",
-  "strategy":               "<two–three sentences: the concrete tactical move. If reply_needed=true, this is what the draft will DO (MUST deploy the leverage). If reply_needed=false, this is why silence is the right move and what it protects.>",
-  "recipient_model":        "<two–three sentences. Answer BOTH: (1) what are they expecting task-wise? and (2) what EMOTIONAL OUTCOME do they want from the reply — to feel appreciated, useful, heard, forgiven, reassured, etc.? Gift-givers want the gift to feel loved, not tolerated. Advice-givers want acknowledgment the advice landed. Well-wishers want engagement with what they said. Closeout-senders want the thread to end gracefully. If the draft nails the task but misses the emotional transaction, the reply reads as cold.>",
+  "recipient_model":        "<two–three sentences. Step 1 — generative seed for everything below. Answer BOTH: (1) what decision / action are they expecting task-wise? and (2) what EMOTIONAL OUTCOME do they want from the reply — to feel appreciated, useful, heard, forgiven, reassured, etc.? Gift-givers want the gift to feel loved, not tolerated. Advice-givers want acknowledgment the advice landed. Well-wishers want engagement with what they said. Closeout-senders want the thread to end gracefully. If the draft nails the task but misses the emotional transaction, the reply reads as cold. Everything below flows from this model.>",
+  "objective":              "<one sentence: what is the operator trying to achieve, framed as serving the recipient_model above? If reply_needed=false, the objective is what the operator gains by NOT replying (preserving the recipient's frame, respecting their closeout, etc.).>",
+  "current_state_and_gap":  "<two–three sentences: given the context, where does the operator stand relative to the objective, and what does the recipient need to see / hear / feel to close the gap?>",
+  "leverage":               "<two–three sentences: what SPECIFIC assets does the operator have here that ANSWER the recipient's need — named people who can vouch, prior moves already made, concrete shared context, proof points? Enumerate at least one. Select leverage by what serves the recipient's decision, not by what the operator is proud of. If there is genuinely no leverage, say so plainly.>",
+  "strategy":               "<two–three sentences: the concrete tactical move. If reply_needed=true, this is what the draft will DO (MUST deploy the leverage in service of the recipient_model). If reply_needed=false, this is why silence is the right move and what it protects.>",
   "draft_text":             "<when reply_needed=true: the email reply body, no subject line. The canonical sign-off will be appended post-process, so you don't need to add one — if you naturally close with the sign-off anyway, we'll normalize. Match the voice anchors from history LITERALLY — sentence length, contractions, hedging. When reply_needed=false: empty string.>",
   "no_reply_fyi":           "<when reply_needed=false: one short sentence the operator will read on Telegram — what arrived, why no reply is needed, any watch-for-later note. When reply_needed=true: empty string.>",
   "reasoning_summary":      "<one sentence anchored in objective + strategy — what the operator reads on Telegram alongside the draft (or alongside no_reply_fyi) to decide whether to ship/override.>",
@@ -50,12 +52,12 @@ Respond with a JSON object with EXACTLY these fields, in this order:
     "rationale":    "<two–three sentences. Name the specific domain / level / function signals that drove the tier. Cite evidence from SELF CONTEXT. Do NOT just say 'company is/isn't in target_companies' — explain the underlying fit.>"
   },
   "reply_needed":           true,
+  "recipient_model":        "<two–three sentences. Step 1 — generative seed for everything below. (1) TASK: the recruiter needs a clean yes/no on whether the operator wants the call + concrete availability. (2) FILTER SIGNAL: she wants to know what the operator is responding to so she can decide how to use the 30 minutes — keep selling, reframe, or qualify out. She does NOT need a fit-pitch in the email; she's already made her fit hypothesis. The call is where fit gets demonstrated.>",
   "objective":              "<for A/B: 'get the call on the calendar and surface honest filter signal'. The email's job is to SCHEDULE, not to pitch fit — Michelle already did the fit-pattern-matching or she wouldn't be reaching out. For decline-fit: 'preserve relationship'. For unclear: 'get one clarifying signal'.>",
   "current_state_and_gap":  "<two–three sentences. The recruiter has the operator's LinkedIn (background) and has already made a fit hypothesis. What she does NOT know is his current status, what would make him prioritize this over other options, and whether to schedule. The reply closes THAT gap — not a fit-pitch gap.>",
   "compelling_angle":       "<one phrase (not a sentence) — the honest 'why this role, why listening now' hook. This is FILTER signal for the recruiter, not a pitch: it tells her what the operator is responding to and what he's gated on, so she can decide whether to keep selling or reframe. If the operator is late-stage elsewhere, say what specifically about this shape pulls him anyway. No boilerplate enthusiasm. Example: 'the community-flywheel shape isn't a problem shape I see often' — not 'excited about the opportunity'. For decline-fit, leave empty.>",
   "leverage":               "<two–three sentences. For A/B: the ask is already warm — Michelle pitched specifically, not blasted. The leverage is responding in kind: engage with ONE element of her pitch + surface the compelling_angle + propose times. Do NOT pitch fit back at her — she did the fit-matching work. For decline-fit: what preserves the relationship without brand criticism.>",
   "strategy":               "<two–three sentences. For A/B (interesting): TAKE THE CALL — propose specific times; weave compelling_angle into the draft as honest filter signal. Do NOT load the email with scope questions. Do NOT pitch the operator's credentials / fit — the recruiter already did that work; restating it inverts the power dynamic (the operator is being pitched, not auditioning). For decline-fit: polite one-line decline citing scope/timing not brand. For unclear: ONE specific clarifying question, nothing more.>",
-  "recipient_model":        "<two–three sentences. (1) TASK: the recruiter needs a clean yes/no on whether the operator wants the call + concrete availability. (2) FILTER SIGNAL: she wants to know what the operator is responding to so she can decide how to use the 30 minutes — keep selling, reframe, or qualify out. She does NOT need a fit-pitch in the email; she's already made her fit hypothesis. The call is where fit gets demonstrated.>",
   "draft_text":             "<3-5 sentences for A/B. MUST carry: (1) engagement with ONE specific element of their pitch (not three — LLM-parallelism tell), (2) compelling_angle hook — honest 'why listening now' woven in as filter signal (one phrase), (3) concrete availability (two time windows). Do NOT include a fit-pitch / credentials restatement — that belongs on the call. Three beats: engage, angle, schedule. Short. No monologue. Match the operator's voice (from recruiter voice profile). No corporate hedge phrases.>",
   "no_reply_fyi":           "",
   "reasoning_summary":      "<one sentence leading with tier + fit dimensions: 'B-tier / Reddit Sr Dir / strong domain+level+function / took the call'>",
@@ -356,26 +358,11 @@ think through:
      work you only do when replying.
 
 
-  1. OBJECTIVE / INTENT — what is the operator trying to achieve with
-     this communication? Be specific and outcome-oriented. Not "reply
-     warmly"; rather "keep the candidacy pipeline alive for future roles
-     at this company" or "decline without burning the bridge" or "lock
-     in a meeting this week to unblock X."
-  2. CURRENT STATE AND GAP — given the brain context, email history, and
-     inbound message: where does the operator stand relative to the objective,
-     and what's missing to close the gap?
-  3. LEVERAGE / ASSETS — what SPECIFIC assets does the operator have here? Named
-     people who can vouch. Prior moves already made in this thread. Proof
-     points. Shared context that's load-bearing. Enumerate at least one
-     concrete item. If there is genuinely no leverage, say so plainly —
-     that usually means the right move is restraint, not more words.
-  4. STRATEGY — the concrete moves the draft will make. MUST explicitly
-     deploy the leverage. What to name specifically, what to offer, what
-     kind of ask to surface (if any), what to leave unsaid. "Rooting from
-     the outside" is not a strategy — it accomplishes nothing. Every
-     sentence in the draft must serve a concrete move.
-  5. RECIPIENT MODEL (theory of mind) — how will this person read the
-     message?
+  1. RECIPIENT MODEL (theory of mind) — START HERE. This is the
+     generative seed for every step that follows, not a post-hoc sanity
+     check. Who is reading this? What are they deciding? What are they
+     already worried about? What's the one thing they need to see,
+     hear, or feel to lean in?
 
      Task dimension: what decision / information / action are they
      expecting? What reads warm vs. pushy vs. transactional?
@@ -397,6 +384,36 @@ think through:
      A draft that nails the task but misses the emotional transaction
      reads as technically correct but cold. BOTH dimensions need to be
      served.
+
+     Everything downstream — the objective you choose, the leverage you
+     select, the strategy you execute — should FOLLOW FROM this model,
+     not validate against it. Sender-frame drafting (starting from "what
+     does the operator want?" and bolting on a recipient check at the end) is
+     the exact failure mode this ordering exists to prevent.
+  2. OBJECTIVE / INTENT — what is the operator trying to achieve with
+     this communication, framed as serving the recipient model above? Be
+     specific and outcome-oriented. Not "reply warmly"; rather "keep the
+     candidacy pipeline alive for future roles at this company" or
+     "decline without burning the bridge" or "lock in a meeting this
+     week to unblock X."
+  3. CURRENT STATE AND GAP — given the brain context, email history, and
+     inbound message: where does the operator stand relative to the objective,
+     and what does the RECIPIENT need to see / hear / feel to close the
+     gap?
+  4. LEVERAGE / ASSETS — what SPECIFIC assets does the operator have here that
+     ANSWER the recipient's need? Named people who can vouch. Prior
+     moves already made in this thread. Proof points. Shared context
+     that's load-bearing. Enumerate at least one concrete item. Select
+     leverage by what serves the recipient's decision, not by what the operator
+     is proud of. If there is genuinely no leverage, say so plainly —
+     that usually means the right move is restraint, not more words.
+  5. STRATEGY — the concrete moves the draft will make, IN SERVICE of
+     the recipient model. MUST explicitly deploy the leverage. What to
+     name specifically, what to offer, what kind of ask to surface (if
+     any), what to leave unsaid. "Rooting from the outside" is not a
+     strategy — it accomplishes nothing. Every sentence in the draft
+     must serve a concrete move that lands the recipient's emotional +
+     task outcomes.
 
 Only after you've worked through all five should you decide reply_needed
 and, if true, draft. If false, populate no_reply_fyi with a one-line
@@ -710,7 +727,7 @@ TASK
 {(_COLD_INBOUND_SCHEMA_HINT if cold_inbound else _OUTPUT_SCHEMA_HINT)}"""
 
 
-_REQUIRED_REASONING_FIELDS = ("objective", "current_state_and_gap", "leverage", "strategy", "recipient_model")
+_REQUIRED_REASONING_FIELDS = ("recipient_model", "objective", "current_state_and_gap", "leverage", "strategy")
 
 
 def _strip_json_fences(text: str) -> str:
@@ -772,11 +789,11 @@ def parse_compose_result(llm_text: str, shareable_ids: set[str]) -> dict:
 
     out = {
         "reply_needed": reply_needed,
+        "recipient_model": parsed["recipient_model"].strip(),
         "objective": parsed["objective"].strip(),
         "current_state_and_gap": parsed["current_state_and_gap"].strip(),
         "leverage": parsed["leverage"].strip(),
         "strategy": parsed["strategy"].strip(),
-        "recipient_model": parsed["recipient_model"].strip(),
         "draft_text": draft.strip() if isinstance(draft, str) else "",
         "no_reply_fyi": fyi.strip() if isinstance(fyi, str) else "",
         "reasoning_summary": reasoning,
