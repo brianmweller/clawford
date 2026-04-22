@@ -192,50 +192,123 @@ def find_child_by_name(children, target):
     return None
 
 
-def find_or_create_date_path(meeting_date, nodes, api_key=None):
-    """Navigate/create Year > Month > Date heading hierarchy. Returns date node ID."""
+def find_meeting_root_id(nodes, root_name="Meeting"):
+    """Return the id of the top-level node named ``root_name`` (or None).
+
+    Anchors ``find_or_create_date_path`` to a specific workspace so a
+    2026 year subtree under ``Notes`` (or any other top-level tree) does
+    NOT get picked up by accident. The 2026-04-21 Reddit-recruiter
+    test hit this when the meeting landed under
+    ``Notes > 2026 > April 2026`` instead of ``Meeting > 2026 > …``.
+
+    Top-level nodes have ``parent_id`` of ``None`` or missing. If the
+    exact name isn't found at the top level, fall back to any node
+    with that name (some workspaces nest roots under hidden parents).
+    """
+    for n in nodes:
+        pid = n.get("parent_id")
+        if pid is None or pid == "":
+            name = strip_html((n.get("name") or "").strip())
+            if name == root_name:
+                return n.get("id")
+    for n in nodes:
+        name = strip_html((n.get("name") or "").strip())
+        if name == root_name:
+            return n.get("id")
+    return None
+
+
+def find_or_create_date_path(meeting_date, nodes, api_key=None,
+                             *, root_id=None, tz=None):
+    """Navigate/create Year > Month > Date heading hierarchy.
+
+    Args:
+      meeting_date: datetime. If ``tz`` is supplied and the datetime is
+        tz-aware, it's converted with ``.astimezone(ZoneInfo(tz))``
+        before pulling year/month/day. If naive, it's assumed to
+        already be in the target tz.
+      nodes: flat node export from ``get_export()``.
+      root_id: if given, the Year search is scoped to descendants of
+        this node only. Strongly recommended — without it, the legacy
+        behavior scans every 2026 year node in the export and picks
+        the first one with month children, which lands unpredictably
+        when multiple top-level roots have date subtrees.
+      tz: IANA timezone name (e.g., ``"America/Los_Angeles"``). Used
+        to convert ``meeting_date`` before extracting day components
+        so the date-node heading matches the operator's local date.
+
+    Returns:
+      The id of the Date heading node.
+    """
+    # --- timezone-normalize the meeting_date first ---
+    if tz is not None:
+        try:
+            from zoneinfo import ZoneInfo
+            tz_info = ZoneInfo(tz)
+            if meeting_date.tzinfo is not None:
+                meeting_date = meeting_date.astimezone(tz_info)
+            else:
+                meeting_date = meeting_date.replace(tzinfo=tz_info)
+        except Exception:
+            # Fall back to meeting_date as-is if zoneinfo fails —
+            # behavior matches the legacy (pre-tz) code.
+            pass
+
     children_map = {}
     for node in nodes:
         children_map.setdefault(node.get("parent_id"), []).append(node)
 
     year_str = str(meeting_date.year)
 
-    # Find year node
+    # --- locate the year node ---
     year_id = None
     year_parent_id = None
-    for node in nodes:
-        name = strip_html((node.get("name") or "").strip())
-        if name == year_str:
-            kids = children_map.get(node.get("id"), [])
-            has_month = any(
-                strip_html((k.get("name") or "").strip()).split()[0] in MONTH_NAMES
-                for k in kids
-                if strip_html((k.get("name") or "").strip())
-            )
-            if has_month or not year_id:
+    if root_id is not None:
+        # Scope: children of root_id only.
+        for node in children_map.get(root_id, []):
+            name = strip_html((node.get("name") or "").strip())
+            if name == year_str:
                 year_id = node.get("id")
-                year_parent_id = node.get("parent_id")
-                if has_month:
-                    break
-
-    if not year_id:
-        # Find sibling year's parent
-        parent_id = None
+                year_parent_id = root_id
+                break
+        if not year_id:
+            result = create_node(root_id, year_str, position="bottom", api_key=api_key)
+            year_id = extract_node_id(result)
+    else:
+        # Legacy path: scan the whole export for any 2026 year node
+        # with month children. Kept for backward compatibility with
+        # callers that haven't opted into root scoping yet.
         for node in nodes:
             name = strip_html((node.get("name") or "").strip())
-            if re.match(r"^\d{4}$", name):
+            if name == year_str:
                 kids = children_map.get(node.get("id"), [])
                 has_month = any(
                     strip_html((k.get("name") or "").strip()).split()[0] in MONTH_NAMES
-                    for k in kids if strip_html((k.get("name") or "").strip())
+                    for k in kids
+                    if strip_html((k.get("name") or "").strip())
                 )
-                if has_month:
-                    parent_id = node.get("parent_id")
-                    break
-        result = create_node(parent_id, year_str, api_key=api_key)
-        year_id = extract_node_id(result)
+                if has_month or not year_id:
+                    year_id = node.get("id")
+                    year_parent_id = node.get("parent_id")
+                    if has_month:
+                        break
+        if not year_id:
+            parent_id = None
+            for node in nodes:
+                name = strip_html((node.get("name") or "").strip())
+                if re.match(r"^\d{4}$", name):
+                    kids = children_map.get(node.get("id"), [])
+                    has_month = any(
+                        strip_html((k.get("name") or "").strip()).split()[0] in MONTH_NAMES
+                        for k in kids if strip_html((k.get("name") or "").strip())
+                    )
+                    if has_month:
+                        parent_id = node.get("parent_id")
+                        break
+            result = create_node(parent_id, year_str, api_key=api_key)
+            year_id = extract_node_id(result)
 
-    # Find or create month node
+    # --- month ---
     month_str = f"{meeting_date.strftime('%B')} {meeting_date.year}"
     year_children = children_map.get(year_id, [])
     month_id = find_child_by_name(year_children, month_str)
@@ -243,7 +316,7 @@ def find_or_create_date_path(meeting_date, nodes, api_key=None):
         result = create_node(year_id, month_str, position="top", api_key=api_key)
         month_id = extract_node_id(result)
 
-    # Find or create date heading
+    # --- date heading ---
     date_str = (
         f"{meeting_date.strftime('%a')}, "
         f"{meeting_date.strftime('%b')} {meeting_date.day}, "
@@ -539,10 +612,32 @@ def _find_matching_child(existing_children, title, attendees, config=None):
     return None
 
 
-def create_meeting_node(meeting_date, title, hashtags=None, attendees=None, api_key=None, config=None):
-    """Create a meeting node with the standard template structure."""
+def create_meeting_node(meeting_date, title, hashtags=None, attendees=None,
+                        api_key=None, config=None,
+                        *, root_id=None, tz=None):
+    """Create a meeting node with the standard template structure.
+
+    Args:
+      meeting_date: datetime. Combined with ``tz`` to compute the
+        operator-local date heading.
+      title: meeting node name (typically the attendee's name).
+      hashtags: list of CamelCase tags appended as ``#Tag1 #Tag2``.
+      attendees: list of ``{email, name}`` dicts for duplicate
+        detection.
+      api_key: Workflowy API key.
+      config: meeting-config.json dict for alias resolution.
+      root_id: id of the top-level workspace node (e.g. ``"Meeting"``)
+        to anchor the date path under. Strongly recommended — resolve
+        via ``find_meeting_root_id(nodes, root_name)``. If omitted,
+        the legacy global year search runs (backward compat).
+      tz: operator timezone (e.g. ``"America/Los_Angeles"``) so dates
+        are computed in local time, not UTC. Operator's configured
+        timezone — callers should pull it from config.
+    """
     nodes = get_export(api_key=api_key)
-    date_id = find_or_create_date_path(meeting_date, nodes, api_key=api_key)
+    date_id = find_or_create_date_path(
+        meeting_date, nodes, api_key=api_key, root_id=root_id, tz=tz,
+    )
 
     # Duplicate prevention: try to find an existing matching meeting
     existing = get_children(date_id, api_key=api_key)
@@ -556,18 +651,31 @@ def create_meeting_node(meeting_date, title, hashtags=None, attendees=None, api_
         tags_str = " ".join(f"#{tag}" for tag in hashtags)
         node_name = f"{title} {tags_str}"
 
-    meeting_result = create_node(date_id, node_name, api_key=api_key)
+    # Meeting node itself: position="top" keeps the latest-added
+    # meeting at the top of the date's children (Workflowy default,
+    # preserved for ergonomics).
+    meeting_result = create_node(date_id, node_name,
+                                 position="top", api_key=api_key)
     meeting_node_id = extract_node_id(meeting_result)
 
-    # Create subsections
-    pre_result = create_node(meeting_node_id, "Pre / during", api_key=api_key)
+    # Sub-structure: position="bottom" on every create so the template
+    # renders top-down (Pre/during above Post-meeting, Agenda above
+    # Notes). Workflowy's default is prepend, which was silently
+    # inverting the template — caught on the 2026-04-21 Reddit-recruiter
+    # test.
+    pre_result = create_node(meeting_node_id, "Pre / during",
+                             position="bottom", api_key=api_key)
     pre_id = extract_node_id(pre_result)
-    create_node(pre_id, "\U0001f4d4  Agenda", api_key=api_key)
-    create_node(pre_id, "\U0001f4dd  Notes", api_key=api_key)
+    create_node(pre_id, "\U0001f4d4  Agenda",
+                position="bottom", api_key=api_key)
+    create_node(pre_id, "\U0001f4dd  Notes",
+                position="bottom", api_key=api_key)
 
-    post_result = create_node(meeting_node_id, "Post-meeting", api_key=api_key)
+    post_result = create_node(meeting_node_id, "Post-meeting",
+                              position="bottom", api_key=api_key)
     post_id = extract_node_id(post_result)
-    create_node(post_id, "\u2705  Takeaways", api_key=api_key)
+    create_node(post_id, "\u2705  Takeaways",
+                position="bottom", api_key=api_key)
 
     return meeting_node_id
 
@@ -594,8 +702,26 @@ def cmd_create_nodes():
     links = load_links()
     config = _load_config()
 
-    # Load today's events
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Anchor the date path under the configured meeting root (or the
+    # conventional "Meeting" top-level node) so we don't accidentally
+    # land under a sibling workspace (e.g. "Notes") whose 2026 year
+    # node happens to come up first in the export. 2026-04-21 bug.
+    root_name = (config.get("workflowy") or {}).get("meeting_root_name", "Meeting")
+    meeting_root_id = None
+    try:
+        nodes = get_export(api_key=api_key)
+        meeting_root_id = find_meeting_root_id(nodes, root_name)
+    except Exception:
+        meeting_root_id = None
+
+    # Operator timezone — dates render against this, not UTC. Default
+    # to Pacific since that's the operator's home zone; callers can
+    # override via meeting-config.json's `timezone` key.
+    operator_tz = config.get("timezone", "America/Los_Angeles")
+
+    # Load today's events (today in operator-local time, not UTC)
+    from zoneinfo import ZoneInfo
+    today = datetime.now(ZoneInfo(operator_tz)).strftime("%Y-%m-%d")
     cache_path = os.path.join(CACHE_DIR, f"events-{today}.json")
     if not os.path.exists(cache_path):
         print(json.dumps({"status": "error", "message": "No cached events — run gcal-fetch.py first"}))
@@ -648,6 +774,8 @@ def cmd_create_nodes():
                 attendees=attendees,
                 api_key=api_key,
                 config=config,
+                root_id=meeting_root_id,
+                tz=operator_tz,
             )
             links[event_id] = {
                 "node_id": node_id,
