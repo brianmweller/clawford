@@ -44,7 +44,7 @@ def test_recruiter_markup_returns_keyboard_for_a_tier():
     assert markup is not None
     row = markup["inline_keyboard"][0]
     assert row[0]["text"].startswith("✅")  # ✅
-    assert row[0]["callback_data"] == "recruiter:promote:t-cold-abc"
+    assert row[0]["callback_data"] == "recruiter:keep:t-cold-abc"
     assert row[1]["callback_data"] == "recruiter:reject:t-cold-abc"
 
 

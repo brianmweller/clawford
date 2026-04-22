@@ -4,8 +4,8 @@ Contract:
 - handle_recruiter_callback(action, arg, *, people_dir, workspace_dir,
   queue_path, now_iso) routes a `recruiter:<action>:<thread_id>`
   callback to the right operation and returns a structured dict.
-- Promote creates `people/<slug>.md`, appends a line to
-  `cache/promoted-recruiters.jsonl`, and leaves the queue alone (the
+- Keep creates `people/<slug>.md`, appends a line to
+  `cache/kept-recruiters.jsonl`, and leaves the queue alone (the
   auto-compose processed-log prevents re-processing; subsequent inbounds
   from the same sender route as `queued` via email_to_slug).
 - Reject appends a line to `cache/rejected-recruiters.jsonl` with the
@@ -122,16 +122,16 @@ def test_derive_fields_slug_is_domain_qualified_when_ambiguous_local_part():
 
 
 # ---------------------------------------------------------------------------
-# promote_recruiter
+# keep_recruiter
 # ---------------------------------------------------------------------------
 
 
-def test_promote_creates_person_file_with_expected_fields(tmp_path: Path, monkeypatch):
+def test_keep_creates_person_file_with_expected_fields(tmp_path: Path, monkeypatch):
     people_dir, queue_path, workspace_dir = _seed(tmp_path)
     monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(tmp_path / "brain"))
 
     result = rc_lib.handle_recruiter_callback(
-        "promote", "t-abc123",
+        "keep", "t-abc123",
         people_dir=people_dir,
         workspace_dir=workspace_dir,
         queue_path=queue_path,
@@ -139,7 +139,7 @@ def test_promote_creates_person_file_with_expected_fields(tmp_path: Path, monkey
     )
 
     assert result["status"] == "ok"
-    assert result["action"] == "promote"
+    assert result["action"] == "keep"
     assert result["slug"] == "jane-recruiter"
 
     person_file = people_dir / "jane-recruiter.md"
@@ -152,17 +152,17 @@ def test_promote_creates_person_file_with_expected_fields(tmp_path: Path, monkey
     assert "relationship_type:** recruiter" in content
 
 
-def test_promote_appends_to_promoted_jsonl(tmp_path: Path, monkeypatch):
+def test_keep_appends_to_kept_jsonl(tmp_path: Path, monkeypatch):
     people_dir, queue_path, workspace_dir = _seed(tmp_path)
     monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(tmp_path / "brain"))
 
     rc_lib.handle_recruiter_callback(
-        "promote", "t-abc123",
+        "keep", "t-abc123",
         people_dir=people_dir, workspace_dir=workspace_dir,
         queue_path=queue_path, now_iso="2026-04-21T18:00:00Z",
     )
 
-    log_path = workspace_dir / "cache" / "promoted-recruiters.jsonl"
+    log_path = workspace_dir / "cache" / "kept-recruiters.jsonl"
     assert log_path.exists()
     lines = log_path.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 1
@@ -170,34 +170,34 @@ def test_promote_appends_to_promoted_jsonl(tmp_path: Path, monkeypatch):
     assert entry["slug"] == "jane-recruiter"
     assert entry["from_email"] == "jane@lever.co"
     assert entry["thread_id"] == "t-abc123"
-    assert entry["promoted_at"] == "2026-04-21T18:00:00Z"
+    assert entry["kept_at"] == "2026-04-21T18:00:00Z"
 
 
-def test_promote_returns_already_promoted_on_second_call(tmp_path: Path, monkeypatch):
+def test_keep_returns_already_kept_on_second_call(tmp_path: Path, monkeypatch):
     people_dir, queue_path, workspace_dir = _seed(tmp_path)
     monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(tmp_path / "brain"))
 
     rc_lib.handle_recruiter_callback(
-        "promote", "t-abc123",
+        "keep", "t-abc123",
         people_dir=people_dir, workspace_dir=workspace_dir,
         queue_path=queue_path, now_iso="2026-04-21T18:00:00Z",
     )
     result2 = rc_lib.handle_recruiter_callback(
-        "promote", "t-abc123",
+        "keep", "t-abc123",
         people_dir=people_dir, workspace_dir=workspace_dir,
         queue_path=queue_path, now_iso="2026-04-21T19:00:00Z",
     )
 
-    assert result2["status"] == "already_promoted"
+    assert result2["status"] == "already_kept"
     assert result2["slug"] == "jane-recruiter"
 
 
-def test_promote_returns_not_found_for_unknown_thread_id(tmp_path: Path, monkeypatch):
+def test_keep_returns_not_found_for_unknown_thread_id(tmp_path: Path, monkeypatch):
     people_dir, queue_path, workspace_dir = _seed(tmp_path)
     monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(tmp_path / "brain"))
 
     result = rc_lib.handle_recruiter_callback(
-        "promote", "t-nonexistent",
+        "keep", "t-nonexistent",
         people_dir=people_dir, workspace_dir=workspace_dir,
         queue_path=queue_path, now_iso="2026-04-21T18:00:00Z",
     )
@@ -313,7 +313,7 @@ def test_malformed_queue_json_returns_error(tmp_path: Path):
     queue_path.write_text("{not valid json", encoding="utf-8")
 
     result = rc_lib.handle_recruiter_callback(
-        "promote", "t-abc123",
+        "keep", "t-abc123",
         people_dir=people_dir, workspace_dir=workspace_dir,
         queue_path=queue_path, now_iso="2026-04-21T18:00:00Z",
     )

@@ -258,8 +258,8 @@ def test_status_filter_excludes_log_only_entries(seeded):
     assert r["status"] == "not_found"
 
 
-def test_promote_recruiter_fuzzy_match_to_queue_entry(seeded, monkeypatch):
-    """End-to-end: promote_recruiter('Anthropic') should resolve via
+def test_keep_recruiter_fuzzy_match_to_queue_entry(seeded, monkeypatch):
+    """End-to-end: keep_recruiter('Anthropic') should resolve via
     subject match to the cold-recruiter queue entry and invoke the
     promotion callback on that thread_id."""
     captured = {}
@@ -272,8 +272,8 @@ def test_promote_recruiter_fuzzy_match_to_queue_entry(seeded, monkeypatch):
 
     monkeypatch.setattr(tools, "_handle_recruiter_callback", _fake_handle)
 
-    r = tools.promote_recruiter("Anthropic")
-    assert captured["action"] == "promote"
+    r = tools.keep_recruiter("Anthropic")
+    assert captured["action"] == "keep"
     assert captured["arg"] == "19db3333333333cc"
     assert r["status"] == "ok"
     # Resolver metadata should be preserved for Telegram-side rendering.
@@ -281,9 +281,9 @@ def test_promote_recruiter_fuzzy_match_to_queue_entry(seeded, monkeypatch):
     assert "recruiter@anthropic.com" in r.get("matched_from_email", "")
 
 
-def test_promote_recruiter_passes_through_ambiguous_status(seeded, monkeypatch):
+def test_keep_recruiter_passes_through_ambiguous_status(seeded, monkeypatch):
     """When the descriptor matches multiple cold-recruiter queue
-    entries, promote_recruiter must NOT call the callback — it returns
+    entries, keep_recruiter must NOT call the callback — it returns
     the candidates list so the LLM can ask the operator to pick."""
     # Add a second cold-recruiter queue entry matching the same word.
     import json as _json
@@ -304,16 +304,16 @@ def test_promote_recruiter_passes_through_ambiguous_status(seeded, monkeypatch):
         lambda action, arg: calls.append((action, arg)) or {"status": "ok"},
     )
 
-    r = tools.promote_recruiter("Anthropic")
+    r = tools.keep_recruiter("Anthropic")
     assert r["status"] == "ambiguous"
     assert len(r["candidates"]) == 2
     assert calls == [], "ambiguous match must NOT invoke the callback"
 
 
-def test_promote_recruiter_not_found_returns_recent_queue_only(seeded, monkeypatch):
+def test_keep_recruiter_not_found_returns_recent_queue_only(seeded, monkeypatch):
     """When the descriptor doesn't match any cold-recruiter queue
     entry, recent_threads should be queue-scoped — no log entries."""
-    r = tools.promote_recruiter("zzznothinglikethat")
+    r = tools.keep_recruiter("zzznothinglikethat")
     assert r["status"] == "not_found"
     # recent_threads, if present, should only contain cold-recruiter entries
     for entry in r.get("recent_threads") or []:
@@ -321,8 +321,8 @@ def test_promote_recruiter_not_found_returns_recent_queue_only(seeded, monkeypat
         assert entry.get("thread_id") != "19db1111111111aa"
 
 
-def test_promote_recruiter_empty_descriptor_errors():
-    r = tools.promote_recruiter("")
+def test_keep_recruiter_empty_descriptor_errors():
+    r = tools.keep_recruiter("")
     assert r["status"] == "error"
 
 

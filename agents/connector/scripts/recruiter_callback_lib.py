@@ -3,7 +3,7 @@ callbacks on cold-recruiter FYI messages.
 
 Routes `recruiter:<action>:<thread_id>` (from agents/shared/dispatcher.py) to:
 
-- **promote**: turn the ephemeral cold-recruiter stub into a real
+- **keep**: turn the ephemeral cold-recruiter stub into a real
   `brain/people/<slug>.md` file so Murphy's meeting-prep can find the
   contact on the calendar next week and so Huckle's own future inbounds
   from the same sender route as `queued` (known).
@@ -12,12 +12,12 @@ Routes `recruiter:<action>:<thread_id>` (from agents/shared/dispatcher.py) to:
   `skipped_rejected_recruiter`, preventing the same inbound from
   re-queueing the cold-recruiter pipeline indefinitely.
 
-Promote does NOT remove the entry from `cache/triage-queue.json` —
+Keep does NOT remove the entry from `cache/triage-queue.json` —
 auto-compose's processed-log (`cache/auto-compose-log.json`) already
 keeps the current run from double-composing; the queue entry ages out
 naturally when the rolling triage window moves past it.
 
-Return shape: `{"status": "ok"|"already_promoted"|"already_rejected"|
+Return shape: `{"status": "ok"|"already_kept"|"already_rejected"|
 "not_found"|"error", "action": <str>, ...}`. Callers render a short
 confirmation message to Telegram from this.
 """
@@ -169,18 +169,18 @@ def load_rejected_recruiters(rejected_path: Path) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
-# Promote
+# Keep — turn a cold-recruiter queue entry into a durable people file
 # ---------------------------------------------------------------------------
 
 
-def _is_already_promoted(promoted_path: Path, thread_id: str) -> dict | None:
-    for entry in _read_jsonl(promoted_path):
+def _is_already_kept(kept_path: Path, thread_id: str) -> dict | None:
+    for entry in _read_jsonl(kept_path):
         if entry.get("thread_id") == thread_id:
             return entry
     return None
 
 
-def _promote_recruiter(
+def _keep_recruiter(
     thread_id: str,
     *,
     people_dir: Path,
@@ -188,12 +188,12 @@ def _promote_recruiter(
     queue_path: Path,
     now_iso: str,
 ) -> dict:
-    promoted_path = workspace_dir / "cache" / "promoted-recruiters.jsonl"
-    prior = _is_already_promoted(promoted_path, thread_id)
+    kept_path = workspace_dir / "cache" / "kept-recruiters.jsonl"
+    prior = _is_already_kept(kept_path, thread_id)
     if prior is not None:
         return {
-            "status": "already_promoted",
-            "action": "promote",
+            "status": "already_kept",
+            "action": "keep",
             "slug": prior.get("slug", ""),
             "path": prior.get("path", ""),
         }
@@ -201,7 +201,7 @@ def _promote_recruiter(
     queue = _load_queue(queue_path)
     entry = _find_entry(queue, thread_id)
     if entry is None:
-        return {"status": "not_found", "action": "promote", "thread_id": thread_id}
+        return {"status": "not_found", "action": "keep", "thread_id": thread_id}
 
     fields = derive_person_fields_from_queue_entry(entry)
     name = fields.pop("name")
@@ -213,27 +213,27 @@ def _promote_recruiter(
             name, circles, slug=slug, **fields,
         )
     except FileExistsError:
-        # A people file with this slug already exists — the prior promotion
+        # A people file with this slug already exists — a prior keep
         # landed on a separate thread, or the sender matches an existing
-        # contact. Treat as already_promoted.
+        # contact. Treat as already_kept.
         return {
-            "status": "already_promoted",
-            "action": "promote",
+            "status": "already_kept",
+            "action": "keep",
             "slug": slug,
             "detail": "people file already exists at slug",
         }
 
-    _append_jsonl(promoted_path, {
+    _append_jsonl(kept_path, {
         "thread_id": thread_id,
         "from_email": fields["email"],
         "slug": created["slug"],
         "path": created["path"],
-        "promoted_at": now_iso,
+        "kept_at": now_iso,
     })
 
     return {
         "status": "ok",
-        "action": "promote",
+        "action": "keep",
         "slug": created["slug"],
         "path": created["path"],
         "name": name,
@@ -307,8 +307,8 @@ def handle_recruiter_callback(
     a confirmation or failure message.
     """
     try:
-        if action == "promote":
-            return _promote_recruiter(
+        if action == "keep":
+            return _keep_recruiter(
                 arg,
                 people_dir=people_dir,
                 workspace_dir=workspace_dir,

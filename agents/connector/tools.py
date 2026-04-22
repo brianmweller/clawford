@@ -524,27 +524,28 @@ TOOLS: list[dict] = [
     },
     {
         "type": "function",
-        "name": "promote_recruiter",
+        "name": "keep_recruiter",
         "description": (
-            "Promote a cold-recruiter queue entry to a real "
-            "people/<slug>.md file, identified by fuzzy reference. The "
-            "normal path is the ✅ Promote button on the cold-recruiter "
-            "FYI — this tool is the manual alternative when the "
-            "button was dismissed or the operator is acting in chat.\n"
+            "Keep a cold-recruiter inbound as a contact — turn the "
+            "ephemeral stub into a real people/<slug>.md file so "
+            "future inbounds from the same sender route as known and "
+            "Murphy's meeting-prep can find them. The normal path is "
+            "the ✅ Keep button on the cold-recruiter FYI; this tool "
+            "is the chat-driven alternative.\n"
             "\n"
             "`descriptor` accepts ANY of:\n"
-            "  - person name: 'Jane Ashby', 'Michelle'\n"
+            "  - person name: 'Jane Ashby'\n"
             "  - sender email: 'jane@lever.co'\n"
-            "  - subject substring: 'Senior Director role at Reddit'\n"
+            "  - subject substring: 'Senior Director role at <company>'\n"
             "  - explicit Gmail thread_id\n"
             "\n"
             "Resolution is SCOPED to un-acted cold-recruiter queue "
-            "entries (status=queued_cold_recruiter). Already-promoted, "
-            "rejected, or known-sender threads will not match — that "
-            "scope prevents accidentally re-promoting the wrong thing.\n"
+            "entries (status=queued_cold_recruiter). Already-kept, "
+            "rejected, or known-sender threads will not match — the "
+            "scope prevents accidentally re-keeping the wrong thing.\n"
             "\n"
             "Returns {status: ok, slug, name, path} on success, "
-            "{status: already_promoted, ...} on duplicate, "
+            "{status: already_kept, ...} on duplicate, "
             "{status: ambiguous, candidates: [...]} when the "
             "descriptor matches multiple queue entries (LLM should "
             "ask the operator to pick), or {status: not_found, ...} with "
@@ -563,27 +564,6 @@ TOOLS: list[dict] = [
                 },
             },
             "required": ["descriptor"],
-        },
-    },
-    {
-        "type": "function",
-        "name": "promote_recruiter_by_thread_id",
-        "description": (
-            "Back-compat: promote a cold-recruiter queue entry by "
-            "explicit Gmail thread_id. Prefer promote_recruiter "
-            "(fuzzy descriptor) for conversational flows — this "
-            "tool is kept for programmatic callers or cached "
-            "dispatcher state that references the old name."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "thread_id": {
-                    "type": "string",
-                    "description": "Gmail thread ID from the cold-recruiter queue entry",
-                },
-            },
-            "required": ["thread_id"],
         },
     },
     {
@@ -835,31 +815,23 @@ def _handle_recruiter_callback(action: str, arg: str) -> dict:
     )
 
 
-def promote_recruiter_by_thread_id(thread_id: str) -> dict:
-    """Manual fallback when the Telegram button is unavailable (e.g., the
-    cold-recruiter FYI was dismissed or the user is replying via chat).
-    Runs the same promote flow the recruiter:promote callback runs."""
-    return _handle_recruiter_callback("promote", thread_id)
-
-
-def promote_recruiter(descriptor: str) -> dict:
-    """Operator-invoked promotion of a cold-recruiter stub to a real
-    people file, identified by fuzzy reference. Mirrors the fuzzy-
-    resolver pattern from reply_to_message: accept person name, sender
-    email, subject substring, or explicit thread_id.
+def keep_recruiter(descriptor: str) -> dict:
+    """Operator-invoked keep — turn a cold-recruiter stub into a real
+    people file, identified by fuzzy reference. Mirrors the
+    fuzzy-resolver pattern from reply_to_message: accept person name,
+    sender email, subject substring, or explicit thread_id.
 
     Scoped to un-acted queue state — only matches triage queue entries
-    whose status is ``queued_cold_recruiter``. Already-promoted
-    senders, known senders, and generic queued threads are NOT
-    candidates (they'd fail at the promotion step anyway because the
-    callback needs from_email + from_header from an un-acted queue
-    entry to create the people file).
+    whose status is ``queued_cold_recruiter``. Already-kept senders,
+    known senders, and generic queued threads are NOT candidates
+    (they'd fail at the callback step anyway because the call needs
+    from_email + from_header from an un-acted queue entry to create
+    the people file).
 
-    Use when the operator says 'promote that Jane Ashby recruiter', '/promote
-    the Reddit one', or wants to promote a cold-recruiter stub without
-    hunting for the Telegram button. Returns the same shape as the
-    recruiter:promote callback:
-      {status: ok | already_promoted | not_found | ambiguous, ...}
+    Use when the operator says 'keep Jane Ashby', '/keep the Reddit one', or
+    wants to keep a cold-recruiter stub without hunting for the
+    Telegram button. Returns:
+      {status: ok | already_kept | not_found | ambiguous, ...}
     On ambiguous, returns candidates[] for LLM-driven disambiguation.
     """
     ref = (descriptor or "").strip()
@@ -874,7 +846,7 @@ def promote_recruiter(descriptor: str) -> dict:
         return {**resolution, "descriptor": ref}
 
     tid = resolution["thread_id"]
-    result = _handle_recruiter_callback("promote", tid)
+    result = _handle_recruiter_callback("keep", tid)
     # Preserve the resolver's matched metadata so the Telegram-side
     # confirmation can name the sender / subject without another lookup.
     matched = resolution.get("matched")
@@ -1172,12 +1144,6 @@ def reply_to_message(message_ref: str, hint: str | None = None) -> dict:
     }
 
 
-# Backwards-compat alias — original name before the fuzzy-resolver
-# rename. Kept so any cached Telegram tool state or documentation
-# that still references the old name resolves correctly. New callers
-# should use reply_to_message.
-def reply_to_thread(thread_id: str, hint: str | None = None) -> dict:
-    return reply_to_message(thread_id, hint=hint)
 
 
 EXECUTORS: dict = {
@@ -1193,10 +1159,8 @@ EXECUTORS: dict = {
     "handle_nudge_action": handle_nudge_action,
     "handle_facts_callback": lambda action, arg: _handle_facts_callback(action, arg),
     "handle_recruiter_callback": lambda action, arg: _handle_recruiter_callback(action, arg),
-    "promote_recruiter_by_thread_id": promote_recruiter_by_thread_id,
-    "promote_recruiter": promote_recruiter,
+    "keep_recruiter": keep_recruiter,
     "reply_to_message": reply_to_message,
-    "reply_to_thread": reply_to_thread,  # back-compat alias
     "get_person": get_person,
     "get_commitments": get_commitments,
     "dismiss_triage_n": dismiss_triage_n,

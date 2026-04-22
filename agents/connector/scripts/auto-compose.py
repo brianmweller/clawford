@@ -297,11 +297,11 @@ def _format_telegram(parsed: dict) -> str | None:
 
 def _build_recruiter_markup(parsed: dict) -> dict | None:
     """Build an inline keyboard for cold-recruiter FYI messages:
-      [✅ Promote] [🚫 Not a fit]
+      [✅ Keep] [🚫 Not a fit]
     Only attaches to drafts that carry a `fit_assessment` (cold-recruiter
     runs) AND a thread_id we can encode into callback_data. For
     `not_a_target` tier we skip the buttons — the operator can still
-    `/promote <thread_id>` manually but the happy path is dismiss.
+    `/keep <descriptor>` manually but the happy path is dismiss.
     """
     if not parsed:
         return None
@@ -316,7 +316,7 @@ def _build_recruiter_markup(parsed: dict) -> dict | None:
         return None
     return {
         "inline_keyboard": [[
-            {"text": "✅ Promote", "callback_data": f"recruiter:promote:{thread_id}"},
+            {"text": "✅ Keep", "callback_data": f"recruiter:keep:{thread_id}"},
             {"text": "\U0001f6ab Not a fit", "callback_data": f"recruiter:reject:{thread_id}"},
         ]],
     }

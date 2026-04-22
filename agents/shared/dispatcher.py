@@ -657,12 +657,12 @@ def _handle_facts_callback(
 
 
 # recruiter:<action>:<thread_id> — Huckle Cat cold-recruiter buttons
-# on auto-compose FYI messages. Promote converts the ephemeral stub
-# into a real people file so Murphy can find the contact next week and
+# on auto-compose FYI messages. Keep converts the ephemeral stub into
+# a real people file so Murphy can find the contact next week and
 # future inbounds route as `queued` (known). Reject records the sender
 # so future messages short-circuit to skipped_rejected_recruiter.
 _RECRUITER_TOAST = {
-    "promote": "✅ Promoting...",
+    "keep": "✅ Keeping...",
     "reject": "\U0001f6ab Rejected",
 }
 
@@ -697,10 +697,10 @@ def _handle_recruiter_callback(
     if not isinstance(result, dict):
         return
     status = result.get("status", "ok")
-    if status == "ok" and action == "promote":
+    if status == "ok" and action == "keep":
         telegram_api.send_message(
             cfg.token, chat_id,
-            f"✅ Promoted {result.get('name', result.get('slug', ''))} — "
+            f"✅ Kept {result.get('name', result.get('slug', ''))} — "
             f"slug `{result.get('slug', '')}`. Future inbounds from this sender "
             f"will route as known.",
             skip_review=True,
@@ -712,10 +712,10 @@ def _handle_recruiter_callback(
             f"`{result.get('from_email', '')}` will be skipped.",
             skip_review=True,
         )
-    elif status == "already_promoted":
+    elif status == "already_kept":
         telegram_api.send_message(
             cfg.token, chat_id,
-            f"Already promoted (slug `{result.get('slug', '')}`).",
+            f"Already kept (slug `{result.get('slug', '')}`).",
             skip_review=True,
         )
     elif status == "already_rejected":
@@ -874,8 +874,8 @@ def _try_callback_shortcut(
             _handle_facts_callback(cfg, chat_id, action, arg, cbq_id)
             return True
 
-    # Cold-recruiter promote/reject buttons (Huckle Cat):
-    # recruiter:<action>:<thread_id>
+    # Cold-recruiter keep/reject buttons (Huckle Cat):
+    # recruiter:<action>:<thread_id>  (action ∈ {keep, reject})
     if data.startswith("recruiter:"):
         parts = data.split(":", 2)
         if len(parts) >= 3:
