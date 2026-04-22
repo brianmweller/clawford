@@ -1,6 +1,6 @@
 # Huckle Cat 🐱🤝 — the connector agent
 
-*Last updated: 2026-04-21 · Reading time: ~50 min · Difficulty: hard*
+*Last updated: 2026-04-22 · Reading time: ~55 min · Difficulty: hard*
 
 > **TL;DR.** Huckle Cat is the relationship agent — the one that inverts the usual shape of a Clawford agent. Instead of wrapping a single external API the way Mr Fixit wraps the fleet's own heartbeat or Mistress Mouse wraps Google Calendar, Huckle Cat is built **around the shared brain itself**. His input is six disparate data sources (Gmail, Google Calendar, Google Contacts, Google Messages, meeting transcripts, and Workflowy) and his output is a relationship intelligence layer: ~280 people files in the brain with names, emails, phones, circles, last-interaction timestamps, enriched context notes, and facts pulled from email signatures. He composes a morning relationship nudge at 5 AM PT (overdue / approaching / healthy), triages a shared notes inbox twice a day, and keeps `last_interaction` fresh via a daily re-mining pass. A second parallel brain under `self/` — four layers synthesised from the operator's career archives — feeds a [cold-recruiter drafting path](#the-professional-brain) that detects unknown ATS senders, scores a composite fit across domain / level / function dimensions, and drafts replies that read like the operator wrote them. He was the last agent in the fleet to deploy, and he is the only one where the [mining pipeline](#the-mining-pipeline) runs **before** the first cron fires — by design.
 
@@ -565,6 +565,36 @@ A real inbound from a retained-search recruiter on 2026-04-21 became the calibra
 - **Iteration 4 — credentials-first opener.** The fourth draft led with the operator's resume even though the recruiter had LinkedIn-sourced the outreach. *"My background is in economic modeling and causal inference"* is redundant; the recruiter said as much in their opening line. The fix was an OPENER STRATEGY directive: the opener engages with *their* pitch, not the operator's credentials. What specific element of their note resonated? Name one or two, conversationally. Credentials come later as confirmation of fit, if at all. A final anti-redundancy rule — no *"Senior Director role"* restatement when the recruiter already used the title — was the last regression.
 
 The shipped draft is not a monument to a perfect pipeline. It's a monument to four specific edits, each made against a specific failure mode, each surfacing a different layer of the architecture. The four-layer self-brain is what the operator's professional context looks like. The FIT CHECK is how the pipeline judges a role against that context. The recipient-respect first principle is how the draft reads from the other side of the wire. The calibration inbound is where all three of those stopped being theoretical and started producing something the operator would actually sign their name to.
+
+### Stub promotion — cold recruiter becomes a real contact
+
+The `_make_cold_recruiter_stub_person` helper that feeds the draft is ephemeral — built at prompt time, never written to the people directory. That's fine for the first reply, but the recruiter usually comes back: a week later they want to schedule the call, a week after that they're sending a hiring-manager intro. If the sender never crosses the threshold from "unknown" to "known," every thread re-enters the cold-recruiter pipeline, the drafts keep spinning fresh stubs, and any downstream agent that wants to find this contact (the meetings agent prepping the recruiter screen, say) comes up empty because `find_person_by_email` returns `None`.
+
+The fix is a Telegram-button promotion flow on the cold-recruiter FYI. Auto-compose now attaches an inline keyboard with **✅ Promote** and **🚫 Not a fit** under every A/B/C/unclear-tier cold-recruiter draft it stages. Tapping ✅ fires a `recruiter:promote:<thread_id>` callback that reads the queue entry, derives name + slug from the `From` header, and calls `brain.create_person_file(name, "professional-outer", email=…, relationship_type="recruiter", recruiter_signal_domain=…, source_thread_id=…)`. The operator's person directory gains a new entry with the correct circles, and every future inbound from that sender routes as `queued` (known) instead of `queued_cold_recruiter`.
+
+Tapping 🚫 fires `recruiter:reject:<thread_id>` and records the sender on `cache/rejected-recruiters.jsonl`. The inbox triage path now loads that list and short-circuits any future match to a new `skipped_rejected_recruiter` status — preventing the same sender from re-queueing the cold-recruiter pipeline indefinitely. For `not_a_target` tier drafts the buttons are suppressed entirely; the operator can still rescue via a manual `/promote <thread_id>` tool, but the happy path is dismiss.
+
+The callback plumbing reuses the `facts:*` dispatcher pattern — a thin prefix in `agents/shared/dispatcher.py` hands off to `handle_recruiter_callback` in a connector-side library. Pure functions, testable without a live Telegram session. The rule the code enforces is: idempotency on the thread_id (tapping twice doesn't double-create), and the promoted-recruiters log is append-only so re-runs of the callback produce the same final state.
+
+### Email is schedule-plus-filter, not demonstrate-plus-evaluate
+
+A subtler pass on the same calibration thread exposed a deeper mismatch between what the prompt was asking the LLM to do and what an email reply *should* carry. The first version of the cold-inbound schema asked for a `fit_signal` field alongside `compelling_angle` — "one specific piece of evidence tied to the role's demands." The intent was to give the recruiter advocate-ready evidence to forward to the hiring manager. The resulting drafts included phrases like *"which lines up well with work I have done leading economic modeling for marketplace dynamics at scale."* Technically accurate. Structurally wrong.
+
+The recruiter is reaching out to the operator — not the other way around. She has already read the LinkedIn profile, made her fit hypothesis, and is pitching *him* on the role. A reply that pitches fit back inverts the power dynamic. It reads as auditioning when the operator should be the one being courted. It also pre-commits the operator to a framing before the role details have landed, narrowing scope pre-screen.
+
+The structural clarification: an email reply and a recruiter call do different work, even though they're part of the same relationship.
+
+| | Email | Call |
+|---|---|---|
+| Job | Schedule + surface honest filter | Demonstrate fit + evaluate match |
+| Must-carry | Engagement + compelling_angle + availability | Full pitch narrative + evaluation questions |
+| Power stance | Being courted (don't audition) | Both parties present; fit gets demonstrated live |
+
+The revised schema drops `fit_signal` entirely. `compelling_angle` stays — because that's *filter* information the recruiter can actually use ("here's what the operator is responding to; if my pitch doesn't match that, I should reframe"). It also stays honest about context the recruiter can't see: if the operator is late-stage with two other companies, the angle names what specifically about *this* shape pulls him anyway, so the recruiter can calibrate urgency. No boilerplate enthusiasm. No "excited about the opportunity."
+
+The LLM's own `recipient_model` reasoning moved in the right direction once the prompt carried the power-dynamic framing explicitly. The model now articulates the distinction unprompted: *"A short, specific, respectful note will feel engaged; a fit-pitch would feel redundant and slightly awkward because she is the one recruiting him."* That's the durable fix — the reasoning step encodes the stance upstream of the output, so drafts stop drifting into pitch register even when the voice profile's "warm-but-restrained" patterns tempt the LLM toward over-explaining.
+
+The three-beat email contract that came out of this is now encoded as a MUST-CARRY section in the compose prompt: **engage with one specific element of their pitch + compelling_angle as honest filter signal + concrete availability**. Four paragraphs would be wrong. Four sentences are right.
 
 ## Deployment walkthrough
 

@@ -1,12 +1,12 @@
 # The shared brain
 
-*Last updated: 2026-04-21 · Reading time: ~22 min · Difficulty: moderate*
+*Last updated: 2026-04-22 · Reading time: ~22 min · Difficulty: moderate*
 
 **TL;DR**
 
 - The shared brain is what turns a *pile of agents* into a *fleet*. It's a directory of plain markdown files with a small structured schema on top — no database, no vendor, no API.
 - Four core primitives: **facts** (knowledge that decays), **commitments** (promises that resolve), **tasks** (action items), **notes** (raw inputs awaiting triage). Plus per-person profile files and per-agent status/rules files.
-- A parallel [`self/` subtree](#the-self-layer-a-brain-about-the-operator) mirrors the shape for a single subject — the operator — with a four-layer synthesis pipeline (classifier → archives → structured facts → narrative profile) that feeds Huckle's cold-recruiter drafting path.
+- A parallel [`self/` subtree](#the-self-layer-a-brain-about-the-operator) mirrors the shape for a single subject — the operator — with a four-layer synthesis pipeline (classifier → archives → structured facts → narrative profile) that feeds Huckle's cold-recruiter drafting AND Murphy's recruiter-meeting prep.
 - Two halves, two sync mechanisms. `ops/brain/*` is **git-tracked** and flows local → VPS via `deploy.py`. `~/Dropbox/clawford-backup/*` is **Dropbox-synced bidirectionally**. The split is enforced structurally by `agents/shared/brain.py`.
 - All writes are appends. Every entry carries an agent ID and a timestamp; the file is its own changelog. Multiple agents writing the same file simultaneously is a designed-for case, not a bug.
 - This is the single most underrated piece of infrastructure in the whole fleet. It survived the migration off the OpenClaw platform untouched, because it never depended on the platform — it's just files on disk.
@@ -141,7 +141,7 @@ The self-brain lives at `~/Dropbox/clawford-backup/self/` and fans out across ei
 | `search-timeline.md` | Hand-editable chronology — start/end dates per round of job search | Operator authors once; same routing pattern |
 | `linkedin-profile-current.pdf` | Authoritative bio input for profile synthesis | Operator exports from LinkedIn periodically |
 
-The architecture deliberately mirrors the four-primitive brain on the other side. People files → `profile.md`. `brain/facts/YYYY-MM.md` → `self/facts/*.json`. `brain/people/<slug>.md`'s `## Recent observations` section → `self/archives/<role>.md`. The boundary between the two subtrees is strict: anything about other people goes in the main brain; anything about the operator goes in `self/`. The Huckle-specific importer pipeline that builds `self/` is covered in [Ch 14 — The professional brain](14-huckle-cat.md#the-professional-brain); this section is the architectural slot.
+The architecture deliberately mirrors the four-primitive brain on the other side. People files → `profile.md`. `brain/facts/YYYY-MM.md` → `self/facts/*.json`. `brain/people/<slug>.md`'s `## Recent observations` section → `self/archives/<role>.md`. The boundary between the two subtrees is strict: anything about other people goes in the main brain; anything about the operator goes in `self/`. The Huckle-specific importer pipeline that builds `self/` is covered in [Ch 14 — The professional brain](14-huckle-cat.md#the-professional-brain); this section is the architectural slot. Murphy now consumes the same subtree for [recruiter-meeting prep](13-sergeant-murphy.md#professional-meeting-prep) — demonstrating the pattern works cleanly under a second reader without either agent knowing about the other.
 
 Three design rules carry over from the main brain and three are unique to this subtree.
 

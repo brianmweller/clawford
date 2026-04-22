@@ -1,6 +1,6 @@
 # Sergeant Murphy 🐷🔍 — the meetings-coach agent
 
-*Last updated: 2026-04-18 · Reading time: ~20 min · Difficulty: hard*
+*Last updated: 2026-04-22 · Reading time: ~30 min · Difficulty: hard*
 
 > **TL;DR.** Sergeant Murphy is the meetings agent — not a calendar agent, a meetings agent. He composes a morning meeting brief at 5 AM PT with factual context for every meeting on the day (no invented talking points), fires pre-meeting alerts 15–45 minutes ahead with the real agenda, scans meeting transcripts from an MCP-speaking transcription provider after each meeting to stage action items + decisions for confirmation, tracks the commitments that actually get confirmed, and runs a coaching analysis against a configured set of communication growth areas. He is the **second** Google-OAuth agent in the fleet (after [Mistress Mouse](12-mistress-mouse.md)) and he sits on the other side of [§ the routing boundary](12-mistress-mouse.md#the-routing-boundary-with-sergeant-murphy): Workflowy-presence events are his, non-Workflowy events are Mistress Mouse's. Read [§ The 5x resend incident](#the-5x-resend-incident) before deploying the post-meeting scan. It is the reason the rest of the fleet treats "cache files are not a delivery queue" as a named design rule.
 
@@ -152,6 +152,78 @@ cache/
   sent-alerts.json         # pre-meeting alert dedup
 scripts/                   # all Python listed above
 ```
+
+## Professional-meeting prep
+
+Sergeant Murphy's default prep output is an I/O assembly — fetch attendees, look up their facts and commitments, read any Workflowy agenda the operator already staged. Zero LLM calls. That shape is right for the 90% case (a 1:1 with a colleague, a family call, a regular staff sync): the agent doesn't invent content, it surfaces what the brain already knows.
+
+It's wrong for recruiter screens and hiring-manager calls. Those meetings have a specific shape — the operator needs to walk in with a pitch narrative, a concrete "why this role, why now" angle, and a small set of evaluation questions anchored on the operator's own level and scope bar. None of that lives in the default brain. All of it lives in the [self-brain](14-huckle-cat.md#the-professional-brain) that Huckle Cat's cold-recruiter path already exercises.
+
+Phase 2 extended the self-brain to a second consumer — this one. Three surgical pieces land it: a meeting classifier that decides whether a calendar event is professional; an LLM-backed prep builder that consumes the self-profile; and a renderer branch in the morning brief + pre-meeting alert that surfaces the prep block when it fires.
+
+### The classifier
+
+`classify_meeting_type(event, attendees_resolved, self_profile) -> {"recruiter-screen" | "hiring-manager" | "hiring-panel" | "general"}` runs as a short heuristic ladder after attendee resolution. First match wins:
+
+1. Any resolved attendee carries `relationship_type: recruiter` (a [promoted cold-recruiter stub](14-huckle-cat.md#stub-promotion-cold-recruiter-becomes-a-real-contact)) → `recruiter-screen`. Strongest signal — explicit operator decision.
+2. Any attendee's domain matches the shared `RECRUITER_DOMAINS` set (ATS + retained-search platforms) → `recruiter-screen`. Same domain list Huckle's detector uses; single source of truth at `agents/shared/recruiter_domains.py` so the two agents agree.
+3. Any attendee's domain matches a company in `self_profile.current_targets` → `hiring-panel` by default, `hiring-manager` if the event title carries a manager-1:1 keyword (*"manager chat"*, *"1:1 with"*).
+4. Event title matches a hiring-process keyword (*"phone screen"*, *"intro call"*, *"interview"*, *"onsite"*) AND at least one attendee is a known contact → `recruiter-screen`.
+5. Otherwise → `general`.
+
+Degrades open: if `self_profile.has_profile` is `False`, the classifier returns `general` immediately and the rest of the prep path is skipped. The existing I/O prep still runs. Nothing silently breaks when the self-brain hasn't been synthesised yet.
+
+### The prep schema
+
+When the classifier returns non-`general`, a single LLM call builds a structured prep block. The first cut of the schema asked for `questions_to_ask` + `talking_points` + `red_flags` + a `prep_summary` — which read as generic resume-bullet content. The failure mode was the same one Huckle hit: treating the meeting as a one-way evaluator ("do I want this role?") when in fact the operator needs to demonstrate fit AND evaluate at the same time, against a real recipient with real needs.
+
+The revised 8-field schema mirrors the compose pipeline's recipient-modeling step:
+
+| Field | What it carries |
+|---|---|
+| `recipient_model` | What the recruiter / interviewer needs to leave the call with |
+| `objective` | The operator's dual goal: evaluate match + make an advocate-ready case if it clears |
+| `fit_pitch` | 3–5-sentence narrative mapping the operator's specific track record to THIS role |
+| `compelling_angle` | 1–2 sentences on what specifically about this role / company would pull the operator (the "why change" answer, honest about late-stage-elsewhere context) |
+| `fit_evidence` | 3 concrete proof-point bullets the operator can drop in when asked |
+| `evaluation_questions` | 3 questions to ask, at least one anchored on the level & scope bar |
+| `red_flags` | 0–3 mismatch signals to press on (optional) |
+| `prep_summary` | one-line framing for skim-reading |
+
+The scar-tissue observation that forced the restructure was sharp: *"any recruiter wants to know (1) what my experience is and (2) what I find compelling about the role — why I might change what I'm doing. There's no prep section for this. Maybe this is a symptom of a bigger gap: not asking 'what does the other party want or need from the conversation?'"*
+
+That's the durable lesson. The prompt now reasons explicitly through recipient model → objective → strategy (pitch + evaluate) before producing any content. On the calibration run, the LLM's `red_flags` section spontaneously picked up the active-pipeline context from `active_search_stages.json` and flagged it — *"late-stage with two other companies, so timeline and seriousness of process matter if this one wants to compete."* No prompt-engineering to surface that — the pipeline context was loaded into the prompt, and the model wove it in naturally once the reasoning structure gave it a place to go.
+
+### The Huckle / Murphy split
+
+The same Phase 2 pass forced a clarifying distinction between what belongs in an email reply and what belongs in call prep. The email's job is **schedule + filter**. The call's job is **demonstrate + evaluate**. Both consume the same self-brain; they use different slices of it for different register.
+
+| | Email (Huckle) | Call prep (Murphy) |
+|---|---|---|
+| Media | Gmail draft | Workflowy agenda node |
+| Must-carry | Engagement + compelling_angle + availability | Full 8-field schema above |
+| Pitch? | No — the recruiter already made the fit hypothesis | Yes — this is where the operator demonstrates |
+| Power stance | Being courted (don't audition) | Both parties actively evaluating |
+| LLM call | 4-step reasoning with cold-inbound schema | Single call with the 8-field prep schema |
+| Output volume | 3–5 sentences | A full meeting briefing, multi-hundred words |
+
+The practical consequence: Huckle's cold-recruiter draft no longer tries to pitch. Murphy's prep carries the full pitch plus evaluation scaffolding. They're explicitly distinct paths consuming the same `self/` brain, not two variations on the same compose.
+
+### Renderers + the Workflowy convention dance
+
+The prep block surfaces in two places: the morning meeting brief (full shape — framing + recipient model + objective + pitch + evidence + questions + flags, as nested bullets) and the 15-minute-out pre-meeting alert (compact shape — just the compelling_angle + one question + one talking point, so the alert stays glanceable on phone).
+
+The Workflowy push path exposed three latent bugs in the meeting-node helpers — caught during a live calibration against the operator's real Workflowy:
+
+- **`find_or_create_date_path` lacked a workspace anchor.** It scanned the entire export for any `2026` year node with month children and took the first match. In a Workflowy with multiple top-level roots (e.g. `Meeting` for calendar-driven notes and `Notes` for a personal journal, each with a `2026` subtree), the meeting could land in the wrong workspace depending on export order. Fix: `find_meeting_root_id(nodes, root_name)` locates the correct top-level node by name; `find_or_create_date_path` now accepts a `root_id` kwarg that scopes the year search to descendants of that root.
+
+- **Dates were computed in UTC.** The meeting-prep helpers pulled `year`, `month`, `day` from a datetime that hadn't been timezone-normalised. On a PT evening after the UTC date rolled over, a meeting for "tomorrow 10 AM PT" landed under a date heading for the following weekday. Fix: `find_or_create_date_path` takes a `tz` kwarg; if supplied, it calls `.astimezone(ZoneInfo(tz))` on the input before extracting components. Configured via `timezone` in `meeting-config.json`.
+
+- **`create_node` defaults to prepend.** Workflowy's default position for a new child is the top of the parent, not the bottom. `create_meeting_node` was therefore inverting the template: Post-meeting ended up above Pre/during, Notes above Agenda, because the later-created nodes prepended. Fix: `position="bottom"` on every sub-structure creation (Pre/during, Post-meeting, Agenda, Notes, Takeaways). The meeting node itself keeps `position="top"` — new meetings surface at the top of their date, which matches the operator's "most-recent-first" reading order.
+
+All three bugs had the same failure mode: the production path worked *most of the time* because the non-deterministic defaults happened to pick the right thing, and the subset of cases that didn't trip any of them flew under the radar. A one-off calibration meeting on the operator's real Workflowy was what forced the fix — exactly the class of latent bug a fuzz-test wouldn't have caught, but a live integration test did.
+
+The Workflowy convention itself (per the operator's template): title = `"{Attendee Name} #{CamelCaseTag1} #{CamelCaseTag2}"`, structure = `Pre / during > 📔 Agenda + 📝 Notes ; Post-meeting > ✅ Takeaways`, briefing content goes inside Agenda as nested-per-field bullets, Notes stays empty pre-meeting (it's the live-capture surface during the call). The prep renderer follows this convention; Murphy's cron-driven meeting creation uses the same.
 
 ## Deployment walkthrough
 
