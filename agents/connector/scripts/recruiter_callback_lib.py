@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import re
 import sys
-from email.utils import parseaddr
+from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
@@ -180,6 +180,23 @@ def _is_already_kept(kept_path: Path, thread_id: str) -> dict | None:
     return None
 
 
+def _last_interaction_from_entry(entry: dict, now_iso: str) -> str:
+    """Derive YYYY-MM-DD for the inbound email date in the queue entry.
+
+    Falls back to now_iso's calendar date when the queue `date` is missing
+    or unparseable. Without this stamp, people-scan.py treats a freshly
+    kept recruiter as days_since=999 and surfaces them in the next
+    morning nudge as hundreds of days overdue (Michelle Leist, 2026-04-22).
+    """
+    raw = (entry.get("date") or "").strip()
+    if raw:
+        try:
+            return parsedate_to_datetime(raw).date().isoformat()
+        except (TypeError, ValueError):
+            pass
+    return now_iso[:10]
+
+
 def _keep_recruiter(
     thread_id: str,
     *,
@@ -207,6 +224,7 @@ def _keep_recruiter(
     name = fields.pop("name")
     slug = fields.pop("slug")
     circles = fields.pop("circles")
+    fields["last_interaction"] = _last_interaction_from_entry(entry, now_iso)
 
     try:
         created = brain.create_person_file(

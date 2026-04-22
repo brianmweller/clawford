@@ -320,20 +320,20 @@ def load_pinned_contacts(csv_path=None):
 def auto_circle(c, config, pinned=None):
     """Assign a circle to a merged contact.
 
-    Pin-list short-circuit (2026-04-19): contacts whose email or
-    name-slug appears in holiday-card-pins.csv go straight to
-    `professional-inner`, regardless of meeting count or recency. This
-    makes the manual reclassification durable — future mining runs on
-    a new ex-colleague contact (zero meetings post-Example Corp) still land
-    them in the right bucket on first ingest.
+    Pin-list short-circuit (2026-04-19; remapped 2026-04-22 per Option A):
+    contacts whose email or name-slug appears in holiday-card-pins.csv
+    go straight to `professional-outer` (90d cadence), regardless of
+    meeting count or recency. The pin list encodes "don't lose this
+    ex-colleague" intent (holiday card / life-event surface area),
+    which is semantically outer-cadence, not weekly-check-in cadence.
     """
     if pinned:
         email_norm = (c.get("email", "") or "").lower().strip()
         name_slug = _pinned_slugify(c.get("name", "") or "")
         if email_norm and email_norm in pinned.get("emails", set()):
-            return "professional-inner"
+            return "professional-outer"
         if name_slug and name_slug in pinned.get("name_slugs", set()):
-            return "professional-inner"
+            return "professional-outer"
 
     rules = config.get("circle_rules", {})
     now = datetime.now(timezone.utc).date()

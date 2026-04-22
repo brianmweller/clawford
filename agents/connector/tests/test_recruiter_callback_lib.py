@@ -152,6 +152,48 @@ def test_keep_creates_person_file_with_expected_fields(tmp_path: Path, monkeypat
     assert "relationship_type:** recruiter" in content
 
 
+def test_keep_stamps_last_interaction_from_queue_entry_date(
+    tmp_path: Path, monkeypatch
+):
+    """Cold-recruiter keep must stamp last_interaction=<inbound email date>.
+    Without it, people-scan.py treats the new person as days_since=999 and
+    surfaces them in the next morning nudge as 909 days overdue
+    (regression 2026-04-22: Michelle Leist)."""
+    people_dir, queue_path, workspace_dir = _seed(tmp_path)
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(tmp_path / "brain"))
+
+    rc_lib.handle_recruiter_callback(
+        "keep", "t-abc123",
+        people_dir=people_dir, workspace_dir=workspace_dir,
+        queue_path=queue_path, now_iso="2026-04-22T18:00:00Z",
+    )
+
+    content = (people_dir / "jane-recruiter.md").read_text(encoding="utf-8")
+    # Queue entry date is "Mon, 21 Apr 2026 12:00:00 -0700" — parsed to 2026-04-21.
+    assert "last_interaction:** 2026-04-21" in content
+
+
+def test_keep_falls_back_to_now_date_when_queue_date_missing(
+    tmp_path: Path, monkeypatch
+):
+    """Missing/malformed queue `date` must fall back to now_iso's calendar
+    date rather than leave last_interaction blank (which re-creates the
+    999-days bug)."""
+    entry = _sample_queue_entry()
+    entry.pop("date", None)
+    people_dir, queue_path, workspace_dir = _seed(tmp_path, entries=[entry])
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(tmp_path / "brain"))
+
+    rc_lib.handle_recruiter_callback(
+        "keep", "t-abc123",
+        people_dir=people_dir, workspace_dir=workspace_dir,
+        queue_path=queue_path, now_iso="2026-04-22T18:00:00Z",
+    )
+
+    content = (people_dir / "jane-recruiter.md").read_text(encoding="utf-8")
+    assert "last_interaction:** 2026-04-22" in content
+
+
 def test_keep_appends_to_kept_jsonl(tmp_path: Path, monkeypatch):
     people_dir, queue_path, workspace_dir = _seed(tmp_path)
     monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(tmp_path / "brain"))

@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
-"""holiday-card-reclassify.py — Upsert `professional-inner` for everyone on
+"""holiday-card-reclassify.py — Upsert `professional-outer` for everyone on
 the operator's Holiday Card List.
 
 Companion to `holiday-card-pins.csv`. Walks the people directory, matches
 each pin row to a `.md` file by email (primary) or name-slug (fallback),
-merges `professional-inner` into the file's `circles` line. Pins with no
-matching file get a new stub .md with `circles: professional-inner`.
+merges `professional-outer` into the file's `circles` line. Pins with no
+matching file get a new stub .md with `circles: professional-outer`.
 
 Background. The mining pipeline's `auto_circle` only promotes to
 `professional-inner` when a contact has 5+ meetings in the last 30 days.
 After the operator left Example Corp every ex-colleague fell through to
 `professional-outer`, and `people-seed.py` skips existing files on re-run
 so seed updates never reclassify. This script is the manual override
-ingest; the pin-list short-circuit in `contact-aggregator.auto_circle` is
-the durability half of the fix.
+ingest for ex-colleagues that should never drop out of the address book.
+
+2026-04-22 (Option A remap): changed target circle from
+`professional-inner` (7d cadence, weekly nudges) to `professional-outer`
+(90d cadence, holiday-card-compatible). The 7d cadence was too
+aggressive — it surfaced ex-colleagues as "overdue" every week, which
+is not what "keep on the holiday card list" means.
 
 Usage
     python3 holiday-card-reclassify.py                    # dry run
@@ -31,10 +36,10 @@ Matching (priority order)
        and `- **slug:**`.
 
 Merge semantics
-    - Existing file already has `professional-inner`: no-op.
+    - Existing file already has `professional-outer`: no-op.
     - Existing file has other circles (e.g. `holiday-card`, `friends-close`):
-      append `, professional-inner` so the 7-day cadence wins but the
-      historical tag is preserved.
+      append `, professional-outer` so the 90-day cadence runs alongside
+      the historical tag.
     - No matching file for a pin: create a stub using the
       `people-seed.py` template.
     - Ambiguous name-slug (two files, same normalized name, no email
@@ -142,7 +147,7 @@ def _circles_list(raw: str) -> list[str]:
     return [c.strip() for c in raw.split(",") if c.strip()]
 
 
-def _merge_circle(existing: str, new: str = "professional-inner") -> str:
+def _merge_circle(existing: str, new: str = "professional-outer") -> str:
     """Append `new` to the comma-separated circles value if not present."""
     items = _circles_list(existing)
     if new in items:
@@ -164,7 +169,7 @@ def _write_merged_circles(path: Path, content: str, new_circles: str) -> None:
 _STUB_TEMPLATE = """# {name}
 
 - **slug:** {slug}
-- **circles:** professional-inner
+- **circles:** professional-outer
 - **relationship:** colleague
 - **relationship_type:** colleague
 - **preferred_channel:** email
@@ -176,11 +181,11 @@ _STUB_TEMPLATE = """# {name}
 - **notes:** Seeded by holiday-card-reclassify.py on {date}
 """
 # last_interaction seeds to the stub creation date so the stub lands
-# in `healthy` initially and ages into `overdue` at the 7-day
-# professional-inner cadence. Without this, an empty field gave
-# days_since=999 and every stub crowded out real-signal entries
-# like Drew Branden (51d since last contact) at the top of the
-# overdue list — exactly the wrong order for the operator's morning.
+# in `healthy` initially and ages into `overdue` at the 90-day
+# professional-outer cadence. Without this, an empty field gave
+# days_since=999 and every stub crowded out real-signal entries at
+# the top of the overdue list — exactly the wrong order for the operator's
+# morning.
 
 
 def _write_stub(people_dir: Path, slug: str, name: str, email: str) -> Path:
@@ -298,7 +303,7 @@ def run(*, pins_csv: Path, people_dir: Path, write: bool) -> dict:
             continue
 
         rec = matches[0]
-        if "professional-inner" in _circles_list(rec["circles"]):
+        if "professional-outer" in _circles_list(rec["circles"]):
             report["already_pinned"] += 1
             report["details"].append({
                 "action": "already_pinned",

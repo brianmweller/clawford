@@ -1,8 +1,12 @@
 """Tests for the pin-list short-circuit in contact-aggregator.auto_circle().
 
 The holiday-card-pins.csv should make any future mining run classify
-a listed contact as professional-inner on first ingest, regardless of
+a listed contact as professional-outer on first ingest, regardless of
 meeting counts or recency. This makes reclassification durable.
+
+2026-04-22 (Option A remap): target circle is professional-outer (90d)
+rather than professional-inner (7d) — pin intent is holiday-card
+retention, not weekly nudging.
 """
 from __future__ import annotations
 
@@ -37,7 +41,7 @@ DEFAULT_CFG = {
 }
 
 
-def test_pinned_email_returns_professional_inner_regardless_of_meetings(agg):
+def test_pinned_email_returns_professional_outer_regardless_of_meetings(agg):
     pinned = {"emails": {"drew.branden@example.com"}, "name_slugs": set()}
     contact = {
         "email": "drew.branden@example.com",
@@ -45,7 +49,7 @@ def test_pinned_email_returns_professional_inner_regardless_of_meetings(agg):
         "meeting_count": 0,
         "last_interaction": "2024-06-01",
     }
-    assert agg.auto_circle(contact, DEFAULT_CFG, pinned) == "professional-inner"
+    assert agg.auto_circle(contact, DEFAULT_CFG, pinned) == "professional-outer"
 
 
 def test_pinned_name_slug_match_when_email_missing(agg):
@@ -56,7 +60,22 @@ def test_pinned_name_slug_match_when_email_missing(agg):
         "meeting_count": 0,
         "last_interaction": None,
     }
-    assert agg.auto_circle(contact, DEFAULT_CFG, pinned) == "professional-inner"
+    assert agg.auto_circle(contact, DEFAULT_CFG, pinned) == "professional-outer"
+
+
+def test_pinned_overrides_active_collaborator_promotion(agg):
+    """Pin-list short-circuit must beat the 5+ recent meetings rule —
+    even an actively collaborating pinned contact drops to 90d cadence
+    because the pin list encodes 'holiday-card retention', not 'weekly
+    check-in' (Option A, 2026-04-22)."""
+    pinned = {"emails": {"active.pin@example.com"}, "name_slugs": set()}
+    contact = {
+        "email": "active.pin@example.com",
+        "name": "Active Pin",
+        "meeting_count": 10,
+        "last_interaction": __import__("datetime").date.today().isoformat(),
+    }
+    assert agg.auto_circle(contact, DEFAULT_CFG, pinned) == "professional-outer"
 
 
 def test_unpinned_contact_falls_through_to_existing_rules(agg):

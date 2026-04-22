@@ -75,22 +75,25 @@ def _read_circles(dir_: Path, slug: str) -> str:
 
 
 def test_match_by_email_exact(rc, people_dir, tmp_path):
-    _write_person(people_dir, "drew-branden", email="drew.branden@example.com")
+    # Seed file has `friends-close` circle so that professional-outer is
+    # genuinely missing and triggers a merge (Option A: target == outer;
+    # seeding with 'professional-outer' would short-circuit to already_pinned).
+    _write_person(people_dir, "drew-branden", email="drew.branden@example.com", circles="friends-close")
     pins = _write_pins(tmp_path, [{"name": "Drew Branden", "email": "drew.branden@example.com"}])
     report = rc.run(pins_csv=pins, people_dir=people_dir, write=True)
     assert report["matched_by_email"] == 1
-    assert _read_circles(people_dir, "drew-branden") == "professional-outer, professional-inner"
+    assert _read_circles(people_dir, "drew-branden") == "friends-close, professional-outer"
 
 
 def test_match_by_email_case_insensitive(rc, people_dir, tmp_path):
-    _write_person(people_dir, "drew-branden", email="Drew.Branden@EXAMPLE.COM")
+    _write_person(people_dir, "drew-branden", email="Drew.Branden@EXAMPLE.COM", circles="friends-close")
     pins = _write_pins(tmp_path, [{"name": "Drew Branden", "email": "drew.branden@example.com"}])
     report = rc.run(pins_csv=pins, people_dir=people_dir, write=True)
     assert report["matched_by_email"] == 1
 
 
 def test_match_by_alt_email(rc, people_dir, tmp_path):
-    _write_person(people_dir, "ellie-mertz", email="ellie@example.com", alt_emails="ellie.mertz@example.com")
+    _write_person(people_dir, "ellie-mertz", email="ellie@example.com", alt_emails="ellie.mertz@example.com", circles="friends-close")
     pins = _write_pins(tmp_path, [{"name": "Ellie Mertz", "email": "ellie.mertz@example.com"}])
     report = rc.run(pins_csv=pins, people_dir=people_dir, write=True)
     assert report["matched_by_email"] == 1
@@ -98,15 +101,15 @@ def test_match_by_alt_email(rc, people_dir, tmp_path):
 
 def test_match_by_name_slug_when_emails_differ(rc, people_dir, tmp_path):
     # .md has personal gmail, CSV has work email — common mining-vs-holiday-card split.
-    _write_person(people_dir, "dan-zylberglejd", email="danzylber@gmail.com")
+    _write_person(people_dir, "dan-zylberglejd", email="danzylber@gmail.com", circles="friends-close")
     pins = _write_pins(tmp_path, [{"name": "Dan Zylberglejd", "email": "dan.zylberglejd@example.com"}])
     report = rc.run(pins_csv=pins, people_dir=people_dir, write=True)
     assert report["matched_by_name"] == 1
-    assert "professional-inner" in _read_circles(people_dir, "dan-zylberglejd")
+    assert "professional-outer" in _read_circles(people_dir, "dan-zylberglejd")
 
 
 def test_duplicate_csv_rows_deduped(rc, people_dir, tmp_path):
-    _write_person(people_dir, "huiji-gao", email="huiji.gao@example.com")
+    _write_person(people_dir, "huiji-gao", email="huiji.gao@example.com", circles="friends-close")
     pins = _write_pins(tmp_path, [
         {"name": "Huiji Gao", "email": "huiji.gao@example.com"},
         {"name": "Huiji Gao", "email": "huiji.gao@example.com"},
@@ -123,18 +126,18 @@ def test_ambiguous_name_match_skipped_with_warning(rc, people_dir, tmp_path):
     # exactly-same slug collision which is impossible for files. Instead
     # test by giving two .md files with different slugs whose name fields
     # collide. We detect ambiguity by normalized-name collision.
-    _write_person(people_dir, "jason-smith-a", email="jason@example.com", name="Jason Smith")
-    _write_person(people_dir, "jason-smith-b", email="js@example.com", name="Jason Smith")
+    _write_person(people_dir, "jason-smith-a", email="jason@example.com", name="Jason Smith", circles="friends-close")
+    _write_person(people_dir, "jason-smith-b", email="js@example.com", name="Jason Smith", circles="friends-close")
     pins = _write_pins(tmp_path, [{"name": "Jason Smith", "email": "jsmith@example.com"}])
     report = rc.run(pins_csv=pins, people_dir=people_dir, write=True)
     assert report["ambiguous"] == 1
     # Neither file should have been modified.
-    assert _read_circles(people_dir, "jason-smith-a") == "professional-outer"
-    assert _read_circles(people_dir, "jason-smith-b") == "professional-outer"
+    assert _read_circles(people_dir, "jason-smith-a") == "friends-close"
+    assert _read_circles(people_dir, "jason-smith-b") == "friends-close"
 
 
 def test_name_with_roman_suffix_stripped(rc, people_dir, tmp_path):
-    _write_person(people_dir, "casimir-ksiazek", email="ck@example.com", name="Casimir Ksiazek")
+    _write_person(people_dir, "casimir-ksiazek", email="ck@example.com", name="Casimir Ksiazek", circles="friends-close")
     pins = _write_pins(tmp_path, [{"name": "Casimir Ksiazek III", "email": "somewhere@example.com"}])
     report = rc.run(pins_csv=pins, people_dir=people_dir, write=True)
     assert report["matched_by_name"] == 1
@@ -150,7 +153,7 @@ def test_creates_stub_for_missing_person(rc, people_dir, tmp_path):
     stub = people_dir / "brand-new.md"
     assert stub.exists()
     content = stub.read_text(encoding="utf-8")
-    assert "- **circles:** professional-inner" in content
+    assert "- **circles:** professional-outer" in content
     assert "- **email:** brand.new@example.com" in content
 
 
@@ -169,20 +172,21 @@ def test_merges_with_existing_non_outer_circle(rc, people_dir, tmp_path):
     rc.run(pins_csv=pins, people_dir=people_dir, write=True)
     circles = _read_circles(people_dir, "leanne-bradley")
     assert "friends-close" in circles
-    assert "professional-inner" in circles
+    assert "professional-outer" in circles
 
 
-def test_noop_when_already_professional_inner(rc, people_dir, tmp_path):
-    _write_person(people_dir, "charlie-farrell", email="charlie.farrell@example.com", circles="professional-inner")
+def test_noop_when_already_professional_outer(rc, people_dir, tmp_path):
+    _write_person(people_dir, "charlie-farrell", email="charlie.farrell@example.com", circles="professional-outer")
     pins = _write_pins(tmp_path, [{"name": "Charlie Farrell", "email": "charlie.farrell@example.com"}])
     report = rc.run(pins_csv=pins, people_dir=people_dir, write=True)
     assert report["already_pinned"] == 1
     assert report["matched_by_email"] == 0
-    assert _read_circles(people_dir, "charlie-farrell") == "professional-inner"
+    assert _read_circles(people_dir, "charlie-farrell") == "professional-outer"
 
 
 def test_idempotent_rerun(rc, people_dir, tmp_path):
-    _write_person(people_dir, "drew-branden", email="drew.branden@example.com")
+    # Seed with friends-close so first run MERGES (not a no-op short-circuit).
+    _write_person(people_dir, "drew-branden", email="drew.branden@example.com", circles="friends-close")
     pins = _write_pins(tmp_path, [{"name": "Drew Branden", "email": "drew.branden@example.com"}])
     r1 = rc.run(pins_csv=pins, people_dir=people_dir, write=True)
     r2 = rc.run(pins_csv=pins, people_dir=people_dir, write=True)
@@ -192,14 +196,14 @@ def test_idempotent_rerun(rc, people_dir, tmp_path):
 
 
 def test_dry_run_writes_nothing(rc, people_dir, tmp_path):
-    _write_person(people_dir, "drew-branden", email="drew.branden@example.com")
+    _write_person(people_dir, "drew-branden", email="drew.branden@example.com", circles="friends-close")
     pins = _write_pins(tmp_path, [{"name": "Drew Branden", "email": "drew.branden@example.com"}])
     rc.run(pins_csv=pins, people_dir=people_dir, write=False)
-    assert _read_circles(people_dir, "drew-branden") == "professional-outer"
+    assert _read_circles(people_dir, "drew-branden") == "friends-close"
 
 
 def test_rewrites_only_circles_line(rc, people_dir, tmp_path):
-    _write_person(people_dir, "drew-branden", email="drew.branden@example.com")
+    _write_person(people_dir, "drew-branden", email="drew.branden@example.com", circles="friends-close")
     original = (people_dir / "drew-branden.md").read_text(encoding="utf-8")
     pins = _write_pins(tmp_path, [{"name": "Drew Branden", "email": "drew.branden@example.com"}])
     rc.run(pins_csv=pins, people_dir=people_dir, write=True)
