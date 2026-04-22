@@ -638,7 +638,7 @@ Every match carries a `match_reason` string that enumerates which signals fired:
 
 The underlying data sources are the log (persistent, all processed threads) and the triage queue (transient, rolling window). The log has subject + slug; the queue has from_email + from_header. Union-by-thread_id across both gives a single merged candidate pool with the richest metadata either source had.
 
-This same fuzzy-resolver pattern should generalise to any operator tool that needs to point at a specific thing-in-context. A `/promote` by sender name for cold-recruiter promotion is the obvious second application; the existing tool takes a thread_id but the same resolver would accept a descriptor and map to the right queue entry.
+The fuzzy-resolver pattern generalises to any operator tool that needs to point at a specific thing-in-context. Phase 2b extends it to `/promote` — the cold-recruiter promotion flow now accepts the same descriptor shapes as `/reply`, scoped to un-acted queue state via an `only_queue_statuses` kwarg on the resolver. The status filter is essential: already-promoted, rejected, or known-sender threads must not match `/promote` even if they'd hit the substring heuristic, because the promotion callback needs `from_email` + `from_header` from a live `queued_cold_recruiter` queue entry to create the people file. Without the filter, a fuzzy match could silently misroute to an incompatible state. The next operator tool that needs to point at a thing-in-context should follow the same pattern: scope the resolver to only the state that's actually actionable for that flow.
 
 ## Deployment walkthrough
 
