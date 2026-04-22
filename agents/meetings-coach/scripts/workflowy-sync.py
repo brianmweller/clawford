@@ -1094,7 +1094,7 @@ def cmd_push_prep_meeting(event_id):
         title=title,
         hashtags=hashtags,
         attendees=[{"email": a.get("email", ""), "name": a.get("name", "")}
-                   for a in attendees],
+                   for a in (prep.get("attendees") or [])],
         api_key=api_key,
         config=config,
         root_id=root_id,
