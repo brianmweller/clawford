@@ -164,6 +164,28 @@ def _any_attendee_has_ats_domain(attendees_resolved: list[dict]) -> bool:
     return False
 
 
+def _organizer_email(event: dict) -> str:
+    """Extract the organizer email from an event. gcal-fetch flattens
+    to a string; a raw GCal event dict nests under
+    {email, displayName, self}. Handle both so the caller doesn't
+    have to care which path built the event."""
+    org = event.get("organizer")
+    if isinstance(org, str):
+        return org
+    if isinstance(org, dict):
+        return str(org.get("email") or "")
+    return ""
+
+
+def _organizer_has_ats_domain(event: dict) -> bool:
+    """True when the event organizer sits on a known ATS / recruiting
+    domain. Covers the Adobe/Amazon/Google scheduled-interview case
+    where no attendees are listed on the invite — the interviewer is
+    only named in the description body, so attendee-based signals
+    miss. The organizer domain is the strongest remaining tell."""
+    return is_recruiter_domain(_organizer_email(event))
+
+
 def _any_attendee_is_known(attendees_resolved: list[dict]) -> bool:
     for att in attendees_resolved:
         if att.get("person_data"):
@@ -192,8 +214,13 @@ def classify_meeting_type(
     if _any_attendee_is_recruiter(attendees_resolved):
         return "recruiter-screen"
 
-    # 2. ATS / retained-search platform domain on any attendee.
+    # 2. ATS / retained-search platform domain on any attendee —
+    #    OR on the organizer. Adobe/Amazon-style scheduled interviews
+    #    often list only the operator as attendee; the ATS signal lives on
+    #    the organizer (schedule@interview.adobe.com).
     if _any_attendee_has_ats_domain(attendees_resolved):
+        return "recruiter-screen"
+    if _organizer_has_ats_domain(event):
         return "recruiter-screen"
 
     # 3. Target-company domain match — classify as hiring-manager when

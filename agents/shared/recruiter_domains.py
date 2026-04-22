@@ -56,8 +56,31 @@ AMBIGUOUS_DOMAINS: frozenset[str] = frozenset({
 })
 
 
+# ATS subdomain prefixes — big companies run in-house scheduling on
+# subdomains like `interview.adobe.com`, `schedule.amazon.com`,
+# `recruiting.google.com`, `talent.apple.com`. The organizer email on
+# those invites is typically `schedule@<prefix>.<company>.com` or
+# `no-reply@<prefix>.<company>.com`. Enumerating every big company's
+# ATS domain is a losing battle; matching the subdomain prefix catches
+# the pattern generically.
+_ATS_SUBDOMAIN_PREFIXES: frozenset[str] = frozenset({
+    "interview",
+    "interviews",
+    "schedule",
+    "scheduling",
+    "recruiting",
+    "recruit",
+    "talent",
+    "careers",
+    "hire",
+    "hiring",
+})
+
+
 def is_recruiter_domain(email_or_domain: str) -> bool:
-    """True if the argument's domain suffix matches RECRUITER_DOMAINS.
+    """True if the argument's domain suffix matches RECRUITER_DOMAINS
+    or its leftmost subdomain is a known ATS prefix
+    (`interview.adobe.com`, `schedule.amazon.com`, etc.).
 
     Accepts either a bare domain (`lever.co`) or a full email
     (`no-reply@lever.co`). Case-insensitive. Empty / None → False.
@@ -71,4 +94,12 @@ def is_recruiter_domain(email_or_domain: str) -> bool:
     for rd in RECRUITER_DOMAINS:
         if domain == rd or domain.endswith("." + rd):
             return True
+    # Subdomain-prefix pattern: only the leftmost label is considered,
+    # and only if the domain has at least 3 labels (prefix.company.tld).
+    # This avoids matching a bare `careers.com` (2 labels, likely a
+    # legitimate recruiting site but also a potential false-positive
+    # seed). 3+ labels implies `prefix.company.tld` form.
+    parts = domain.split(".")
+    if len(parts) >= 3 and parts[0] in _ATS_SUBDOMAIN_PREFIXES:
+        return True
     return False

@@ -112,6 +112,40 @@ def test_classify_ats_domain_triggers_recruiter_screen():
     assert lib.classify_meeting_type(event, [att], profile) == "recruiter-screen"
 
 
+def test_classify_organizer_on_ats_subdomain_triggers_recruiter_screen():
+    """Adobe-style scheduled interview: organizer is 'schedule@
+    interview.adobe.com', no attendees on the invite (interviewer is
+    only named in the description body), title is the generic
+    'Meeting Confirmation'. The ATS subdomain signal on the organizer
+    alone must classify this as a recruiter screen — otherwise prep
+    never fires for big-company in-house interview systems."""
+    profile = _profile_with_targets_and_pipeline()
+    event = _event(summary="Meeting Confirmation - Sam Smith",
+                   attendees=[])
+    event["organizer"] = "schedule@interview.adobe.com"
+    assert lib.classify_meeting_type(event, [], profile) == "recruiter-screen"
+
+
+def test_classify_organizer_on_ats_subdomain_as_dict():
+    """Same as above, but `organizer` comes through as a dict (GCal's
+    native shape is {email, displayName, self}) — some fetchers pass it
+    through verbatim instead of flattening to a string."""
+    profile = _profile_with_targets_and_pipeline()
+    event = _event(summary="Final round", attendees=[])
+    event["organizer"] = {"email": "no-reply@recruiting.amazon.com",
+                          "displayName": "Amazon Interviews"}
+    assert lib.classify_meeting_type(event, [], profile) == "recruiter-screen"
+
+
+def test_classify_organizer_non_ats_stays_general():
+    """Regression guard: ordinary meeting with an unrelated organizer
+    domain must not be dragged into recruiter-screen."""
+    profile = _profile_with_targets_and_pipeline()
+    event = _event(summary="Team sync", attendees=[])
+    event["organizer"] = "boss@example.com"
+    assert lib.classify_meeting_type(event, [], profile) == "general"
+
+
 # ---------------------------------------------------------------------------
 # classify_meeting_type — target company domain match
 # ---------------------------------------------------------------------------
