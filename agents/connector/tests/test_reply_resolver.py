@@ -217,6 +217,115 @@ def test_completely_unknown_descriptor_returns_recent_threads(seeded):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# only_queue_statuses filter (Phase 2b — /promote scoping)
+# ---------------------------------------------------------------------------
+
+
+def test_status_filter_restricts_to_cold_recruiter_queue_entries(seeded):
+    """With only_queue_statuses=['queued_cold_recruiter'], the resolver
+    must match ONLY queue entries whose status is in that list. Log
+    entries (processed threads) are excluded even if they'd match
+    substrings — /promote can't operate on already-processed stuff."""
+    # 'Anthropic' appears in a queued_cold_recruiter entry — match.
+    r = tools._resolve_thread_descriptor(
+        "Anthropic", only_queue_statuses=["queued_cold_recruiter"],
+    )
+    assert r["status"] == "ok"
+    assert r["thread_id"] == "19db3333333333cc"  # the cold recruiter
+
+
+def test_status_filter_excludes_known_sender_queue_entries(seeded):
+    """Plain 'queued' (known-sender) entries must NOT match when the
+    filter is 'queued_cold_recruiter' — even when the descriptor hits
+    their from_email or subject."""
+    # 'Michelle' matches a known-sender queue entry (status=queued).
+    # With the cold-recruiter filter, it should NOT resolve.
+    r = tools._resolve_thread_descriptor(
+        "michelle", only_queue_statuses=["queued_cold_recruiter"],
+    )
+    assert r["status"] == "not_found"
+
+
+def test_status_filter_excludes_log_only_entries(seeded):
+    """Log-only threads (processed, no longer in queue) must not match
+    when a queue-status filter is active — /promote can't work against
+    them (needs from_email + from_header from a live queue entry)."""
+    # 'jamie' only has a log entry (no queue entry in the seed).
+    r = tools._resolve_thread_descriptor(
+        "jamie", only_queue_statuses=["queued_cold_recruiter"],
+    )
+    assert r["status"] == "not_found"
+
+
+def test_promote_recruiter_fuzzy_match_to_queue_entry(seeded, monkeypatch):
+    """End-to-end: promote_recruiter('Anthropic') should resolve via
+    subject match to the cold-recruiter queue entry and invoke the
+    promotion callback on that thread_id."""
+    captured = {}
+
+    def _fake_handle(action, arg):
+        captured["action"] = action
+        captured["arg"] = arg
+        return {"status": "ok", "action": action, "slug": "test-slug",
+                "path": "/x.md", "name": "Test"}
+
+    monkeypatch.setattr(tools, "_handle_recruiter_callback", _fake_handle)
+
+    r = tools.promote_recruiter("Anthropic")
+    assert captured["action"] == "promote"
+    assert captured["arg"] == "19db3333333333cc"
+    assert r["status"] == "ok"
+    # Resolver metadata should be preserved for Telegram-side rendering.
+    assert r.get("matched_descriptor") == "Anthropic"
+    assert "recruiter@anthropic.com" in r.get("matched_from_email", "")
+
+
+def test_promote_recruiter_passes_through_ambiguous_status(seeded, monkeypatch):
+    """When the descriptor matches multiple cold-recruiter queue
+    entries, promote_recruiter must NOT call the callback — it returns
+    the candidates list so the LLM can ask the operator to pick."""
+    # Add a second cold-recruiter queue entry matching the same word.
+    import json as _json
+    queue_path = tools._TRIAGE_QUEUE_PATH
+    data = _json.loads(Path(queue_path).read_text(encoding="utf-8"))
+    data["queued"].append({
+        "thread_id": "19db9999999999ff",
+        "from_email": "jane@anthropic.com",
+        "from_header": "Jane <jane@anthropic.com>",
+        "subject": "Head of Marketplace ML at Anthropic",
+        "status": "queued_cold_recruiter",
+    })
+    Path(queue_path).write_text(_json.dumps(data), encoding="utf-8")
+
+    calls = []
+    monkeypatch.setattr(
+        tools, "_handle_recruiter_callback",
+        lambda action, arg: calls.append((action, arg)) or {"status": "ok"},
+    )
+
+    r = tools.promote_recruiter("Anthropic")
+    assert r["status"] == "ambiguous"
+    assert len(r["candidates"]) == 2
+    assert calls == [], "ambiguous match must NOT invoke the callback"
+
+
+def test_promote_recruiter_not_found_returns_recent_queue_only(seeded, monkeypatch):
+    """When the descriptor doesn't match any cold-recruiter queue
+    entry, recent_threads should be queue-scoped — no log entries."""
+    r = tools.promote_recruiter("zzznothinglikethat")
+    assert r["status"] == "not_found"
+    # recent_threads, if present, should only contain cold-recruiter entries
+    for entry in r.get("recent_threads") or []:
+        # The log has jamie-fitzgerald as a non-cold; it must not appear here.
+        assert entry.get("thread_id") != "19db1111111111aa"
+
+
+def test_promote_recruiter_empty_descriptor_errors():
+    r = tools.promote_recruiter("")
+    assert r["status"] == "error"
+
+
 def test_resolver_handles_missing_log_and_queue(tmp_path, monkeypatch):
     """If the workspace is fresh (no log, no queue), the resolver must
     not crash — it should return not_found with empty recent_threads."""

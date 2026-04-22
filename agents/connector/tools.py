@@ -524,14 +524,56 @@ TOOLS: list[dict] = [
     },
     {
         "type": "function",
+        "name": "promote_recruiter",
+        "description": (
+            "Promote a cold-recruiter queue entry to a real "
+            "people/<slug>.md file, identified by fuzzy reference. The "
+            "normal path is the ✅ Promote button on the cold-recruiter "
+            "FYI — this tool is the manual alternative when the "
+            "button was dismissed or the operator is acting in chat.\n"
+            "\n"
+            "`descriptor` accepts ANY of:\n"
+            "  - person name: 'Jane Ashby', 'Michelle'\n"
+            "  - sender email: 'jane@lever.co'\n"
+            "  - subject substring: 'Senior Director role at Reddit'\n"
+            "  - explicit Gmail thread_id\n"
+            "\n"
+            "Resolution is SCOPED to un-acted cold-recruiter queue "
+            "entries (status=queued_cold_recruiter). Already-promoted, "
+            "rejected, or known-sender threads will not match — that "
+            "scope prevents accidentally re-promoting the wrong thing.\n"
+            "\n"
+            "Returns {status: ok, slug, name, path} on success, "
+            "{status: already_promoted, ...} on duplicate, "
+            "{status: ambiguous, candidates: [...]} when the "
+            "descriptor matches multiple queue entries (LLM should "
+            "ask the operator to pick), or {status: not_found, ...} with "
+            "recent threads when nothing matches."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "descriptor": {
+                    "type": "string",
+                    "description": (
+                        "Fuzzy reference to the cold-recruiter queue "
+                        "entry — person name, sender email, subject "
+                        "substring, or thread_id"
+                    ),
+                },
+            },
+            "required": ["descriptor"],
+        },
+    },
+    {
+        "type": "function",
         "name": "promote_recruiter_by_thread_id",
         "description": (
-            "Promote a cold-recruiter queue entry to a real people/<slug>.md "
-            "file. The normal path is the ✅ Promote button on the auto-compose "
-            "FYI message; use this tool only when the operator types `/promote "
-            "<thread_id>` manually (e.g., because he dismissed the button or "
-            "is following up via chat). Returns {status, slug, name, path} on "
-            "success or {status, detail} on error."
+            "Back-compat: promote a cold-recruiter queue entry by "
+            "explicit Gmail thread_id. Prefer promote_recruiter "
+            "(fuzzy descriptor) for conversational flows — this "
+            "tool is kept for programmatic callers or cached "
+            "dispatcher state that references the old name."
         ),
         "parameters": {
             "type": "object",
@@ -800,6 +842,51 @@ def promote_recruiter_by_thread_id(thread_id: str) -> dict:
     return _handle_recruiter_callback("promote", thread_id)
 
 
+def promote_recruiter(descriptor: str) -> dict:
+    """Operator-invoked promotion of a cold-recruiter stub to a real
+    people file, identified by fuzzy reference. Mirrors the fuzzy-
+    resolver pattern from reply_to_message: accept person name, sender
+    email, subject substring, or explicit thread_id.
+
+    Scoped to un-acted queue state — only matches triage queue entries
+    whose status is ``queued_cold_recruiter``. Already-promoted
+    senders, known senders, and generic queued threads are NOT
+    candidates (they'd fail at the promotion step anyway because the
+    callback needs from_email + from_header from an un-acted queue
+    entry to create the people file).
+
+    Use when the operator says 'promote that Jane Ashby recruiter', '/promote
+    the Reddit one', or wants to promote a cold-recruiter stub without
+    hunting for the Telegram button. Returns the same shape as the
+    recruiter:promote callback:
+      {status: ok | already_promoted | not_found | ambiguous, ...}
+    On ambiguous, returns candidates[] for LLM-driven disambiguation.
+    """
+    ref = (descriptor or "").strip()
+    if not ref:
+        return {"status": "error", "error": "descriptor is required"}
+
+    resolution = _resolve_thread_descriptor(
+        ref,
+        only_queue_statuses=["queued_cold_recruiter"],
+    )
+    if resolution.get("status") != "ok":
+        return {**resolution, "descriptor": ref}
+
+    tid = resolution["thread_id"]
+    result = _handle_recruiter_callback("promote", tid)
+    # Preserve the resolver's matched metadata so the Telegram-side
+    # confirmation can name the sender / subject without another lookup.
+    matched = resolution.get("matched")
+    if matched and isinstance(result, dict):
+        result.setdefault("matched_descriptor", ref)
+        result.setdefault("matched_from_email",
+                          matched.get("from_email", ""))
+        result.setdefault("matched_subject",
+                          matched.get("subject", ""))
+    return result
+
+
 _AUTO_COMPOSE_LOG = os.path.join(CACHE, "auto-compose-log.json")
 _TRIAGE_QUEUE_PATH = os.path.join(CACHE, "triage-queue.json")
 
@@ -807,17 +894,51 @@ _THREAD_ID_RE = __import__("re").compile(r"^[0-9a-f]{14,22}$")
 _EMAIL_RE = __import__("re").compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 
-def _load_thread_candidates() -> dict:
+def _load_thread_candidates(
+    *, only_queue_statuses: list[str] | None = None,
+) -> dict:
     """Union of the auto-compose log + triage queue, keyed by
     thread_id. Each candidate carries whatever metadata either source
     had — subject, slug (from log), from_email + from_header (from
     queue). When both sources have the same thread_id we merge fields.
+
+    only_queue_statuses: when set (e.g., ['queued_cold_recruiter']),
+    restrict candidates to queue entries whose status is in the list.
+    Log-only entries are excluded entirely — useful for flows that
+    only operate on un-acted queue state (e.g., /promote, which
+    needs from_email + from_header from the queue entry to create
+    the people file).
     """
-    log = _read_json(_AUTO_COMPOSE_LOG, default={}) or {}
     queue_raw = _read_json(_TRIAGE_QUEUE_PATH, default={}) or {}
     queue = queue_raw.get("queued") if isinstance(queue_raw, dict) else []
+    queue = queue or []
 
-    candidates: dict[str, dict] = {}
+    status_filter = set(only_queue_statuses) if only_queue_statuses else None
+
+    if status_filter is not None:
+        # Queue-only path: skip the log entirely.
+        candidates: dict[str, dict] = {}
+        for q in queue:
+            if not isinstance(q, dict):
+                continue
+            tid = q.get("thread_id")
+            if not tid:
+                continue
+            if q.get("status") not in status_filter:
+                continue
+            candidates[tid] = {
+                "thread_id": tid,
+                "subject": q.get("subject", ""),
+                "slug": None,
+                "from_email": q.get("from_email", ""),
+                "from_header": q.get("from_header", ""),
+                "last_seen": q.get("date", ""),
+                "status": q.get("status", ""),
+            }
+        return candidates
+
+    log = _read_json(_AUTO_COMPOSE_LOG, default={}) or {}
+    candidates = {}
     for tid, entry in (log or {}).items():
         if not isinstance(entry, dict):
             continue
@@ -832,7 +953,7 @@ def _load_thread_candidates() -> dict:
             "fit_tier": entry.get("fit_tier", ""),
             "cold_inbound": bool(entry.get("cold_inbound")),
         }
-    for q in queue or []:
+    for q in queue:
         if not isinstance(q, dict):
             continue
         tid = q.get("thread_id")
@@ -858,15 +979,23 @@ def _load_thread_candidates() -> dict:
     return candidates
 
 
-def _resolve_thread_descriptor(descriptor: str) -> dict:
+def _resolve_thread_descriptor(
+    descriptor: str,
+    *,
+    only_queue_statuses: list[str] | None = None,
+) -> dict:
     """Turn a fuzzy operator string into a Gmail thread_id.
 
     Accepts any of:
       - explicit thread_id (hex, 14–22 chars) — passes through
       - full email ('jane@lever.co') — matches from_email
-      - person name ('Michelle', 'Michelle Leist') — resolved via
+      - person name ('first' / 'first last') — resolved via
         brain.get_person (with first-name fallback) to slug / emails
-      - subject substring ('Reddit', 'hello') — matches log + queue
+      - subject substring — matches log + queue
+
+    only_queue_statuses: restrict matching to queue entries whose
+    status is in the list (e.g., ['queued_cold_recruiter'] for
+    /promote flows that only operate on un-acted queue state).
 
     Returns:
       {"status": "ok", "thread_id": tid, "matched": {...}}
@@ -877,7 +1006,9 @@ def _resolve_thread_descriptor(descriptor: str) -> dict:
     if not s:
         return {"status": "not_found", "reason": "empty descriptor"}
 
-    candidates = _load_thread_candidates()
+    candidates = _load_thread_candidates(
+        only_queue_statuses=only_queue_statuses,
+    )
 
     # 1. Explicit thread_id shape — pass through (even if not in log,
     #    Gmail will 404 if invalid; better to attempt than reject).
@@ -1063,6 +1194,7 @@ EXECUTORS: dict = {
     "handle_facts_callback": lambda action, arg: _handle_facts_callback(action, arg),
     "handle_recruiter_callback": lambda action, arg: _handle_recruiter_callback(action, arg),
     "promote_recruiter_by_thread_id": promote_recruiter_by_thread_id,
+    "promote_recruiter": promote_recruiter,
     "reply_to_message": reply_to_message,
     "reply_to_thread": reply_to_thread,  # back-compat alias
     "get_person": get_person,
