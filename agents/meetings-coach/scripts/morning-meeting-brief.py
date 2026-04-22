@@ -395,6 +395,37 @@ def run() -> dict:
             {"source": "meeting-prep", "error": f"{prep_failures} event(s) failed"}
         )
 
+    # Auto-push professional-meeting prep to Workflowy. Symmetric with
+    # Huckle's auto-compose: recruiter-screen / hiring-manager /
+    # hiring-panel meetings get their 8-field llm_prep pushed to the
+    # Agenda of the Workflowy meeting node, creating the node under
+    # Notes > <year> > <month> > <date> if it doesn't exist yet.
+    #
+    # Idempotent — the Agenda-section dedup helper skips any label
+    # already present, so re-running the same morning is a safe no-op.
+    # Silent-fails: any push failure increments the counter + lands in
+    # sources_failed, but the morning brief still emits.
+    workflowy_push_failures = 0
+    workflowy_push_count = 0
+    for eid, prep in prep_lookup.items():
+        meetings = prep.get("meetings") if isinstance(prep, dict) else None
+        if not meetings or not isinstance(meetings[0], dict):
+            continue
+        if meetings[0].get("meeting_type", "general") == "general":
+            continue
+        push_result = _run_script(
+            "workflowy-sync.py", "--push-prep-meeting", eid, timeout=120,
+        )
+        if is_subprocess_error(push_result):
+            workflowy_push_failures += 1
+        else:
+            workflowy_push_count += 1
+    if workflowy_push_failures:
+        sources_failed.append(
+            {"source": "workflowy-prep-push",
+             "error": f"{workflowy_push_failures} event(s) failed to push"}
+        )
+
     # Weekly overview is Monday-only and optional — track failures but
     # keep emitting the brief without the week-ahead section.
     week_events: list | None = None
