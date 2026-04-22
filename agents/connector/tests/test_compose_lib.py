@@ -175,6 +175,35 @@ def test_prompt_cold_inbound_includes_recipient_respect_principle():
     assert "directionally interesting" in prompt.lower()
 
 
+def test_prompt_cold_inbound_avoids_caught_my_eye_idiom():
+    """'caught my eye' is discovery-frame idiom that inverts the reactive
+    power dynamic (the operator is being pitched, not spotting). Three prior
+    prescriptive positions leaked it into drafts:
+      - ENGAGEMENT beat: 'one specific element ... that caught the operator's eye'
+      - Opener strategy: 'what element of what they wrote caught the operator's eye?'
+      - Don't-echo rule: 'a specific phrase that caught your eye'
+      - Anti-pattern fix-up: 'say what specifically caught your eye'
+
+    The prompt must not prescribe the idiom in any of those positions,
+    AND must flag it in the anti-pattern list so future edits that
+    regress toward the idiom are caught visibly."""
+    prompt = build_compose_prompt(
+        _ctx(), _voice(), _inbound(),
+        cold_inbound=True, self_profile=_self_profile(),
+    )
+    lower = prompt.lower()
+    # The four original prescriptive sentence fragments must all be gone.
+    # Each one is specific enough that it won't match the anti-pattern
+    # list (which uses the idiom inside single-quote delimiters).
+    assert "that caught operator's eye" not in lower
+    assert "caught operator's eye?" not in lower
+    assert "phrase that caught your eye" not in lower
+    assert "specifically caught your eye" not in lower
+    # And the anti-pattern list explicitly flags the idiom family, so
+    # the LLM sees it as forbidden voice, not approved voice.
+    assert "'caught my eye'" in lower
+
+
 def test_prompt_warm_inbound_omits_self_context():
     """Non-cold (known-sender) drafts don't get the SELF CONTEXT block
     or the fit_assessment schema — existing behavior preserved."""
