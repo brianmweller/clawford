@@ -17,29 +17,54 @@ sys.path.insert(0, str(AGENT_DIR))
 def tools_mod(tmp_path, monkeypatch):
     workspace = tmp_path / "connector-workspace"
     workspace.mkdir()
+    brain_root = tmp_path / "brain"
+    (brain_root / "people").mkdir(parents=True)
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(brain_root))
     for mod in list(sys.modules):
-        if mod in ("tools",):
+        if mod in ("tools", "brain"):
             del sys.modules[mod]
     import tools
     monkeypatch.setattr(tools, "WORKSPACE", str(workspace))
     monkeypatch.setattr(tools, "CHECKIN_LOG_PATH", str(workspace / "checkin-log.json"))
     monkeypatch.setattr(tools, "CONFIG_PATH", str(workspace / "connector-config.json"))
+    tools._TEST_BRAIN_ROOT = brain_root  # type: ignore[attr-defined]
     return tools
 
 
+def _seed_person(tools_mod, name: str, circles: str = "friends-close") -> str:
+    """Write a minimal person file so list_persons / get_person resolve.
+
+    People files use H1 for display name and `- **key:** value` lines
+    for frontmatter — matching brain._parse_people_md.
+    """
+    slug = name.lower().replace(" ", "-")
+    path = tools_mod._TEST_BRAIN_ROOT / "people" / f"{slug}.md"
+    path.write_text(
+        f"# {name}\n\n- **circles:** {circles}\n",
+        encoding="utf-8",
+    )
+    return slug
+
+
 def test_mark_checkin_logs_contact(tools_mod):
+    _seed_person(tools_mod, "John Smith")
     result = tools_mod.mark_checkin("John Smith")
     assert result["status"] == "ok"
     assert result["person"] == "John Smith"
+    assert result["slug"] == "john-smith"
 
     with open(tools_mod.CHECKIN_LOG_PATH, encoding="utf-8") as f:
         data = json.load(f)
     assert len(data["checkins"]) == 1
     assert data["checkins"][0]["person"] == "John Smith"
+    assert data["checkins"][0]["slug"] == "john-smith"
     assert data["checkins"][0]["source"] == "manual"
 
 
 def test_mark_checkin_appends_multiple(tools_mod):
+    _seed_person(tools_mod, "Alice")
+    _seed_person(tools_mod, "Bob")
+    _seed_person(tools_mod, "Carol")
     tools_mod.mark_checkin("Alice")
     tools_mod.mark_checkin("Bob")
     tools_mod.mark_checkin("Carol")
@@ -49,10 +74,21 @@ def test_mark_checkin_appends_multiple(tools_mod):
     assert len(data["checkins"]) == 3
 
 
+def test_mark_checkin_unknown_person_returns_not_found(tools_mod):
+    """Fuzzy-resolver behavior: descriptor that matches no person file
+    returns status=not_found so the LLM asks the operator to disambiguate
+    rather than silently writing a dangling log entry."""
+    result = tools_mod.mark_checkin("Stranger Danger")
+    assert result["status"] == "not_found"
+    assert result["descriptor"] == "Stranger Danger"
+
+
 def test_snooze_reminder(tools_mod):
+    _seed_person(tools_mod, "Sarah")
     result = tools_mod.snooze_reminder("Sarah", days=14)
     assert result["status"] == "ok"
     assert result["person"] == "Sarah"
+    assert result["slug"] == "sarah"
     assert result["snoozed_for_days"] == 14
 
     with open(tools_mod.CONFIG_PATH, encoding="utf-8") as f:
@@ -62,6 +98,7 @@ def test_snooze_reminder(tools_mod):
 
 
 def test_snooze_default_7_days(tools_mod):
+    _seed_person(tools_mod, "Tom")
     result = tools_mod.snooze_reminder("Tom")
     assert result["snoozed_for_days"] == 7
 

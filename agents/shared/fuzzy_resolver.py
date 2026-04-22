@@ -262,6 +262,58 @@ def resolve_fuzzy_descriptor(
 # ---------------------------------------------------------------------------
 
 
+def result_to_dict(
+    result: ResolutionResult,
+    *,
+    id_key: str,
+    recent_key: str,
+    candidate_formatter: Callable[[Candidate], dict] | None = None,
+) -> dict:
+    """Translate a ResolutionResult into a standardized dict for tool
+    callers. Every domain wrapper should use this so the shape is
+    identical across agents:
+
+      {status: "ok",        <id_key>: str, matched: {...}}
+      {status: "ambiguous", candidates: [dict, ...]}
+      {status: "not_found", reason: str, <recent_key>: [dict, ...]}
+
+    Callers supply the per-domain key names (``"thread_id"`` vs
+    ``"meeting_id"`` vs ``"event_id"``) and an optional formatter
+    that turns a Candidate into the domain-shaped dict (e.g., pulling
+    specific fields out of ``extras``). Without a formatter the
+    default shape is ``{<id_key>, subject, email, last_seen,
+    match_reason}`` — useful for quick wiring.
+    """
+    def _default_fmt(c: Candidate) -> dict:
+        return {
+            id_key: c.id,
+            "subject": (c.subject or "")[:80],
+            "email": c.email,
+            "last_seen": c.last_seen,
+            "match_reason": c.match_reason,
+        }
+
+    fmt = candidate_formatter or _default_fmt
+
+    if result.status == "ok":
+        matched = result.matched
+        return {
+            "status": "ok",
+            id_key: result.id,
+            "matched": fmt(matched) if matched else {id_key: result.id},
+        }
+    if result.status == "ambiguous":
+        return {
+            "status": "ambiguous",
+            "candidates": [fmt(c) for c in (result.candidates or [])],
+        }
+    return {
+        "status": "not_found",
+        "reason": result.reason or "no match",
+        recent_key: [fmt(c) for c in (result.recent or [])],
+    }
+
+
 def _with_reason(candidate: Candidate, reason: str) -> Candidate:
     """Return a copy of ``candidate`` with ``match_reason`` set. Using
     dataclasses.replace would also work; a shallow construction keeps

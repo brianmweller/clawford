@@ -100,12 +100,18 @@ def test_dismiss_action_item(tools_mod, tmp_path):
     assert 0 in data["dismissed_items"]
 
 
-def test_confirm_invalid_item_id(tools_mod):
+def test_confirm_descriptor_matches_nothing_returns_not_found(tools_mod):
+    """Fuzzy descriptor that hits neither item_id passthrough nor any
+    substring match returns status=not_found (operator-friendly;
+    distinguishes from a malformed item_id)."""
     result = tools_mod.confirm_action_item("bad_id")
-    assert result["status"] == "error"
+    assert result["status"] == "not_found"
 
 
 def test_confirm_missing_debrief(tools_mod):
+    """An item_id-shaped descriptor that passes through the pattern
+    but doesn't correspond to any real debrief file surfaces as an
+    error at the file-access stage."""
     result = tools_mod.confirm_action_item("nonexistent:0")
     assert result["status"] == "error"
 

@@ -17,6 +17,11 @@ import pending_actions  # type: ignore
 import memory_writer  # type: ignore
 import state_introspection  # type: ignore
 from subprocess_helpers import run_json_script, is_subprocess_error  # type: ignore
+from fuzzy_resolver import (  # type: ignore
+    Candidate as _FuzzyCandidate,
+    resolve_fuzzy_descriptor as _shared_resolve,
+    result_to_dict as _result_to_dict,
+)
 
 # Put the agent dir on sys.path so we can import agent-root modules.
 # dispatcher.py loads tools.py via spec_from_file_location, which doesn't
@@ -229,26 +234,160 @@ def propose_event_add(
     )
 
 
+# ---------------------------------------------------------------------------
+# Event-descriptor resolver — P0 application of the shared fuzzy-
+# resolver. Operators describe events ('my 3pm dentist', 'Avery's
+# pickup') rather than typing GCal event_ids.
+# ---------------------------------------------------------------------------
+
+
+def _load_event_candidates() -> list[_FuzzyCandidate]:
+    """Build an event-candidate pool from cached gcal-fetch results.
+    Each candidate carries the full event dict in ``extras`` so the
+    downstream tool can pull out ``source_calendar_id`` + ``id`` when
+    it stages the pending action."""
+    cache = Path(CACHE)
+    if not cache.exists():
+        return []
+    today = datetime.now(
+        ZoneInfo(os.environ.get("TZ", "America/Los_Angeles"))
+    ).date()
+    candidates: list[_FuzzyCandidate] = []
+    seen: set[str] = set()
+    for path in sorted(cache.glob("events-*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        for ev in (data.get("events") or []):
+            eid = ev.get("id", "")
+            if not eid or eid in seen:
+                continue
+            start = ev.get("start", "")
+            try:
+                ev_date = datetime.fromisoformat(
+                    start.replace("Z", "+00:00") if "T" in start else start
+                ).date()
+                delta = (ev_date - today).days
+                if delta < -1 or delta > 14:
+                    continue
+            except (ValueError, TypeError):
+                pass
+
+            attendees = ev.get("attendees") or []
+            names = [(a.get("name") or "").strip()
+                     for a in attendees if isinstance(a, dict)]
+            emails = [(a.get("email") or "").strip().lower()
+                      for a in attendees if isinstance(a, dict)]
+            seen.add(eid)
+            candidates.append(_FuzzyCandidate(
+                id=eid,
+                display=ev.get("summary", "(untitled)"),
+                last_seen=start,
+                name=" ; ".join(n for n in names if n),
+                email=" ; ".join(e for e in emails if e),
+                subject=ev.get("summary", ""),
+                extras=dict(ev),
+            ))
+    return candidates
+
+
+def _resolve_event_descriptor(descriptor: str) -> dict:
+    """Map a fuzzy operator descriptor to a GCal event_id + its
+    calendar_id (extracted from the matched event's source_calendar_id).
+    Returns the standardized {status, event_id/candidates/recent_events}
+    shape; for status=ok the matched dict carries the full event."""
+    pool = _load_event_candidates()
+    result = _shared_resolve(
+        descriptor,
+        candidates=pool,
+        id_pattern=r"^[A-Za-z0-9_]{10,}$",
+    )
+
+    def _event_fmt(c: _FuzzyCandidate) -> dict:
+        return {
+            "event_id": c.id,
+            "title": (c.subject or "")[:80],
+            "start": c.last_seen,
+            "attendees": c.name,
+            "match_reason": c.match_reason,
+        }
+
+    def _match_fmt(c: _FuzzyCandidate) -> dict:
+        return {**(c.extras or {}), "match_reason": c.match_reason}
+
+    if result.status == "ok":
+        return _result_to_dict(
+            result, id_key="event_id",
+            recent_key="recent_events",
+            candidate_formatter=_match_fmt,
+        )
+    return _result_to_dict(
+        result, id_key="event_id",
+        recent_key="recent_events",
+        candidate_formatter=_event_fmt,
+    )
+
+
 def propose_event_move(
-    calendar_id: str, event_id: str,
-    new_start: str, new_end: str = "",
+    event: str, new_start: str, new_end: str = "",
 ) -> dict:
+    """Stage a move for an event identified by fuzzy descriptor. The
+    resolver matches against today's + upcoming cached events by
+    title, attendee name, or explicit event_id. On single match,
+    stages a pending_action with the resolved event_id + its
+    source_calendar_id. On ambiguity, returns candidates[] for
+    LLM-driven disambiguation."""
+    ref = (event or "").strip()
+    if not ref:
+        return {"status": "error", "error": "event is required"}
+    resolution = _resolve_event_descriptor(ref)
+    if resolution.get("status") != "ok":
+        return {**resolution, "descriptor": ref}
+
+    matched = resolution.get("matched") or {}
+    event_id = resolution["event_id"]
+    calendar_id = matched.get("source_calendar_id") or matched.get("calendar_id", "")
+    if not calendar_id:
+        return {"status": "error",
+                "error": "resolved event has no calendar_id",
+                "resolved_event_id": event_id}
+
+    title = (matched.get("summary") or "")[:60]
     payload = {
         "calendar_id": calendar_id, "event_id": event_id,
         "new_start": new_start, "new_end": new_end,
     }
     return pending_actions.stage(
         "family-calendar", "calendar_move", payload,
-        f"Move event to {new_start}",
+        f"Move '{title}' to {new_start}",
         confirm_label="\U0001f4c5 Move it", cancel_label="Keep",
     )
 
 
-def propose_event_cancel(calendar_id: str, event_id: str) -> dict:
+def propose_event_cancel(event: str) -> dict:
+    """Stage a cancel for an event identified by fuzzy descriptor.
+    Same resolution semantics as propose_event_move."""
+    ref = (event or "").strip()
+    if not ref:
+        return {"status": "error", "error": "event is required"}
+    resolution = _resolve_event_descriptor(ref)
+    if resolution.get("status") != "ok":
+        return {**resolution, "descriptor": ref}
+
+    matched = resolution.get("matched") or {}
+    event_id = resolution["event_id"]
+    calendar_id = matched.get("source_calendar_id") or matched.get("calendar_id", "")
+    if not calendar_id:
+        return {"status": "error",
+                "error": "resolved event has no calendar_id",
+                "resolved_event_id": event_id}
+
+    title = (matched.get("summary") or "")[:60]
     payload = {"calendar_id": calendar_id, "event_id": event_id}
     return pending_actions.stage(
         "family-calendar", "calendar_cancel", payload,
-        f"Cancel event {event_id}",
+        f"Cancel '{title}'" if title else f"Cancel event {event_id}",
         confirm_label="\U0001f4c5 Cancel event", cancel_label="Keep",
     )
 
@@ -375,35 +514,55 @@ TOOLS: list[dict] = [
         "type": "function",
         "name": "propose_event_move",
         "description": (
-            "Stage a calendar event move for the operator's confirmation. "
-            "Requires the calendar_id and event_id from a prior "
-            "get_events_for_day or get_week call."
+            "Stage a calendar-event move for the operator's confirmation, "
+            "identified by fuzzy descriptor. `event` accepts:\n"
+            "  - event title substring ('dentist', 'Avery pickup')\n"
+            "  - attendee name or email\n"
+            "  - explicit GCal event_id\n"
+            "\n"
+            "Resolver scans the last 14 days of cached events. On "
+            "ambiguity returns candidates[] for LLM to ask the operator to "
+            "pick. Use for 'move my 3pm dentist to 4pm' or 'push "
+            "Avery's pickup back an hour'."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "calendar_id": {"type": "string"},
-                "event_id": {"type": "string", "description": "Google Calendar event ID"},
+                "event": {
+                    "type": "string",
+                    "description": (
+                        "Fuzzy reference — title substring, attendee "
+                        "name, or event_id"
+                    ),
+                },
                 "new_start": {"type": "string", "description": "ISO datetime for new start"},
                 "new_end": {"type": "string", "description": "ISO datetime for new end (optional)"},
             },
-            "required": ["calendar_id", "event_id", "new_start"],
+            "required": ["event", "new_start"],
         },
     },
     {
         "type": "function",
         "name": "propose_event_cancel",
         "description": (
-            "Stage a calendar event cancellation for the operator's confirmation. "
-            "Requires the calendar_id and event_id."
+            "Stage a calendar-event cancellation for the operator's "
+            "confirmation, identified by fuzzy descriptor. Same "
+            "resolution semantics as propose_event_move. Use for "
+            "'cancel the dentist appointment' or 'drop tomorrow's "
+            "10am standup.'"
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "calendar_id": {"type": "string"},
-                "event_id": {"type": "string"},
+                "event": {
+                    "type": "string",
+                    "description": (
+                        "Fuzzy reference — title substring, attendee "
+                        "name, or event_id"
+                    ),
+                },
             },
-            "required": ["calendar_id", "event_id"],
+            "required": ["event"],
         },
     },
     {

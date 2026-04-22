@@ -27,6 +27,7 @@ sys.path.insert(0, str(_SHARED))
 from fuzzy_resolver import (  # type: ignore
     Candidate,
     resolve_fuzzy_descriptor,
+    result_to_dict,
 )
 
 
@@ -251,6 +252,87 @@ def test_match_reason_names_all_firing_signals():
 # ---------------------------------------------------------------------------
 # Ranking: strong signals (slug match) rank above substring-only
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# result_to_dict — standardized per-domain shape
+# ---------------------------------------------------------------------------
+
+
+def test_result_to_dict_ok_uses_domain_id_key():
+    """Each domain names the id differently — thread_id, meeting_id,
+    event_id — but the shape is identical otherwise."""
+    result = resolve_fuzzy_descriptor(
+        "Michelle", candidates=_email_pool(),
+    )
+    out = result_to_dict(
+        result,
+        id_key="thread_id",
+        recent_key="recent_threads",
+    )
+    assert out["status"] == "ok"
+    assert out["thread_id"] == "19db2222222222bb"
+    assert "matched" in out
+
+
+def test_result_to_dict_ambiguous_uses_candidate_formatter():
+    """Callers pass a formatter to extract domain-specific fields from
+    each Candidate's extras dict."""
+    pool = [
+        Candidate(id="evt_1", display="A", subject="Board Meeting",
+                  extras={"start": "2026-04-22T10:00:00-07:00"}),
+        Candidate(id="evt_2", display="B", subject="Board Call",
+                  extras={"start": "2026-04-23T14:00:00-07:00"}),
+    ]
+    result = resolve_fuzzy_descriptor("board", candidates=pool)
+
+    def _fmt(c):
+        return {
+            "event_id": c.id,
+            "title": c.subject,
+            "start": (c.extras or {}).get("start", ""),
+            "match_reason": c.match_reason,
+        }
+
+    out = result_to_dict(
+        result,
+        id_key="event_id",
+        recent_key="recent_events",
+        candidate_formatter=_fmt,
+    )
+    assert out["status"] == "ambiguous"
+    assert {c["event_id"] for c in out["candidates"]} == {"evt_1", "evt_2"}
+    assert all("title" in c for c in out["candidates"])
+
+
+def test_result_to_dict_not_found_uses_domain_recent_key():
+    result = resolve_fuzzy_descriptor(
+        "nothingmatches", candidates=_email_pool(),
+    )
+    out = result_to_dict(
+        result,
+        id_key="thread_id",
+        recent_key="recent_threads",
+    )
+    assert out["status"] == "not_found"
+    assert "recent_threads" in out
+    assert "reason" in out
+
+
+def test_result_to_dict_default_formatter_works_without_caller_fmt():
+    """Omitting candidate_formatter should produce a sensible default
+    shape for quick wiring."""
+    result = resolve_fuzzy_descriptor(
+        "Reddit", candidates=_email_pool(),
+    )
+    out = result_to_dict(
+        result, id_key="thread_id", recent_key="recent_threads",
+    )
+    assert out["status"] == "ok"
+    matched = out["matched"]
+    assert matched["thread_id"] == "19db2222222222bb"
+    assert "subject" in matched
+    assert "match_reason" in matched
 
 
 def test_ambiguous_matches_rank_strong_signals_first():

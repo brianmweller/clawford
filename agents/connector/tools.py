@@ -19,6 +19,7 @@ import subprocess_helpers  # type: ignore
 from fuzzy_resolver import (  # type: ignore
     Candidate as _FuzzyCandidate,
     resolve_fuzzy_descriptor as _shared_resolve,
+    result_to_dict as _result_to_dict,
 )
 
 AGENT_ID = "connector"
@@ -124,14 +125,88 @@ def confirm_remember(rule: str, category: str) -> dict:
     return memory_writer.append_rule(AGENT_ID, rule, category)
 
 
-def mark_checkin(person_name: str) -> dict:
-    """Record a manual check-in for a relationship contact."""
+def _load_person_candidates() -> list[_FuzzyCandidate]:
+    """Build a candidate pool from the full people directory. Each
+    candidate's name / slug / display fields come from list_persons;
+    the email field is populated from the person file when present so
+    'jamie@example.com' still resolves."""
+    pool: list[_FuzzyCandidate] = []
+    try:
+        persons = brain.list_persons()
+    except Exception:  # noqa: BLE001
+        return []
+    for p in persons:
+        slug = p.get("slug", "")
+        name = p.get("name", "") or slug
+        # list_persons doesn't carry email; fetch it if cheap — but
+        # that'd be O(N) file reads. Keep the lookup name+slug-only
+        # for now. Email-based resolution still works via the
+        # person_resolver=brain.get_person path the shared resolver
+        # takes when the descriptor looks like a name.
+        pool.append(_FuzzyCandidate(
+            id=slug,
+            display=name,
+            name=name,
+            slug=slug,
+            extras={"name": name, "slug": slug,
+                    "circles": p.get("circles"),
+                    "last_interaction": p.get("last_interaction", "")},
+        ))
+    return pool
+
+
+def _resolve_person_descriptor(descriptor: str) -> dict:
+    """Map a fuzzy operator descriptor to a person slug. Uses the full
+    people directory as the pool; handles ambiguity by returning
+    candidates[] so check-in / snooze flows don't silently no-op on
+    'Michelle' when there are three Michelles."""
+    pool = _load_person_candidates()
+    result = _shared_resolve(
+        descriptor,
+        candidates=pool,
+        person_resolver=brain.get_person,
+    )
+
+    def _fmt(c: _FuzzyCandidate) -> dict:
+        return {
+            "slug": c.id,
+            "name": c.name,
+            "circles": (c.extras or {}).get("circles", ""),
+            "last_interaction": (c.extras or {}).get("last_interaction", ""),
+            "match_reason": c.match_reason,
+        }
+
+    return _result_to_dict(
+        result, id_key="slug",
+        recent_key="recent_people",
+        candidate_formatter=_fmt,
+    )
+
+
+def mark_checkin(person: str) -> dict:
+    """Record a manual check-in for a relationship contact. ``person``
+    is a fuzzy descriptor (first name, full name, slug). On ambiguity
+    returns candidates[] for LLM-driven disambiguation — previous
+    behavior silently wrote the descriptor verbatim, which produced
+    dangling log entries that didn't match any person file."""
+    ref = (person or "").strip()
+    if not ref:
+        return {"status": "error", "error": "person is required"}
+    resolution = _resolve_person_descriptor(ref)
+    if resolution.get("status") != "ok":
+        return {**resolution, "descriptor": ref}
+
+    matched = resolution.get("matched") or {}
+    canonical_name = matched.get("name") or ref
+    slug = resolution["slug"]
+
     data = _read_json(CHECKIN_LOG_PATH, default={"checkins": []})
     if not isinstance(data.get("checkins"), list):
         data["checkins"] = []
 
     entry = {
-        "person": person_name,
+        "person": canonical_name,
+        "slug": slug,
         "checked_in_at": datetime.now(timezone.utc).isoformat(),
         "source": "manual",
     }
@@ -140,25 +215,45 @@ def mark_checkin(person_name: str) -> dict:
     with open(CHECKIN_LOG_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-    return {"status": "ok", "person": person_name, "logged_at": entry["checked_in_at"]}
+    return {
+        "status": "ok",
+        "person": canonical_name,
+        "slug": slug,
+        "logged_at": entry["checked_in_at"],
+    }
 
 
-def snooze_reminder(person_name: str, days: int = 7) -> dict:
-    """Push the next overdue reminder out by N days for a given person."""
+def snooze_reminder(person: str, days: int = 7) -> dict:
+    """Push the next overdue reminder out by N days for a given
+    person. Fuzzy descriptor as in mark_checkin."""
+    ref = (person or "").strip()
+    if not ref:
+        return {"status": "error", "error": "person is required"}
+    resolution = _resolve_person_descriptor(ref)
+    if resolution.get("status") != "ok":
+        return {**resolution, "descriptor": ref}
+
+    matched = resolution.get("matched") or {}
+    canonical_name = matched.get("name") or ref
+    slug = resolution["slug"]
+
     config = _read_json(CONFIG_PATH, default={})
     snoozes = config.setdefault("snoozes", {})
-    snoozes[person_name.lower()] = {
+    snoozes[slug] = {
         "until": (datetime.now(timezone.utc) + timedelta(days=days)).isoformat(),
         "snoozed_at": datetime.now(timezone.utc).isoformat(),
+        "person": canonical_name,
     }
 
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
 
     return {
-        "status": "ok", "person": person_name,
+        "status": "ok",
+        "person": canonical_name,
+        "slug": slug,
         "snoozed_for_days": days,
-        "until": snoozes[person_name.lower()]["until"],
+        "until": snoozes[slug]["until"],
     }
 
 
@@ -374,34 +469,50 @@ TOOLS: list[dict] = [
         "type": "function",
         "name": "mark_checkin",
         "description": (
-            "Record that the operator has checked in with someone. Logs the "
-            "contact in checkin-log.json and resets the overdue timer. "
-            "Call when the operator says 'I talked to John today' or 'just "
-            "caught up with Sarah'."
+            "Record that the operator has checked in with someone. Resolves "
+            "`person` via fuzzy match against the full people "
+            "directory, so 'John' / 'John Smith' / 'john-smith' all "
+            "work. On ambiguity (e.g., two Johns) returns "
+            "candidates[] — the LLM should ask the operator to pick.\n"
+            "\n"
+            "Logs the canonical name + slug in checkin-log.json and "
+            "resets the overdue timer. Call when the operator says 'I "
+            "talked to John today' or 'just caught up with Sarah'."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "person_name": {"type": "string", "description": "Name of the person"},
+                "person": {
+                    "type": "string",
+                    "description": (
+                        "Fuzzy reference — first name, full name, or slug"
+                    ),
+                },
             },
-            "required": ["person_name"],
+            "required": ["person"],
         },
     },
     {
         "type": "function",
         "name": "snooze_reminder",
         "description": (
-            "Snooze the overdue reminder for a person by N days. Call "
-            "when the operator says 'snooze John' or 'remind me about Sarah "
-            "next week instead'. Default 7 days."
+            "Snooze the overdue reminder for a person by N days. "
+            "Fuzzy-resolved as in mark_checkin. Call when the operator says "
+            "'snooze John' or 'remind me about Sarah next week "
+            "instead'. Default 7 days."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "person_name": {"type": "string"},
+                "person": {
+                    "type": "string",
+                    "description": (
+                        "Fuzzy reference — first name, full name, or slug"
+                    ),
+                },
                 "days": {"type": "integer", "description": "Days to snooze (default 7)"},
             },
-            "required": ["person_name"],
+            "required": ["person"],
         },
     },
     {
@@ -998,38 +1109,33 @@ def _resolve_thread_descriptor(
         person_resolver=brain.get_person,
     )
 
-    if result.status == "ok":
-        matched = result.matched
+    def _thread_fmt(c: _FuzzyCandidate) -> dict:
+        # Pass the full original dict through + match_reason so any
+        # call-site consumer can access reply_needed / fit_tier /
+        # cold_inbound via the extras passthrough.
+        return {**(c.extras or {}), "match_reason": c.match_reason}
+
+    def _recent_fmt(c: _FuzzyCandidate) -> dict:
+        # Leaner shape for the not_found recents — we don't need full
+        # extras, just the breadcrumbs the LLM needs to offer picks.
         return {
-            "status": "ok",
-            "thread_id": result.id,
-            "matched": (
-                {**(matched.extras or {}),
-                 "match_reason": matched.match_reason}
-                if matched else {"thread_id": result.id}
-            ),
+            "thread_id": c.id,
+            "from_email": c.email,
+            "subject": (c.subject or "")[:80],
+            "last_seen": c.last_seen,
         }
-    if result.status == "ambiguous":
-        return {
-            "status": "ambiguous",
-            "candidates": [
-                {**(c.extras or {}), "match_reason": c.match_reason}
-                for c in (result.candidates or [])
-            ],
-        }
-    return {
-        "status": "not_found",
-        "reason": result.reason or f"no thread matches {descriptor!r}",
-        "recent_threads": [
-            {
-                "thread_id": c.id,
-                "from_email": c.email,
-                "subject": (c.subject or "")[:80],
-                "last_seen": c.last_seen,
-            }
-            for c in (result.recent or [])
-        ],
-    }
+
+    if result.status == "not_found":
+        return _result_to_dict(
+            result, id_key="thread_id",
+            recent_key="recent_threads",
+            candidate_formatter=_recent_fmt,
+        )
+    return _result_to_dict(
+        result, id_key="thread_id",
+        recent_key="recent_threads",
+        candidate_formatter=_thread_fmt,
+    )
 
 
 def reply_to_message(message_ref: str, hint: str | None = None) -> dict:

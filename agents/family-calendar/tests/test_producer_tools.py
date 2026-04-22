@@ -44,25 +44,85 @@ def test_propose_event_add_stages_action(tools_mod):
     assert actions[0]["payload"]["summary"] == "Dentist"
 
 
-def test_propose_event_move_stages_action(tools_mod):
+def test_propose_event_move_stages_action(tools_mod, monkeypatch):
+    """Fuzzy resolver: an event_id-shaped descriptor passes through
+    id_pattern. The candidate must live in the pool so the tool can
+    extract source_calendar_id from matched.extras."""
+    from fuzzy_resolver import Candidate
+    fake_pool = [Candidate(
+        id="evlongenough01",
+        display="Dentist",
+        subject="Dentist",
+        extras={"id": "evlongenough01",
+                "summary": "Dentist",
+                "source_calendar_id": "family"},
+    )]
+    monkeypatch.setattr(tools_mod, "_load_event_candidates", lambda: fake_pool)
+
     result = tools_mod.propose_event_move(
-        calendar_id="family", event_id="ev123",
-        new_start="2026-04-21T15:00",
+        event="evlongenough01", new_start="2026-04-21T15:00",
     )
     assert "__pending_action__" in result
     import pending_actions
     action = pending_actions.load_by_id("family-calendar", result["action_id"])
     assert action["kind"] == "calendar_move"
+    assert action["payload"]["calendar_id"] == "family"
+    assert action["payload"]["event_id"] == "evlongenough01"
 
 
-def test_propose_event_cancel_stages_action(tools_mod):
-    result = tools_mod.propose_event_cancel(
-        calendar_id="family", event_id="ev456",
-    )
+def test_propose_event_cancel_stages_action(tools_mod, monkeypatch):
+    from fuzzy_resolver import Candidate
+    fake_pool = [Candidate(
+        id="evcancellable2",
+        display="Standup",
+        subject="Standup",
+        extras={"id": "evcancellable2",
+                "summary": "Standup",
+                "source_calendar_id": "family"},
+    )]
+    monkeypatch.setattr(tools_mod, "_load_event_candidates", lambda: fake_pool)
+
+    result = tools_mod.propose_event_cancel(event="evcancellable2")
     assert "__pending_action__" in result
     import pending_actions
     action = pending_actions.load_by_id("family-calendar", result["action_id"])
     assert action["kind"] == "calendar_cancel"
+    assert action["payload"]["calendar_id"] == "family"
+    assert action["payload"]["event_id"] == "evcancellable2"
+
+
+def test_propose_event_move_by_fuzzy_title(tools_mod, monkeypatch):
+    """A title-substring descriptor ('dentist') resolves via the fuzzy
+    resolver to the matching event + its calendar."""
+    from fuzzy_resolver import Candidate
+    fake_pool = [Candidate(
+        id="evdentist01234",
+        display="Dentist",
+        subject="Dentist appointment",
+        extras={"id": "evdentist01234",
+                "summary": "Dentist appointment",
+                "source_calendar_id": "family"},
+    )]
+    monkeypatch.setattr(tools_mod, "_load_event_candidates", lambda: fake_pool)
+
+    result = tools_mod.propose_event_move(
+        event="dentist", new_start="2026-04-21T16:00",
+    )
+    import pending_actions
+    action = pending_actions.load_by_id("family-calendar", result["action_id"])
+    assert action["payload"]["event_id"] == "evdentist01234"
+
+
+def test_propose_event_move_returns_not_found_on_miss(tools_mod, monkeypatch):
+    """Fuzzy that matches nothing returns status=not_found without
+    staging a pending action. Use a short descriptor that won't trip
+    the id_pattern passthrough (< 10 alphanumeric chars)."""
+    monkeypatch.setattr(tools_mod, "_load_event_candidates", lambda: [])
+    result = tools_mod.propose_event_move(
+        event="nonesuch", new_start="2026-04-21T16:00",
+    )
+    assert result["status"] == "not_found"
+    assert "__pending_action__" not in result
 
 
 def test_confirm_calendar_add_calls_subprocess(tools_mod, monkeypatch):

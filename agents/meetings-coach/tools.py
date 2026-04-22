@@ -21,6 +21,7 @@ import subprocess_helpers  # type: ignore
 from fuzzy_resolver import (  # type: ignore
     Candidate as _FuzzyCandidate,
     resolve_fuzzy_descriptor as _shared_resolve,
+    result_to_dict as _result_to_dict,
 )
 
 try:
@@ -291,9 +292,64 @@ def list_pending_action_items() -> dict:
     return {"count": len(items), "items": items}
 
 
-def confirm_action_item(item_id: str) -> dict:
-    """Mark an action item as accepted. Writes status to the debrief file.
-    No Workflowy integration per the operator's decision."""
+def _load_action_item_candidates() -> list[_FuzzyCandidate]:
+    """Build an action-item candidate pool from all pending debrief
+    files. Each candidate's subject is the action-item text, so
+    substring matches like 'board deck' resolve correctly."""
+    pool: list[_FuzzyCandidate] = []
+    for it in (list_pending_action_items().get("items") or []):
+        text = str(it.get("action_item") or "")
+        pool.append(_FuzzyCandidate(
+            id=it.get("item_id", ""),
+            display=text[:80],
+            last_seen=it.get("meeting_start", ""),
+            subject=text,
+            name=str(it.get("meeting") or ""),
+            extras=dict(it),
+        ))
+    return pool
+
+
+def _resolve_action_item_descriptor(descriptor: str) -> dict:
+    """Map a fuzzy operator descriptor to an action-item item_id.
+    Matches on action-item text (primary) or the meeting title
+    (secondary). The item_id shape is '<event_id>:<idx>' which we
+    accept as id_pattern passthrough."""
+    pool = _load_action_item_candidates()
+    result = _shared_resolve(
+        descriptor,
+        candidates=pool,
+        id_pattern=r"^[A-Za-z0-9_-]+:\d+$",
+    )
+
+    def _fmt(c: _FuzzyCandidate) -> dict:
+        return {
+            "item_id": c.id,
+            "action_item": c.subject,
+            "meeting": c.name,
+            "meeting_start": c.last_seen,
+            "match_reason": c.match_reason,
+        }
+
+    return _result_to_dict(
+        result, id_key="item_id",
+        recent_key="recent_items",
+        candidate_formatter=_fmt,
+    )
+
+
+def confirm_action_item(action_item: str) -> dict:
+    """Mark a pending action item as accepted. ``action_item`` is a
+    fuzzy descriptor — action-item text substring ('board deck'),
+    meeting title, or explicit item_id ('<event_id>:<idx>'). On
+    ambiguity returns candidates[] for LLM-driven disambiguation."""
+    ref = (action_item or "").strip()
+    if not ref:
+        return {"status": "error", "error": "action_item is required"}
+    resolution = _resolve_action_item_descriptor(ref)
+    if resolution.get("status") != "ok":
+        return {**resolution, "descriptor": ref}
+    item_id = resolution["item_id"]
     event_id, _, idx_str = item_id.partition(":")
     if not event_id or not idx_str:
         return {"status": "error", "error": f"invalid item_id: {item_id}"}
@@ -321,8 +377,16 @@ def confirm_action_item(item_id: str) -> dict:
     return {"status": "ok", "item_id": item_id, "action_item": ai_text}
 
 
-def dismiss_action_item(item_id: str) -> dict:
-    """Mark an action item as dismissed."""
+def dismiss_action_item(action_item: str) -> dict:
+    """Mark a pending action item as dismissed. Accepts the same
+    fuzzy-descriptor shapes as confirm_action_item."""
+    ref = (action_item or "").strip()
+    if not ref:
+        return {"status": "error", "error": "action_item is required"}
+    resolution = _resolve_action_item_descriptor(ref)
+    if resolution.get("status") != "ok":
+        return {**resolution, "descriptor": ref}
+    item_id = resolution["item_id"]
     event_id, _, idx_str = item_id.partition(":")
     if not event_id or not idx_str:
         return {"status": "error", "error": f"invalid item_id: {item_id}"}
@@ -456,44 +520,31 @@ def _resolve_meeting_descriptor(descriptor: str) -> dict:
         person_resolver=person_resolver,
     )
 
+    def _meeting_fmt(c: _FuzzyCandidate) -> dict:
+        return {
+            "meeting_id": c.id,
+            "title": (c.subject or "")[:80],
+            "start": c.last_seen,
+            "attendees": c.name,
+            "match_reason": c.match_reason,
+        }
+
+    def _match_fmt(c: _FuzzyCandidate) -> dict:
+        # For status=ok, pass original event dict through so callers
+        # that need full event metadata can reach it via extras.
+        return {**(c.extras or {}), "match_reason": c.match_reason}
+
     if result.status == "ok":
-        matched = result.matched
-        return {
-            "status": "ok",
-            "meeting_id": result.id,
-            "matched": (
-                {**(matched.extras or {}),
-                 "match_reason": matched.match_reason}
-                if matched else {"meeting_id": result.id}
-            ),
-        }
-    if result.status == "ambiguous":
-        return {
-            "status": "ambiguous",
-            "candidates": [
-                {
-                    "meeting_id": c.id,
-                    "title": c.subject[:80] if c.subject else "",
-                    "start": c.last_seen,
-                    "attendees": c.name,
-                    "match_reason": c.match_reason,
-                }
-                for c in (result.candidates or [])
-            ],
-        }
-    return {
-        "status": "not_found",
-        "reason": result.reason
-        or f"no meeting matches {descriptor!r}",
-        "recent_meetings": [
-            {
-                "meeting_id": c.id,
-                "title": c.subject[:80] if c.subject else "",
-                "start": c.last_seen,
-            }
-            for c in (result.recent or [])
-        ],
-    }
+        return _result_to_dict(
+            result, id_key="meeting_id",
+            recent_key="recent_meetings",
+            candidate_formatter=_match_fmt,
+        )
+    return _result_to_dict(
+        result, id_key="meeting_id",
+        recent_key="recent_meetings",
+        candidate_formatter=_meeting_fmt,
+    )
 
 
 def force_prep(meeting: str) -> dict:
@@ -748,31 +799,51 @@ TOOLS: list[dict] = [
         "type": "function",
         "name": "confirm_action_item",
         "description": (
-            "Mark an action item as accepted. Use the item_id from "
-            "list_pending_action_items. Call when the operator says 'accept "
-            "that' or 'I'll do it'."
+            "Mark a pending action item as accepted, identified by "
+            "fuzzy descriptor. `action_item` accepts:\n"
+            "  - text substring of the action item ('board deck', "
+            "'Q2 roadmap')\n"
+            "  - the meeting title the item came from\n"
+            "  - explicit item_id ('<event_id>:<idx>')\n"
+            "\n"
+            "On ambiguity returns candidates[] for LLM-driven "
+            "disambiguation. Call when the operator says 'accept the board "
+            "deck item' or 'I'll do the roadmap one'."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "item_id": {"type": "string", "description": "Action item ID (event_id:index)"},
+                "action_item": {
+                    "type": "string",
+                    "description": (
+                        "Fuzzy reference — action-item text, meeting "
+                        "title, or explicit item_id"
+                    ),
+                },
             },
-            "required": ["item_id"],
+            "required": ["action_item"],
         },
     },
     {
         "type": "function",
         "name": "dismiss_action_item",
         "description": (
-            "Dismiss an action item — mark it as not relevant or "
-            "already done. Use the item_id from list_pending_action_items."
+            "Dismiss a pending action item — mark as not relevant or "
+            "already done. Same fuzzy descriptor shapes as "
+            "confirm_action_item."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "item_id": {"type": "string"},
+                "action_item": {
+                    "type": "string",
+                    "description": (
+                        "Fuzzy reference — action-item text, meeting "
+                        "title, or explicit item_id"
+                    ),
+                },
             },
-            "required": ["item_id"],
+            "required": ["action_item"],
         },
     },
     {
