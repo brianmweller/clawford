@@ -468,37 +468,47 @@ TOOLS: list[dict] = [
     },
     {
         "type": "function",
-        "name": "reply_to_thread",
+        "name": "reply_to_message",
         "description": (
-            "Regenerate a reply for a specific Gmail thread with an "
-            "optional operator hint that steers the draft. This is the "
-            "iterative-feedback path alongside the autonomous half-hour "
-            "auto-compose cron: the cron writes a draft every tick, "
-            "this tool lets the operator shape it with real-time context the "
-            "cron can't know.\n"
+            "Regenerate a draft reply for a specific Gmail thread, "
+            "identified by fuzzy reference. This is the iterative-"
+            "feedback path alongside the autonomous auto-compose cron: "
+            "the cron writes drafts every half hour, this tool lets "
+            "the operator shape a specific one with real-time context.\n"
             "\n"
-            "Use the `hint` param for:\n"
-            "  - stylistic override: 'make it warmer', 'two sentences "
-            "shorter', 'drop the scope questions'\n"
-            "  - factual context: 'mention I already accepted the "
-            "offer', 'flag that I'm traveling next week', 'the hiring "
-            "manager followed up separately, reference that'\n"
+            "`message_ref` accepts ANY of:\n"
+            "  - person name: 'Michelle', 'Jamie Fitzgerald'\n"
+            "  - sender email: 'michelle@rivierapartners.com'\n"
+            "  - subject substring: 'Reddit', 'Sunday lunch'\n"
+            "  - explicit Gmail thread_id (hex, 14-22 chars)\n"
             "\n"
-            "Both kinds of hint land as authoritative overrides at the "
-            "top of the compose prompt — they take precedence over "
-            "voice anchors, history, and any conflicting brain facts.\n"
+            "Matches against the auto-compose log + triage queue. On "
+            "ambiguity (e.g., 'Michelle' matches three people), returns "
+            "status='ambiguous' with candidate list — the operator picks.\n"
             "\n"
-            "Called without a hint, it's the 'compose now, don't wait "
-            "for the cron' path. Called with a hint, it's the "
-            "'regenerate with this' iteration path. Produces a new "
-            "Gmail draft either way."
+            "`hint` is an optional operator override injected at the "
+            "top of the compose prompt:\n"
+            "  - stylistic: 'make it warmer', 'two sentences shorter'\n"
+            "  - factual: 'mention I already accepted the offer', 'the "
+            "hiring manager followed up separately, reference that'\n"
+            "Both take precedence over voice anchors, history, and "
+            "conflicting brain facts.\n"
+            "\n"
+            "Use when the operator says 'redo the Michelle draft shorter', "
+            "'regenerate Jamie's reply, warmer', 'the Reddit recruiter "
+            "email — mention I'm pausing searches'. Called without a "
+            "hint, it's the 'compose now, don't wait for the cron' "
+            "path."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "thread_id": {
+                "message_ref": {
                     "type": "string",
-                    "description": "Gmail thread ID to reply to",
+                    "description": (
+                        "Fuzzy reference to the thread — person name, "
+                        "sender email, subject substring, or thread_id"
+                    ),
                 },
                 "hint": {
                     "type": "string",
@@ -509,7 +519,7 @@ TOOLS: list[dict] = [
                     ),
                 },
             },
-            "required": ["thread_id"],
+            "required": ["message_ref"],
         },
     },
     {
@@ -790,54 +800,224 @@ def promote_recruiter_by_thread_id(thread_id: str) -> dict:
     return _handle_recruiter_callback("promote", thread_id)
 
 
-def reply_to_thread(thread_id: str, hint: str | None = None) -> dict:
-    """Operator-invoked draft composition for a specific Gmail thread,
-    with an optional operator hint that steers the compose prompt.
+_AUTO_COMPOSE_LOG = os.path.join(CACHE, "auto-compose-log.json")
+_TRIAGE_QUEUE_PATH = os.path.join(CACHE, "triage-queue.json")
 
-    The hint is the main reason this tool exists alongside the
-    auto-compose cron — the cron produces an autonomous draft every
-    half hour, but it can't take iterative feedback. The hint path
-    lets the operator shape the draft with either:
+_THREAD_ID_RE = __import__("re").compile(r"^[0-9a-f]{14,22}$")
+_EMAIL_RE = __import__("re").compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
+def _load_thread_candidates() -> dict:
+    """Union of the auto-compose log + triage queue, keyed by
+    thread_id. Each candidate carries whatever metadata either source
+    had — subject, slug (from log), from_email + from_header (from
+    queue). When both sources have the same thread_id we merge fields.
+    """
+    log = _read_json(_AUTO_COMPOSE_LOG, default={}) or {}
+    queue_raw = _read_json(_TRIAGE_QUEUE_PATH, default={}) or {}
+    queue = queue_raw.get("queued") if isinstance(queue_raw, dict) else []
+
+    candidates: dict[str, dict] = {}
+    for tid, entry in (log or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        candidates[tid] = {
+            "thread_id": tid,
+            "subject": entry.get("subject", ""),
+            "slug": entry.get("slug"),
+            "from_email": "",
+            "from_header": "",
+            "last_seen": entry.get("at", ""),
+            "reply_needed": entry.get("reply_needed"),
+            "fit_tier": entry.get("fit_tier", ""),
+            "cold_inbound": bool(entry.get("cold_inbound")),
+        }
+    for q in queue or []:
+        if not isinstance(q, dict):
+            continue
+        tid = q.get("thread_id")
+        if not tid:
+            continue
+        if tid in candidates:
+            candidates[tid]["from_email"] = q.get("from_email", "")
+            candidates[tid]["from_header"] = q.get("from_header", "")
+            if not candidates[tid].get("subject"):
+                candidates[tid]["subject"] = q.get("subject", "")
+        else:
+            candidates[tid] = {
+                "thread_id": tid,
+                "subject": q.get("subject", ""),
+                "slug": None,
+                "from_email": q.get("from_email", ""),
+                "from_header": q.get("from_header", ""),
+                "last_seen": q.get("date", ""),
+                "reply_needed": None,
+                "fit_tier": "",
+                "cold_inbound": q.get("status") == "queued_cold_recruiter",
+            }
+    return candidates
+
+
+def _resolve_thread_descriptor(descriptor: str) -> dict:
+    """Turn a fuzzy operator string into a Gmail thread_id.
+
+    Accepts any of:
+      - explicit thread_id (hex, 14–22 chars) — passes through
+      - full email ('jane@lever.co') — matches from_email
+      - person name ('Michelle', 'Michelle Leist') — resolved via
+        brain.get_person (with first-name fallback) to slug / emails
+      - subject substring ('Reddit', 'hello') — matches log + queue
+
+    Returns:
+      {"status": "ok", "thread_id": tid, "matched": {...}}
+      {"status": "ambiguous", "candidates": [...]}
+      {"status": "not_found", "reason": str, "recent_threads": [...]}
+    """
+    s = (descriptor or "").strip()
+    if not s:
+        return {"status": "not_found", "reason": "empty descriptor"}
+
+    candidates = _load_thread_candidates()
+
+    # 1. Explicit thread_id shape — pass through (even if not in log,
+    #    Gmail will 404 if invalid; better to attempt than reject).
+    if _THREAD_ID_RE.match(s):
+        matched = candidates.get(s, {"thread_id": s, "source": "passthrough"})
+        return {"status": "ok", "thread_id": s, "matched": matched}
+
+    # 2. Try person lookup — this handles 'Michelle' (first-name fallback)
+    #    and 'Michelle Leist' (exact slug) via brain.get_person.
+    target_slug = None
+    target_emails: list[str] = []
+    person = None
+    try:
+        person = brain.get_person(s)
+    except Exception:
+        person = None
+    if person:
+        target_slug = person.get("slug")
+        raw = person.get("raw", "") or ""
+        target_emails = [e.lower() for e in _EMAIL_RE.findall(raw)]
+
+    # 3. Score every candidate.
+    slow = s.lower()
+    matches: list[dict] = []
+    for c in candidates.values():
+        reasons: list[str] = []
+        subj = (c.get("subject") or "").lower()
+        from_email = (c.get("from_email") or "").lower()
+        from_header = (c.get("from_header") or "").lower()
+        slug = c.get("slug") or ""
+
+        if target_slug and slug == target_slug:
+            reasons.append(f"slug={target_slug}")
+        if target_emails and from_email in target_emails:
+            reasons.append(f"person_email={from_email}")
+        # Email match: the descriptor itself looks like an email
+        if "@" in slow and slow == from_email:
+            reasons.append(f"email_exact")
+        # Substring on sender email / header (useful for partial names
+        # in a display-name: 'michelle' matches '"Michelle Leist" <...>').
+        if slow in from_email and slow != "":
+            reasons.append("email_substring")
+        if slow in from_header and slow != "":
+            reasons.append("header_substring")
+        # Subject substring
+        if slow in subj and slow != "":
+            reasons.append("subject_substring")
+
+        if reasons:
+            matches.append({**c, "match_reason": " + ".join(reasons)})
+
+    if not matches:
+        # Return recent threads to help the caller disambiguate —
+        # auto-compose log entries sorted by most-recent 'at' timestamp.
+        recent = sorted(
+            candidates.values(),
+            key=lambda c: c.get("last_seen", ""),
+            reverse=True,
+        )[:5]
+        return {
+            "status": "not_found",
+            "reason": f"no thread matches {descriptor!r}",
+            "recent_threads": [
+                {"thread_id": r["thread_id"],
+                 "from_email": r.get("from_email", ""),
+                 "subject": r.get("subject", "")[:80],
+                 "last_seen": r.get("last_seen", "")}
+                for r in recent
+            ],
+        }
+    if len(matches) == 1:
+        return {"status": "ok",
+                "thread_id": matches[0]["thread_id"],
+                "matched": matches[0]}
+
+    # Rank ambiguous matches: most-recent first, then slug matches
+    # (strongest signal) ahead of substring-only.
+    def _rank(m):
+        r = m.get("match_reason", "")
+        strong = ("slug=" in r) or ("person_email=" in r) or ("email_exact" in r)
+        return (0 if strong else 1, -1 * (m.get("last_seen", "") or ""))
+    matches_sorted = sorted(matches, key=_rank)
+    return {"status": "ambiguous",
+            "candidates": matches_sorted[:8]}
+
+
+def reply_to_message(message_ref: str, hint: str | None = None) -> dict:
+    """Operator-invoked draft regeneration for a specific Gmail thread,
+    identified by fuzzy reference (person name, email, subject
+    substring, or explicit thread_id), with an optional hint that
+    steers the compose prompt.
+
+    The hint is why this tool exists alongside the auto-compose cron
+    — the cron writes a draft every half hour, but can't take
+    iterative feedback. The hint path lets the operator shape the draft with:
 
       - stylistic guidance: 'make it warmer', 'two sentences shorter',
         'drop the scope questions'
-      - factual context: 'mention that I already accepted the offer',
-        'flag that I'm traveling next week', 'I heard back from the
-        hiring manager, reference that'
+      - factual context: 'mention that I already accepted', 'flag
+        that I'm traveling next week', 'the hiring manager followed
+        up separately, reference that'
 
-    Both kinds of hint are injected at the top of the compose prompt
-    as authoritative overrides — they take precedence over voice
-    anchors, history defaults, and any conflicting brain facts.
+    Hints land at the top of the compose prompt as authoritative
+    overrides — they take precedence over voice anchors, history
+    defaults, and any conflicting brain facts.
 
-    Runs the same pipeline the cron does under the hood: single-thread
-    triage (classifies known vs cold) + forced compose (bypasses
-    processed-log skip). Produces a new Gmail draft.
+    Resolution: message_ref is fuzzy-matched against the
+    auto-compose log + triage queue. On ambiguity (multiple matches)
+    returns the candidate list so the LLM can ask the operator to pick. On
+    not-found returns recent threads as disambiguation options.
 
-    Use when the operator says '/reply <thread_id> <hint>' or 'regenerate
-    that draft but shorter' or 'redo the reply, mention that I heard
-    back'. Called with no hint, it's still useful for 'compose now,
-    don't wait for the cron'.
+    Use when the operator says 'redo the Michelle draft shorter', 'regenerate
+    the reply to Jamie, warmer', 'that Reddit recruiter email —
+    mention I'm pausing other searches'.
     """
-    tid = (thread_id or "").strip()
-    if not tid:
-        return {"status": "error", "error": "thread_id is required"}
+    ref = (message_ref or "").strip()
+    if not ref:
+        return {"status": "error", "error": "message_ref is required"}
     hint_str = (hint or "").strip() or None
 
+    resolution = _resolve_thread_descriptor(ref)
+    if resolution.get("status") != "ok":
+        # Pass through ambiguous/not_found so the LLM surfaces candidates.
+        return {**resolution, "message_ref": ref}
+
+    tid = resolution["thread_id"]
     scripts_dir = Path(__file__).parent / "scripts"
     inbox_triage = str(scripts_dir / "inbox-triage.py")
     auto_compose = str(scripts_dir / "auto-compose.py")
 
-    # Step 1: classify + upsert into triage queue (handles both known
-    # senders and cold-recruiter routing).
+    # Step 1: classify + upsert into triage queue.
     triage = subprocess_helpers.run_json_script(
         inbox_triage, "--thread-id", tid, timeout=60,
     )
     if subprocess_helpers.is_subprocess_error(triage):
         return {"status": "error", "stage": "triage",
-                "error": triage.get("__error__", "triage script error")}
+                "error": triage.get("__error__", "triage script error"),
+                "resolved_thread_id": tid}
 
-    # Step 2: force compose on that specific thread, threading the
-    # operator hint through if present.
+    # Step 2: force compose, passing the hint through if present.
     compose_args = [auto_compose, "--force", tid, "--max", "1"]
     if hint_str:
         compose_args.extend(["--operator-hint", hint_str])
@@ -847,15 +1027,26 @@ def reply_to_thread(thread_id: str, hint: str | None = None) -> dict:
     if subprocess_helpers.is_subprocess_error(compose):
         return {"status": "error", "stage": "compose",
                 "error": compose.get("__error__", "compose script error"),
+                "resolved_thread_id": tid,
                 "triage_classification": triage.get("classification")}
 
     return {
         "status": "ok",
+        "message_ref": ref,
         "thread_id": tid,
+        "matched": resolution.get("matched"),
         "hint_applied": bool(hint_str),
         "triage_classification": triage.get("classification"),
         "compose": compose,
     }
+
+
+# Backwards-compat alias — original name before the fuzzy-resolver
+# rename. Kept so any cached Telegram tool state or documentation
+# that still references the old name resolves correctly. New callers
+# should use reply_to_message.
+def reply_to_thread(thread_id: str, hint: str | None = None) -> dict:
+    return reply_to_message(thread_id, hint=hint)
 
 
 EXECUTORS: dict = {
@@ -872,7 +1063,8 @@ EXECUTORS: dict = {
     "handle_facts_callback": lambda action, arg: _handle_facts_callback(action, arg),
     "handle_recruiter_callback": lambda action, arg: _handle_recruiter_callback(action, arg),
     "promote_recruiter_by_thread_id": promote_recruiter_by_thread_id,
-    "reply_to_thread": reply_to_thread,
+    "reply_to_message": reply_to_message,
+    "reply_to_thread": reply_to_thread,  # back-compat alias
     "get_person": get_person,
     "get_commitments": get_commitments,
     "dismiss_triage_n": dismiss_triage_n,
