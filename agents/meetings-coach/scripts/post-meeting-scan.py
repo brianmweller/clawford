@@ -829,10 +829,15 @@ def run() -> dict:
     now_utc = datetime.now(timezone.utc)
     now_iso = now_utc.isoformat()
 
-    # Populate gcal cache for transcript-scan. Return value intentionally
-    # ignored — this is a cache warmer, not a data source. transcript-scan
-    # tolerates a stale/missing gcal cache.
-    _run_script("gcal-fetch.py")
+    # Populate gcal cache for transcript-scan AND for Murphy's
+    # on-demand prep resolver (tools.py: _resolve_meeting_descriptor).
+    # Ran with default --days 1 until 2026-04-22 — that overwrote the
+    # morning brief's wider pull, so by evening tomorrow's invites
+    # were invisible and 'Coinbase for tomorrow' returned not_found.
+    # --days 7 keeps a week of runway at every 30-min scan. Return
+    # value intentionally ignored; transcript-scan tolerates a stale
+    # cache on its own.
+    _run_script("gcal-fetch.py", "--days", "7")
 
     # Run transcript-scan — SINGLE SOURCE OF TRUTH for delivery. Without
     # it we have no way to know which transcripts are newly ready, so

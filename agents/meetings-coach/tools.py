@@ -765,6 +765,26 @@ def _resolve_meeting_descriptor(descriptor: str) -> dict:
     if day_parse is not None:
         target_date, cleaned = day_parse
         day_pool = _filter_candidates_by_date(time_pool, target_date, tz)
+        # On-demand cache refresh: if the target date is in the near
+        # future (≤14 days) and the pool is empty for that day, extend
+        # the events cache and reload once. Same 2026-04-22 incident
+        # as above — between morning-brief runs the cache-warmer was
+        # writing only today's events, so any "tomorrow" query missed.
+        # Capped at 14 days to bound the API-quota blast radius of
+        # operator typos. One fetch, one retry, never loops.
+        if not day_pool:
+            today_local = datetime.now(tz).date()
+            offset = (target_date - today_local).days
+            if 0 <= offset <= 14:
+                fetch_result = _run_gcal_fetch(
+                    today_local.isoformat(), offset + 1,
+                )
+                if not fetch_result.get("error"):
+                    time_pool = _load_meeting_candidates(include_non_real=True)
+                    pool = _load_meeting_candidates()
+                    day_pool = _filter_candidates_by_date(
+                        time_pool, target_date, tz,
+                    )
         if day_pool:
             # No content tokens left → the day itself is the query.
             # One meeting that day = ok, many = ambiguous.

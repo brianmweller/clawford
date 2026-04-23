@@ -1020,6 +1020,67 @@ def test_run_happy_path_sends_debrief_and_coaching(
     assert ids == ["evt-alexis-420"]
 
 
+def test_run_warms_gcal_cache_with_wider_window(
+    mod, scan_empty, meeting_config, tmp_path, monkeypatch,
+):
+    """The cache-warmer call to gcal-fetch inside post-meeting-scan
+    must fetch a multi-day window, not just today. Regression target:
+    2026-04-22 — the warmer ran with default --days 1, which
+    overwrote the morning brief's --days 2 pull and left tomorrow's
+    invites invisible to the Murphy resolver by evening."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "cache").mkdir()
+    (workspace / "scripts").mkdir()
+    history = workspace / "cache" / "coaching-history.json"
+    active_file = workspace / "active.md"
+
+    monkeypatch.setattr(mod, "WORKSPACE", workspace)
+    monkeypatch.setattr(mod, "CACHE_DIR", workspace / "cache")
+    monkeypatch.setattr(mod, "SCRIPTS_DIR", workspace / "scripts")
+    monkeypatch.setattr(mod, "COACHING_HISTORY_FILE", history)
+    monkeypatch.setattr(mod, "ACTIVE_COMMITMENTS_FILE", active_file)
+    monkeypatch.setattr(
+        mod, "KRISP_LAST_401_FILE", workspace / "cache" / "krisp-last-401.json"
+    )
+    monkeypatch.setattr(
+        mod, "KRISP_LAST_ALERT_FILE", workspace / "cache" / "krisp-last-alert.json"
+    )
+    monkeypatch.setattr(
+        mod, "LAST_RUN_FILE", workspace / "cache" / "last-post-meeting.json"
+    )
+    monkeypatch.setattr(
+        mod, "MEETING_CONFIG_FILE", workspace / "meeting-config.json"
+    )
+    (workspace / "meeting-config.json").write_text(
+        json.dumps(meeting_config), encoding="utf-8"
+    )
+
+    calls: list[tuple] = []
+
+    def fake_run(script, *args, **kw):
+        calls.append((script, args))
+        if script == "gcal-fetch.py":
+            return {"status": "ok", "events": []}
+        if script == "transcript-scan.py":
+            return scan_empty
+        return None
+
+    monkeypatch.setattr(mod, "_run_script", fake_run)
+
+    mod.run()
+
+    gcal_calls = [c for c in calls if c[0] == "gcal-fetch.py"]
+    assert len(gcal_calls) == 1
+    args = gcal_calls[0][1]
+    # Must carry an explicit --days flag with a multi-day window.
+    assert "--days" in args
+    days_value = int(args[args.index("--days") + 1])
+    assert days_value >= 2, (
+        f"cache-warmer must request >=2 days of events, got {days_value}"
+    )
+
+
 def test_compose_coaching_feeds_transcript_dialogue_not_notes(
     mod, meeting_config, monkeypatch,
 ):
