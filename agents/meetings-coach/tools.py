@@ -10,7 +10,6 @@ import importlib.util
 import json
 import os
 import re
-import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -92,8 +91,6 @@ CACHE = os.path.join(WORKSPACE, "cache")
 CONFIG_PATH = os.path.join(WORKSPACE, "meeting-config.json")
 LAST_COMMITMENT_PATH = os.path.join(CACHE, "last-commitment.json")
 COACHING_HISTORY_PATH = os.path.join(CACHE, "coaching-history.json")
-GCAL_FETCH_SCRIPT = os.path.join(WORKSPACE, "scripts", "gcal-fetch.py")
-
 DEFAULT_TZ = "America/Los_Angeles"
 
 
@@ -121,63 +118,57 @@ def _user_today() -> date:
 
 
 def _run_gcal_fetch(start_date: str, days: int) -> dict:
-    """Return fresh calendar events for Murphy.
+    """Return fresh calendar events for Murphy from the shared brain.
 
-    Prefers the shared calendar brain at ``~/.clawford/calendar-brain/
-    calendar-brain.json`` — one writer (the listener daemon + daily
-    rebuild), both agents read. If the brain is missing, stale (>10
-    min old), or the rollback marker
-    ``~/.clawford/calendar-brain-read-disabled`` is present, falls back
-    to the legacy subprocess call to ``gcal-fetch.py``.
+    The brain at ``~/.clawford/calendar-brain/calendar-brain.json`` is
+    the single source of truth — one writer (the listener daemon +
+    daily rebuild script), both agents read. Owner filter
+    ``sergeant-murphy`` keeps Mouse's events out; the brain also
+    applies Murphy's ``is_real_meeting`` skip-titles filter.
 
-    Return shape is unchanged: ``{status, date, days, events, errors,
-    fetched_at, error?}``. Callers never need to know which path fired
-    (the ``fetched_via`` field distinguishes for debugging)."""
-    # --- Brain-preferred path ---------------------------------------------
-    try:
-        from calendar_brain import read_brain_if_fresh  # type: ignore
-        payload = read_brain_if_fresh(
-            os.path.expanduser(
-                "~/.clawford/calendar-brain/calendar-brain.json"
-            ),
-            owner="sergeant-murphy",
-            date=start_date, days=days,
-        )
-    except Exception:  # noqa: BLE001 — any import/read failure → fallback
-        payload = None
-    if payload is not None:
+    Staleness: if the brain's ``generated_at`` is older than
+    ``CLAWFORD_CALENDAR_BRAIN_MAX_AGE_S`` (default 600s), returns
+    ``{error: stale brain ...}`` so callers can surface the problem
+    rather than silently serving old data. Same for missing brain
+    (listener dead) and the
+    ``~/.clawford/calendar-brain-read-disabled`` rollback marker.
+
+    Regression target: pre-2026-04-23 this shelled to a per-agent
+    ``gcal-fetch.py`` script, each agent wrote its own cache, and
+    callers clobbered each other's ``--days`` window on the shared
+    ``events-{today}.json`` file (the Coinbase-for-tomorrow outage)."""
+    from calendar_brain import read_brain_if_fresh  # type: ignore
+    brain_path = os.path.expanduser(
+        "~/.clawford/calendar-brain/calendar-brain.json"
+    )
+    max_age_s = int(
+        os.environ.get("CLAWFORD_CALENDAR_BRAIN_MAX_AGE_S", "600")
+    )
+    payload = read_brain_if_fresh(
+        brain_path,
+        owner="sergeant-murphy",
+        date=start_date, days=days,
+        max_age_seconds=max_age_s,
+    )
+    if payload is None:
         return {
-            "status": "ok",
-            "date": start_date,
-            "days": days,
-            "events": payload.get("events") or [],
-            "errors": [],
-            "fetched_via": "brain",
-            "fetched_at": payload.get("generated_at"),
+            "error": (
+                "calendar brain unavailable (missing, stale >"
+                f"{max_age_s}s, or disabled via "
+                "~/.clawford/calendar-brain-read-disabled)"
+            ),
+            "events": [],
+            "fetched_via": "brain-unavailable",
         }
-
-    # --- Legacy subprocess fallback --------------------------------------
-    if not os.path.exists(GCAL_FETCH_SCRIPT):
-        return {"error": f"gcal-fetch.py not found at {GCAL_FETCH_SCRIPT}"}
-    try:
-        proc = subprocess.run(
-            [sys.executable, GCAL_FETCH_SCRIPT,
-             "--date", start_date, "--days", str(days)],
-            capture_output=True, text=True, timeout=45, cwd=WORKSPACE,
-        )
-    except subprocess.TimeoutExpired:
-        return {"error": "gcal-fetch timed out after 45s"}
-    except Exception as exc:
-        return {"error": f"gcal-fetch subprocess failed: {exc}"}
-
-    if proc.returncode != 0 and not proc.stdout:
-        return {"error": proc.stderr.strip() or f"gcal-fetch exit {proc.returncode}"}
-
-    parsed = subprocess_helpers.parse_script_stdout(proc.stdout or "")
-    if isinstance(parsed, dict):
-        parsed.setdefault("fetched_via", "subprocess")
-        return parsed
-    return {"error": "gcal-fetch non-JSON output", "stdout": (proc.stdout or "")[:500]}
+    return {
+        "status": "ok",
+        "date": start_date,
+        "days": days,
+        "events": payload.get("events") or [],
+        "errors": [],
+        "fetched_via": "brain",
+        "fetched_at": payload.get("generated_at"),
+    }
 
 
 def _summarize_event(ev: dict) -> dict:

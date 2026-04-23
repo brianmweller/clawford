@@ -25,7 +25,7 @@ whitelist (EROFS under bwrap); 🛡️ agent is ISOLATION_EXEMPT
 
 | Subpath | Writer(s) | Writer cron(s) in allowlist | IsolStatus |
 |---------|-----------|------------------------------|------------|
-| `status/` | `agents/family-calendar/scripts/calendar-index-build.py` (atomic `_write_atomic`) | `family-calendar-calendar-index-build` | ❌ **active regression** |
+| `status/` | `agents/shared/scripts/calendar-brain-build.py` (`_atomic_dump_json`, double-writes legacy `calendar-index.json` during migration from the retired `family-calendar/scripts/calendar-index-build.py`) | `calendar-brain-build` | ❌ **active regression** |
 | `tasks/` | `agents/shared/brain_tasks.py` (`QUEUE_RELPATH = "tasks/queue.md"`, `append_task`, in-place edits), `agents/family-calendar/scripts/gcal-tasks-sync.py` | `family-calendar-tasks-sync` | ❌ **imminent regression** |
 | `people/` | `agents/connector/scripts/daily-refresh.py::update_last_interaction`, `people-seed.py`, `person-bootstrap.py`, `birthday-miner.py`, `voice-profile-build.py`, `holiday-card-reclassify.py`, `agents/shared/brain.py::create_person_file` | `connector-gmessages-mine`, `connector-birthday-miner`, `connector-inbox-triage` (indirectly), others | ✅ |
 | `facts/` | `agents/shared/facts.py`, `agents/shared/fact_extraction.py`, `agents/connector/scripts/birthday-miner.py`, `agents/connector/scripts/facts-scope-augment.py`, `agents/fix-it/scripts/brain-index-rebuild.py` | `connector-gmail-facts-mine`, `connector-workflowy-facts-mine`, `meetings-coach-krisp-facts-mine`, `connector-birthday-miner` | ✅ |

@@ -7,7 +7,9 @@ has_videoconference_link check, but Mistress Mouse deliberately blanks
 every event's description before classifying — which made her blind
 to Webex/Zoom/Meet links pasted into the description. The index is
 built once per tick on the RAW Google Calendar events by
-agents/family-calendar/scripts/calendar-index-build.py and written to
+agents/shared/scripts/calendar-brain-build.py (the successor to the
+2026-04-18–2026-04-23 family-calendar/scripts/calendar-index-build.py)
+and written to
 ~/Dropbox/openclaw-backup/status/calendar-index.json. Murphy and Mouse
 both read it; whichever agent matches `owner` picks up the event.
 

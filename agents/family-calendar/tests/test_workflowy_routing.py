@@ -46,13 +46,25 @@ def _load_script(name: str):
     return m
 
 
-def test_gcal_fetch_imports_shared_classifier():
-    """The module must pick up has_videoconference_link from the shared
-    library so Mouse and Murphy share one source of truth."""
+def test_gcal_fetch_is_brain_shim():
+    """Post-2026-04-23 gcal-fetch.py is a brain-reading shim, not a
+    live-API fetcher. Routing classification happens once, at
+    brain-build time (``calendar_fetch.normalize_event`` +
+    ``calendar_index.classify_event``), so the script no longer imports
+    ``has_videoconference_link`` directly — it just reads the already-
+    classified brain record. Regression guard against anyone
+    reintroducing a second classification path here."""
     mod = _load_script("gcal-fetch.py")
-    assert callable(mod.has_videoconference_link)
-    assert mod.has_videoconference_link({"hangoutLink": "https://meet.google.com/x"}) is True
-    assert mod.has_videoconference_link({"summary": "in-person"}) is False
+    assert not hasattr(mod, "has_videoconference_link"), (
+        "gcal-fetch should not do its own classification — brain is "
+        "the single source of truth"
+    )
+    assert not hasattr(mod, "fetch_calendar_events"), (
+        "gcal-fetch should not hit the Google API directly — brain "
+        "listener handles that"
+    )
+    # It does still expose the CLI parse + brain reader.
+    assert callable(mod.parse_args)
 
 
 def test_reminder_check_imports_shared_classifier():

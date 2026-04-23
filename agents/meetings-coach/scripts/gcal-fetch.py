@@ -1,34 +1,45 @@
 #!/usr/bin/env python3
-"""
-gcal-fetch.py — Fetch events from Sam's professional Google Calendar.
+"""gcal-fetch.py — brain-reading shim for Sergeant Murphy.
 
-Reads meeting-config.json for the calendar ID and filters. Fetches events
-via Google Calendar API. Enriches with attendee details, conference links,
-and a real-meeting filter. Outputs JSON to stdout.
+Historically this script fetched events from Google Calendar directly
+and wrote ``cache/events-<date>.json``. Every caller (post-meeting-scan,
+pre-meeting-alert, morning-meeting-brief, meeting-prep) independently
+invoked it with different ``--days`` windows, which produced a
+last-writer-wins cache-clobber bug (2026-04-22 "Coinbase for tomorrow"
+outage).
+
+Post-2026-04-23 the script is a thin shim over the shared calendar
+brain at ``~/.clawford/calendar-brain/calendar-brain.json``. The brain
+is the single source of truth — one writer (the 60s-cadence listener
+daemon + the daily rebuild), both agents read. This script filters the
+brain by Murphy's owner + the requested date window and emits the
+legacy JSON shape so existing callers don't care that the fetch path
+moved.
 
 Usage:
   python3 gcal-fetch.py                     # Today's events
-  python3 gcal-fetch.py --date 2026-04-08   # Specific date
+  python3 gcal-fetch.py --date 2026-04-24   # Specific date
   python3 gcal-fetch.py --days 7            # Next N days
 
-Output JSON:
+Output (unchanged from the legacy script):
   {
     "status": "ok",
-    "date": "2026-04-08",
-    "days": 1,
-    "events": [...],
+    "date": "2026-04-24",
+    "days": 7,
+    "events": [ <normalized event>, ... ],
     "errors": [],
-    "fetched_at": "..."
+    "fetched_at": "<ISO UTC>",
+    "fetched_via": "brain"
   }
-
-Requires: google-api-python-client, google-auth-httplib2, google-auth-oauthlib
 """
+from __future__ import annotations
 
 import json
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 # --- shared library sys.path shim ---
 for _p in Path(__file__).resolve().parents:
@@ -37,25 +48,23 @@ for _p in Path(__file__).resolve().parents:
             sys.path.insert(0, str(_p))
         break
 
-from agents.shared.meeting_classifier import has_videoconference_link  # noqa: E402
+from agents.shared.calendar_brain import (  # noqa: E402
+    DEFAULT_BRAIN_FILE,
+    read_brain_if_fresh,
+)
 
 WORKSPACE = os.path.expanduser("~/.clawford/meetings-coach-workspace")
 CONFIG_PATH = os.path.join(WORKSPACE, "meeting-config.json")
-TOKEN_PATH = os.environ.get(
-    "GOOGLE_CALENDAR_TOKEN_PATH",
-    os.path.join(WORKSPACE, "token.json"),
-)
-CREDENTIALS_PATH = os.environ.get(
-    "GOOGLE_CALENDAR_CREDENTIALS_PATH",
-    os.path.join(WORKSPACE, "credentials.json"),
-)
 CACHE_DIR = os.path.join(WORKSPACE, "cache")
+BRAIN_FILE = os.environ.get(
+    "CLAWFORD_CALENDAR_BRAIN_FILE", DEFAULT_BRAIN_FILE,
+)
+MAX_AGE_S = int(os.environ.get("CLAWFORD_CALENDAR_BRAIN_MAX_AGE_S", "600"))
 
 
-def parse_args():
-    target_date = None
+def parse_args() -> tuple[str | None, int]:
+    target_date: str | None = None
     days = 1
-
     i = 1
     while i < len(sys.argv):
         if sys.argv[i] == "--date" and i + 1 < len(sys.argv):
@@ -66,255 +75,70 @@ def parse_args():
             i += 2
         else:
             i += 1
-
     return target_date, days
 
 
-def load_config():
-    if not os.path.exists(CONFIG_PATH):
-        return None, "meeting-config.json not found"
-    with open(CONFIG_PATH) as f:
-        return json.load(f), None
-
-
-def get_credentials():
-    """Load or refresh OAuth2 credentials."""
+def _operator_today() -> str:
+    tz_name = "America/Los_Angeles"
     try:
-        from google.auth.transport.requests import Request
-        from google.oauth2.credentials import Credentials
-    except ImportError:
-        return None, "google-auth not installed"
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            cfg = json.load(f)
+        tz_name = (cfg or {}).get("timezone") or tz_name
+    except (OSError, json.JSONDecodeError):
+        pass
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = timezone.utc
+    return datetime.now(tz).strftime("%Y-%m-%d")
 
-    if not os.path.exists(TOKEN_PATH):
-        return None, f"token.json not found at {TOKEN_PATH} — run gcal-auth.py first"
 
-    with open(TOKEN_PATH) as f:
-        token_data = json.load(f)
+def main() -> None:
+    target_date, days = parse_args()
+    start = target_date or _operator_today()
 
-    creds = Credentials(
-        token=token_data.get("token"),
-        refresh_token=token_data.get("refresh_token"),
-        token_uri=token_data.get("token_uri"),
-        client_id=token_data.get("client_id"),
-        client_secret=token_data.get("client_secret"),
-        scopes=token_data.get("scopes"),
+    payload = read_brain_if_fresh(
+        BRAIN_FILE,
+        owner="sergeant-murphy",
+        date=start, days=days,
+        max_age_seconds=MAX_AGE_S,
     )
 
-    if creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(Request())
-            # Save refreshed token
-            token_data["token"] = creds.token
-            with open(TOKEN_PATH, "w") as f:
-                json.dump(token_data, f, indent=2)
-        except Exception as e:
-            return None, f"Token refresh failed: {e}"
-
-    if not creds.valid:
-        return None, "Credentials invalid — run gcal-auth.py to re-authorize"
-
-    return creds, None
-
-
-def extract_conference_link(event):
-    """Extract video meeting link URL (for rendering/linking).
-
-    Routing (is-this-a-meeting) lives in
-    agents.shared.meeting_classifier.has_videoconference_link — this
-    function returns the *URL* for downstream formatters that need it.
-    """
-    link = event.get("hangoutLink", "")
-    if link:
-        return link
-
-    conf = event.get("conferenceData", {})
-    for entry_point in conf.get("entryPoints", []):
-        if entry_point.get("entryPointType") == "video":
-            return entry_point.get("uri", "")
-
-    desc = event.get("description", "")
-    if desc:
-        for pattern in ["https://zoom.us/", "https://meet.google.com/", "https://teams.microsoft.com/"]:
-            idx = desc.find(pattern)
-            if idx >= 0:
-                end = len(desc)
-                for ch in [" ", "\n", "\r", '"', "'"]:
-                    pos = desc.find(ch, idx)
-                    if pos >= 0:
-                        end = min(end, pos)
-                return desc[idx:end]
-
-    return ""
-
-
-def is_real_meeting(event, config):
-    """Decide if a calendar item is a meeting (Murphy) vs event (Mouse).
-
-    As of 2026-04-18 the rule is: meeting iff the item has a
-    videoconferencing link. Attendee count no longer promotes an
-    in-person invite (e.g. "exploring ballet" with Sam) into Murphy's
-    queue. The shared predicate lives in
-    agents.shared.meeting_classifier so Mouse applies the same check —
-    see memory project_meeting_event_routing.md.
-    """
-    filters = config.get("meeting_filters", {})
-    summary = event.get("summary", "")
-
-    for skip in filters.get("skip_titles", []):
-        if skip.lower() in summary.lower():
-            return False
-
-    return has_videoconference_link(event)
-
-
-def fetch_calendar_events(service, calendar_id, time_min, time_max, config):
-    """Fetch events from the calendar with full attendee and conference data."""
-    events = []
-    page_token = None
-
-    while True:
-        result = service.events().list(
-            calendarId=calendar_id,
-            timeMin=time_min,
-            timeMax=time_max,
-            singleEvents=True,
-            orderBy="startTime",
-            maxResults=250,
-            pageToken=page_token,
-        ).execute()
-
-        for event in result.get("items", []):
-            start = event.get("start", {})
-            end = event.get("end", {})
-
-            all_day = "date" in start
-            start_str = start.get("dateTime", start.get("date", ""))
-            end_str = end.get("dateTime", end.get("date", ""))
-
-            # Extract attendees
-            raw_attendees = event.get("attendees", [])
-            attendees = []
-            for att in raw_attendees:
-                if att.get("self", False):
-                    continue
-                attendees.append({
-                    "email": att.get("email", ""),
-                    "name": att.get("displayName", att.get("email", "").split("@")[0]),
-                    "response_status": att.get("responseStatus", "needsAction"),
-                })
-
-            conference_link = extract_conference_link(event)
-            real = is_real_meeting(event, config)
-
-            events.append({
-                "id": event.get("id", ""),
-                "summary": event.get("summary", "(No title)"),
-                "start": start_str,
-                "end": end_str,
-                "all_day": all_day,
-                "location": event.get("location", ""),
-                "description": event.get("description", ""),
-                "status": event.get("status", "confirmed"),
-                "attendees": attendees,
-                "conference_link": conference_link,
-                "is_real_meeting": real,
-                "organizer": event.get("organizer", {}).get("email", ""),
-                "source_calendar_id": calendar_id,
-            })
-
-        page_token = result.get("nextPageToken")
-        if not page_token:
-            break
-
-    return events
-
-
-def main():
-    target_date, days = parse_args()
-
-    # Load config
-    config, err = load_config()
-    if err:
-        print(json.dumps({"status": "error", "message": err}))
-        sys.exit(1)
-
-    tz_name = config.get("timezone", "America/Los_Angeles")
-
-    # Compute time range
-    if target_date:
-        base = datetime.strptime(target_date, "%Y-%m-%d")
+    if payload is None:
+        result = {
+            "status": "error",
+            "date": start,
+            "days": days,
+            "events": [],
+            "errors": [{
+                "source": "calendar-brain",
+                "error": (
+                    "brain unavailable (missing, stale, or disabled)"
+                ),
+            }],
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "fetched_via": "brain-unavailable",
+        }
     else:
-        try:
-            from zoneinfo import ZoneInfo
-            now = datetime.now(ZoneInfo(tz_name))
-            base = datetime(now.year, now.month, now.day)
-        except ImportError:
-            base = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        result = {
+            "status": "ok",
+            "date": start,
+            "days": days,
+            "events": payload.get("events") or [],
+            "errors": [],
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "fetched_via": "brain",
+            "brain_generated_at": payload.get("generated_at"),
+        }
 
-    # Google Calendar API wants RFC3339 with timezone
-    try:
-        from zoneinfo import ZoneInfo
-        tz = ZoneInfo(tz_name)
-        time_min = base.replace(tzinfo=tz).isoformat()
-        time_max = (base + timedelta(days=days)).replace(tzinfo=tz).isoformat()
-    except ImportError:
-        time_min = base.isoformat() + "T00:00:00Z"
-        time_max = (base + timedelta(days=days)).isoformat() + "T00:00:00Z"
-
-    # Get credentials
-    creds, err = get_credentials()
-    if err:
-        print(json.dumps({"status": "error", "message": err}))
-        sys.exit(1)
-
-    # Build service
-    try:
-        from googleapiclient.discovery import build
-        service = build("calendar", "v3", credentials=creds)
-    except Exception as e:
-        print(json.dumps({"status": "error", "message": f"Failed to build Calendar service: {e}"}))
-        sys.exit(1)
-
-    # Fetch events
-    all_events = []
-    errors = []
-    calendars = config.get("calendars", [])
-
-    for cal in calendars:
-        cal_id = cal["id"]
-        label = cal["label"]
-        emoji = cal.get("emoji", "")
-
-        try:
-            events = fetch_calendar_events(service, cal_id, time_min, time_max, config)
-            for event in events:
-                event["calendar_label"] = label
-                event["calendar_emoji"] = emoji
-            all_events.extend(events)
-        except Exception as e:
-            errors.append({"calendar": label, "calendar_id": cal_id, "error": str(e)})
-
-    # Sort by start time
-    all_events.sort(key=lambda e: e["start"])
-
-    # Cache results
+    # Preserve the legacy cache-file write so existing event-*.json
+    # readers (tools.py fuzzy resolver, workflowy-sync, etc.) keep
+    # working. Shape matches the old writer exactly.
     os.makedirs(CACHE_DIR, exist_ok=True)
-    cache_date = target_date or base.strftime("%Y-%m-%d")
-    cache_path = os.path.join(CACHE_DIR, f"events-{cache_date}.json")
-
-    result = {
-        "status": "ok" if not errors else "partial",
-        "date": cache_date,
-        "days": days,
-        "events": all_events,
-        "errors": errors,
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-    with open(cache_path, "w") as f:
+    cache_path = os.path.join(CACHE_DIR, f"events-{start}.json")
+    with open(cache_path, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2)
 
-    # Output to stdout
     print(json.dumps(result, indent=2))
 
 

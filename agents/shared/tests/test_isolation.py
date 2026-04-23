@@ -220,10 +220,11 @@ def test_bwrap_command_binds_brain_commitments_and_queues_rw(tmp_path: Path) -> 
 
 
 def test_bwrap_command_binds_brain_status_rw(tmp_path: Path) -> None:
-    """brain/status/ must be RW-bound. calendar-index-build.py writes
-    ``status/calendar-index.json`` atomically (tmpfile + os.replace);
-    without this bind the tmpfile write hits EROFS. See
-    ``agents/shared/tests/bwrap_write_surfaces.md`` for the audit."""
+    """brain/status/ must be RW-bound. calendar-brain-build.py
+    double-writes ``status/calendar-index.json`` atomically (tmpfile +
+    os.replace) during the migration from the legacy
+    calendar-index-build.py; without this bind the tmpfile write hits
+    EROFS. See ``agents/shared/tests/bwrap_write_surfaces.md``."""
     brain = tmp_path / "brain"
     (brain / "status").mkdir(parents=True)
     workspace = tmp_path / "ws"

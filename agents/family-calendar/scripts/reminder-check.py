@@ -300,9 +300,11 @@ def main():
     # Mouse/Murphy routing boundary (memory:
     # project_meeting_event_routing.md): Murphy owns events with a
     # videoconference link. Authoritative set comes from the shared
-    # brain calendar index (populated at 10:25 UTC by
-    # calendar-index-build.py); local has_videoconference_link is the
-    # fallback for events the index hasn't seen yet.
+    # calendar brain (maintained by the calendar-brain listener + the
+    # daily calendar-brain-build.py rebuild at 10:25 UTC, which also
+    # double-writes the legacy calendar-index.json read here); local
+    # has_videoconference_link is the fallback for events the brain
+    # hasn't seen yet.
     brain_meeting_ids = _load_brain_meeting_ids()
     reminders_to_send = []
 

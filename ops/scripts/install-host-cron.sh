@@ -20,7 +20,7 @@
 #   */5 * * * *   news-digest-engagement-poll     → NEWSDIGEST_BOT_TOKEN
 #   0 23 * * *    news-digest-preference-update   → NEWSDIGEST_BOT_TOKEN  (Phase 3b — pure-Python, calls llm.infer internally)
 #   30 10 * * *   shopping-delivery-digest        → SHOPPING_BOT_TOKEN   (Phase 4 — full daily digest, writes cache/morning-brief-ready.txt for 5 AM PT fleet delivery; appends monthly S&S section on the 1st)
-#   25 10 * * *   family-calendar-calendar-index-build → FAMILYCAL_BOT_TOKEN (2026-04-18 — builds shared brain calendar index used by Mouse + Murphy for meeting/event routing; runs 5 min before morning-briefing)
+#   25 10 * * *   calendar-brain-build → FAMILYCAL_BOT_TOKEN (2026-04-23 — daily full-rebuild of shared calendar brain at ~/.clawford/calendar-brain/. Belt-and-suspenders under the clawford-calendar-brain.service listener. Also double-writes legacy calendar-index.json during migration.)
 #   30 10 * * *   family-calendar-morning-briefing → FAMILYCAL_BOT_TOKEN (Phase 4 — daily brief for 5 AM PT fleet; appends WEEK AHEAD section on Mondays)
 #   15 */2 * * *  family-calendar-activity-email-alert → FAMILYCAL_BOT_TOKEN (Phase 4 — LLM classifies preschool/swim/ballet emails)
 #   30 */3 * * *  family-calendar-gmail-invite-alert   → FAMILYCAL_BOT_TOKEN (Phase 4 — format + send per-invite Telegram alerts)
@@ -123,7 +123,7 @@ CONTRACT_ENTRIES=(
   "*/5 * * * *|news-digest-engagement-poll|/home/openclaw/.clawford/news-digest-workspace/scripts/engagement-poller.py|NEWSDIGEST_BOT_TOKEN|60"
   "0 23 * * *|news-digest-preference-update|/home/openclaw/.clawford/news-digest-workspace/scripts/update-preferences.py|NEWSDIGEST_BOT_TOKEN|300"
   "30 10 * * *|shopping-delivery-digest|/home/openclaw/.clawford/shopping-workspace/scripts/delivery-digest.py|SHOPPING_BOT_TOKEN|900"
-  "25 10 * * *|family-calendar-calendar-index-build|/home/openclaw/.clawford/family-calendar-workspace/scripts/calendar-index-build.py|FAMILYCAL_BOT_TOKEN|180"
+  "25 10 * * *|calendar-brain-build|/home/openclaw/repo/agents/shared/scripts/calendar-brain-build.py|FAMILYCAL_BOT_TOKEN|180"
   "30 10 * * *|family-calendar-morning-briefing|/home/openclaw/.clawford/family-calendar-workspace/scripts/morning-briefing.py|FAMILYCAL_BOT_TOKEN|300"
   "15 */2 * * *|family-calendar-activity-email-alert|/home/openclaw/.clawford/family-calendar-workspace/scripts/activity-email-alert.py|FAMILYCAL_BOT_TOKEN|300"
   "30 */3 * * *|family-calendar-gmail-invite-alert|/home/openclaw/.clawford/family-calendar-workspace/scripts/gmail-invite-alert.py|FAMILYCAL_BOT_TOKEN|120"

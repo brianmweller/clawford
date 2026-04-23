@@ -35,7 +35,6 @@
     "scripts/gmail-invite-check.py",
     "scripts/chat-parse-schedule.py",
     "scripts/heartbeat.py",
-    "scripts/calendar-index-build.py",
     "scripts/gcal-tasks-sync.py",
     "scripts/morning-briefing.py",
     "task_surfacer_lib.py",

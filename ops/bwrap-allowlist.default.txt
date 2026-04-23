@@ -17,7 +17,7 @@
 # Brain writes: the profile RW-whitelists
 # `brain/{facts,people,commitments,queues,status,tasks,notes}/`
 # plus file-level bind for `brain/fleet-health.json` (isolation.py).
-# Fact miners, daily-refresh, calendar-index-build, task-sync, and
+# Fact miners, daily-refresh, calendar-brain-build, task-sync, and
 # any other brain-write cron are safe to list here. Only
 # `brain/memory/` still hits EROFS — by design (fleet memory is
 # written via <brain>/agents/<agent_id>/, never the root).
@@ -37,7 +37,7 @@ connector-birthday-miner
 connector-gmail-sent-mine
 connector-gmail-watch-renew
 connector-inbox-triage
-family-calendar-calendar-index-build
+calendar-brain-build
 family-calendar-tasks-sync
 family-calendar-whatsapp-chat-alert
 

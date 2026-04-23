@@ -482,40 +482,6 @@ def test_day_only_falls_through_when_narrowed_pool_empty(tools_mod):
         assert result["meeting_id"] == "coinbase_not_tomorrow"
 
 
-def test_run_gcal_fetch_tolerates_script_contract_envelope(tools_mod, tmp_path):
-    """`_run_gcal_fetch` shells out to gcal-fetch.py, which ends its
-    stdout with the SCRIPT_CONTRACT dual-envelope shape:
-
-        {"events": [...], "status": "ok", ...}
-        {"status": "ok"}
-
-    Regression target: 2026-04-22 — the naive `json.loads(proc.stdout)`
-    call choked on the trailing envelope, silently turning every
-    on-demand fetch into an error. the operator's 'Coinbase for tomorrow'
-    failed for this reason even though fix #2 was in place."""
-    import sys
-    fake_script = tmp_path / "gcal-fetch.py"
-    fake_script.write_text(
-        "#!/usr/bin/env python3\n"
-        "import json, sys\n"
-        "print(json.dumps({'status': 'ok', 'events': [{'id': 'evt_abc', 'summary': 'Demo'}], 'errors': []}))\n"
-        "print(json.dumps({'status': 'ok'}))\n",
-        encoding="utf-8",
-    )
-    import importlib
-    # Point the tools module's GCAL_FETCH_SCRIPT at our fake.
-    orig = tools_mod.GCAL_FETCH_SCRIPT
-    tools_mod.GCAL_FETCH_SCRIPT = str(fake_script)
-    try:
-        result = tools_mod._run_gcal_fetch("2026-04-22", 2)
-    finally:
-        tools_mod.GCAL_FETCH_SCRIPT = orig
-
-    assert result.get("error") is None, result
-    assert result.get("status") == "ok"
-    assert result["events"][0]["id"] == "evt_abc"
-
-
 def test_prep_meeting_accepts_time_descriptor(tools_mod, monkeypatch):
     """End-to-end: the LLM calls prep_meeting('tomorrow 2:45pm') and
     it shells out with the resolved event id."""

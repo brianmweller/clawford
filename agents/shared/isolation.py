@@ -180,8 +180,9 @@ def bwrap_command(
     # targets. Pre-widening (2026-04-20) only <brain>/agents/<agent_id>/
     # was RW-bound; every other brain-path write hit EROFS silently.
     # daily-refresh surfaced this on brain/people/*.md starting
-    # 2026-04-18, calendar-index-build surfaced the same on
-    # brain/status/ on 2026-04-21. The whitelist is explicit and
+    # 2026-04-18; the calendar-index-build (now superseded by
+    # agents/shared/scripts/calendar-brain-build.py) surfaced the same
+    # on brain/status/ on 2026-04-21. The whitelist is explicit and
     # derived from the audit at tests/bwrap_write_surfaces.md:
     #   facts, people, commitments, queues, status, tasks, notes
     # plus file-level bind for brain/fleet-health.json.
