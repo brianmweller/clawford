@@ -3,14 +3,16 @@
     "family-inner": {"check_days": 1, "nudge": false, "note": "Monitored by Mistress Mouse"},
     "family-extended": {"check_days": 21, "nudge": true},
     "friends-close": {"check_days": 30, "nudge": true},
+    "friends-acquaintance": {"check_days": 180, "nudge": true},
     "professional-inner": {"check_days": 7, "nudge": true},
     "professional-outer": {"check_days": 90, "nudge": true},
-    "holiday-card": {"check_days": 365, "nudge": false, "note": "Life events only"}
+    "holiday-card": {"check_days": 365, "nudge": false, "note": "Life events only"},
+    "children": {"check_days": 1, "nudge": false, "note": "the operator's kids — no proactive nudge"}
   },
   "timezone": "America/Los_Angeles",
   "nudge": {
     "max_per_day": 5,
-    "skip_circles": ["family-inner", "holiday-card"]
+    "skip_circles": ["family-inner", "holiday-card", "children"]
   },
   "triage": {
     "max_batch_size": 10,
