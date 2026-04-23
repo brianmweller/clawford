@@ -377,6 +377,58 @@ def test_llm_prep_prompt_mentions_level_bar_when_present():
     assert "Test bar" in prompt
 
 
+def test_resolve_company_prefers_target_match():
+    event = {"summary": "Interview with Coinbase", "description": ""}
+    name = lib.resolve_company_name_for_prep(
+        event=event,
+        attendees_for_classifier=[{"email": "anyone@example.com"}],
+        target_match={"company": "Anthropic"},
+    )
+    assert name == "Anthropic"
+
+
+def test_resolve_company_uses_event_title_when_no_target():
+    """Self-booked LinkedIn cold-recruiter invite: event title is the
+    primary company signal. Regression 2026-04-23: Coinbase invite
+    leaked 'LinkedIn' because attendee resolved to hit-reply@linkedin.com
+    (LinkedIn relay)."""
+    event = {"summary": "Interview with Coinbase", "description": ""}
+    name = lib.resolve_company_name_for_prep(
+        event=event,
+        attendees_for_classifier=[
+            {"email": "hit-reply@linkedin.com",
+             "email_source": "linkedin_relay"},
+        ],
+        target_match=None,
+    )
+    assert name == "Coinbase"
+
+
+def test_resolve_company_falls_back_to_attendee_domain_when_no_title_token():
+    event = {"summary": "Recruiter call", "description": ""}
+    name = lib.resolve_company_name_for_prep(
+        event=event,
+        attendees_for_classifier=[{"email": "abby@anthropic.com"}],
+        target_match=None,
+    )
+    assert name == "Anthropic"
+
+
+def test_resolve_company_skips_linkedin_relay_attendee():
+    """When the only attendee is a LinkedIn relay AND the title has no
+    company token, return None — don't false-fire on 'Linkedin'."""
+    event = {"summary": "Recruiter Chat", "description": ""}
+    name = lib.resolve_company_name_for_prep(
+        event=event,
+        attendees_for_classifier=[
+            {"email": "hit-reply@linkedin.com",
+             "email_source": "linkedin_relay"},
+        ],
+        target_match=None,
+    )
+    assert name is None
+
+
 def _company_brief_dict():
     return {
         "company_name": "Anthropic",

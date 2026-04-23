@@ -56,6 +56,18 @@ def test_infer_company_from_third_party_ats_returns_none():
     assert _infer_company_from_email("no-reply@greenhouse-mail.io") is None
 
 
+def test_infer_company_from_linkedin_relay_returns_none():
+    """LinkedIn InMail / relay addresses (hit-reply@linkedin.com,
+    anything @linkedin.com) carry zero signal about the hiring company —
+    the real sender is masked behind LinkedIn's routing. Regression:
+    2026-04-23 Coinbase prep researched LinkedIn because the Gmail
+    thread's From was 'Abby Mintert via LinkedIn <hit-reply@linkedin.com>'.
+    Must fall through to body-based extraction (LLM)."""
+    assert _infer_company_from_email("hit-reply@linkedin.com") is None
+    assert _infer_company_from_email("Abby Mintert <abby@linkedin.com>") is None
+    assert _infer_company_from_email("noreply@inmail.linkedin.com") is None
+
+
 # ---------------------------------------------------------------------------
 # extract_company_and_role — end to end
 # ---------------------------------------------------------------------------

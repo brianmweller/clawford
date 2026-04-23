@@ -62,6 +62,7 @@ from meeting_prep_professional_lib import (  # noqa: E402
     classify_meeting_type,
     match_attendee_to_search_stage,
     match_attendee_to_target,
+    resolve_company_name_for_prep,
 )
 
 WORKSPACE = os.path.expanduser("~/.clawford/meetings-coach-workspace")
@@ -538,16 +539,11 @@ def prep_meeting(event, force=False):
         company_brief_dict: dict | None = None
         try:
             from agents.shared.company_research import research_company
-            from agents.shared.recruiter_extract_lib import _infer_company_from_email
-            company_name = None
-            if target_match and target_match.get("company"):
-                company_name = target_match["company"]
-            else:
-                for att in attendees_for_classifier:
-                    inferred = _infer_company_from_email(att.get("email", ""))
-                    if inferred:
-                        company_name = inferred
-                        break
+            company_name = resolve_company_name_for_prep(
+                event=event,
+                attendees_for_classifier=attendees_for_classifier,
+                target_match=target_match,
+            )
             if company_name:
                 brief = research_company(
                     company_name,

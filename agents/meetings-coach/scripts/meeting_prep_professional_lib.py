@@ -418,6 +418,58 @@ def _format_pipeline_block(stage_match: dict | None,
     return "Not in active pipeline with this company."
 
 
+def resolve_company_name_for_prep(
+    *,
+    event: dict,
+    attendees_for_classifier: list[dict],
+    target_match: dict | None,
+) -> str | None:
+    """Pick the company name to feed into company_research.research_company.
+
+    Resolution order (most reliable first):
+      1. target_match["company"] — the operator's explicit shortlist hit.
+      2. _extract_company_token(event) from the title — handles self-
+         booked LinkedIn cold-recruiter invites like "Interview with
+         Coinbase" cleanly.
+      3. Attendee-domain inference via _infer_company_from_email,
+         skipping attendees whose email_source is linkedin_relay
+         (their @linkedin.com address is a routing artifact, not the
+         real company).
+
+    Returns None when no reliable signal is available — the caller
+    then skips enrichment rather than researching a wrong company.
+
+    Regression 2026-04-23: Coinbase prep researched LinkedIn because
+    the only attendee resolved to hit-reply@linkedin.com via Gmail
+    lookup, and the old path naively inferred "Linkedin" from the
+    domain stem.
+    """
+    # Local import so this module stays importable without the shared
+    # libs on path during unit tests that only exercise pure helpers.
+    try:
+        from agents.shared.gmail_recruiter_lookup import _extract_company_token
+        from agents.shared.recruiter_extract_lib import _infer_company_from_email
+    except ImportError:
+        from gmail_recruiter_lookup import _extract_company_token  # type: ignore
+        from recruiter_extract_lib import _infer_company_from_email  # type: ignore
+
+    if target_match and target_match.get("company"):
+        return target_match["company"]
+
+    token = _extract_company_token(event)
+    if token:
+        return token
+
+    for att in attendees_for_classifier:
+        if att.get("email_source") == "linkedin_relay":
+            continue
+        inferred = _infer_company_from_email(att.get("email", ""))
+        if inferred:
+            return inferred
+
+    return None
+
+
 def _format_company_brief_block(company_brief: dict | None) -> str:
     """Render the COMPANY BRIEF block from company_research.CompanyBrief's
     to_prompt_dict(). Empty dict (errored brief) → empty string so the

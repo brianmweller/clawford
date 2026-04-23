@@ -53,6 +53,17 @@ DEFAULT_CACHE_DIR = Path(os.path.expanduser("~/.clawford/recruiter-extract-cache
 LLM_TIMEOUT_S = 20
 _BODY_SLICE = 500
 
+# Relay / platform domains whose sender address carries no signal about
+# the real hiring company. The actual recruiter is masked behind the
+# platform's routing (LinkedIn InMail, etc.). Must fall through to
+# body-based LLM extraction. Regression: 2026-04-23 Coinbase prep
+# researched LinkedIn because the Gmail thread's From was 'Abby Mintert
+# via LinkedIn <hit-reply@linkedin.com>'.
+_RELAY_DOMAIN_SUFFIXES: tuple[str, ...] = (
+    "linkedin.com",
+    "inmail.linkedin.com",
+)
+
 _EXTRACT_INSTRUCTIONS = (
     "You extract structured signal from recruiter emails. Reply with "
     "a single valid JSON object. No prose outside the JSON."
@@ -115,17 +126,22 @@ def _domain_from_email(from_field: str) -> str:
 
 def _infer_company_from_email(from_field: str) -> Optional[str]:
     """Return a company-name prior derived from the From domain, or
-    None when the domain encodes no signal (third-party ATS).
+    None when the domain encodes no signal.
 
     - Direct corporate domain → capitalize the stem ("reddit.com" → "Reddit").
     - In-house ATS subdomain → delegate to extract_company_from_ats_domain.
     - Third-party ATS (lever.co, greenhouse-mail.io) → None.
+    - Relay / platform domains (linkedin.com) → None — the real sender
+      is masked behind the platform's routing; fall through to body.
     """
     if not from_field:
         return None
     domain = _domain_from_email(from_field)
     if not domain:
         return None
+    for relay in _RELAY_DOMAIN_SUFFIXES:
+        if domain == relay or domain.endswith("." + relay):
+            return None
     if is_recruiter_domain(domain):
         # Could still be an in-house ATS prefix (interview.adobe.com);
         # let extract_company_from_ats_domain decide.
