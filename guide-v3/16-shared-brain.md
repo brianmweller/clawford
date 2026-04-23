@@ -1,12 +1,13 @@
 # The shared brain
 
-*Last updated: 2026-04-22 · Reading time: ~22 min · Difficulty: moderate*
+*Last updated: 2026-04-23 · Reading time: ~25 min · Difficulty: moderate*
 
 **TL;DR**
 
 - The shared brain is what turns a *pile of agents* into a *fleet*. It's a directory of plain markdown files with a small structured schema on top — no database, no vendor, no API.
 - Four core primitives: **facts** (knowledge that decays), **commitments** (promises that resolve), **tasks** (action items), **notes** (raw inputs awaiting triage). Plus per-person profile files and per-agent status/rules files.
 - A parallel [`self/` subtree](#the-self-layer-a-brain-about-the-operator) mirrors the shape for a single subject — the operator — with a four-layer synthesis pipeline (classifier → archives → structured facts → narrative profile) that feeds Huckle's cold-recruiter drafting AND Murphy's recruiter-meeting prep.
+- A brain-adjacent [**calendar brain**](#the-calendar-brain-one-writer-two-readers) at `~/.clawford/calendar-brain/` — one canonical events file, fed by a 60s syncToken-polling listener plus a daily full rebuild, consumed by both Murphy and Mistress Mouse via owner filter. Born from a cache-clobber outage in April 2026 where two independent fetchers kept overwriting each other's `events-{today}.json`.
 - Two halves, two sync mechanisms. `ops/brain/*` is **git-tracked** and flows local → VPS via `deploy.py`. `~/Dropbox/clawford-backup/*` is **Dropbox-synced bidirectionally**. The split is enforced structurally by `agents/shared/brain.py`.
 - All writes are appends. Every entry carries an agent ID and a timestamp; the file is its own changelog. Multiple agents writing the same file simultaneously is a designed-for case, not a bug.
 - This is the single most underrated piece of infrastructure in the whole fleet. It survived the migration off the OpenClaw platform untouched, because it never depended on the platform — it's just files on disk.
@@ -25,7 +26,7 @@ The brain has two halves that live in different places and sync through differen
 
 **The git-tracked half — `ops/brain/*` in the Clawford repo.** Configuration: the canonical schema `README.md`, the seed `_template.md` for new person files, per-agent rules scaffolds, validation scripts. Flows *one-way*: local git → VPS via `deploy.py`. An agent edit never writes back here. If the schema or a rules file needs updating, edit locally, commit, push, redeploy.
 
-**The Dropbox-synced half — `~/Dropbox/clawford-backup/` on the VPS.** Runtime state: live facts, live people files (whose structure came from `_template.md` but whose content is populated by the connector agent and the human), commitments, tasks, notes, per-agent status, `fleet-health.json`, and cross-fleet indexes like `status/calendar-index.json` (built once per morning tick by Mouse's `calendar-index-build.py`; classifies every upcoming event as meeting vs event so Murphy and Mouse read one shared truth instead of independently re-classifying). Flows *bidirectionally*: agents write on the VPS, Dropbox syncs it off-VPS.
+**The Dropbox-synced half — `~/Dropbox/clawford-backup/` on the VPS.** Runtime state: live facts, live people files (whose structure came from `_template.md` but whose content is populated by the connector agent and the human), commitments, tasks, notes, per-agent status, `fleet-health.json`, and a legacy thin-index `status/calendar-index.json` that older readers still consume (double-written by the daily `calendar-brain-build.py` during migration; see [§ The calendar brain](#the-calendar-brain-one-writer-two-readers) for the canonical replacement, which lives at `~/.clawford/calendar-brain/` outside Dropbox). Flows *bidirectionally*: agents write on the VPS, Dropbox syncs it off-VPS.
 
 > Paths in the repository may still show `openclaw-backup` rather than `clawford-backup` at the time of writing. The rename is queued for a final cleanup pass. Treat the two names as interchangeable until then.
 
@@ -123,6 +124,22 @@ Huckle's correspondence layer mines the operator's sent mail to produce per-circ
 They live in `cache/voice-profiles/` in the connector's workspace rather than in the shared brain proper. Two reasons. First, they're large enough — a per-circle profile is a few KB of extracted style features — that Dropbox sync costs are meaningful if they churn. Second, voice profiles are a Huckle-specific asset today; no other agent reads or writes them. Holding them as agent-workspace state rather than brain state lets Huckle rebuild or invalidate them without coordinating with the rest of the fleet.
 
 That's the rule of thumb for the brain/workspace boundary: **share state that two or more agents need to agree on. Keep agent-private state in the agent's workspace.** Voice profiles are derivative — they're computed from sent mail — so recomputation is cheap and cross-agent agreement isn't required. Facts are authoritative truth about people, so they live in the brain.
+
+## The calendar brain — one writer, two readers
+
+Meeting awareness started out as two independent fetchers. Sergeant Murphy pulled the professional calendar; Mistress Mouse pulled the household ones. Each wrote `events-{today}.json` into its own workspace. Inside each agent, four or five crons called the fetch script with different `--days` windows — morning-brief with `--days 2`, post-meeting-scan with `--days 7`, pre-meeting-alert originally with `--days 1` — and the last writer won the shared filename. For most of April 2026, the writers happened to agree, so the bug never surfaced.
+
+The evening that stopped the pretending was one where I asked Murphy to prep a recruiter interview for the next day and he swore there was nothing on the calendar. The actual failure mode was embarrassingly plain: the pre-meeting-alert cron was running every thirty minutes with `--days 1` and erasing tomorrow's invites every time, overwriting the morning brief's wider pull. Each writer was correct in isolation. The concurrency model was not. Whether Murphy could see tomorrow depended on which cron had most recently clobbered the shared cache.
+
+The calendar brain is what came out of that evening. One canonical JSON file, one writer, both agents read. It lives at `~/.clawford/calendar-brain/calendar-brain.json` — outside the Dropbox-synced brain on purpose, because the listener rewrites it every 60 seconds and sync thrash would be brutal. Every event is normalised once at write time — attendees, conference link, `is_meeting`, `owner`, Murphy's `is_real_meeting` display flag — and readers filter by owner rather than reclassifying. [Mistress Mouse](12-mistress-mouse.md) reads `owner == "mistress-mouse"`. [Sergeant Murphy](13-sergeant-murphy.md) reads `owner == "sergeant-murphy"` plus the `is_real_meeting` display filter. Neither agent calls the Google Calendar API anymore.
+
+Two processes write. A **listener daemon** (`clawford-calendar-brain.service`, user-scope systemd) polls every 60 seconds via Google Calendar's incremental sync API — `events.list(calendarId, syncToken)` returns the delta since the last tick, the daemon applies it, atomic-writes the new copy. A 410 GONE on the sync token triggers a bounded full fetch to re-seed. A transient 401 on one calendar is isolated to that calendar's token column, so the other calendars' deltas still apply. A **daily rebuild** at 10:25 UTC — `calendar-brain-build.py`, running five minutes before the fleet morning brief — pulls the full 8-day window, renormalises everything, and resets every sync token. It's the belt-and-suspenders under the listener, and it's also what writes the legacy `status/calendar-index.json` thin-index shape that some older readers still consume during the tail of the migration.
+
+The natural question is why polling and not webhooks. Google Calendar's native push is an HTTPS webhook, which needs a public endpoint with its own TLS rotation, retry semantics, and firewall hole. At the fleet's scale — two calendars, ~30 events in the lookahead window — 60-second polling hits sub-2-minute latency for essentially free: `N × 1440` calls per day against a 1,000,000/day quota. Gmail uses Pub/Sub pull because Gmail supports it; Calendar doesn't, so polling is the cheap equivalent. Revisit if an "I just created an invite, the agent missed it" gap starts biting; until then, polling is enough.
+
+Rollback is a single marker file. `touch ~/.clawford/calendar-brain-disabled` makes the systemd unit refuse to start — the `ExecStartPre` checks for the marker, systemd obeys, and the daily rebuild keeps the brain fresh enough to survive. When the marker comes off the listener resumes from wherever it left.
+
+> 🧨 **Pitfall.** Writing a second cron that produces `events-{today}.json`. **Why:** that was the April 2026 cache-clobber bug — a second writer with a narrower `--days` window silently erased forward-looking events between writes, and every caller in the fleet paid the price the next time the window flipped. **How to avoid:** every caller reads the brain through `_run_gcal_fetch` in `tools.py`, or through the hollowed `gcal-fetch.py` shim both agents now ship. There is no second writer.
 
 ## The self/ layer — a brain about the operator
 

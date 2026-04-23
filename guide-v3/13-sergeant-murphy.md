@@ -100,7 +100,7 @@ Sergeant Murphy's post-meeting scan talks to a meeting-transcription provider ov
 
 The full explanation of the routing rule lives in [§ The routing boundary section of Ch 12](12-mistress-mouse.md#the-routing-boundary-with-sergeant-murphy). The short version (after the 2026-04-18 revision): **a calendar event is Sergeant Murphy's iff it has a videoconference link OR the operator has linked it in Workflowy.** Otherwise it's Mistress Mouse's.
 
-Both agents read the same classification — a shared brain calendar index at `~/Dropbox/clawford-backup/status/calendar-index.json`, rebuilt once per morning tick by Mouse's `calendar-index-build.py` — rather than each running their own classifier inline. Sergeant Murphy's orchestrators (morning-meeting-brief, pre-meeting-alert, post-meeting-scan) still fall back to a local `has_videoconference_link` check for events the index hasn't seen yet.
+Both agents read the same classification — the [calendar brain](16-shared-brain.md#the-calendar-brain-one-writer-two-readers), normalised once at write time by a 60-second polling listener and a daily rebuild. Each event in the brain carries an `owner` field, and each agent filters on its own owner rather than reclassifying. Sergeant Murphy's orchestrators (morning-meeting-brief, pre-meeting-alert, post-meeting-scan) no longer run their own classifier; when the brain is unavailable they surface an error rather than silently serving stale data, because the subprocess fallback that used to let each agent re-fetch from Google was removed as part of that consolidation. The legacy `~/Dropbox/clawford-backup/status/calendar-index.json` thin-index is still double-written by the daily rebuild for readers that haven't migrated yet.
 
 The failure mode to watch for is the Workflowy session expiring — see the [routing pitfall in Ch 12](12-mistress-mouse.md#pitfalls). A dead Workflowy session means the `workflowy-links.json` cache stops updating, and any meeting whose only signal was the Workflowy tag will misroute. Video-link meetings still get classified correctly in that degraded state; only in-person meetings the operator tagged for coaching slip through to Mistress Mouse. The fix is to refresh the Workflowy session, not to patch either agent's routing code.
 
@@ -120,7 +120,7 @@ As of 2026-04-15, Sergeant Murphy runs five host crons off `~/.clawford/meetings
 
 **Supporting I/O scripts** (deterministic Python, subprocess-safe, called by orchestrators):
 
-- `gcal-fetch.py` — multi-calendar reader with `is_real_meeting` flag and conference-link extraction
+- `gcal-fetch.py` — brain-reading shim; filters the shared calendar brain by `owner == "sergeant-murphy"` (and `is_real_meeting`) and emits the legacy events JSON shape for downstream consumers (post-2026-04-23, no longer hits Google directly)
 - `meeting-prep.py` — per-meeting context assembly (attendees + facts + open commitments)
 - `workflowy-sync.py` — Workflowy node creation + search; owns the Workflowy session
 - `transcript-scan.py` — fetches from MCP vendor, extracts action items + decisions, maintains `processed-transcripts.json` as the single source of truth for dedup
