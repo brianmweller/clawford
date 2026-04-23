@@ -68,6 +68,17 @@ def test_infer_company_from_linkedin_relay_returns_none():
     assert _infer_company_from_email("noreply@inmail.linkedin.com") is None
 
 
+def test_infer_company_from_personal_email_returns_none():
+    """Personal email providers (gmail.com, yahoo.com, etc.) do not
+    encode a hiring company — they're the operator's own address, or a
+    personal contact's, never a corporate recruiter."""
+    assert _infer_company_from_email("sam.smith@example.com") is None
+    assert _infer_company_from_email("someone@yahoo.com") is None
+    assert _infer_company_from_email("<foo@outlook.com>") is None
+    assert _infer_company_from_email("a@icloud.com") is None
+    assert _infer_company_from_email("b@hotmail.com") is None
+
+
 # ---------------------------------------------------------------------------
 # extract_company_and_role — end to end
 # ---------------------------------------------------------------------------

@@ -53,15 +53,37 @@ DEFAULT_CACHE_DIR = Path(os.path.expanduser("~/.clawford/recruiter-extract-cache
 LLM_TIMEOUT_S = 20
 _BODY_SLICE = 500
 
-# Relay / platform domains whose sender address carries no signal about
-# the real hiring company. The actual recruiter is masked behind the
-# platform's routing (LinkedIn InMail, etc.). Must fall through to
-# body-based LLM extraction. Regression: 2026-04-23 Coinbase prep
-# researched LinkedIn because the Gmail thread's From was 'Abby Mintert
-# via LinkedIn <hit-reply@linkedin.com>'.
-_RELAY_DOMAIN_SUFFIXES: tuple[str, ...] = (
+# Domains whose sender address carries no signal about the real hiring
+# company. Two flavors, both in one set:
+#   (a) platform / relay domains — LinkedIn InMail relay, the real
+#       sender is masked behind the platform's routing.
+#   (b) personal email providers — gmail/yahoo/outlook/icloud/hotmail.
+#       Either the operator's own address (self-booked invites list him as
+#       organizer) or a personal contact; never a corporate recruiter.
+# Both must fall through to body-based LLM extraction when available.
+# Regression 2026-04-23: Coinbase prep researched "LinkedIn" from
+# hit-reply@linkedin.com; Adobe prep would research "Gmail" from
+# sam.smith@example.com if organizer-fallback isn't guarded.
+_NO_SIGNAL_DOMAIN_SUFFIXES: tuple[str, ...] = (
+    # Relay / platform
     "linkedin.com",
     "inmail.linkedin.com",
+    # Personal email providers
+    "gmail.com",
+    "googlemail.com",
+    "yahoo.com",
+    "outlook.com",
+    "hotmail.com",
+    "live.com",
+    "icloud.com",
+    "me.com",
+    "mac.com",
+    "aol.com",
+    "protonmail.com",
+    "proton.me",
+    "fastmail.com",
+    "fastmail.fm",
+    "pm.me",
 )
 
 _EXTRACT_INSTRUCTIONS = (
@@ -139,8 +161,8 @@ def _infer_company_from_email(from_field: str) -> Optional[str]:
     domain = _domain_from_email(from_field)
     if not domain:
         return None
-    for relay in _RELAY_DOMAIN_SUFFIXES:
-        if domain == relay or domain.endswith("." + relay):
+    for suffix in _NO_SIGNAL_DOMAIN_SUFFIXES:
+        if domain == suffix or domain.endswith("." + suffix):
             return None
     if is_recruiter_domain(domain):
         # Could still be an in-house ATS prefix (interview.adobe.com);

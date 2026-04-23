@@ -429,6 +429,56 @@ def test_resolve_company_skips_linkedin_relay_attendee():
     assert name is None
 
 
+def test_resolve_company_uses_organizer_ats_subdomain():
+    """Adobe Leadership Chat confirmation: title is generic ('Meeting
+    Confirmation - Sam Smith'), attendees are empty, and the ONLY
+    company signal is the organizer (schedule@interview.adobe.com).
+    Resolver must consult organizer as a fallback after attendees.
+    Regression 2026-04-23 Adobe prep: company_name came back None."""
+    event = {
+        "summary": "Meeting Confirmation - Sam Smith",
+        "description": "Adobe Leadership Chat",
+        "organizer": "schedule@interview.adobe.com",
+    }
+    name = lib.resolve_company_name_for_prep(
+        event=event,
+        attendees_for_classifier=[],
+        target_match=None,
+    )
+    assert name == "Adobe"
+
+
+def test_resolve_company_ignores_self_booked_gmail_organizer():
+    """Self-booked cold recruiter invites have the operator's own email
+    as organizer (sam.smith@example.com). Must not resolve to
+    'Gmail' — fall through to the title token."""
+    event = {
+        "summary": "Interview with Coinbase",
+        "organizer": "sam.smith@example.com",
+    }
+    name = lib.resolve_company_name_for_prep(
+        event=event,
+        attendees_for_classifier=[],
+        target_match=None,
+    )
+    assert name == "Coinbase"
+
+
+def test_resolve_company_organizer_as_dict():
+    """Some Google Calendar API shapes return organizer as
+    {email, displayName}. Resolver must accept both forms."""
+    event = {
+        "summary": "Meeting Confirmation",
+        "organizer": {"email": "schedule@interview.adobe.com"},
+    }
+    name = lib.resolve_company_name_for_prep(
+        event=event,
+        attendees_for_classifier=[],
+        target_match=None,
+    )
+    assert name == "Adobe"
+
+
 def _company_brief_dict():
     return {
         "company_name": "Anthropic",

@@ -432,17 +432,22 @@ def resolve_company_name_for_prep(
          booked LinkedIn cold-recruiter invites like "Interview with
          Coinbase" cleanly.
       3. Attendee-domain inference via _infer_company_from_email,
-         skipping attendees whose email_source is linkedin_relay
-         (their @linkedin.com address is a routing artifact, not the
-         real company).
+         skipping attendees whose email_source is linkedin_relay.
+      4. Organizer-domain inference — Adobe Leadership Chat ships
+         'Meeting Confirmation - Sam Smith' as the title with no
+         attendees populated; the only signal is the organizer
+         schedule@interview.adobe.com. _infer_company_from_email
+         resolves the interview.adobe.com ATS subdomain to "Adobe"
+         and skips personal-email providers so self-booked invites
+         (organizer=sam.smith@example.com) don't false-fire.
 
     Returns None when no reliable signal is available — the caller
     then skips enrichment rather than researching a wrong company.
 
-    Regression 2026-04-23: Coinbase prep researched LinkedIn because
-    the only attendee resolved to hit-reply@linkedin.com via Gmail
-    lookup, and the old path naively inferred "Linkedin" from the
-    domain stem.
+    Regression 2026-04-23: Coinbase prep researched "LinkedIn" from
+    the hit-reply@linkedin.com attendee; Adobe prep resolved to None
+    because the company signal lived in the organizer, not the (empty)
+    attendees list.
     """
     # Local import so this module stays importable without the shared
     # libs on path during unit tests that only exercise pure helpers.
@@ -464,6 +469,19 @@ def resolve_company_name_for_prep(
         if att.get("email_source") == "linkedin_relay":
             continue
         inferred = _infer_company_from_email(att.get("email", ""))
+        if inferred:
+            return inferred
+
+    # Organizer fallback. Google Calendar returns organizer as either
+    # a bare email string or {email, displayName}.
+    organizer = event.get("organizer")
+    organizer_email = ""
+    if isinstance(organizer, dict):
+        organizer_email = organizer.get("email") or ""
+    elif isinstance(organizer, str):
+        organizer_email = organizer
+    if organizer_email:
+        inferred = _infer_company_from_email(organizer_email)
         if inferred:
             return inferred
 
