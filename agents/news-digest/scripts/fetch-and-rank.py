@@ -323,8 +323,6 @@ def _summarize_linkedin_thread(sender: str, full_messages: list[str]) -> str | N
     return text if text else None
 
 
-_PROFILE_VIEW_NAME_RE = re.compile(r"^(.+?)\s+viewed your profile", re.IGNORECASE)
-
 _TIME_AGO_UNIT_RANK = {"m": 0, "h": 1, "d": 2, "w": 3}
 
 
@@ -377,66 +375,87 @@ def _feed_post_is_stale(t: str) -> bool:
 def _build_profile_view_summary(notifications: list[dict]) -> dict | None:
     """Collapse every `type: profile_view` notification into ONE rollup.
 
-    LinkedIn fires one 'X viewed your profile' notification per recent
-    view event. The scraper captures each with:
-      - `text`: the headline viewer label (e.g. 'Omar Shahine viewed
-        your profile' OR, for anonymous viewers,
-        'Soldier / Military Officer at US Navy viewed your profile')
-      - `time_ago`: how recently the headline viewer landed
-      - `detail_names`: named 1st-connections ONLY — anonymous viewers
-        ('someone at Google', 'Principal Engineer at Anthropic') never
-        appear here; they only show up in `text`.
+    `detail_names` on each profile_view notification is the sole source
+    of truth — populated by linkedin-scrape.py after it clicks through
+    to /me/profile-views/ and runs linkedin-viewers-extract.js. Each
+    entry is `{name, time_ago, title, is_anonymous}` where:
+      - Named 1st-degree viewer: name="Omar Shahine", title="VP Eng at
+        Microsoft", is_anonymous=False.
+      - Anonymous viewer: name="Principal Engineer at Anthropic",
+        title="", is_anonymous=True (name already conveys the company
+        signal, so we don't duplicate it into the title slot).
 
-    This helper merges viewers from BOTH places, deduping by name
-    (keeping the freshest time_ago per person), filters to strictly
-    under 24h so repeat brief cadence doesn't re-show yesterday's
-    viewers, and returns one synthesized notification article.
+    The notification's top-level `text`/`time_ago` fields are IGNORED.
+    Pre-2026-04-23 we regex-parsed the headline — which silently
+    captured LinkedIn's own aggregate card ("2 people viewed your
+    profile") as a viewer named "2 people" whenever the click-through
+    extractor returned nothing. Trusting only detail_names means that
+    if LinkedIn redesigns /me/profile-views/ we emit an empty section
+    rather than leaking the aggregate banner; the operator explicitly prefers
+    that failure mode (2026-04-23).
 
-    Returns None when no fresh (within-24h) profile_view viewers exist.
+    Dedup is by name: freshest time_ago wins, and a later non-empty
+    title beats an earlier empty one. The 24h filter drops viewers
+    labelled in days/weeks — they were surfaced on an earlier morning
+    brief, or would have been. Returns None when no fresh viewers
+    survive.
     """
-    viewer_times: dict[str, str] = {}
+    # name -> (time_ago, title)
+    viewer_data: dict[str, tuple[str, str]] = {}
 
     def _less_old(a: str, b: str) -> bool:
         return _time_ago_key(a) < _time_ago_key(b)
 
-    def _add(name: str, time_ago: str) -> None:
+    def _add(name: str, time_ago: str, title: str) -> None:
         name = (name or "").strip()
         if not name:
             return
-        cur = viewer_times.get(name)
-        if cur is None or _less_old(time_ago, cur):
-            viewer_times[name] = (time_ago or "").strip()
+        time_ago = (time_ago or "").strip()
+        title = (title or "").strip()
+        cur = viewer_data.get(name)
+        if cur is None:
+            viewer_data[name] = (time_ago, title)
+            return
+        cur_time, cur_title = cur
+        new_time = time_ago if _less_old(time_ago, cur_time) else cur_time
+        # Prefer a non-empty title; never overwrite one with blank.
+        new_title = title or cur_title
+        viewer_data[name] = (new_time, new_title)
 
-    any_profile_view = False
     for notif in notifications or []:
         if notif.get("type") != "profile_view":
             continue
-        any_profile_view = True
-        # Text headline viewer — the ONLY place anonymous viewers land.
-        m = _PROFILE_VIEW_NAME_RE.match(notif.get("text", "") or "")
-        if m:
-            _add(m.group(1), notif.get("time_ago", ""))
-        # Named 1st-connections enumerated by LinkedIn.
         for d in notif.get("detail_names") or []:
-            _add(d.get("name", ""), d.get("time_ago", ""))
+            _add(
+                d.get("name", ""),
+                d.get("time_ago", ""),
+                d.get("title", ""),
+            )
 
-    if not any_profile_view:
+    if not viewer_data:
         return None
 
-    # 24h filter: drop viewers with time_ago in days/weeks — they were
-    # already on an earlier brief, or would have been.
-    fresh = {name: t for name, t in viewer_times.items() if _time_ago_within_24h(t)}
+    fresh = {
+        name: (t, title)
+        for name, (t, title) in viewer_data.items()
+        if _time_ago_within_24h(t)
+    }
     if not fresh:
         return None
 
-    ordered = sorted(fresh.items(), key=lambda kv: _time_ago_key(kv[1]))
+    ordered = sorted(fresh.items(), key=lambda kv: _time_ago_key(kv[1][0]))
     count = len(ordered)
-    lines = [f"• {name} — {time_ago}" for name, time_ago in ordered]
+    lines: list[str] = []
+    for name, (time_ago, title) in ordered:
+        if title:
+            lines.append(f"• {name} — {title} — {time_ago}")
+        else:
+            lines.append(f"• {name} — {time_ago}")
     summary = "\n".join(lines)
-    title = f"👁️ Profile visitors — last 24h ({count})"
+    title_line = f"👁️ Profile visitors — last 24h ({count})"
     return {
         "id": article_id(f"profile-view-rollup-{count}-{'-'.join(n for n, _ in ordered)[:80]}"),
-        "title": title,
+        "title": title_line,
         "link": "https://www.linkedin.com/me/profile-views/",
         "summary": summary,
         "source": "linkedin",
@@ -445,9 +464,9 @@ def _build_profile_view_summary(notifications: list[dict]) -> dict | None:
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "_is_notification": True,
         # Tell morning-edition's low-signal filter to pass this through.
-        # The summary body lists individual viewers alongside "viewed
-        # your profile", which would otherwise trip the substring
-        # blacklist and drop the rollup this function exists to build.
+        # The summary body may list anonymous descriptors containing
+        # "at {Company}" — harmless, but the title_line itself stays
+        # clear of the "viewed your profile" / "profile view" blacklist.
         "_exempt_low_signal": True,
     }
 
