@@ -405,8 +405,19 @@ def _render_notification_headline(item: dict) -> str:
     buries the actual who/what. Instead, show the raw notification
     text (already contains name + action) with a time-ago suffix, no
     LLM pass.
+
+    For rollup-shape items (the profile-view rollup has a short title
+    like '👁️ Profile visitors — last 24h (3)' AND a multi-line
+    bulleted summary), prefix the title so the rendered block shows
+    both the header and the per-viewer lines. Single-line notifs keep
+    the summary-only shape.
     """
-    text = (item.get("summary") or item.get("title") or "").strip()
+    title = (item.get("title") or "").strip()
+    summary = (item.get("summary") or "").strip()
+    if title and "\n" in summary:
+        text = f"{title}\n{summary}"
+    else:
+        text = summary or title
     # LinkedIn notification text often trails a "See more" or
     # "View all" CTA. Strip trailing CTAs so the rendered line is
     # just the substantive bit.

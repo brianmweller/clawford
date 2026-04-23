@@ -481,7 +481,12 @@ def _build_profile_view_summary(notifications: list[dict]) -> dict | None:
         "link": "https://www.linkedin.com/me/profile-views/",
         "summary": summary,
         "source": "linkedin",
-        "source_label": "LinkedIn Notification",
+        # No source_label: the category header '🔔 LinkedIn Notifications'
+        # already conveys the source. Leaving it as "LinkedIn Notification"
+        # causes the renderer to tack `— LinkedIn Notification` onto the
+        # last bullet line, visually attaching the label to the final
+        # viewer's time_ago.
+        "source_label": "",
         "pub_date": datetime.now(timezone.utc).isoformat(),
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "_is_notification": True,

@@ -454,6 +454,44 @@ def test_render_notification_headline_no_time_ago(mod):
     assert "()" not in out
 
 
+def test_render_notification_headline_prefixes_title_for_rollup(mod):
+    """The profile-view rollup has a short title ('👁️ Profile visitors —
+    last 24h (3)') and a multi-line bulleted summary. Rendering only
+    the summary loses the count/header; rendering only the title loses
+    the per-viewer data. For rollup-shape items (title present AND
+    summary contains newlines), combine them as `{title}\\n{summary}`
+    so Telegram shows:
+        19. 👁️ Profile visitors — last 24h (3)
+        • Alice — 2h
+        • Bob — 5h
+    """
+    notif = {
+        "title": "\U0001f441️ Profile visitors — last 24h (2)",
+        "summary": "• Alice — 2h\n• Bob — 5h",
+        "time_ago": "",
+        "_is_notification": True,
+        "source": "linkedin",
+    }
+    out = mod._render_notification_headline(notif)
+    assert out == (
+        "\U0001f441️ Profile visitors — last 24h (2)\n"
+        "• Alice — 2h\n• Bob — 5h"
+    ), repr(out)
+
+
+def test_render_notification_headline_single_line_summary_unchanged(mod):
+    """Non-rollup notifications (single-line summary) keep the existing
+    shape — no title prefix. Avoids leaking 'Omar reacted\\nOmar reacted
+    to your post'."""
+    notif = {
+        "title": "Omar reacted",
+        "summary": "Omar reacted to your post",
+        "time_ago": "3h",
+    }
+    out = mod._render_notification_headline(notif)
+    assert out == "Omar reacted to your post (3h)"
+
+
 # ─── build_prompt ────────────────────────────────────────────────────
 
 
