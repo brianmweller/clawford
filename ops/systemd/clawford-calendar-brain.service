@@ -1,0 +1,18 @@
+[Unit]
+Description=Clawford shared calendar brain — syncToken listener
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/home/openclaw/clawford/.env
+ExecStartPre=/usr/bin/test ! -f /home/openclaw/.clawford/calendar-brain-disabled
+ExecStart=/usr/bin/python3 /home/openclaw/repo/agents/shared/scripts/calendar-brain-listener.py --interval 60
+WorkingDirectory=/home/openclaw/repo
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/home/openclaw/.clawford/logs/calendar-brain.log
+StandardError=append:/home/openclaw/.clawford/logs/calendar-brain.log
+
+[Install]
+WantedBy=default.target

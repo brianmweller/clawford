@@ -71,12 +71,42 @@ def _user_today() -> date:
 
 
 def _run_gcal_fetch(start_date: str, days: int) -> dict:
-    """Invoke the existing gcal-fetch.py script as subprocess and parse
-    its JSON stdout. Passes --skip-meetings so Mistress Mouse's view
-    EXCLUDES anything linked to Sergeant Murphy's Workflowy prep notes
-    — the Mouse↔Murphy boundary is enforced at fetch time, not by
-    the LLM. Events without a Workflowy link stay in, events with one
-    get routed to Murphy only."""
+    """Return fresh calendar events for Mouse.
+
+    Prefers the shared calendar brain at ``~/.clawford/calendar-brain/
+    calendar-brain.json``. Brain reads are filtered by
+    ``owner="mistress-mouse"`` so Murphy's meetings stay in Murphy's
+    lane — this replaces the legacy ``--skip-meetings`` subprocess
+    flag. Falls back to the legacy subprocess if the brain is stale
+    (>10 min), missing, or disabled via
+    ``~/.clawford/calendar-brain-read-disabled``."""
+    # --- Brain-preferred path ---------------------------------------------
+    try:
+        from calendar_brain import read_brain_if_fresh  # type: ignore
+        payload = read_brain_if_fresh(
+            os.path.expanduser(
+                "~/.clawford/calendar-brain/calendar-brain.json"
+            ),
+            owner="mistress-mouse",
+            date=start_date, days=days,
+        )
+    except Exception:  # noqa: BLE001
+        payload = None
+    if payload is not None:
+        return {
+            "status": "ok",
+            "date": start_date,
+            "days": days,
+            "events": payload.get("events") or [],
+            "errors": [],
+            "conflicts": [],
+            "skip_meetings": True,
+            "skipped_meetings_count": 0,
+            "fetched_via": "brain",
+            "fetched_at": payload.get("generated_at"),
+        }
+
+    # --- Legacy subprocess fallback --------------------------------------
     if not os.path.exists(GCAL_FETCH_SCRIPT):
         return {"error": f"gcal-fetch.py not found at {GCAL_FETCH_SCRIPT}"}
     try:
@@ -95,6 +125,7 @@ def _run_gcal_fetch(start_date: str, days: int) -> dict:
 
     parsed = parse_script_stdout(proc.stdout or "")
     if isinstance(parsed, dict):
+        parsed.setdefault("fetched_via", "subprocess")
         return parsed
     return {"error": "gcal-fetch produced non-JSON output", "stdout": (proc.stdout or "")[:500]}
 

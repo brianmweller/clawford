@@ -121,18 +121,42 @@ def _user_today() -> date:
 
 
 def _run_gcal_fetch(start_date: str, days: int) -> dict:
-    """Live gcal-fetch subprocess. See family-calendar/tools.py for why
-    we don't trust the per-day cache files directly — they're keyed
-    by fetch start date with multi-day windows inside, which mismatches
-    the 'query by day' shape the LLM tools want.
+    """Return fresh calendar events for Murphy.
 
-    Parses stdout via ``parse_script_stdout`` so the SCRIPT_CONTRACT
-    dual-envelope tail (data object + trailing ``{"status": "ok"}``)
-    round-trips as the data object. Regression: 2026-04-22 — the
-    prior naive ``json.loads(proc.stdout)`` turned every contract-
-    compliant fetch into ``gcal-fetch non-JSON output`` silently,
-    which in turn made the day-only on-demand fetch retry a no-op
-    and the operator's 'Coinbase for tomorrow' fell through to not_found."""
+    Prefers the shared calendar brain at ``~/.clawford/calendar-brain/
+    calendar-brain.json`` — one writer (the listener daemon + daily
+    rebuild), both agents read. If the brain is missing, stale (>10
+    min old), or the rollback marker
+    ``~/.clawford/calendar-brain-read-disabled`` is present, falls back
+    to the legacy subprocess call to ``gcal-fetch.py``.
+
+    Return shape is unchanged: ``{status, date, days, events, errors,
+    fetched_at, error?}``. Callers never need to know which path fired
+    (the ``fetched_via`` field distinguishes for debugging)."""
+    # --- Brain-preferred path ---------------------------------------------
+    try:
+        from calendar_brain import read_brain_if_fresh  # type: ignore
+        payload = read_brain_if_fresh(
+            os.path.expanduser(
+                "~/.clawford/calendar-brain/calendar-brain.json"
+            ),
+            owner="sergeant-murphy",
+            date=start_date, days=days,
+        )
+    except Exception:  # noqa: BLE001 — any import/read failure → fallback
+        payload = None
+    if payload is not None:
+        return {
+            "status": "ok",
+            "date": start_date,
+            "days": days,
+            "events": payload.get("events") or [],
+            "errors": [],
+            "fetched_via": "brain",
+            "fetched_at": payload.get("generated_at"),
+        }
+
+    # --- Legacy subprocess fallback --------------------------------------
     if not os.path.exists(GCAL_FETCH_SCRIPT):
         return {"error": f"gcal-fetch.py not found at {GCAL_FETCH_SCRIPT}"}
     try:
@@ -151,6 +175,7 @@ def _run_gcal_fetch(start_date: str, days: int) -> dict:
 
     parsed = subprocess_helpers.parse_script_stdout(proc.stdout or "")
     if isinstance(parsed, dict):
+        parsed.setdefault("fetched_via", "subprocess")
         return parsed
     return {"error": "gcal-fetch non-JSON output", "stdout": (proc.stdout or "")[:500]}
 

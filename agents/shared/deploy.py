@@ -1197,6 +1197,7 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "availability.py",       # 2026-04-19 — free-slot calculator for draft-compose
     "brain.py",
     "brain_index.py",         # 2026-04-20 — per-subject _index.json for fast fact lookup
+    "company_research.py",    # 2026-04-22 — fleet-shared company enrichment (Brave + Codex) for Huckle cold-recruiter drafting + Murphy recruiter-meeting prep
     "brain_tasks.py",         # 2026-04-18 — task-queue parser + in-place editors for Mouse
     "camoufox_proxy.py",
     "context_builder.py",     # 2026-04-19 — RecipientContext assembler for draft-compose
@@ -1215,6 +1216,8 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "inbound_scanner.py",    # P0.4 — scan_inbound() + semantic_guard()
     "isolation.py",          # P1.2 — bubblewrap argv builder
     "calendar_index.py",      # 2026-04-18 — shared brain calendar index reader
+    "calendar_brain.py",      # 2026-04-23 — shared event brain reader/writer (listener-fed cache Murphy+Mouse both consume)
+    "calendar_fetch.py",      # 2026-04-23 — shared Google Calendar API lib + normalize_event
     "llm.py",
     "meeting_classifier.py",  # 2026-04-18 — Murphy/Mouse routing predicate
     "memory_writer.py",
@@ -1231,6 +1234,7 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "scan_fields.py",        # P0.4 — wire-in helper (per-agent ingest)
     "fuzzy_resolver.py",     # 2026-04-22 — generic operator-descriptor → opaque-id matching
     "recruiter_domains.py",  # 2026-04-22 — fleet-shared ATS/retained-search domain set
+    "recruiter_extract_lib.py",  # 2026-04-22 — extract {company, role} from recruiter emails for Huckle/Murphy company-research pipeline
     "self_profile.py",       # 2026-04-21 — the operator's professional brain loader for Huckle cold-recruiter drafting
     "state_introspection.py",  # 2026-04-20 — host-cron log parser for get_recent_runs
     "subprocess_helpers.py",
