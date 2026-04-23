@@ -6,7 +6,7 @@ live in the separate email thread that introduced the meeting. This
 module searches the authenticated user's Gmail for messages that share
 a strong signal with the calendar event (Google Meet URL, company
 token, first-name hint), and returns the first non-operator sender's
-parsed {name, email}.
+parsed {name, email, email_source}.
 
 Usage:
     from agents.shared.gmail_recruiter_lookup import resolve_recruiter_from_gmail
@@ -16,7 +16,12 @@ Usage:
         first_name_hint="Abby",
         operator_emails={"sam.smith@example.com"},
     )
-    # result: {"name": "Abby Mintert", "email": "abby@coinbase.com"} or None
+    # Direct address:
+    #   {"name": "Abby Mintert", "email": "abby@coinbase.com",
+    #    "email_source": "direct"}
+    # LinkedIn InMail relay (unreachable for outbound):
+    #   {"name": "Abby Mintert", "email": "inmail-hit-reply@linkedin.com",
+    #    "email_source": "linkedin_relay"}
 
 Search precedence (strongest signal first):
   1. Google Meet URL scraped from event.description — unique identifier.
@@ -26,6 +31,13 @@ Search precedence (strongest signal first):
 Only the From: header is parsed; To / Cc / Bcc are ignored. Messages
 where the From: address belongs to the operator (operator_emails) are
 skipped so we don't pull the operator's own forwarded notes.
+
+``email_source`` signals whether ``email`` is usable for outbound.
+``"direct"`` = reachable; ``"linkedin_relay"`` = the LinkedIn InMail
+obfuscated address (`*@linkedin.com`) that only forwards replies
+through LinkedIn's notification system. Downstream tools (draft-
+compose, person-file writers) should treat relay addresses as
+display-only and not as a reachable email.
 """
 from __future__ import annotations
 
@@ -112,6 +124,20 @@ def _name_matches_first(name: str, first_name_hint: str) -> bool:
     return first_token == hint
 
 
+_LINKEDIN_RELAY_RE = re.compile(r"@([a-z0-9-]+\.)?linkedin\.com$", re.IGNORECASE)
+
+
+def _classify_email_source(email: str) -> str:
+    """Return 'linkedin_relay' for LinkedIn InMail relay addresses
+    (inmail-hit-reply@linkedin.com, hit-reply@linkedin.com, any
+    subdomain of linkedin.com), else 'direct'. Relay addresses only
+    forward through LinkedIn's notification system — they're not
+    reachable for ordinary outbound email."""
+    if not email:
+        return "direct"
+    return "linkedin_relay" if _LINKEDIN_RELAY_RE.search(email) else "direct"
+
+
 def _best_sender_match(
     service,
     message_ids: list[str],
@@ -119,9 +145,17 @@ def _best_sender_match(
     operator_emails: set[str],
 ) -> dict | None:
     """Walk message ids newest-first, return the first non-the operator sender
-    whose display-name first token matches the hint. Stops as soon as
-    one matches so we don't iterate the entire window."""
+    whose display-name first token matches the hint. Prefers a
+    ``direct`` address over a ``linkedin_relay`` one when both appear
+    in the result set — relays come back with the right NAME but only
+    forward replies through LinkedIn's notification system, so any
+    non-relay match from the same resolver is strictly more useful.
+
+    Stops walking after the first direct hit; if only relay hits
+    appear, returns the newest relay match (still valuable for the
+    display name / Workflowy title use case)."""
     brian_lc = {a.strip().lower() for a in (operator_emails or set()) if a}
+    relay_fallback: dict | None = None
     for mid in message_ids:
         header = _fetch_from_header(service, mid)
         name, email = _parse_from_header(header)
@@ -132,9 +166,17 @@ def _best_sender_match(
             # can still be useful if the local-part matches the hint —
             # but we can't recover a LAST name from it, so skip.
             continue
-        if _name_matches_first(name, first_name_hint):
-            return {"name": name, "email": email}
-    return None
+        if not _name_matches_first(name, first_name_hint):
+            continue
+        source = _classify_email_source(email)
+        if source == "direct":
+            return {"name": name, "email": email, "email_source": "direct"}
+        if relay_fallback is None:
+            relay_fallback = {
+                "name": name, "email": email,
+                "email_source": "linkedin_relay",
+            }
+    return relay_fallback
 
 
 def resolve_recruiter_from_gmail(

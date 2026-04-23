@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from agents.shared.gmail_recruiter_lookup import (
+    _classify_email_source,
     _extract_company_token,
     _extract_meet_url,
     _name_matches_first,
@@ -154,7 +155,8 @@ def test_resolve_uses_meet_url_first_and_finds_abby():
         operator_emails={"sam.smith@example.com"},
     )
 
-    assert result == {"name": "Abby Mintert", "email": "abby@coinbase.com"}
+    assert result == {"name": "Abby Mintert", "email": "abby@coinbase.com",
+                      "email_source": "direct"}
     # Meet URL was tried first — no need to fall through to company search.
     assert service.queries[0] == f'"{meet}"'
 
@@ -177,7 +179,8 @@ def test_resolve_falls_through_to_company_then_firstname():
         service=service, event=event, first_name_hint="Abby",
         operator_emails={"sam.smith@example.com"},
     )
-    assert result == {"name": "Abby Mintert", "email": "abby@coinbase.com"}
+    assert result == {"name": "Abby Mintert", "email": "abby@coinbase.com",
+                      "email_source": "direct"}
     # No Meet URL → no Meet-URL query. First query fired should be the
     # first-name + company tier.
     assert service.queries[0] == '"Abby" "Coinbase" newer_than:30d'
@@ -201,7 +204,8 @@ def test_resolve_skips_messages_from_brian():
         service=service, event=event, first_name_hint="Abby",
         operator_emails={"sam.smith@example.com"},
     )
-    assert result == {"name": "Abby Mintert", "email": "abby@coinbase.com"}
+    assert result == {"name": "Abby Mintert", "email": "abby@coinbase.com",
+                      "email_source": "direct"}
 
 
 def test_resolve_returns_none_when_no_match():
@@ -234,6 +238,68 @@ def test_resolve_short_circuits_on_empty_hint():
     )
     assert result is None
     assert service.queries == []
+
+
+def test_classify_email_source_flags_linkedin_relay():
+    assert _classify_email_source("inmail-hit-reply@linkedin.com") == "linkedin_relay"
+    assert _classify_email_source("hit-reply@linkedin.com") == "linkedin_relay"
+    assert _classify_email_source("messaging@notifications.linkedin.com") == "linkedin_relay"
+    assert _classify_email_source("abby@coinbase.com") == "direct"
+    assert _classify_email_source("abby@LINKEDIN.com") == "linkedin_relay"  # case-insensitive
+    assert _classify_email_source("") == "direct"
+
+
+def test_resolve_flags_linkedin_relay_source():
+    """LinkedIn InMail arrives as 'From: Abby Mintert <inmail-hit-
+    reply@linkedin.com>'. The resolver must tag email_source so
+    downstream code knows not to treat it as a reachable address."""
+    meet = "https://meet.google.com/cww-njwm-ksx"
+    event = {
+        "summary": "Interview with Coinbase",
+        "description": f"Google Meet: {meet}\n\nBest,\nAbby",
+    }
+    service = _StubGmail(
+        list_responses={f'"{meet}"': ["msg-linkedin"]},
+        headers={"msg-linkedin": '"Abby Mintert" <inmail-hit-reply@linkedin.com>'},
+    )
+    result = resolve_recruiter_from_gmail(
+        service=service, event=event, first_name_hint="Abby",
+        operator_emails={"sam.smith@example.com"},
+    )
+    assert result == {
+        "name": "Abby Mintert",
+        "email": "inmail-hit-reply@linkedin.com",
+        "email_source": "linkedin_relay",
+    }
+
+
+def test_resolve_prefers_direct_over_linkedin_relay():
+    """If the query returns both a LinkedIn InMail relay and a direct
+    work-email match for the same person, prefer the direct one —
+    relays only forward through LinkedIn's notification system, so
+    outbound drafts using the relay address never reach the recruiter."""
+    event = {
+        "summary": "Interview with Coinbase",
+        "description": "Best,\nAbby",
+    }
+    service = _StubGmail(
+        list_responses={
+            '"Abby" "Coinbase" newer_than:30d': ["msg-linkedin", "msg-direct"],
+        },
+        headers={
+            "msg-linkedin": '"Abby Mintert" <inmail-hit-reply@linkedin.com>',
+            "msg-direct": '"Abby Mintert" <abby@coinbase.com>',
+        },
+    )
+    result = resolve_recruiter_from_gmail(
+        service=service, event=event, first_name_hint="Abby",
+        operator_emails=set(),
+    )
+    assert result == {
+        "name": "Abby Mintert",
+        "email": "abby@coinbase.com",
+        "email_source": "direct",
+    }
 
 
 def test_resolve_rejects_first_name_prefix_false_match():
