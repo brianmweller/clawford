@@ -165,17 +165,25 @@ def test_format_brief_renders_professional_prep_when_meeting_type_set(
     }
     prep_lookup = {"evt-today-1": prep}
     body = mod.format_brief(gcal_today["events"], None, prep_lookup, tuesday_pacific)
+
+    # Compact header: type + target + stage + one-line summary + pointer.
     assert "recruiter-screen" in body
     assert "Anthropic" in body
     assert "hiring-manager" in body
     assert "First recruiter screen" in body
-    assert "Michelle needs" in body
-    assert "Evaluate match" in body
-    assert "marketplace causal-science" in body
-    assert "AI safety" in body
-    assert "safety org" in body
-    assert "FLEX operating model" in body
-    assert "reporting line" in body
+    assert "Full prep in Workflowy" in body
+
+    # Full prep block MUST stay out of the brief — Workflowy owns it.
+    # Regression guard for the 2026-04-23 verbose-brief report.
+    assert "Michelle needs" not in body
+    assert "marketplace causal-science" not in body
+    assert "safety org" not in body
+    assert "FLEX operating model" not in body
+    assert "reporting line" not in body
+    assert "Pitch:" not in body
+    assert "Drop-in evidence" not in body
+    assert "Ask:" not in body
+    assert "Red flags" not in body
 
 
 def test_format_brief_general_meeting_keeps_existing_shape(

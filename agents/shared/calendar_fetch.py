@@ -200,6 +200,9 @@ def normalize_event(
 
         "has_video_link": classification["has_video_link"],
         "in_workflowy": classification["in_workflowy"],
+        "organizer_is_recruiter": classification.get(
+            "organizer_is_recruiter", False
+        ),
         "is_meeting": classification["is_meeting"],
         "owner": classification["owner"],
 

@@ -141,10 +141,18 @@ _MEETING_TYPE_EMOJI = {
 
 
 def _fmt_professional_prep(m: dict) -> list[str]:
-    """Render the professional-prep block for a meeting whose
-    meeting_type != 'general'. Falls through to the generic renderer
-    (caller's responsibility) when llm_prep carries an error — the
-    self_context header is still useful on its own."""
+    """Render the compact professional-prep header for a meeting whose
+    meeting_type != 'general'.
+
+    The Telegram brief renders a glance-view only: type badge, target
+    company, pipeline stage, and one-line ``prep_summary`` thesis from
+    the LLM. The full 8-field prep block (pitch, evidence, evaluation
+    questions, red flags, …) lives in Workflowy — ``tools.py::prep_meeting``
+    pushes it onto the meeting node's Agenda, which is where the operator
+    reads it before walking into the room. Dumping all 8 fields into
+    the Telegram brief was the 2026-04-23 regression: the morning
+    brief scrolled for half a page per interview and drowned the rest
+    of the day. Keep this renderer narrow."""
     lines: list[str] = []
     meeting_type = m.get("meeting_type", "")
     emoji = _MEETING_TYPE_EMOJI.get(meeting_type, "\U0001f4bc")  # 💼
@@ -162,51 +170,11 @@ def _fmt_professional_prep(m: dict) -> list[str]:
     lines.append("   " + " · ".join(header_bits))
 
     llm_prep = m.get("llm_prep") or {}
-    if "error" in llm_prep:
-        # LLM call failed — surface the header only and let the generic
-        # commit_summary path (if any) render underneath.
-        return lines
-
-    prep_summary = (llm_prep.get("prep_summary") or "").strip()
-    if prep_summary:
-        lines.append(f"   {prep_summary}")
-
-    objective = (llm_prep.get("objective") or "").strip()
-    if objective:
-        lines.append(f"   \U0001f3af Objective: {objective}")
-
-    recipient = (llm_prep.get("recipient_model") or "").strip()
-    if recipient:
-        lines.append(f"   \U0001f91d They need: {recipient}")
-
-    fit_pitch = (llm_prep.get("fit_pitch") or "").strip()
-    if fit_pitch:
-        lines.append("   \U0001f3a4 Pitch:")
-        lines.append(f"     {fit_pitch}")
-
-    compelling = (llm_prep.get("compelling_angle") or "").strip()
-    if compelling:
-        lines.append(f"   ✨ Why this: {compelling}")
-
-    evidence = (llm_prep.get("fit_evidence")
-                or llm_prep.get("talking_points") or [])
-    if evidence:
-        lines.append("   \U0001f4e2 Drop-in evidence:")
-        for e in evidence[:3]:
-            lines.append(f"     • {e}")
-
-    questions = (llm_prep.get("evaluation_questions")
-                 or llm_prep.get("questions_to_ask") or [])
-    if questions:
-        lines.append("   \U0001f4ac Ask:")
-        for q in questions[:3]:
-            lines.append(f"     • {q}")
-
-    flags = llm_prep.get("red_flags") or []
-    if flags:
-        lines.append("   \U0001f6a9 Red flags:")
-        for f in flags[:3]:
-            lines.append(f"     • {f}")
+    if "error" not in llm_prep:
+        prep_summary = (llm_prep.get("prep_summary") or "").strip()
+        if prep_summary:
+            lines.append(f"   {prep_summary}")
+        lines.append("   \U0001f4c4 Full prep in Workflowy")
 
     return lines
 

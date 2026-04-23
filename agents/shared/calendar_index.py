@@ -24,6 +24,16 @@ import json
 from pathlib import Path
 
 from agents.shared.meeting_classifier import has_videoconference_link
+from agents.shared.recruiter_domains import is_recruiter_domain
+
+
+def _organizer_email(raw_event: dict) -> str:
+    org = raw_event.get("organizer")
+    if isinstance(org, str):
+        return org
+    if isinstance(org, dict):
+        return str(org.get("email") or "")
+    return ""
 
 
 def classify_event(
@@ -44,18 +54,30 @@ def classify_event(
         "calendar_id": str,
         "has_video_link": bool,
         "in_workflowy": bool,
+        "organizer_is_recruiter": bool,
         "is_meeting": bool,
         "owner": "sergeant-murphy" | "mistress-mouse",
       }
 
-    Rule (2026-04-18, after the operator's correction): meeting iff the event
-    has a videoconference link (physical signal) OR the operator has linked
-    it in Workflowy (human-in-the-loop override — e.g. a coffee chat
-    worth coaching on, or an in-person sync with no meet link). The
-    Workflowy tag always wins for promotion: an event the operator
-    deliberately flagged is Murphy's even without a video link.
-    `workflowy_event_ids` is populated from Murphy's workflowy-links.json
-    cache by the builder; pass an empty set when the cache is missing.
+    Routing rule (current, after 2026-04-23 phone-interview fix):
+    ``is_meeting`` iff ANY of:
+
+      - The event has a videoconference link (physical signal).
+      - the operator has linked it in Workflowy (human-in-the-loop override).
+      - The organizer's domain is a known ATS / scheduling platform
+        (``schedule@interview.adobe.com``, ``no-reply@recruiting.amazon.com``,
+        etc.). Covers phone-only or in-person recruiter interviews that
+        Murphy owns by product intent but that would otherwise fail
+        the video-link test and misroute to Mouse. 2026-04-23: the
+        Adobe "Meeting Confirmation - Sam Smith" (phone screen,
+        organizer ``schedule@interview.adobe.com``, no video) was
+        landing on Mouse's morning brief until this arm was added.
+
+    The Workflowy tag always wins for promotion when present:
+    ``in_workflowy`` flags events the operator has deliberately flagged for
+    coaching. ``workflowy_event_ids`` is populated from Murphy's
+    ``workflowy-links.json`` cache by the builder; pass an empty set
+    when the cache is missing.
     """
     if not isinstance(raw_event, dict):
         raw_event = {}
@@ -69,7 +91,8 @@ def classify_event(
     has_video = has_videoconference_link(raw_event)
     wf_ids = workflowy_event_ids or set()
     in_workflowy = raw_event.get("id", "") in wf_ids
-    is_meeting = has_video or in_workflowy
+    organizer_is_recruiter = is_recruiter_domain(_organizer_email(raw_event))
+    is_meeting = has_video or in_workflowy or organizer_is_recruiter
 
     return {
         "id": raw_event.get("id", ""),
@@ -80,6 +103,7 @@ def classify_event(
         "calendar_id": calendar_id,
         "has_video_link": has_video,
         "in_workflowy": in_workflowy,
+        "organizer_is_recruiter": organizer_is_recruiter,
         "is_meeting": is_meeting,
         "owner": "sergeant-murphy" if is_meeting else "mistress-mouse",
     }

@@ -221,6 +221,45 @@ def test_normalize_workflowy_tag_promotes_event_to_meeting():
     assert out["owner"] == "sergeant-murphy"
 
 
+def test_normalize_ats_organizer_routes_to_murphy():
+    """Phone-only recruiter invite — no video link, no Workflowy tag,
+    but organizer is an ATS/scheduling domain
+    (``schedule@interview.adobe.com``). Must route to Murphy.
+    Regression target: 2026-04-23 — 'Meeting Confirmation - Sam Smith'
+    (Adobe phone screen) was landing on Mouse's morning brief because
+    the classifier only looked at video link + Workflowy tag and
+    ignored the organizer domain, even though Murphy's prep path
+    already recognised ATS organisers."""
+    raw = {
+        "id": "evt_adobe_phone",
+        "summary": "Meeting Confirmation - Sam Smith",
+        "start": {"dateTime": "2026-04-23T14:45:00-07:00"},
+        "end": {"dateTime": "2026-04-23T15:15:00-07:00"},
+        "attendees": [],
+        "organizer": {"email": "schedule@interview.adobe.com"},
+        "location": "phone: 216-469-2610",
+        "description": "Adobe Leadership Chat — phone screen.",
+        "status": "confirmed",
+    }
+    out = normalize_event(raw, calendar_id="sam.smith@example.com")
+    assert out["has_video_link"] is False
+    assert out["in_workflowy"] is False
+    assert out["organizer_is_recruiter"] is True
+    assert out["is_meeting"] is True
+    assert out["owner"] == "sergeant-murphy"
+
+
+def test_normalize_non_ats_organizer_does_not_promote():
+    """Regression guard: a random non-ATS organizer (friend, family,
+    colleague) must NOT route to Murphy via the ATS-organizer arm."""
+    raw = _raw_in_person_no_link()
+    raw["organizer"] = {"email": "friend@example.com"}
+    out = normalize_event(raw, calendar_id="cal")
+    assert out["organizer_is_recruiter"] is False
+    assert out["is_meeting"] is False
+    assert out["owner"] == "mistress-mouse"
+
+
 def test_normalize_missing_fields_defaults():
     """Sparse raw event — defaults shouldn't blow up."""
     out = normalize_event({"id": "evt_sparse"}, calendar_id="cal")
