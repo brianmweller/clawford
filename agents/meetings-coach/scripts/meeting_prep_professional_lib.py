@@ -198,6 +198,45 @@ def _title_has_any_keyword(title: str, keywords: set[str]) -> bool:
     return any(kw in t for kw in keywords)
 
 
+# Description signals that the operator booked a recruiter-initiated meeting
+# himself after an external cold-outreach (usually LinkedIn). Matched
+# via a regex set rather than substring soup so "recruiter" as part of
+# "recruiterly" etc. doesn't false-match. Requires both a
+# hiring-process title keyword AND one of these description matches
+# before classifying, so ordinary social meetings that happen to
+# mention LinkedIn don't fire.
+_RECRUITER_DESCRIPTION_PATTERNS = (
+    re.compile(r"\brecruiter\b", re.IGNORECASE),
+    re.compile(r"\bsourcer\b", re.IGNORECASE),
+    re.compile(
+        r"\blinkedin\b[\s\S]{0,120}?\b("
+        r"follow[- ]?up|following up|connect|chat|opportunity|role|"
+        r"conversation|message|reach(?:ed)? out|in touch"
+        r")\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(follow[- ]?up|following up|reach(?:ed)? out)\b[\s\S]{0,60}?"
+        r"\blinkedin\b",
+        re.IGNORECASE,
+    ),
+)
+
+
+def _description_has_recruiter_pattern(event: dict) -> bool:
+    """True if the event description carries language characteristic
+    of a recruiter cold-outreach that ended with the candidate booking
+    the meeting themselves. Canonical shape (2026-04-22 Coinbase):
+    'Following up on our LinkedIn conversation!'"""
+    desc = event.get("description") or ""
+    if not desc:
+        return False
+    for pat in _RECRUITER_DESCRIPTION_PATTERNS:
+        if pat.search(desc):
+            return True
+    return False
+
+
 def classify_meeting_type(
     event: dict,
     attendees_resolved: list[dict],
@@ -239,6 +278,16 @@ def classify_meeting_type(
     title = event.get("summary", "")
     if (_title_has_any_keyword(title, _HIRING_TITLE_KEYWORDS)
             and _any_attendee_is_known(attendees_resolved)):
+        return "recruiter-screen"
+
+    # 5. Self-booked cold-recruiter pattern: the operator saw a LinkedIn DM,
+    #    booked the meeting himself, so he's the organizer and the
+    #    only recruiter signal lives in the description body.
+    #    Requires BOTH a hiring-title keyword AND a recruiter-pattern
+    #    description match so ordinary social meetings that happen to
+    #    mention LinkedIn don't get dragged in.
+    if (_title_has_any_keyword(title, _HIRING_TITLE_KEYWORDS)
+            and _description_has_recruiter_pattern(event)):
         return "recruiter-screen"
 
     return "general"

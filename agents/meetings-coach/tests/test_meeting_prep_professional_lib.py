@@ -202,6 +202,81 @@ def test_classify_title_keyword_without_person_file_stays_general():
 
 
 # ---------------------------------------------------------------------------
+# classify_meeting_type — self-booked cold-recruiter pattern
+# ---------------------------------------------------------------------------
+
+
+def test_classify_self_booked_linkedin_followup_is_recruiter_screen():
+    """Cold recruiter reached out on LinkedIn, the operator booked the meeting
+    himself → he's the organizer, no attendees on the invite, and the
+    only recruiter signal lives in the description body.
+
+    Regression: 2026-04-22 'Interview with Coinbase' organized by
+    sam.smith@example.com with zero attendees and a description
+    reading 'Following up on our LinkedIn conversation!' was
+    classified 'general', so meeting-prep skipped build_llm_prep and
+    Murphy had no structured prep to push."""
+    profile = _profile_with_targets_and_pipeline()
+    event = _event(
+        summary="Interview with Coinbase",
+        description=(
+            "Hi the operator,\n\nFollowing up on our LinkedIn conversation! "
+            "Looking forward to connecting tomorrow 4/23 at 12:30pm. "
+            "I've sent a calendar invite and a Google Meet link.\n\n"
+            "Best,\nAbby"
+        ),
+        attendees=[],
+    )
+    event["organizer"] = "sam.smith@example.com"
+    assert lib.classify_meeting_type(event, [], profile) == "recruiter-screen"
+
+
+def test_classify_self_booked_explicit_recruiter_keyword():
+    """Description says 'recruiter' explicitly + title has hiring
+    keyword → recruiter-screen even with no attendees."""
+    profile = _profile_with_targets_and_pipeline()
+    event = _event(
+        summary="Intro call with Globex",
+        description="I'm a recruiter at Globex and would love to connect "
+                    "about an open ML leadership role.",
+        attendees=[],
+    )
+    event["organizer"] = "sam.smith@example.com"
+    assert lib.classify_meeting_type(event, [], profile) == "recruiter-screen"
+
+
+def test_classify_linkedin_mention_without_hiring_title_stays_general():
+    """Regression guard: mentioning LinkedIn in the description alone
+    must NOT fire recruiter-screen. Requires BOTH a hiring-process
+    title keyword AND a recruiter-pattern description signal, so
+    'Coffee with Sarah' + 'saw your LinkedIn post' stays general."""
+    profile = _profile_with_targets_and_pipeline()
+    event = _event(
+        summary="Coffee with Sarah",
+        description="Saw your LinkedIn post about causal inference — "
+                    "would love to chat.",
+        attendees=[],
+    )
+    event["organizer"] = "sam.smith@example.com"
+    assert lib.classify_meeting_type(event, [], profile) == "general"
+
+
+def test_classify_hiring_title_without_recruiter_description_stays_general():
+    """Regression guard: 'Interview prep' with a neutral description
+    must not fire recruiter-screen. The cold-recruiter pattern needs
+    BOTH signals to avoid pulling internal prep sessions into the
+    professional-meeting path."""
+    profile = _profile_with_targets_and_pipeline()
+    event = _event(
+        summary="Interview practice",
+        description="Running through the case with Jamie before Thursday.",
+        attendees=[],
+    )
+    event["organizer"] = "sam.smith@example.com"
+    assert lib.classify_meeting_type(event, [], profile) == "general"
+
+
+# ---------------------------------------------------------------------------
 # classify_meeting_type — no match
 # ---------------------------------------------------------------------------
 
