@@ -1204,6 +1204,7 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "facts.py",              # 2026-04-19 — fact-file reader + upsert_fact for birthday miner
     "people.py",             # 2026-04-20 — append_observation helper for people-card nudges
     "gmail_api.py",          # 2026-04-19 — Gmail threaded-draft creation + thread_to_compose_inputs
+    "gmail_recruiter_lookup.py",  # 2026-04-22 — cross-reference recruiter full name from Gmail for Murphy's meeting-prep
     "gcal_freebusy.py",      # 2026-04-21 — Calendar freebusy.query wrapper for connector scheduling
     "gmail_watch.py",        # 2026-04-20 — users.watch() wrapper + WatchState for real-time triage
     "pubsub_pull.py",        # 2026-04-20 — Pub/Sub pull/ack helpers for gmail-push-listener
