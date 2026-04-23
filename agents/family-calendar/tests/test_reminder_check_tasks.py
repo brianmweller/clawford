@@ -70,12 +70,12 @@ def _load_script(name: str):
 
 @pytest.fixture
 def rcheck(monkeypatch, tmp_path):
-    # Make sure brain_tasks and task_surfacer resolve
+    # Make sure brain_tasks and task_surfacer_lib resolve
     sys.path.insert(0, str(SHARED_DIR))
     sys.path.insert(0, str(AGENT_DIR))
     monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(tmp_path / "brain"))
     (tmp_path / "brain" / "tasks").mkdir(parents=True)
-    for mod in ("brain", "brain_tasks", "task_surfacer"):
+    for mod in ("brain", "brain_tasks", "task_surfacer_lib"):
         sys.modules.pop(mod, None)
     return _load_script("reminder-check.py")
 

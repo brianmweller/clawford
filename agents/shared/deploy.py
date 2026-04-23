@@ -1276,6 +1276,7 @@ def sync_manifest_structure(
     example_path: Path | str,
     *,
     force_delete: bool = False,
+    dry_run: bool = False,
 ) -> dict:
     """Copy structural fields from manifest.json.example to manifest.json
     while preserving operator-private fields (crons with PII, approvals).
@@ -1289,6 +1290,14 @@ def sync_manifest_structure(
     If manifest.json doesn't exist yet, bootstraps it from .example as a
     fresh copy (operator will fill in crons next).
 
+    state_files carry a second axis of operator-private data: the
+    ``seed_if_absent`` payloads hold real calendar IDs, real provider
+    queries, etc., while .example ships sanitized placeholder stubs so
+    the file remains public-safe. Sync flows state_files *paths*
+    (add/remove) but preserves each existing path's ``seed_if_absent``
+    from the live manifest — only brand-new paths receive the .example
+    stub (operator fills it in during first-run bootstrap).
+
     Guard: when the sync would REMOVE one or more scripts, config_files,
     or state_files from the live manifest (meaning the entry exists in
     actual but is missing from example), the sync refuses to write and
@@ -1297,6 +1306,11 @@ def sync_manifest_structure(
     guard was added 2026-04-20 after a sync silently dropped three
     legitimate scripts that were present in the live manifest but
     missing from .example.
+
+    dry_run=True computes the diff but does not write (or create, in the
+    bootstrap case). The CLI wires this to --dry-run; see 2026-04-23
+    incident where --sync-manifest --dry-run still clobbered live
+    state_files seeds because the flag was never threaded through.
 
     Returns a dict with status + diff description so callers can log
     what changed.
@@ -1351,7 +1365,23 @@ def sync_manifest_structure(
             diff["state_files_added"] = [p for p in after_paths if p not in before_paths]
             diff["state_files_removed"] = [p for p in before_paths if p not in after_paths]
 
-        actual[field] = after
+        if field == "state_files":
+            # Merge by path: preserve the live entry (carries operator
+            # PII in seed_if_absent) for paths present in both; pull the
+            # .example entry (sanitized stub) for brand-new paths; drop
+            # paths not in .example (subject to the removal guard below).
+            existing_by_path = {
+                sf.get("path"): sf for sf in before if isinstance(sf, dict)
+            }
+            merged: list = []
+            for sf in after:
+                if not isinstance(sf, dict):
+                    continue
+                path = sf.get("path")
+                merged.append(existing_by_path.get(path, sf))
+            actual[field] = merged
+        else:
+            actual[field] = after
 
     # Silent-delete guard. If any structural field would lose entries
     # on sync and force_delete wasn't passed, refuse to write. Returning
@@ -1374,6 +1404,9 @@ def sync_manifest_structure(
                 "to proceed"
             ),
         }
+
+    if dry_run:
+        return diff
 
     try:
         actual_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1875,7 +1908,9 @@ def main() -> int:
             actual = REPO_ROOT / "agents" / agent_id / "manifest.json"
             example = REPO_ROOT / "agents" / agent_id / "manifest.json.example"
             result = sync_manifest_structure(
-                actual, example, force_delete=args.force_delete,
+                actual, example,
+                force_delete=args.force_delete,
+                dry_run=_DRY,
             )
             if result.get("status") == "error":
                 log(f"{agent_id}: sync failed — {result.get('error')}", "err")

@@ -224,7 +224,7 @@ def format_brief(
     `week_events` is optional — pass a 7-day list only on Mondays to
     emit the appended WEEK AHEAD section.
     `today_tasks` / `unscheduled_tasks` are ``brain_tasks.Task`` objects
-    surfaced by ``task_surfacer``. Tasks render in a dedicated section
+    surfaced by ``task_surfacer_lib``. Tasks render in a dedicated section
     between the event blocks and the tomorrow preview. The unscheduled
     rollup is Monday-only.
     """
@@ -406,11 +406,11 @@ def run() -> dict:
     unscheduled_tasks: list = []
     try:
         from agents.shared import brain_tasks  # type: ignore
-        import task_surfacer  # type: ignore
+        import task_surfacer_lib  # type: ignore
         all_tasks = brain_tasks.read_tasks()
-        today_tasks = task_surfacer.tasks_for_morning_brief(all_tasks, now_pacific)
+        today_tasks = task_surfacer_lib.tasks_for_morning_brief(all_tasks, now_pacific)
         if now_pacific.weekday() == 0:
-            unscheduled_tasks = task_surfacer.tasks_for_unscheduled_rollup(all_tasks)
+            unscheduled_tasks = task_surfacer_lib.tasks_for_unscheduled_rollup(all_tasks)
     except Exception as e:
         sources_failed.append({"source": "brain_tasks", "error": str(e)})
 

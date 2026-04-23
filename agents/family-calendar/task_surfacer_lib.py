@@ -1,4 +1,4 @@
-"""agents/family-calendar/task_surfacer.py — tier classifier for Mouse.
+"""agents/family-calendar/task_surfacer_lib.py — tier classifier for Mouse.
 
 Pure functions. No I/O, no Telegram, no GCal. Given a task list and a
 ``now``, return which tasks belong in which surface.

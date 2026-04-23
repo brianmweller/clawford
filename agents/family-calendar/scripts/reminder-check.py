@@ -48,12 +48,12 @@ from agents.shared.meeting_classifier import has_videoconference_link  # noqa: E
 from agents.shared.calendar_index import meeting_event_ids  # noqa: E402
 from agents.shared import brain_tasks  # noqa: E402
 
-# Surfacer is deployed to <workspace>/task_surfacer.py via the manifest's
+# Surfacer is deployed to <workspace>/task_surfacer_lib.py via the manifest's
 # scripts[] list (entry has no ``scripts/`` prefix). The top-level shim
-# above put <workspace> on sys.path, so a bare ``import task_surfacer``
+# above put <workspace> on sys.path, so a bare ``import task_surfacer_lib``
 # resolves. Brain_tasks's own sys.path shim (triggered by the import
 # above) ensures ``from brain_tasks import Task`` resolves inside it.
-import task_surfacer  # type: ignore  # noqa: E402
+import task_surfacer_lib  # type: ignore  # noqa: E402
 
 WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")
 REMINDERS_PATH = os.path.join(WORKSPACE, "sent-reminders.json")
@@ -407,7 +407,7 @@ def main():
     except Exception as e:
         print(f"brain_tasks.read_tasks failed: {e}", file=sys.stderr)
         tasks = []
-    task_payloads = task_surfacer.pending_reminders(
+    task_payloads = task_surfacer_lib.pending_reminders(
         tasks, now, already_sent=set(sent_reminders.keys())
     )
     for payload in task_payloads:

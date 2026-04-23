@@ -1,4 +1,4 @@
-"""Tests for agents/family-calendar/task_surfacer.py — tier classifier.
+"""Tests for agents/family-calendar/task_surfacer_lib.py — tier classifier.
 
 The surfacer is Mouse's policy layer on top of the brain's task primitive.
 It takes the raw task list and a ``now`` and returns:
@@ -37,10 +37,10 @@ sys.path.insert(0, str(AGENT_DIR))
 
 def _reload_surfacer():
     for mod in list(sys.modules):
-        if mod in {"task_surfacer", "brain_tasks", "brain"}:
+        if mod in {"task_surfacer_lib", "brain_tasks", "brain"}:
             del sys.modules[mod]
-    import task_surfacer  # type: ignore
-    return task_surfacer
+    import task_surfacer_lib  # type: ignore
+    return task_surfacer_lib
 
 
 PACIFIC = ZoneInfo("America/Los_Angeles")

@@ -28,11 +28,11 @@ AGENT_DIR = REPO_ROOT / "agents" / "family-calendar"
 
 @pytest.fixture
 def mb():
-    # Make brain_tasks and task_surfacer importable for any direct calls
+    # Make brain_tasks and task_surfacer_lib importable for any direct calls
     for p in (str(SHARED_DIR), str(AGENT_DIR)):
         if p not in sys.path:
             sys.path.insert(0, p)
-    for mod in ("brain", "brain_tasks", "task_surfacer", "morning_briefing"):
+    for mod in ("brain", "brain_tasks", "task_surfacer_lib", "morning_briefing"):
         sys.modules.pop(mod, None)
     spec = importlib.util.spec_from_file_location("morning_briefing", SCRIPT)
     module = importlib.util.module_from_spec(spec)
