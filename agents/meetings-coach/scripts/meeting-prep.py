@@ -39,6 +39,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 # --- shared library sys.path shim (pattern from pre-meeting-alert.py) ---
 for _p in Path(__file__).resolve().parents:
@@ -62,7 +63,32 @@ from meeting_prep_professional_lib import (  # noqa: E402
 
 WORKSPACE = os.path.expanduser("~/.clawford/meetings-coach-workspace")
 CACHE_DIR = os.path.join(WORKSPACE, "cache")
+CONFIG_PATH = os.path.join(WORKSPACE, "meeting-config.json")
 BRAIN = os.path.expanduser("~/Dropbox/openclaw-backup")
+
+_DEFAULT_OPERATOR_TZ = "America/Los_Angeles"
+
+
+def _operator_tz() -> ZoneInfo:
+    """Operator wall-clock timezone from meeting-config.json. Falls
+    back to America/Los_Angeles. Cache keys live in operator TZ so
+    'today's prep' matches the operator's wall clock — writes and reads must
+    agree. Regression: 2026-04-22 writer used UTC while workflowy-sync
+    push read PT, so evening pushes found no cache."""
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            cfg = json.load(f)
+        tz_name = (cfg or {}).get("timezone") or _DEFAULT_OPERATOR_TZ
+    except (OSError, json.JSONDecodeError):
+        tz_name = _DEFAULT_OPERATOR_TZ
+    try:
+        return ZoneInfo(tz_name)
+    except Exception:
+        return ZoneInfo(_DEFAULT_OPERATOR_TZ)
+
+
+def _operator_today_str() -> str:
+    return datetime.now(_operator_tz()).strftime("%Y-%m-%d")
 BRAIN_PEOPLE = os.path.join(BRAIN, "people")
 BRAIN_FACTS = os.path.join(BRAIN, "facts")
 BRAIN_COMMITMENTS = os.path.join(BRAIN, "commitments/active.md")
@@ -93,7 +119,7 @@ def parse_args():
 
 def load_today_events():
     """Load cached events for today from gcal-fetch.py output."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = _operator_today_str()
 
     # Try today's cache first
     cache_path = os.path.join(CACHE_DIR, f"events-{today}.json")
@@ -260,7 +286,7 @@ def read_workflowy_agenda(event_id):
 def prep_meeting(event, force=False):
     """Generate prep for a single meeting."""
     event_id = event.get("id", "")
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = _operator_today_str()
 
     # Check cache unless force
     cache_path = os.path.join(CACHE_DIR, f"prep-{event_id}-{today}.json")

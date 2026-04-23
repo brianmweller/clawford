@@ -47,11 +47,26 @@ _INTERVIEWER_PATTERNS = [
 ]
 
 
+# Sign-off patterns for cold-recruiter LinkedIn outreach pattern.
+# Run AFTER the header patterns so explicit "Interviewer:" always
+# wins. Regression target: 2026-04-22 Abby/Coinbase — no header, only
+# "Best,\n\nAbby" at the end of the body.
+_SIGNOFF_PATTERN = re.compile(
+    r"\n\s*(?:Best|Best regards|Kind regards|Regards|Thanks|Thank you|"
+    r"Cheers|Sincerely|Warmly|Warm regards|All the best|Talk soon|"
+    r"Looking forward|Cheers|-{1,2})[,\s]*\n+\s*"
+    r"([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)",
+    re.IGNORECASE,
+)
+
+
 def _extract_interviewer_from_description(description: str) -> str:
     """Return the first recognizable interviewer/host name in a
     description body, or '' if none found. Strips trailing
     parentheticals and commas so 'Alyssa Bonefas (Adobe)' returns
-    'Alyssa Bonefas'."""
+    'Alyssa Bonefas'. Falls back to a sign-off pattern (Best, / Thanks, /
+    Regards, etc. on its own line followed by a name) to cover cold-
+    recruiter LinkedIn outreach where no 'Interviewer:' header exists."""
     if not description:
         return ""
     for pat in _INTERVIEWER_PATTERNS:
@@ -66,6 +81,44 @@ def _extract_interviewer_from_description(description: str) -> str:
         if "," in raw:
             raw = raw.split(",", 1)[0].strip()
         return raw
+    m = _SIGNOFF_PATTERN.search(description)
+    if m:
+        return m.group(1).strip()
+    return ""
+
+
+# Event-title company-extraction patterns. Applied ONLY when no
+# target-company or organizer-ATS signal is available. Strips out
+# noise tokens ("the operator", "team", "call", etc.) that often appear in
+# informal event titles.
+_COMPANY_TITLE_PATTERNS = [
+    re.compile(r"\bwith\s+([A-Z][A-Za-z0-9&]+)\b", re.IGNORECASE),
+    re.compile(r"^([A-Z][A-Za-z0-9&]+)\s*(?:/|@)\s*\w+", re.IGNORECASE),
+]
+
+_COMPANY_TITLE_STOPWORDS = {
+    "operator", "you", "us", "me", "team", "group", "call", "chat",
+    "meeting", "sync", "interview", "screen", "onsite", "intro",
+    "discussion", "catchup",
+}
+
+
+def _extract_company_from_event_title(event_title: str) -> str:
+    """Extract a likely company name from an event title like
+    'Interview with Coinbase' or 'Coinbase / the operator'. Returns '' when
+    no pattern matches or the captured token is a stopword. Used only
+    as a tertiary fallback — target_company + ATS organizer domain
+    take precedence."""
+    if not event_title:
+        return ""
+    for pat in _COMPANY_TITLE_PATTERNS:
+        m = pat.search(event_title)
+        if not m:
+            continue
+        token = m.group(1).strip()
+        if token.lower() in _COMPANY_TITLE_STOPWORDS:
+            continue
+        return token
     return ""
 
 
@@ -144,6 +197,19 @@ def derive_meeting_title(prep: dict) -> tuple[str, list[str]]:
         inferred = extract_company_from_ats_domain(organizer)
         if inferred:
             hashtags.append(inferred)
+        else:
+            # Tertiary: parse the event title itself. Covers cold
+            # LinkedIn recruiters where the operator self-books with a title
+            # like 'Interview with Coinbase' — no target_company and
+            # no ATS organizer, so the company name lives only in
+            # the event summary.
+            from_title = _extract_company_from_event_title(
+                prep.get("title") or ""
+            )
+            if from_title:
+                camel = _camelcase(from_title)
+                if camel:
+                    hashtags.append(camel)
 
     return title, hashtags
 
@@ -967,8 +1033,19 @@ def cmd_push_bullets(event_id):
 
     node_id = link.get("node_id")
 
-    # Load prep data
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Load prep data — keyed by operator PT date to match meeting-prep's
+    # writer. Was UTC prior to 2026-04-22; the mismatch with the
+    # push-prep-meeting path (which already used PT) orphaned prep
+    # caches written in UTC evenings.
+    from zoneinfo import ZoneInfo as _ZI
+    _cfg_tz = "America/Los_Angeles"
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as _f:
+            _cfg = json.load(_f)
+        _cfg_tz = (_cfg or {}).get("timezone") or _cfg_tz
+    except (OSError, json.JSONDecodeError):
+        pass
+    today = datetime.now(timezone.utc).astimezone(_ZI(_cfg_tz)).strftime("%Y-%m-%d")
     prep_path = os.path.join(CACHE_DIR, f"prep-{event_id}-{today}.json")
     if not os.path.exists(prep_path):
         print(json.dumps({"status": "error", "message": f"No prep cache for {event_id}"}))

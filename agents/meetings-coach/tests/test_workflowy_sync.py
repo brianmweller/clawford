@@ -446,6 +446,84 @@ def test_derive_company_target_wins_over_organizer():
     assert "Adobe" not in tags  # don't duplicate
 
 
+def test_derive_title_from_description_signoff():
+    """Cold-recruiter LinkedIn pattern (2026-04-22 Coinbase/Abby):
+    no attendees, no 'Interviewer:' header, but the description ends
+    with a sign-off + name. Extract the sign-off name as the title
+    rather than falling back to 'Unknown'."""
+    prep = _prep(
+        context={"description": (
+            "Hi the operator,\n\nFollowing up on our LinkedIn conversation! "
+            "Looking forward to connecting tomorrow 4/23 at 12:30pm. "
+            "I've sent a calendar invite and a Google Meet link.\n\n"
+            "Best,\n\nAbby"
+        )},
+        organizer="sam.smith@example.com",
+    )
+    title, _ = wf.derive_meeting_title(prep)
+    assert title == "Abby"
+
+
+def test_derive_title_signoff_handles_full_name():
+    """Sign-off with first + last — preserve both."""
+    prep = _prep(
+        context={"description": (
+            "Hi the operator, reaching out about a Senior DS role.\n\n"
+            "Thanks,\nMegan Whitley"
+        )},
+    )
+    title, _ = wf.derive_meeting_title(prep)
+    assert title == "Megan Whitley"
+
+
+def test_derive_title_signoff_ignores_greeting_name():
+    """Sign-off extraction must not grab 'the operator' from 'Hi the operator,' —
+    the greeting names the recipient, not the sender."""
+    prep = _prep(
+        context={"description": (
+            "Hi the operator,\n\nPlease confirm.\n\nBest,\nSarah"
+        )},
+    )
+    title, _ = wf.derive_meeting_title(prep)
+    assert title == "Sarah"
+
+
+def test_derive_company_from_event_title_coinbase_pattern():
+    """'Interview with Coinbase' — the company is in the event
+    summary, not the organizer domain or target list. Use the word
+    after 'with' as a company hashtag when no ATS / target signal
+    is present."""
+    prep = _prep(
+        title="Interview with Coinbase",
+        context={"description": "Best,\nAbby"},
+        organizer="sam.smith@example.com",
+    )
+    _, tags = wf.derive_meeting_title(prep)
+    assert "Coinbase" in tags
+
+
+def test_derive_company_from_event_title_slash_pattern():
+    """'Coinbase / the operator' — company on the left of a slash."""
+    prep = _prep(
+        title="Coinbase / the operator",
+        organizer="sam.smith@example.com",
+    )
+    _, tags = wf.derive_meeting_title(prep)
+    assert "Coinbase" in tags
+
+
+def test_derive_company_from_event_title_skips_generic_words():
+    """Don't let 'Interview with the operator' promote 'the operator' to a hashtag,
+    and don't let 'Meeting with team' promote 'team'. Filter common
+    noise words."""
+    prep = _prep(
+        title="Meeting with team",
+        organizer="sam.smith@example.com",
+    )
+    _, tags = wf.derive_meeting_title(prep)
+    assert "Team" not in tags
+
+
 def test_derive_title_unknown_when_no_signal():
     """No attendees, no description patterns, no organizer → fall
     back to the existing 'Unknown' behavior."""

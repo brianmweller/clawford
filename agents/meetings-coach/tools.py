@@ -912,8 +912,15 @@ def force_prep(meeting: str) -> dict:
         return {**resolution, "descriptor": ref}
 
     meeting_id = resolution["meeting_id"]
+    # --force bypasses meeting-prep.py's per-day prep cache. Without it
+    # a stale prep (e.g. from before a classifier or context change
+    # landed) sticks around for the rest of the PT day. Regression:
+    # 2026-04-22 Coinbase interview was cached with meeting_type=general
+    # an hour before the cold-recruiter classifier shipped; subsequent
+    # force_prep calls kept returning the stale general-path result
+    # with no llm_prep block, so Murphy had nothing to push to Workflowy.
     result = subprocess_helpers.run_json_script(
-        _MEETING_PREP, "--meeting-id", meeting_id, timeout=60,
+        _MEETING_PREP, "--meeting-id", meeting_id, "--force", timeout=60,
     )
     if subprocess_helpers.is_subprocess_error(result):
         return {"status": "error",
