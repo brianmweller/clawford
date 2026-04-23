@@ -409,6 +409,8 @@ def prep_meeting(event, force=False):
         name = sanitized_fields.get(f"attendee_{i}_name", att.get("name", ""))
 
         att_context = {"email": email, "name": name}
+        if att.get("email_source"):
+            att_context["email_source"] = att["email_source"]
 
         # Look up person file
         person = find_person_by_email(email)
@@ -453,6 +455,11 @@ def prep_meeting(event, force=False):
     # Build attendee details with their context
     for att in attendee_contexts:
         att_entry = {"name": att["name"], "email": att["email"]}
+        # Preserve email_source when the Gmail-recruiter-lookup branch
+        # set it. Downstream consumers (draft-compose, person writers)
+        # must not treat 'linkedin_relay' addresses as reachable.
+        if att.get("email_source"):
+            att_entry["email_source"] = att["email_source"]
 
         person = att.get("person_data")
         if person:
