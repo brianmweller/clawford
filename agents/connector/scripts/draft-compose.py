@@ -419,7 +419,7 @@ def main() -> int:
             infer_fn=lambda p, **kw: _infer(prompt=p, json_mode=True, timeout=kw.get("timeout", 90)),
         )
 
-    parsed = apply_post_processing(parsed, voice_profile)
+    parsed = apply_post_processing(parsed, voice)
 
     print()
     print("=" * 72)

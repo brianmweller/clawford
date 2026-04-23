@@ -210,6 +210,10 @@ def run_draft_compose(
         stdout = result.stdout or ""
         stderr = result.stderr or ""
         combined = stdout + (f"\n---STDERR---\n{stderr}" if stderr else "")
+        if stderr.strip():
+            tag = "draft-compose stderr" if result.returncode == 0 else f"draft-compose stderr (rc={result.returncode})"
+            print(f"[{tag}] tid={thread_id}", file=sys.stderr)
+            print(stderr.rstrip(), file=sys.stderr)
         parsed = {}
         if json_out.exists() and json_out.stat().st_size > 0:
             try:
