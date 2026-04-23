@@ -406,12 +406,34 @@ def _build_profile_view_summary(notifications: list[dict]) -> dict | None:
     def _less_old(a: str, b: str) -> bool:
         return _time_ago_key(a) < _time_ago_key(b)
 
+    def _normalize_time_ago(t: str) -> str:
+        # linkedin-viewers-extract.js emits strings like '14h ago'.
+        # _time_ago_within_24h inspects the last char for h/m, so strip
+        # the trailing ' ago' (case-insensitive) before storing.
+        t = (t or "").strip()
+        if t.lower().endswith(" ago"):
+            t = t[: -len(" ago")].rstrip()
+        return t
+
+    def _is_aria_label_title(name: str, title: str) -> bool:
+        # Cards on /me/profile-views/ render an <a aria-label="View X's
+        # profile"> adjacent to the viewer name; the extractor picks
+        # that up as the line after the name. Filter titles matching
+        # 'View ... profile' so we don't render aria-label garbage in
+        # the bullet.
+        t = (title or "").strip().lower()
+        if not t:
+            return False
+        return t.startswith("view ") and t.endswith("profile")
+
     def _add(name: str, time_ago: str, title: str) -> None:
         name = (name or "").strip()
         if not name:
             return
-        time_ago = (time_ago or "").strip()
+        time_ago = _normalize_time_ago(time_ago)
         title = (title or "").strip()
+        if _is_aria_label_title(name, title):
+            title = ""
         cur = viewer_data.get(name)
         if cur is None:
             viewer_data[name] = (time_ago, title)
