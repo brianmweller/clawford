@@ -51,6 +51,9 @@ for _p in Path(__file__).resolve().parents:
 from agents.shared.scan_fields import scan_fields  # noqa: E402
 from agents.shared.self_profile import load_self_profile  # noqa: E402
 from agents.shared.subprocess_helpers import parse_script_stdout  # noqa: E402
+from agents.shared.gmail_recruiter_lookup import (  # noqa: E402
+    resolve_recruiter_from_gmail,
+)
 
 # meeting_prep_professional_lib is in the same scripts/ directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -89,6 +92,68 @@ def _operator_tz() -> ZoneInfo:
 
 def _operator_today_str() -> str:
     return datetime.now(_operator_tz()).strftime("%Y-%m-%d")
+
+
+# Cold-recruiter sign-off pattern. Mirrors workflowy-sync's
+# _SIGNOFF_PATTERN so meeting-prep can extract a first-name hint
+# before the Gmail cross-reference step runs.
+_SIGNOFF_FIRSTNAME_RE = re.compile(
+    r"\n\s*(?:Best|Best regards|Kind regards|Regards|Thanks|Thank you|"
+    r"Cheers|Sincerely|Warmly|Warm regards|All the best|Talk soon|"
+    r"Looking forward|-{1,2})[,\s]*\n+\s*"
+    r"([A-Z][a-zA-Z]+)(?:\s+[A-Z][a-zA-Z]+)?",
+    re.IGNORECASE,
+)
+
+# the operator's known From: addresses — used to skip his own forwarded notes
+# when walking Gmail results. Kept in sync with other places that
+# filter the operator's traffic (connector's operator_emails).
+_BRIAN_ADDRESSES = {
+    "sam.smith@example.com",
+    "sam.smith+work@example.com",
+    "sam.smith+backup@example.com",
+}
+
+GMAIL_TOKEN_PATH = os.path.join(WORKSPACE, "token.json")
+GMAIL_CREDS_PATH = os.path.join(WORKSPACE, "credentials.json")
+GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+
+
+def _extract_signoff_firstname(description: str) -> str:
+    """Return the first name from a cold-recruiter sign-off line, or ''.
+    Mirrors workflowy-sync's extractor but returns ONLY the first name
+    (we use it as a Gmail search hint; last-name comes from Gmail)."""
+    if not description:
+        return ""
+    m = _SIGNOFF_FIRSTNAME_RE.search(description)
+    return m.group(1).strip() if m else ""
+
+
+def _try_resolve_recruiter_from_gmail(event: dict, hint: str) -> dict | None:
+    """Best-effort Gmail cross-reference. Returns None on any failure
+    (missing token, auth error, Gmail API down) so the prep pipeline
+    degrades to the first-name-only case rather than crashing.
+    Regression target: 2026-04-22 Abby/Coinbase — invite description
+    only had 'Best,\\nAbby'; the recruiter's full name 'Abby Mintert'
+    + email lived in the Gmail thread that introduced the meeting."""
+    if not hint:
+        return None
+    if not os.path.exists(GMAIL_TOKEN_PATH):
+        return None
+    try:
+        from agents.shared.gmail_api import build_gmail_service
+        service = build_gmail_service(
+            GMAIL_TOKEN_PATH, GMAIL_CREDS_PATH,
+            scopes=[GMAIL_READONLY_SCOPE],
+        )
+        return resolve_recruiter_from_gmail(
+            service=service,
+            event=event,
+            first_name_hint=hint,
+            operator_emails=_BRIAN_ADDRESSES,
+        )
+    except Exception:  # noqa: BLE001 — Gmail failure must not kill prep
+        return None
 BRAIN_PEOPLE = os.path.join(BRAIN, "people")
 BRAIN_FACTS = os.path.join(BRAIN, "facts")
 BRAIN_COMMITMENTS = os.path.join(BRAIN, "commitments/active.md")
@@ -293,6 +358,21 @@ def prep_meeting(event, force=False):
     if not force and os.path.exists(cache_path):
         with open(cache_path) as f:
             return json.load(f)
+
+    # Cold-recruiter Gmail enrichment: when the invite has no attendees
+    # but the description signs off with a first name, cross-reference
+    # Gmail for the recruiter's full name + email. Regression target:
+    # 2026-04-22 Coinbase — 'Best,\n\nAbby' was the only name signal in
+    # the invite; the Gmail thread carried
+    # 'From: Abby Mintert <abby@coinbase.com>' which is the canonical
+    # source of truth. Run before field scanning so the synthesized
+    # attendee flows through the same sanitization path as real ones.
+    if not event.get("attendees"):
+        hint = _extract_signoff_firstname(event.get("description") or "")
+        if hint:
+            recruiter = _try_resolve_recruiter_from_gmail(event, hint)
+            if recruiter:
+                event = {**event, "attendees": [recruiter]}
 
     # P0.4: Scan externally-sourced calendar fields before they enter
     # any downstream prompt or agent context. Calendar invites are the
