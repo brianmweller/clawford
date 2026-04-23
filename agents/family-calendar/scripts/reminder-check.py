@@ -48,11 +48,14 @@ from agents.shared.meeting_classifier import has_videoconference_link  # noqa: E
 from agents.shared.calendar_index import meeting_event_ids  # noqa: E402
 from agents.shared import brain_tasks  # noqa: E402
 
-# Surfacer is deployed to <workspace>/task_surfacer_lib.py via the manifest's
-# scripts[] list (entry has no ``scripts/`` prefix). The top-level shim
-# above put <workspace> on sys.path, so a bare ``import task_surfacer_lib``
-# resolves. Brain_tasks's own sys.path shim (triggered by the import
-# above) ensures ``from brain_tasks import Task`` resolves inside it.
+# task_surfacer_lib.py lives one directory up from this script in both
+# contexts: the deployed workspace root (<workspace>/task_surfacer_lib.py,
+# deployed via the manifest's no-prefix entry) and the repo layout
+# (agents/family-calendar/task_surfacer_lib.py). parents[1] resolves to
+# the right directory either way. Import after brain_tasks so its
+# shared/ sys.path insertion is in place for ``from brain_tasks import
+# Task`` inside the lib.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import task_surfacer_lib  # type: ignore  # noqa: E402
 
 WORKSPACE = os.path.expanduser("~/.clawford/family-calendar-workspace")

@@ -272,17 +272,16 @@ def main(argv: list[str] | None = None) -> int:
     except (AttributeError, Exception):
         pass
 
-    brain = dropbox_brain_root()
-    people_dir = args.people_dir or (brain / "people")
-
     # Default is commit; the cron wrapper (script-contract-host.sh)
     # invokes with no extra args, and a dry-run cron is worthless.
     # Use --dry-run for manual smoke tests.
     commit = not args.dry_run
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    operator_emails = set(load_operator().emails)
 
     try:
+        brain = dropbox_brain_root()
+        people_dir = args.people_dir or (brain / "people")
+        operator_emails = set(load_operator().emails)
         service = _build_service(args.token, args.creds)
         result = run(
             service=service,
