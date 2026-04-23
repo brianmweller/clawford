@@ -623,6 +623,76 @@ def _match_by_time(
     return out
 
 
+_DESCRIPTOR_STOPWORDS = {
+    "the", "a", "an", "my", "our", "your", "for", "with", "at",
+    "on", "in", "to", "and", "please", "prep", "prepare",
+    "meeting", "call", "chat", "interview", "sync", "standup",
+    "catchup",
+}
+
+
+def _parse_day_only(descriptor: str, tz: ZoneInfo) -> tuple[date, str] | None:
+    """Detect a day word in the descriptor without a clock time and
+    return (target_date, cleaned_descriptor). Returns None when no day
+    word is present. Cleaned descriptor drops day/stopword tokens so
+    'Coinbase for tomorrow' → 'coinbase' for substring matching.
+
+    Runs AFTER _parse_time_descriptor has returned None, so we know no
+    time was parseable. A descriptor like 'tomorrow 3pm' hits the time
+    branch first and never reaches here."""
+    s = (descriptor or "").strip().lower()
+    if not s:
+        return None
+
+    today = datetime.now(tz).date()
+    day_offset: int | None = None
+    day_tokens: list[str] = []
+    if re.search(r"\btomorrow\b", s):
+        day_offset = 1
+        day_tokens = ["tomorrow"]
+    elif re.search(r"\btoday\b", s):
+        day_offset = 0
+        day_tokens = ["today"]
+    elif re.search(r"\byesterday\b", s):
+        day_offset = -1
+        day_tokens = ["yesterday"]
+    else:
+        for token, wday in _WEEKDAY_NAMES.items():
+            if re.search(rf"\b{token}\b", s):
+                day_offset = (wday - today.weekday()) % 7
+                day_tokens = [token]
+                break
+
+    if day_offset is None:
+        return None
+
+    cleaned = s
+    for token in day_tokens + list(_DESCRIPTOR_STOPWORDS):
+        cleaned = re.sub(rf"\b{re.escape(token)}\b", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    return today + timedelta(days=day_offset), cleaned
+
+
+def _filter_candidates_by_date(
+    candidates: list[_FuzzyCandidate], target: date, tz: ZoneInfo,
+) -> list[_FuzzyCandidate]:
+    out: list[_FuzzyCandidate] = []
+    for c in candidates:
+        raw = (c.last_seen or "").strip()
+        if not raw:
+            continue
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=tz)
+        if dt.astimezone(tz).date() == target:
+            out.append(c)
+    return out
+
+
 def _resolve_meeting_descriptor(descriptor: str) -> dict:
     """Map a fuzzy operator descriptor to a GCal event_id.
 
@@ -637,6 +707,9 @@ def _resolve_meeting_descriptor(descriptor: str) -> dict:
       - time reference ('tomorrow 2:45pm', '3pm today', '14:45
         tomorrow', bare '3pm' which defaults to today) — matched
         against candidate start within ±5 min
+      - day-only reference ('Coinbase for tomorrow', 'my meeting
+        tuesday') — narrows pool by date, substring-matches remaining
+        content words after stripping conversational stopwords
     """
     pool = _load_meeting_candidates()
 
@@ -682,6 +755,68 @@ def _resolve_meeting_descriptor(descriptor: str) -> dict:
             ),
             "recent_meetings": [],
         }
+
+    # Day-only branch: descriptor contains 'tomorrow'/'today'/weekday
+    # but no clock time. Narrow the pool to that date and substring-
+    # match the remaining content words. Regression target:
+    # 2026-04-22 'Coinbase for tomorrow' returned not_found because the
+    # full descriptor went straight to title-substring matching.
+    day_parse = _parse_day_only(descriptor, tz)
+    if day_parse is not None:
+        target_date, cleaned = day_parse
+        day_pool = _filter_candidates_by_date(time_pool, target_date, tz)
+        if day_pool:
+            # No content tokens left → the day itself is the query.
+            # One meeting that day = ok, many = ambiguous.
+            if not cleaned:
+                if len(day_pool) == 1:
+                    c = day_pool[0]
+                    return {
+                        "status": "ok",
+                        "meeting_id": c.id,
+                        "match": {**(c.extras or {}),
+                                  "match_reason": f"day={target_date.isoformat()}"},
+                    }
+                return {
+                    "status": "ambiguous",
+                    "candidates": [
+                        {"meeting_id": c.id,
+                         "title": (c.subject or "")[:80],
+                         "start": c.last_seen,
+                         "attendees": c.name,
+                         "match_reason": f"day={target_date.isoformat()}"}
+                        for c in day_pool
+                    ],
+                }
+            # Content tokens remain — run fuzzy on the narrowed pool.
+            day_result = _shared_resolve(
+                cleaned,
+                candidates=day_pool,
+                id_pattern=r"^[A-Za-z0-9_]{10,}$",
+            )
+            if day_result.status == "ok":
+                return _result_to_dict(
+                    day_result, id_key="meeting_id",
+                    recent_key="recent_meetings",
+                    candidate_formatter=lambda c: {
+                        **(c.extras or {}), "match_reason": c.match_reason,
+                    },
+                )
+            if day_result.status == "ambiguous":
+                return _result_to_dict(
+                    day_result, id_key="meeting_id",
+                    recent_key="recent_meetings",
+                    candidate_formatter=lambda c: {
+                        "meeting_id": c.id,
+                        "title": (c.subject or "")[:80],
+                        "start": c.last_seen,
+                        "attendees": c.name,
+                        "match_reason": c.match_reason,
+                    },
+                )
+            # Narrowed-pool miss falls through to full-pool fuzzy so
+            # content-token matching still runs in case the date was
+            # guessed wrong (e.g. weekday cache not populated).
 
     person_resolver = None
     if _brain is not None:

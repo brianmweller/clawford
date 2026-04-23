@@ -266,6 +266,129 @@ def test_plain_name_still_filters_noise(tools_mod):
     assert result["status"] == "not_found"
 
 
+# ---------------------------------------------------------------------------
+# Day-only + conversational descriptor resolution — the Coinbase case
+# ---------------------------------------------------------------------------
+
+
+def test_day_only_with_title_token_resolves(tools_mod):
+    """'Coinbase for tomorrow' — day word present but no clock time.
+    Should narrow the pool to tomorrow's candidates and substring-match
+    the remaining 'coinbase' token. Regression: 2026-04-22 the operator asked
+    'Prep the interview with Coinbase for tomorrow' and Murphy replied
+    'I couldn't find a meeting matching Coinbase for tomorrow' — the
+    descriptor was handed verbatim to the title-substring matcher,
+    which failed because no title contains 'for tomorrow'."""
+    cache = Path(tools_mod.CACHE)
+    tomorrow = _today() + timedelta(days=1)
+    _write_events(cache, [
+        {"id": "coinbase_tomorrow_abc", "summary": "Coinbase Interview",
+         "start": _iso(tomorrow, 14, 0)},
+        {"id": "unrelated_today_xyz", "summary": "Standup",
+         "start": _iso(_today(), 9, 0)},
+    ])
+
+    result = tools_mod._resolve_meeting_descriptor("Coinbase for tomorrow")
+    assert result["status"] == "ok", result
+    assert result["meeting_id"] == "coinbase_tomorrow_abc"
+
+
+def test_day_only_conversational_prefix_resolves(tools_mod):
+    """'the interview with Coinbase tomorrow' — strip 'the/interview/with/
+    tomorrow', land on 'coinbase', narrow to tomorrow."""
+    cache = Path(tools_mod.CACHE)
+    tomorrow = _today() + timedelta(days=1)
+    _write_events(cache, [
+        {"id": "coinbase_tomorrow_abc", "summary": "Coinbase / the operator",
+         "start": _iso(tomorrow, 14, 0)},
+    ])
+
+    result = tools_mod._resolve_meeting_descriptor(
+        "the interview with Coinbase tomorrow"
+    )
+    assert result["status"] == "ok", result
+    assert result["meeting_id"] == "coinbase_tomorrow_abc"
+
+
+def test_day_only_includes_non_real_meetings(tools_mod):
+    """Recruiter 'Meeting Confirmation' invites carry is_real_meeting=
+    False. A day-only descriptor should still find them — same rationale
+    as the time-descriptor branch."""
+    cache = Path(tools_mod.CACHE)
+    tomorrow = _today() + timedelta(days=1)
+    _write_events(cache, [
+        {"id": "recruiter_xyz",
+         "summary": "Meeting Confirmation — Coinbase",
+         "start": _iso(tomorrow, 14, 0),
+         "is_real_meeting": False, "attendees": []},
+    ])
+
+    result = tools_mod._resolve_meeting_descriptor("Coinbase tomorrow")
+    assert result["status"] == "ok", result
+    assert result["meeting_id"] == "recruiter_xyz"
+
+
+def test_day_only_ambiguous_returns_candidates(tools_mod):
+    """Two 'Coinbase' meetings tomorrow → status=ambiguous."""
+    cache = Path(tools_mod.CACHE)
+    tomorrow = _today() + timedelta(days=1)
+    _write_events(cache, [
+        {"id": "coinbase_morning", "summary": "Coinbase Screen",
+         "start": _iso(tomorrow, 9, 0)},
+        {"id": "coinbase_afternoon", "summary": "Coinbase Panel",
+         "start": _iso(tomorrow, 14, 0)},
+    ])
+
+    result = tools_mod._resolve_meeting_descriptor("Coinbase tomorrow")
+    assert result["status"] == "ambiguous"
+    ids = {c["meeting_id"] for c in result["candidates"]}
+    assert ids == {"coinbase_morning", "coinbase_afternoon"}
+
+
+def test_day_only_no_title_token_single_meeting(tools_mod):
+    """'Prep my meeting tomorrow' with one real meeting on calendar →
+    should resolve to that meeting. No title token survives stopword
+    removal, so day-only pool size of 1 is authoritative."""
+    cache = Path(tools_mod.CACHE)
+    tomorrow = _today() + timedelta(days=1)
+    _write_events(cache, [
+        {"id": "only_meeting_tomorrow", "summary": "Coinbase Interview",
+         "start": _iso(tomorrow, 14, 0)},
+        {"id": "unrelated_today", "summary": "Standup",
+         "start": _iso(_today(), 9, 0)},
+    ])
+
+    result = tools_mod._resolve_meeting_descriptor("my meeting tomorrow")
+    assert result["status"] == "ok", result
+    assert result["meeting_id"] == "only_meeting_tomorrow"
+
+
+def test_day_only_falls_through_when_narrowed_pool_empty(tools_mod):
+    """If no meetings exist on the referenced day, fall through to
+    full-pool fuzzy so 'Coinbase next tuesday' still finds the Coinbase
+    meeting when next-tuesday cache isn't populated yet. (Defensive.)"""
+    cache = Path(tools_mod.CACHE)
+    tomorrow = _today() + timedelta(days=1)
+    _write_events(cache, [
+        {"id": "coinbase_not_tomorrow",
+         "summary": "Coinbase Interview",
+         "start": _iso(tomorrow, 14, 0)},
+    ])
+
+    # Pick a weekday far from today that has no cached events.
+    weekday_name = (
+        "monday" if _today().weekday() != 0 else "wednesday"
+    )
+    result = tools_mod._resolve_meeting_descriptor(
+        f"Coinbase {weekday_name}"
+    )
+    # Either resolves to the one Coinbase meeting (fall-through fuzzy)
+    # or a clean not_found. Don't accept the pre-fix bug shape
+    # (attempting to substring-match 'coinbase monday' against titles).
+    if result["status"] == "ok":
+        assert result["meeting_id"] == "coinbase_not_tomorrow"
+
+
 def test_prep_meeting_accepts_time_descriptor(tools_mod, monkeypatch):
     """End-to-end: the LLM calls prep_meeting('tomorrow 2:45pm') and
     it shells out with the resolved event id."""

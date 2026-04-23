@@ -166,7 +166,7 @@ async def fetch_krisp_transcripts_mcp(days_back=1):
 
     headers = build_headers(token)
 
-    async def mcp_post_with_retry(client, headers, payload, max_retries=6):
+    async def mcp_post_with_retry(client, headers, payload, max_retries=3):
         """POST to MCP with 401 retry.
 
         Krisp has eventual consistency — tokens sometimes fail on edge
@@ -183,7 +183,7 @@ async def fetch_krisp_transcripts_mcp(days_back=1):
                 return resp, current_headers
 
             # Backoff — Krisp eventual consistency usually resolves in a few seconds
-            await _asyncio.sleep(1.0 + attempt * 1.5)
+            await _asyncio.sleep(1.0 + attempt * 1.0)
 
         # Last resort: try refreshing the token once after all retries failed
         new_token = await refresh_krisp_token()
@@ -196,7 +196,7 @@ async def fetch_krisp_transcripts_mcp(days_back=1):
         return resp, current_headers
 
     async with httpx.AsyncClient(
-        timeout=httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0),
+        timeout=httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0),
     ) as client:
         try:
             # Step 1: Initialize MCP session
