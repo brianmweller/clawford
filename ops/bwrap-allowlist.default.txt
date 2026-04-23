@@ -37,7 +37,6 @@ connector-birthday-miner
 connector-gmail-sent-mine
 connector-gmail-watch-renew
 connector-inbox-triage
-calendar-brain-build
 family-calendar-tasks-sync
 family-calendar-whatsapp-chat-alert
 

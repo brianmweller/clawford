@@ -159,6 +159,22 @@ def bwrap_command(
             str(Path.home() / ".clawford" / "operator.json"),
             str(Path.home() / ".clawford" / "operator.json")]
 
+    # Shared calendar brain (~/.clawford/calendar-brain/) — RO-bound
+    # so every bwrap'd cron that reads events via the brain-reading
+    # shim or ``read_brain_if_fresh`` can see the file. Added 2026-04-23
+    # when morning-meeting-brief, morning-briefing, pre-meeting-alert,
+    # and post-meeting-scan all silently returned zero events — the
+    # brain lives outside any agent workspace and was unreachable
+    # inside the isolation namespace until this bind landed. RO is
+    # sufficient: the only writers are the listener daemon (not
+    # bwrap'd; runs as a systemd user service) and the daily
+    # calendar-brain-build cron (which is in the allowlist and needs
+    # its OWN RW bind below if ever isolated — currently excluded
+    # intentionally so it can write).
+    cmd += ["--ro-bind-try",
+            str(Path.home() / ".clawford" / "calendar-brain"),
+            str(Path.home() / ".clawford" / "calendar-brain")]
+
     # Operator's --user pip install dir (~/.local/) — RO-bound so
     # user-installed Python packages and CLI tools (pip-audit,
     # google-auth, camoufox, etc.) resolve inside the namespace.

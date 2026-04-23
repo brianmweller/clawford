@@ -219,6 +219,36 @@ def test_bwrap_command_binds_brain_commitments_and_queues_rw(tmp_path: Path) -> 
         )
 
 
+def test_bwrap_command_binds_calendar_brain_ro(tmp_path: Path, monkeypatch) -> None:
+    """``~/.clawford/calendar-brain/`` must be RO-bound so every
+    bwrap'd brain-reading cron (morning-meeting-brief,
+    morning-briefing, pre-meeting-alert, post-meeting-scan, etc.)
+    can resolve the shared event cache inside its namespace.
+
+    Regression target: 2026-04-23 — after the Phase 3 brain-only
+    switch, the first morning's cron run under bwrap silently
+    returned zero events from ``read_brain_if_fresh`` because the
+    brain path was outside any bind the isolation profile provided.
+    Both agents' morning briefs rendered 'No meetings today' despite
+    a fully-populated brain."""
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    brain_dir = fake_home / ".clawford" / "calendar-brain"
+    brain_dir.mkdir(parents=True)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    brain = tmp_path / "brain"
+    brain.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+    cmd = isolation.bwrap_command(
+        agent_id="meetings-coach", workspace=workspace, brain_root=brain,
+    )
+    assert _has_triple(
+        cmd, "--ro-bind-try", str(brain_dir), str(brain_dir)
+    )
+
+
 def test_bwrap_command_binds_brain_status_rw(tmp_path: Path) -> None:
     """brain/status/ must be RW-bound. calendar-brain-build.py
     double-writes ``status/calendar-index.json`` atomically (tmpfile +
