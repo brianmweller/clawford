@@ -27,6 +27,7 @@ import types
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -266,9 +267,15 @@ def test_main_does_not_resend_already_dedupd_task(rcheck, tmp_path, monkeypatch)
     )
     _seed_queue(brain_root, content)
 
-    # Pre-populate sent-reminders.json as if we already fired T-30min
+    # Pre-populate sent-reminders.json as if we already fired T-30min.
+    # Timestamp must be within prune_old_reminders' 48h window (anchored
+    # to real now, not a fixture date) or the dedup entry is dropped
+    # before the re-send check. Stamp in Pacific — operator wall clock.
+    recent_iso = (
+        datetime.now(ZoneInfo("America/Los_Angeles")) - timedelta(minutes=30)
+    ).isoformat()
     (ws / "sent-reminders.json").write_text(
-        json.dumps({"reminders": {"a-1_t_30min": "2026-04-18T16:30:00Z"}}),
+        json.dumps({"reminders": {"a-1_t_30min": recent_iso}}),
         encoding="utf-8",
     )
 

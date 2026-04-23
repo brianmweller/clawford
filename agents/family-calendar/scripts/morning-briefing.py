@@ -405,13 +405,7 @@ def run() -> dict:
     today_tasks: list = []
     unscheduled_tasks: list = []
     try:
-        # Self-locate agents/shared and agents/family-calendar for the
-        # brain_tasks + task_surfacer imports when invoked as a script.
-        _repo_root = Path(__file__).resolve().parents[3]
-        for _p in (str(_repo_root / "agents" / "shared"), str(_repo_root / "agents" / "family-calendar")):
-            if _p not in sys.path:
-                sys.path.insert(0, _p)
-        import brain_tasks  # type: ignore
+        from agents.shared import brain_tasks  # type: ignore
         import task_surfacer  # type: ignore
         all_tasks = brain_tasks.read_tasks()
         today_tasks = task_surfacer.tasks_for_morning_brief(all_tasks, now_pacific)
