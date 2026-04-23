@@ -338,6 +338,13 @@ _PREP_INSTRUCTIONS = (
     "answer in the meeting, not things the operator would only learn from the "
     "company's public materials. Anchor at least one on the level & scope "
     "bar.\n"
+    "- When a COMPANY BRIEF block is provided, GROUND fit_pitch, "
+    "compelling_angle, and evaluation_questions in its specifics. Do not "
+    "produce generic content (e.g. 'tell me about the team structure') "
+    "when the brief names concrete products, news, or role details you "
+    "could anchor a question to instead. The research-suggested questions "
+    "are a starting point — refine or replace, but do not fabricate "
+    "generic alternatives when concrete signal exists.\n"
     "- red_flags are optional. If the inbound context is clean, return []. "
     "Only flag when you see a genuine level/scope mismatch, compensation "
     "signal to press on, or a time-pressure mismatch with active pipeline.\n"
@@ -411,6 +418,76 @@ def _format_pipeline_block(stage_match: dict | None,
     return "Not in active pipeline with this company."
 
 
+def _format_company_brief_block(company_brief: dict | None) -> str:
+    """Render the COMPANY BRIEF block from company_research.CompanyBrief's
+    to_prompt_dict(). Empty dict (errored brief) → empty string so the
+    caller's f-string splice cleanly omits the section."""
+    if not company_brief:
+        return ""
+    company_name = company_brief.get("company_name", "")
+    what_they_do = company_brief.get("what_they_do", "")
+    stage = company_brief.get("stage_signal", "unknown")
+    confidence = company_brief.get("confidence", "low")
+    recent_news = company_brief.get("recent_news") or []
+    role_ctx = company_brief.get("role_context") or {}
+    operator_fit = company_brief.get("operator_fit") or {}
+
+    lines: list[str] = []
+    lines.append(
+        f"COMPANY BRIEF (external research on {company_name} — ground pitch + "
+        f"questions in these specifics; do not produce generic content when "
+        f"concrete signal is available)"
+    )
+    if what_they_do:
+        lines.append(f"What they do: {what_they_do}")
+    lines.append(f"Stage: {stage} (research confidence: {confidence})")
+
+    if recent_news:
+        lines.append("Recent news:")
+        for item in recent_news[:5]:
+            bullet = (item.get("bullet") or "").strip() if isinstance(item, dict) else str(item)
+            dated = (item.get("dated") or "").strip() if isinstance(item, dict) else ""
+            lines.append(f"  - [{dated}] {bullet}" if dated else f"  - {bullet}")
+
+    if role_ctx:
+        lines.append("Role context (from JD signal):")
+        if role_ctx.get("title"):
+            lines.append(f"  Title: {role_ctx['title']}")
+        if role_ctx.get("team_hint"):
+            lines.append(f"  Team: {role_ctx['team_hint']}")
+        if role_ctx.get("level_band_hint"):
+            lines.append(f"  Level band: {role_ctx['level_band_hint']}")
+        if role_ctx.get("scope_hint"):
+            lines.append(f"  Scope: {role_ctx['scope_hint']}")
+
+    angles = operator_fit.get("strength_angles") or []
+    concerns = operator_fit.get("concerns") or []
+    hooks = operator_fit.get("hooks_to_drop") or []
+    qs = operator_fit.get("questions_to_ask") or []
+    if angles:
+        lines.append("Strength angles (use in fit_pitch):")
+        for a in angles[:5]:
+            lines.append(f"  - {a}")
+    if concerns:
+        lines.append("Concerns to probe (use in evaluation_questions / red_flags):")
+        for c in concerns[:5]:
+            lines.append(f"  - {c}")
+    if hooks:
+        lines.append("Hooks (reference these to prove the operator read the room):")
+        for h in hooks[:4]:
+            lines.append(f"  - {h}")
+    if qs:
+        lines.append(
+            "Research-suggested questions (starting point — refine when you "
+            "can do better; prefer these over generic 'tell me about the "
+            "team' fabrications):"
+        )
+        for q in qs[:5]:
+            lines.append(f"  - {q}")
+
+    return "\n".join(lines)
+
+
 def build_llm_prep_prompt(
     *,
     event: dict,
@@ -419,6 +496,7 @@ def build_llm_prep_prompt(
     meeting_type: str,
     target_company_match: dict | None,
     search_stage_match: dict | None,
+    company_brief: dict | None = None,
 ) -> str:
     """Assemble the user-side prompt for the LLM. Pure — testable without
     a network call."""
@@ -438,6 +516,9 @@ def build_llm_prep_prompt(
 
     pipeline_block = _format_pipeline_block(search_stage_match, self_profile)
 
+    brief_block = _format_company_brief_block(company_brief)
+    brief_section = f"{brief_block}\n\n" if brief_block else ""
+
     return (
         f"MEETING CONTEXT\n"
         f"Title: {title}\n"
@@ -447,6 +528,7 @@ def build_llm_prep_prompt(
         f"{_format_attendee_block(attendees_resolved)}\n\n"
         f"SELF CONTEXT\n"
         f"{_format_self_block(self_profile)}\n\n"
+        f"{brief_section}"
         f"{target_block}"
         f"PIPELINE\n"
         f"{pipeline_block}\n\n"
@@ -460,6 +542,7 @@ def build_llm_prep(
     attendees_resolved: list[dict],
     self_profile: SelfProfile,
     meeting_type: str,
+    company_brief: dict | None = None,
 ) -> dict[str, Any]:
     """Call the LLM and return a structured prep dict. Never raises —
     returns `{"error": <reason>}` on failure so the rendering layer can
@@ -474,6 +557,7 @@ def build_llm_prep(
         meeting_type=meeting_type,
         target_company_match=target_match,
         search_stage_match=stage_match,
+        company_brief=company_brief,
     )
 
     try:

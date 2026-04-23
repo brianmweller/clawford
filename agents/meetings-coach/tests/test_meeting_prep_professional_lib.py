@@ -377,6 +377,111 @@ def test_llm_prep_prompt_mentions_level_bar_when_present():
     assert "Test bar" in prompt
 
 
+def _company_brief_dict():
+    return {
+        "company_name": "Anthropic",
+        "company_slug": "anthropic",
+        "what_they_do": "Ships Claude, a frontier AI assistant.",
+        "stage_signal": "series-D",
+        "recent_news": [
+            {"bullet": "Raised Series E", "dated": "2026-03"},
+            {"bullet": "Shipped Claude 4.7", "dated": "2026-02"},
+        ],
+        "tech_or_product_hints": ["Agent SDK", "Constitutional AI"],
+        "role_context": {
+            "title": "Director, Trust & Safety",
+            "team_hint": "deployment safety",
+            "level_band_hint": "L7",
+            "scope_hint": "cross-org policy",
+        },
+        "operator_fit": {
+            "strength_angles": ["marketplace T&S at scale"],
+            "concerns": ["research-heavy org; level-band check"],
+            "questions_to_ask": [
+                "How does T&S coordinate with research on 4.7 rollout?",
+                "Where does T&S sit relative to deployment gating?",
+            ],
+            "hooks_to_drop": ["the Claude 4.7 rollout pace"],
+        },
+        "confidence": "high",
+        "sources": [{"url": "https://example.com", "title": "A"}],
+        "researched_at_utc": "2026-04-22T12:00:00+00:00",
+    }
+
+
+def test_llm_prep_prompt_renders_company_brief_when_present():
+    profile = _profile_with_targets_and_pipeline()
+    event = _event(summary="H-M chat")
+    prompt = lib.build_llm_prep_prompt(
+        event=event,
+        attendees_resolved=[_att("josh@anthropic.com", name="Josh")],
+        self_profile=profile,
+        meeting_type="hiring-manager",
+        target_company_match={"company": "Anthropic", "tier_company": "A"},
+        search_stage_match=None,
+        company_brief=_company_brief_dict(),
+    )
+    assert "COMPANY BRIEF" in prompt
+    assert "Ships Claude" in prompt
+    assert "series-D" in prompt
+    assert "the Claude 4.7 rollout pace" in prompt
+    # Suggested questions surface so the LLM refines rather than fabricates.
+    assert "How does T&S coordinate with research" in prompt
+
+
+def test_llm_prep_prompt_omits_company_brief_when_none():
+    profile = _profile_with_targets_and_pipeline()
+    event = _event(summary="H-M chat")
+    prompt = lib.build_llm_prep_prompt(
+        event=event,
+        attendees_resolved=[_att("josh@anthropic.com", name="Josh")],
+        self_profile=profile,
+        meeting_type="hiring-manager",
+        target_company_match={"company": "Anthropic", "tier_company": "A"},
+        search_stage_match=None,
+        company_brief=None,
+    )
+    assert "COMPANY BRIEF" not in prompt
+
+
+def test_llm_prep_prompt_treats_empty_brief_as_absent():
+    """An errored brief ({}) must behave like None — no stray block."""
+    profile = _profile_with_targets_and_pipeline()
+    event = _event(summary="H-M chat")
+    prompt = lib.build_llm_prep_prompt(
+        event=event,
+        attendees_resolved=[_att("josh@anthropic.com", name="Josh")],
+        self_profile=profile,
+        meeting_type="hiring-manager",
+        target_company_match={"company": "Anthropic", "tier_company": "A"},
+        search_stage_match=None,
+        company_brief={},
+    )
+    assert "COMPANY BRIEF" not in prompt
+
+
+def test_llm_prep_prompt_company_brief_precedes_target_company_match():
+    """Positioning: COMPANY BRIEF comes AFTER SELF CONTEXT but BEFORE
+    TARGET COMPANY MATCH — the brief is the outward-looking research,
+    the target-match is the operator-side shortlist signal, and the
+    LLM should read research first."""
+    profile = _profile_with_targets_and_pipeline()
+    event = _event(summary="H-M chat")
+    prompt = lib.build_llm_prep_prompt(
+        event=event,
+        attendees_resolved=[_att("josh@anthropic.com", name="Josh")],
+        self_profile=profile,
+        meeting_type="hiring-manager",
+        target_company_match={"company": "Anthropic", "tier_company": "A"},
+        search_stage_match=None,
+        company_brief=_company_brief_dict(),
+    )
+    self_ctx_idx = prompt.index("SELF CONTEXT")
+    brief_idx = prompt.index("COMPANY BRIEF")
+    tcm_idx = prompt.index("TARGET COMPANY MATCH")
+    assert self_ctx_idx < brief_idx < tcm_idx
+
+
 def test_llm_prep_prompt_omits_pipeline_section_when_no_match():
     profile = _profile_with_targets_and_pipeline()
     event = _event(summary="Random recruiter")

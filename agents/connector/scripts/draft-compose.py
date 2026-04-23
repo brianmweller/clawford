@@ -294,6 +294,8 @@ def main() -> int:
     # For cold recruiter inbounds, load the operator's professional brain and
     # pass into the compose prompt so FIT CHECK can reference it.
     self_profile_dict = None
+    company_brief_dict: dict | None = None
+    extracted_pitch_dict: dict | None = None
     if args.cold_inbound:
         from agents.shared.self_profile import load_self_profile
         sp = load_self_profile()
@@ -307,12 +309,36 @@ def main() -> int:
             "late_stage_searches": sp.late_stage_searches,
         }
 
+        # Extract {company, role} from the inbound, then research the
+        # company via Brave + Codex synthesis. Degrades silently: if
+        # either step fails, we fall back to the pre-enrichment prompt.
+        try:
+            from agents.shared.company_research import research_company
+            from agents.shared.recruiter_extract_lib import extract_company_and_role
+            pitch = extract_company_and_role(inbound)
+            if pitch.ok:
+                extracted_pitch_dict = pitch.to_prompt_dict()
+                brief = research_company(
+                    pitch.company_name,
+                    role_title=pitch.role_title or None,
+                    operator_context={
+                        "strength_themes": sp.strength_themes,
+                        "current_targets": sp.current_targets,
+                        "level_bar_text": sp.level_bar_text,
+                    },
+                )
+                if brief.ok:
+                    company_brief_dict = brief.to_prompt_dict()
+        except Exception as e:  # noqa: BLE001 — enrichment must never break drafting
+            print(f"[draft-compose] enrichment skipped: {e}", file=sys.stderr)
+
     prompt = build_compose_prompt(
         ctx, voice, inbound,
         availability_slots=availability_slots,
         cold_inbound=args.cold_inbound,
         self_profile=self_profile_dict,
         operator_hint=args.operator_hint,
+        company_brief=company_brief_dict,
     )
 
     print("=" * 72)

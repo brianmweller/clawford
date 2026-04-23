@@ -529,11 +529,49 @@ def prep_meeting(event, force=False):
                 if t.get("theme") or t.get("content")
             ],
         }
+
+        # Company-level research enrichment: name-resolve → research →
+        # attach brief. Shared cache with Huckle, so if Huckle already
+        # drafted a reply to an Anthropic recruiter today, this is a
+        # cache hit. Degrades silently — any failure leaves company_brief
+        # None and downstream still renders the pre-enrichment prep.
+        company_brief_dict: dict | None = None
+        try:
+            from agents.shared.company_research import research_company
+            from agents.shared.recruiter_extract_lib import _infer_company_from_email
+            company_name = None
+            if target_match and target_match.get("company"):
+                company_name = target_match["company"]
+            else:
+                for att in attendees_for_classifier:
+                    inferred = _infer_company_from_email(att.get("email", ""))
+                    if inferred:
+                        company_name = inferred
+                        break
+            if company_name:
+                brief = research_company(
+                    company_name,
+                    operator_context={
+                        "strength_themes": self_profile.strength_themes,
+                        "current_targets": self_profile.current_targets,
+                        "level_bar_text": self_profile.level_bar_text,
+                    },
+                )
+                if brief.ok:
+                    company_brief_dict = brief.to_prompt_dict()
+        except Exception as e:  # noqa: BLE001 — enrichment must never break prep
+            print(f"[meeting-prep] company research skipped: {e}", file=sys.stderr)
+
+        if company_brief_dict:
+            result["company_brief"] = company_brief_dict
+            result["context_sources"].append("company_research:cached-or-fresh")
+
         result["llm_prep"] = build_llm_prep(
             event=event,
             attendees_resolved=attendees_for_classifier,
             self_profile=self_profile,
             meeting_type=meeting_type,
+            company_brief=company_brief_dict,
         )
         result["context_sources"].append(f"meeting_type:{meeting_type}")
 

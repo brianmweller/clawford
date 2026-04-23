@@ -336,6 +336,110 @@ def test_prompt_cold_inbound_without_profile_still_builds():
     assert "fit_assessment" in prompt
 
 
+# --- COMPANY CONTEXT block (from agents.shared.company_research) ---
+
+
+def _company_brief():
+    return {
+        "company_name": "Anthropic",
+        "company_slug": "anthropic",
+        "what_they_do": "Ships Claude, a frontier assistant; research lab + platform.",
+        "stage_signal": "series-D",
+        "recent_news": [
+            {"bullet": "Raised Series E", "dated": "2026-03"},
+            {"bullet": "Shipped Claude 4.7 Opus", "dated": "2026-02"},
+        ],
+        "tech_or_product_hints": ["Claude Agent SDK", "Constitutional AI"],
+        "role_context": {
+            "title": "Director, Trust & Safety",
+            "team_hint": "safety & deployment",
+            "level_band_hint": "L7",
+            "scope_hint": "cross-org policy",
+        },
+        "operator_fit": {
+            "strength_angles": ["marketplace trust & safety at scale"],
+            "concerns": ["possibly research-weighted; level-band check"],
+            "questions_to_ask": [
+                "How does the safety team coordinate with research on 4.7 rollout?",
+                "Where does T&S sit relative to product-on-Claude and deployment gating?",
+            ],
+            "hooks_to_drop": ["the Claude 4.7 rollout pace"],
+        },
+        "confidence": "high",
+        "sources": [{"url": "https://example.com", "title": "Article"}],
+        "researched_at_utc": "2026-04-22T12:00:00+00:00",
+    }
+
+
+def test_prompt_cold_inbound_renders_company_context_when_brief_present():
+    prompt = build_compose_prompt(
+        _ctx(), _voice(), _inbound(),
+        cold_inbound=True,
+        self_profile=_self_profile(),
+        company_brief=_company_brief(),
+    )
+    assert "COMPANY CONTEXT" in prompt
+    assert "Ships Claude" in prompt
+    # Stage and news signal surfaces as part of the block.
+    assert "series-D" in prompt
+    assert "Series E" in prompt or "Claude 4.7" in prompt
+    # Questions and hooks are rendered so the LLM can refine them, not
+    # fabricate from scratch.
+    assert "the Claude 4.7 rollout pace" in prompt
+    assert "How does the safety team" in prompt
+
+
+def test_prompt_cold_inbound_hooks_appear_near_strategy_instructions():
+    """Positioning test — the hooks_to_drop section must land close
+    enough to the STRATEGY instructions that the LLM reaches for it
+    when drafting. We check relative ordering: FIT CHECK / STRATEGY
+    block appears AFTER the COMPANY CONTEXT block so the hooks are
+    still fresh in context when the LLM executes strategy."""
+    prompt = build_compose_prompt(
+        _ctx(), _voice(), _inbound(),
+        cold_inbound=True,
+        self_profile=_self_profile(),
+        company_brief=_company_brief(),
+    )
+    cc_idx = prompt.index("COMPANY CONTEXT")
+    strat_idx = prompt.index("STRATEGY by tier")
+    assert cc_idx < strat_idx
+
+
+def test_prompt_cold_inbound_omits_company_context_when_brief_none():
+    prompt = build_compose_prompt(
+        _ctx(), _voice(), _inbound(),
+        cold_inbound=True,
+        self_profile=_self_profile(),
+        company_brief=None,
+    )
+    assert "COMPANY CONTEXT" not in prompt
+
+
+def test_prompt_warm_inbound_omits_company_context_even_if_brief_present():
+    """Known-sender (warm) drafting has its own voice anchors and facts;
+    the company_brief channel is cold-inbound-only. A stray brief on a
+    warm draft must be ignored, not spliced."""
+    prompt = build_compose_prompt(
+        _ctx(), _voice(), _inbound(),
+        cold_inbound=False,
+        company_brief=_company_brief(),
+    )
+    assert "COMPANY CONTEXT" not in prompt
+
+
+def test_prompt_cold_inbound_renders_errored_brief_as_absent():
+    """A brief that failed (to_prompt_dict returned empty) should be
+    treated the same as no brief at all."""
+    prompt = build_compose_prompt(
+        _ctx(), _voice(), _inbound(),
+        cold_inbound=True,
+        self_profile=_self_profile(),
+        company_brief={},  # errored brief
+    )
+    assert "COMPANY CONTEXT" not in prompt
+
+
 def test_prompt_requires_five_step_reasoning_in_order():
     """Recipient model must come FIRST — it's the generative seed for
     objective / leverage / strategy, not a post-hoc sanity check. Flipped

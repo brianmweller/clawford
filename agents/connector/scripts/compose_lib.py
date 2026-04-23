@@ -181,6 +181,105 @@ def _render_self_context_block(self_profile: dict) -> str:
     return "\n".join(parts)
 
 
+def _render_company_context_block(company_brief: dict) -> str:
+    """Render the COMPANY CONTEXT block from a company_research.CompanyBrief's
+    to_prompt_dict(). Called only for cold-inbound drafts — known-sender
+    drafts have per-recipient facts and voice anchors that carry the
+    same load.
+
+    The block sits between SELF CONTEXT and FIT CHECK so by the time the
+    LLM reaches STRATEGY, the hooks_to_drop and operator_fit guidance
+    are fresh. Positioning is load-bearing: drafts tail-weighted toward
+    fit-check instructions tend to pull the most specific hooks the
+    model has seen, which is exactly what we want.
+    """
+    company_name = company_brief.get("company_name", "")
+    what_they_do = company_brief.get("what_they_do", "")
+    stage = company_brief.get("stage_signal", "unknown")
+    confidence = company_brief.get("confidence", "low")
+    recent_news = company_brief.get("recent_news") or []
+    role_ctx = company_brief.get("role_context") or {}
+    operator_fit = company_brief.get("operator_fit") or {}
+
+    parts: list[str] = []
+    parts.append(
+        f"COMPANY CONTEXT (external research on {company_name} — facts the "
+        f"recruiter assumes the operator already knows or will look up; use them "
+        f"to tailor the draft away from generic and show the operator read the "
+        f"room):"
+    )
+    parts.append("")
+    parts.append(f"  COMPANY:       {company_name}")
+    if what_they_do:
+        parts.append(f"  WHAT THEY DO:  {what_they_do}")
+    parts.append(f"  STAGE:         {stage} (research confidence: {confidence})")
+
+    if recent_news:
+        parts.append("")
+        parts.append("  RECENT NEWS:")
+        for item in recent_news[:5]:
+            bullet = (item.get("bullet") or "").strip() if isinstance(item, dict) else str(item)
+            dated = (item.get("dated") or "").strip() if isinstance(item, dict) else ""
+            if dated:
+                parts.append(f"    - [{dated}] {bullet}")
+            else:
+                parts.append(f"    - {bullet}")
+
+    if role_ctx:
+        parts.append("")
+        parts.append("  ROLE CONTEXT (from JD signal):")
+        if role_ctx.get("title"):
+            parts.append(f"    Title:            {role_ctx['title']}")
+        if role_ctx.get("team_hint"):
+            parts.append(f"    Team:             {role_ctx['team_hint']}")
+        if role_ctx.get("level_band_hint"):
+            parts.append(f"    Level band:       {role_ctx['level_band_hint']}")
+        if role_ctx.get("scope_hint"):
+            parts.append(f"    Scope:            {role_ctx['scope_hint']}")
+
+    angles = operator_fit.get("strength_angles") or []
+    concerns = operator_fit.get("concerns") or []
+    hooks = operator_fit.get("hooks_to_drop") or []
+    qs = operator_fit.get("questions_to_ask") or []
+
+    if angles or concerns:
+        parts.append("")
+        parts.append("  FIT ANALYSIS (tailored to the operator's strength themes + level bar):")
+        if angles:
+            parts.append("    Strength angles:")
+            for a in angles[:5]:
+                parts.append(f"      - {a}")
+        if concerns:
+            parts.append("    Concerns (be honest about these in the reply, don't paper over):")
+            for c in concerns[:5]:
+                parts.append(f"      - {c}")
+
+    if hooks:
+        parts.append("")
+        parts.append(
+            "  HOOKS TO DROP (one-two phrases that prove the operator read about "
+            "them — weave ONE into the draft as the COMPELLING ANGLE or as "
+            "the ENGAGEMENT element with their pitch):"
+        )
+        for h in hooks[:4]:
+            parts.append(f"    - {h}")
+
+    if qs:
+        parts.append("")
+        parts.append(
+            "  QUESTIONS THE RESEARCH SUGGESTS (a starting point — refine or "
+            "replace when you can do better. PREFER these over generic "
+            "'tell me about the team structure' fabrications. Remember: "
+            "per POWER DYNAMIC below, most questions belong on the CALL "
+            "not in the reply — surface at most ONE in the email if it's "
+            "the load-bearing dimension the reply needs to gate on):"
+        )
+        for q in qs[:5]:
+            parts.append(f"    - {q}")
+
+    return "\n".join(parts)
+
+
 def _excerpt_profile_md(profile_md: str, max_chars: int = 1200) -> str:
     """Pull the Self-description section from profile.md, capped. For
     prompt size control; the full profile is too large to inject."""
@@ -206,6 +305,7 @@ def build_compose_prompt(
     cold_inbound: bool = False,
     self_profile: dict | None = None,
     operator_hint: str | None = None,
+    company_brief: dict | None = None,
 ) -> str:
     person = context.recipient_person
     name = person.get("full_name") or person.get("slug", "them")
@@ -518,6 +618,8 @@ TASK
   empty.
 
 {_render_self_context_block(self_profile) if cold_inbound and self_profile else ""}
+
+{_render_company_context_block(company_brief) if cold_inbound and company_brief else ""}
 
 {(
     "FIRST PRINCIPLE — BEFORE anything else, apply the recipient-"
