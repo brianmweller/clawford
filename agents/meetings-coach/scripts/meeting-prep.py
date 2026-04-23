@@ -49,6 +49,7 @@ for _p in Path(__file__).resolve().parents:
 
 from agents.shared.scan_fields import scan_fields  # noqa: E402
 from agents.shared.self_profile import load_self_profile  # noqa: E402
+from agents.shared.subprocess_helpers import parse_script_stdout  # noqa: E402
 
 # meeting_prep_professional_lib is in the same scripts/ directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -104,11 +105,13 @@ def load_today_events():
     script = os.path.join(WORKSPACE, "scripts/gcal-fetch.py")
     if os.path.exists(script):
         result = subprocess.run(
-            ["python3", script, "--days", "2"],
+            [sys.executable, script, "--days", "2"],
             capture_output=True, text=True
         )
         if result.returncode == 0:
-            return json.loads(result.stdout)
+            parsed = parse_script_stdout(result.stdout or "")
+            if isinstance(parsed, dict):
+                return parsed
 
     return {"events": [], "errors": ["No cached events and gcal-fetch.py failed"]}
 

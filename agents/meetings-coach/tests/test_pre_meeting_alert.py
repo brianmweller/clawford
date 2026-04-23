@@ -279,6 +279,53 @@ def test_run_sends_per_new_meeting_and_skips_already_alerted(
     assert not any("Portfolio" in m for m in sent)
 
 
+def test_run_warms_gcal_cache_with_wider_window(mod, tmp_path, monkeypatch):
+    """pre-meeting-alert runs every 30 min, and its gcal-fetch call
+    overwrites events-{today}.json with the default --days 1 payload
+    — silently clobbering post-meeting-scan's --days 7 pull. By
+    evening, tomorrow's invites were invisible to any resolver that
+    only read the cache. Fix: pre-meeting-alert must also request a
+    multi-day window."""
+    workspace = tmp_path / "meetings-coach-workspace"
+    (workspace / "cache").mkdir(parents=True)
+    (workspace / "scripts").mkdir()
+    monkeypatch.setattr(mod, "WORKSPACE", workspace)
+    monkeypatch.setattr(mod, "CACHE_DIR", workspace / "cache")
+    monkeypatch.setattr(mod, "SCRIPTS_DIR", workspace / "scripts")
+    monkeypatch.setattr(mod, "SENT_ALERTS_FILE", workspace / "sent-alerts.json")
+    monkeypatch.setattr(
+        mod, "LAST_RUN_FILE", workspace / "cache" / "last-pre-meeting.json"
+    )
+
+    calls: list[tuple] = []
+
+    def fake_run(script, *args, **kw):
+        calls.append((script, args))
+        if script == "gcal-fetch.py":
+            return {"status": "ok", "events": []}
+        return None
+
+    monkeypatch.setattr(mod, "_run_script", fake_run)
+    monkeypatch.setattr(mod, "resolve_credentials", lambda env: ("tok", "chat"))
+    monkeypatch.setattr(
+        mod, "send_message", lambda tok, chat, text, **kw: True
+    )
+
+    mod.run()
+
+    gcal_calls = [c for c in calls if c[0] == "gcal-fetch.py"]
+    assert len(gcal_calls) == 1
+    args = gcal_calls[0][1]
+    assert "--days" in args, (
+        f"pre-meeting-alert must pass --days to gcal-fetch "
+        f"(otherwise it clobbers post-meeting-scan's wider pull); got {args!r}"
+    )
+    days_value = int(args[args.index("--days") + 1])
+    assert days_value >= 2, (
+        f"cache-warmer must request >=2 days of events, got {days_value}"
+    )
+
+
 def test_run_silent_when_nothing_in_window(mod, tmp_path, monkeypatch):
     workspace = tmp_path / "meetings-coach-workspace"
     (workspace / "cache").mkdir(parents=True)

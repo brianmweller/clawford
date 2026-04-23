@@ -254,7 +254,13 @@ def _write_atomic(path: Path, content: str) -> None:
 def run() -> dict:
     now_utc = datetime.now(timezone.utc)
 
-    gcal = _run_script("gcal-fetch.py")
+    # --days 7 (not the default 1) so this every-30-min cron doesn't
+    # clobber post-meeting-scan's wider pull on the shared cache file
+    # (events-{today}.json is written by whoever runs gcal-fetch last).
+    # Regression: 2026-04-22 — pre-meeting-alert running at :00/:30
+    # wiped tomorrow's invites every time, leaving Murphy's resolver
+    # blind to 'Coinbase for tomorrow' for half of each hour.
+    gcal = _run_script("gcal-fetch.py", "--days", "7")
 
     # gcal-fetch is the primary data source — without it we can't know
     # which meetings are upcoming, so propagate subprocess failures as

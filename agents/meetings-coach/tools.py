@@ -11,6 +11,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -123,12 +124,20 @@ def _run_gcal_fetch(start_date: str, days: int) -> dict:
     """Live gcal-fetch subprocess. See family-calendar/tools.py for why
     we don't trust the per-day cache files directly — they're keyed
     by fetch start date with multi-day windows inside, which mismatches
-    the 'query by day' shape the LLM tools want."""
+    the 'query by day' shape the LLM tools want.
+
+    Parses stdout via ``parse_script_stdout`` so the SCRIPT_CONTRACT
+    dual-envelope tail (data object + trailing ``{"status": "ok"}``)
+    round-trips as the data object. Regression: 2026-04-22 — the
+    prior naive ``json.loads(proc.stdout)`` turned every contract-
+    compliant fetch into ``gcal-fetch non-JSON output`` silently,
+    which in turn made the day-only on-demand fetch retry a no-op
+    and the operator's 'Coinbase for tomorrow' fell through to not_found."""
     if not os.path.exists(GCAL_FETCH_SCRIPT):
         return {"error": f"gcal-fetch.py not found at {GCAL_FETCH_SCRIPT}"}
     try:
         proc = subprocess.run(
-            ["/usr/bin/python3", GCAL_FETCH_SCRIPT,
+            [sys.executable, GCAL_FETCH_SCRIPT,
              "--date", start_date, "--days", str(days)],
             capture_output=True, text=True, timeout=45, cwd=WORKSPACE,
         )
@@ -139,10 +148,11 @@ def _run_gcal_fetch(start_date: str, days: int) -> dict:
 
     if proc.returncode != 0 and not proc.stdout:
         return {"error": proc.stderr.strip() or f"gcal-fetch exit {proc.returncode}"}
-    try:
-        return json.loads(proc.stdout)
-    except json.JSONDecodeError:
-        return {"error": "gcal-fetch non-JSON output", "stdout": proc.stdout[:500]}
+
+    parsed = subprocess_helpers.parse_script_stdout(proc.stdout or "")
+    if isinstance(parsed, dict):
+        return parsed
+    return {"error": "gcal-fetch non-JSON output", "stdout": (proc.stdout or "")[:500]}
 
 
 def _summarize_event(ev: dict) -> dict:

@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 import pending_actions  # type: ignore
 import memory_writer  # type: ignore
 import state_introspection  # type: ignore
-from subprocess_helpers import run_json_script, is_subprocess_error  # type: ignore
+from subprocess_helpers import run_json_script, is_subprocess_error, parse_script_stdout  # type: ignore
 from fuzzy_resolver import (  # type: ignore
     Candidate as _FuzzyCandidate,
     resolve_fuzzy_descriptor as _shared_resolve,
@@ -81,7 +81,7 @@ def _run_gcal_fetch(start_date: str, days: int) -> dict:
         return {"error": f"gcal-fetch.py not found at {GCAL_FETCH_SCRIPT}"}
     try:
         proc = subprocess.run(
-            ["/usr/bin/python3", GCAL_FETCH_SCRIPT,
+            [_sys.executable, GCAL_FETCH_SCRIPT,
              "--date", start_date, "--days", str(days), "--skip-meetings"],
             capture_output=True, text=True, timeout=45, cwd=WORKSPACE,
         )
@@ -93,10 +93,10 @@ def _run_gcal_fetch(start_date: str, days: int) -> dict:
     if proc.returncode != 0 and not proc.stdout:
         return {"error": proc.stderr.strip() or f"gcal-fetch exit {proc.returncode}"}
 
-    try:
-        return json.loads(proc.stdout)
-    except json.JSONDecodeError:
-        return {"error": "gcal-fetch produced non-JSON output", "stdout": proc.stdout[:500]}
+    parsed = parse_script_stdout(proc.stdout or "")
+    if isinstance(parsed, dict):
+        return parsed
+    return {"error": "gcal-fetch produced non-JSON output", "stdout": (proc.stdout or "")[:500]}
 
 
 def _summarize_events(events: list) -> list:
