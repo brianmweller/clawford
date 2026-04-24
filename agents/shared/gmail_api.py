@@ -50,7 +50,11 @@ def build_raw_message(
     if in_reply_to_message_id:
         msg["In-Reply-To"] = in_reply_to_message_id
         msg["References"] = in_reply_to_message_id
-    msg.set_content(body)
+    # cte="8bit": Python's default policy encodes as quoted-printable with
+    # 76-column soft wraps (`=\n`). Gmail's compose renderer treats those
+    # as hard line breaks, so a dehardwrapped paragraph reappears chopped
+    # at ~65-70 chars. 8BITMIME is universally supported (incl. Gmail).
+    msg.set_content(body, cte="8bit")
     return base64.urlsafe_b64encode(bytes(msg)).decode("ascii")
 
 

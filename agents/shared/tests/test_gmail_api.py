@@ -91,3 +91,60 @@ def test_raw_message_preserves_unicode_body():
     payload = msg.get_payload(decode=True).decode("utf-8")
     assert "—" in payload
     assert "naïve" in payload
+
+
+def test_raw_message_does_not_soft_wrap_long_paragraphs():
+    """Python's default EmailMessage policy encodes bodies as
+    quoted-printable with 76-column soft wraps (=\\n). Gmail's draft
+    renderer treats those wraps as hard line breaks inside paragraphs,
+    so a dehardwrapped single-line paragraph shows up in the compose
+    window chopped at ~65-70 chars. Force CTE=8bit (or equivalent) so
+    the body is transmitted as a single unwrapped line per paragraph.
+    """
+    long_paragraph = (
+        "This is a long paragraph that the compose pipeline delivered "
+        "as a single unwrapped line after dehardwrap. It should reach "
+        "Gmail as one continuous line so Gmail wraps it to the user's "
+        "window width, not at 76 columns with visible mid-sentence breaks."
+    )
+    raw = build_raw_message(
+        to=["a@ex.com"],
+        subject="Test",
+        body=long_paragraph,
+    )
+    padded = raw + "=" * (-len(raw) % 4)
+    mime_text = base64.urlsafe_b64decode(padded).decode("utf-8")
+    # Header/body separator can be \r\n\r\n or \n\n depending on policy.
+    sep = "\r\n\r\n" if "\r\n\r\n" in mime_text else "\n\n"
+    _, body_text = mime_text.split(sep, 1)
+    # The body, before any SMTP line-length enforcement, must contain
+    # the paragraph verbatim as one line — no `=\n` soft breaks, no
+    # mid-paragraph `\n` splits inserted by the email policy.
+    assert "=\n" not in body_text and "=\r\n" not in body_text, (
+        f"quoted-printable soft wraps must be absent; body was:\n{body_text!r}"
+    )
+    body_line = body_text.rstrip("\r\n")
+    assert "\n" not in body_line, (
+        f"single-paragraph body must not be wrapped into multiple lines; "
+        f"got:\n{body_line!r}"
+    )
+    assert body_line.startswith("This is a long paragraph")
+    assert body_line.endswith("visible mid-sentence breaks.")
+
+
+def test_raw_message_preserves_paragraph_breaks():
+    """Blank-line paragraph breaks (\\n\\n) must survive — they're how
+    dehardwrap separates paragraphs downstream."""
+    body = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph."
+    raw = build_raw_message(to=["a@ex.com"], subject="Test", body=body)
+    padded = raw + "=" * (-len(raw) % 4)
+    mime_text = base64.urlsafe_b64decode(padded).decode("utf-8")
+    # Header/body separator can be \r\n\r\n or \n\n depending on policy.
+    sep = "\r\n\r\n" if "\r\n\r\n" in mime_text else "\n\n"
+    _, body_text = mime_text.split(sep, 1)
+    assert "First paragraph." in body_text
+    assert "Second paragraph." in body_text
+    assert "Third paragraph." in body_text
+    # Three paragraphs separated by blank lines → at least two blank-line
+    # separators in the body.
+    assert body_text.count("\r\n\r\n") + body_text.count("\n\n") >= 2
