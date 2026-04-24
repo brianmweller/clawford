@@ -13,6 +13,25 @@ sys.path.insert(0, str(SHARED_DIR))
 sys.path.insert(0, str(AGENT_DIR))
 
 
+def _reimport_connector_tools(monkeypatch):
+    """Re-import connector/tools.py fresh.
+
+    Other agents' tools.py modules (e.g. agents/fix-it/tools.py) run
+    ``sys.path.insert(0, <self_dir>)`` at module-load time to
+    bootstrap sibling imports. If a test in another suite exec-loaded
+    such a module earlier in the session, sys.path[0] now points at
+    the wrong agent, and a bare ``import tools`` resolves to the wrong
+    module. Re-assert connector's AGENT_DIR at position 0 before the
+    import to guarantee we pick up connector/tools.py.
+    """
+    monkeypatch.syspath_prepend(str(AGENT_DIR))
+    for mod in list(sys.modules):
+        if mod in ("tools", "brain"):
+            del sys.modules[mod]
+    import tools  # noqa: PLC0415 — deliberate late import
+    return tools
+
+
 @pytest.fixture
 def tools_mod(tmp_path, monkeypatch):
     workspace = tmp_path / "connector-workspace"
@@ -20,10 +39,7 @@ def tools_mod(tmp_path, monkeypatch):
     brain_root = tmp_path / "brain"
     (brain_root / "people").mkdir(parents=True)
     monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(brain_root))
-    for mod in list(sys.modules):
-        if mod in ("tools", "brain"):
-            del sys.modules[mod]
-    import tools
+    tools = _reimport_connector_tools(monkeypatch)
     monkeypatch.setattr(tools, "WORKSPACE", str(workspace))
     monkeypatch.setattr(tools, "CHECKIN_LOG_PATH", str(workspace / "checkin-log.json"))
     monkeypatch.setattr(tools, "CONFIG_PATH", str(workspace / "connector-config.json"))
@@ -193,10 +209,7 @@ def nudge_with_brain(tmp_path, monkeypatch):
 
     # Force a fresh tools import so CLAWFORD_BRAIN_DROPBOX_ROOT is
     # picked up by any module-scope brain root resolution.
-    for mod in list(sys.modules):
-        if mod in ("tools", "brain"):
-            del sys.modules[mod]
-    import tools
+    tools = _reimport_connector_tools(monkeypatch)
     monkeypatch.setattr(tools, "WORKSPACE", str(workspace))
     monkeypatch.setattr(tools, "SNOOZES_PATH", str(workspace / "snoozes.json"))
 
@@ -289,10 +302,7 @@ def brain_sandboxed_tools(tmp_path, monkeypatch):
     (brain_root / "people").mkdir()
     monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(brain_root))
 
-    for mod in list(sys.modules):
-        if mod in ("tools", "brain"):
-            del sys.modules[mod]
-    import tools
+    tools = _reimport_connector_tools(monkeypatch)
     workspace = tmp_path / "ws"
     workspace.mkdir()
     monkeypatch.setattr(tools, "WORKSPACE", str(workspace))
