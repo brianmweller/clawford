@@ -447,8 +447,10 @@ def main() -> int:
             print("(--no-create-draft — Gmail draft creation SKIPPED; simulation only)")
         elif args.gmail_thread_id:
             from agents.shared.gmail_api import (
-                build_gmail_service, create_threaded_draft, fetch_inbound_message_id,
+                build_gmail_service, compose_reply_all_recipients,
+                create_threaded_draft, fetch_inbound_message_id,
             )
+            from agents.shared.operator import load_operator
             token = Path(args.gmail_token).expanduser()
             creds = Path(args.gmail_creds).expanduser()
             service = build_gmail_service(
@@ -463,10 +465,14 @@ def main() -> int:
             reply_subject = inbound.get("subject", "")
             if reply_subject and not reply_subject.lower().startswith("re:"):
                 reply_subject = f"Re: {reply_subject}"
+            reply_to, reply_cc = compose_reply_all_recipients(
+                inbound, load_operator().emails,
+            )
             draft_resource = create_threaded_draft(
                 service,
                 thread_id=args.gmail_thread_id,
-                to=[inbound["from_email"]],
+                to=reply_to,
+                cc=reply_cc or None,
                 subject=reply_subject,
                 body=parsed["draft_text"],
                 in_reply_to_message_id=in_reply_to,

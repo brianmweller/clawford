@@ -219,6 +219,43 @@ def thread_to_compose_inputs(thread: dict, operator_emails: set[str]) -> tuple[d
     return inbound, history
 
 
+def compose_reply_all_recipients(
+    inbound: dict,
+    operator_emails,
+) -> tuple[list[str], list[str]]:
+    """Return (to, cc) for a reply-all draft.
+
+    To = [sender]. Cc = the union of the inbound's original To and Cc,
+    minus the operator's own addresses and the sender (who's already in
+    To). Dedup is case-insensitive; the first-seen casing wins, and
+    original To-before-Cc ordering is preserved.
+
+    Callers that want reply-to-sender-only semantics should bypass this
+    helper — the fleet default (memory: feedback_reply_all_default) is
+    reply-all, and narrowing is the explicit exception.
+    """
+    sender = inbound.get("from_email") or ""
+    to = [sender] if sender else []
+
+    exclude_lower = {a.lower() for a in operator_emails}
+    if sender:
+        exclude_lower.add(sender.lower())
+
+    original = list(inbound.get("to") or []) + list(inbound.get("cc") or [])
+    cc: list[str] = []
+    seen: set[str] = set()
+    for addr in original:
+        if not addr:
+            continue
+        key = addr.lower()
+        if key in exclude_lower or key in seen:
+            continue
+        seen.add(key)
+        cc.append(addr)
+
+    return to, cc
+
+
 def fetch_inbound_message_id(service, thread_id: str) -> str | None:
     """Pull the RFC822 Message-ID header of the most recent inbound
     message in the thread. Used by create_threaded_draft as the

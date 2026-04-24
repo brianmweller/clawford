@@ -11,7 +11,7 @@ import base64
 import email
 from email.message import EmailMessage
 
-from agents.shared.gmail_api import build_raw_message
+from agents.shared.gmail_api import build_raw_message, compose_reply_all_recipients
 
 
 def _decode(raw: str) -> EmailMessage:
@@ -148,3 +148,87 @@ def test_raw_message_preserves_paragraph_breaks():
     # Three paragraphs separated by blank lines → at least two blank-line
     # separators in the body.
     assert body_text.count("\r\n\r\n") + body_text.count("\n\n") >= 2
+
+
+# ---------------------------------------------------------------------------
+# compose_reply_all_recipients
+# ---------------------------------------------------------------------------
+
+OPERATOR = frozenset({"operator@example.com", "operator.alt@example.com"})
+
+
+def test_reply_all_single_sender_leaves_cc_empty():
+    inbound = {
+        "from_email": "adler@example.com",
+        "to": ["operator@example.com"],
+        "cc": [],
+    }
+    to, cc = compose_reply_all_recipients(inbound, OPERATOR)
+    assert to == ["adler@example.com"]
+    assert cc == []
+
+
+def test_reply_all_multi_recipient_ccs_others_back():
+    inbound = {
+        "from_email": "adler@example.com",
+        "to": ["operator@example.com", "teammate@example.com"],
+        "cc": ["observer@example.com"],
+    }
+    to, cc = compose_reply_all_recipients(inbound, OPERATOR)
+    assert to == ["adler@example.com"]
+    assert cc == ["teammate@example.com", "observer@example.com"]
+
+
+def test_reply_all_excludes_all_operator_emails_from_cc():
+    inbound = {
+        "from_email": "adler@example.com",
+        "to": ["operator@example.com", "teammate@example.com"],
+        "cc": ["operator.alt@example.com"],
+    }
+    to, cc = compose_reply_all_recipients(inbound, OPERATOR)
+    assert to == ["adler@example.com"]
+    assert cc == ["teammate@example.com"]
+
+
+def test_reply_all_excludes_sender_from_cc_if_cc_listed():
+    # Defensive: if the inbound message Cc'd its own sender (weird but
+    # possible), the reply's Cc must not duplicate the To.
+    inbound = {
+        "from_email": "adler@example.com",
+        "to": ["operator@example.com"],
+        "cc": ["adler@example.com", "observer@example.com"],
+    }
+    to, cc = compose_reply_all_recipients(inbound, OPERATOR)
+    assert to == ["adler@example.com"]
+    assert cc == ["observer@example.com"]
+
+
+def test_reply_all_case_insensitive_dedup():
+    inbound = {
+        "from_email": "Adler@Example.com",
+        "to": ["OPERATOR@example.com", "Teammate@Example.com"],
+        "cc": ["teammate@example.com", "the operator.Alt@example.com"],
+    }
+    to, cc = compose_reply_all_recipients(inbound, OPERATOR)
+    # To keeps inbound casing for the sender.
+    assert to == ["Adler@Example.com"]
+    # Cc deduped by lowercase; first-seen casing preserved.
+    assert cc == ["Teammate@Example.com"]
+
+
+def test_reply_all_preserves_to_then_cc_ordering():
+    inbound = {
+        "from_email": "adler@example.com",
+        "to": ["a@example.com", "b@example.com", "operator@example.com"],
+        "cc": ["c@example.com", "d@example.com"],
+    }
+    to, cc = compose_reply_all_recipients(inbound, OPERATOR)
+    assert to == ["adler@example.com"]
+    assert cc == ["a@example.com", "b@example.com", "c@example.com", "d@example.com"]
+
+
+def test_reply_all_missing_to_cc_keys_defaults_empty():
+    inbound = {"from_email": "adler@example.com"}
+    to, cc = compose_reply_all_recipients(inbound, OPERATOR)
+    assert to == ["adler@example.com"]
+    assert cc == []
