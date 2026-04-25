@@ -389,6 +389,14 @@ def test_fetch_incremental_410_gone_returns_sentinel():
     """A 410 GONE from Google means the syncToken has aged out. Caller
     should fall back to a full fetch to re-seed. The lib signals this
     by returning (None, None)."""
+    # family-calendar tests stub sys.modules["googleapiclient"] with a
+    # bare ModuleType (no submodules) for isolation from the network.
+    # Those stubs leak across the session; pop them so the real package
+    # resolves `googleapiclient.errors.HttpError` below.
+    import sys
+    for mod in list(sys.modules):
+        if mod == "googleapiclient" or mod.startswith("googleapiclient."):
+            del sys.modules[mod]
     from googleapiclient.errors import HttpError
     from unittest.mock import MagicMock
 

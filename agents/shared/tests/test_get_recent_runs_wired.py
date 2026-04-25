@@ -35,7 +35,22 @@ def _load_tools(agent_id: str):
         f"{agent_id}_tools_smoketest", path,
     )
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    # Some agent tools.py files self-bootstrap their directory onto
+    # sys.path at module-load time (e.g. agents/fix-it/tools.py,
+    # agents/family-calendar/tools.py) so the dispatcher's exec_module
+    # flow resolves sibling imports. Production needs that side effect
+    # to stick; this smoke loader does not, and leaking it poisons
+    # bare `import tools` lookups in every downstream test suite.
+    # Snapshot + restore isolates the mutation.
+    saved_path = list(sys.path)
+    saved_modules = set(sys.modules)
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path[:] = saved_path
+        for m in list(sys.modules):
+            if m not in saved_modules:
+                del sys.modules[m]
     return mod
 
 

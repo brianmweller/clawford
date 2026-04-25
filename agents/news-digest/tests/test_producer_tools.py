@@ -21,6 +21,10 @@ def tools_mod(tmp_path, monkeypatch):
     prefs.mkdir()
     cache = workspace / "cache"
     cache.mkdir()
+    # Other agents' test files also insert AGENT_DIR at sys.path[0]
+    # during collection; whichever runs last wins. Re-assert ours
+    # before the bare `import tools` below.
+    monkeypatch.syspath_prepend(str(AGENT_DIR))
     for mod in list(sys.modules):
         if mod in ("tools",):
             del sys.modules[mod]

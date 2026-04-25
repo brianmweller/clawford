@@ -55,6 +55,14 @@ class _Exec:
 
     def execute(self):
         if self.kwargs.get("syncToken") in self.raise_410_for:
+            # family-calendar tests install bare-ModuleType stubs for
+            # googleapiclient at sys.modules and don't clean up. Pop
+            # them so the real errors submodule resolves below. See
+            # test_calendar_fetch.py for the same dance.
+            import sys as _sys
+            for _m in list(_sys.modules):
+                if _m == "googleapiclient" or _m.startswith("googleapiclient."):
+                    del _sys.modules[_m]
             from googleapiclient.errors import HttpError
             from unittest.mock import MagicMock
             resp = MagicMock()

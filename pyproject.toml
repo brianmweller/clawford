@@ -1,0 +1,9 @@
+[tool.pytest.ini_options]
+# importlib mode lets test files share a basename across agents
+# (e.g. test_producer_tools.py exists in connector/, shopping/,
+# family-calendar/, meetings-coach/, news-digest/). The default
+# rootdir-prepend mode conflates them in sys.modules and fails
+# collection with "import file mismatch". importlib synthesises a
+# unique module name per file, so collisions go away without
+# requiring __init__.py packaging per tests/ dir.
+addopts = "--import-mode=importlib"

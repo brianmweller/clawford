@@ -53,6 +53,9 @@ def tools_mod(tmp_path, monkeypatch):
     cache.mkdir()
     monkeypatch.setenv("CLAWFORD_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("TZ", "America/Los_Angeles")
+    # Defeat cross-agent sys.path[0] pollution from other test files'
+    # module-load inserts. See test_producer_tools.py note.
+    monkeypatch.syspath_prepend(str(AGENT_DIR))
     for mod in list(sys.modules):
         if mod == "tools":
             del sys.modules[mod]
