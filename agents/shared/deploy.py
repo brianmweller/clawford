@@ -19,6 +19,8 @@ Usage (run on the VPS):
 Options:
     --dry-run           Plan only; do not make any changes.
     --skip-files        Skip config-file install (SOUL.md, IDENTITY.md, …).
+                        Scripts + shared library still sync (post-merge hook
+                        relies on this for plain `git pull` refresh).
     --skip-scripts      Skip Python script install.
 
 Exit codes:
@@ -1757,10 +1759,14 @@ def deploy_one(agent_id: str, args: argparse.Namespace) -> int:
     note("Backup")
     pre_deploy_backup = backup_workspace(mf)
 
+    # --skip-files gates only the config-file lane (Safeguard 10 +
+    # sync_files). Scripts, shared library, state-file preservation,
+    # and symlink heal always run — the post-merge git hook on the VPS
+    # relies on this so plain `git pull` refreshes cron paths even when
+    # config files (which live in Dropbox brain, not git) are skipped.
     if not args.skip_files:
         # Safeguard 10: refuse if any config file source is missing or
-        # still carries the bootstrap sentinel. Gated on skip_files so a
-        # partial bootstrap can still iterate on crons/approvals.
+        # still carries the bootstrap sentinel.
         note("Config source resolution")
         rc10 = _ensure_config_sources_present(mf)
         if rc10 != 0:
@@ -1769,25 +1775,26 @@ def deploy_one(agent_id: str, args: argparse.Namespace) -> int:
 
         note("Config files")
         sync_files(mf, yes_updates=getattr(args, "yes_updates", False))
-        note("Scripts")
-        sync_scripts(
-            mf,
-            yes_updates=getattr(args, "yes_updates", False),
-            remove_orphan_scripts=getattr(args, "remove_orphan_scripts", False),
-        )
-        note("Shared library")
-        sync_shared_library(mf)
-        note("State files")
-        sync_state_files(mf)
-        # Heal any cross-workspace symlinks (e.g. a historical
-        # token.json → ../other-workspace/token.json) that would
-        # silently break under P1.2 bwrap isolation.
-        note("Cross-workspace symlink heal")
-        healed = heal_cross_workspace_symlinks(mf)
-        if healed:
-            log(f"healed {len(healed)} cross-workspace symlink(s)", "ok")
-        else:
-            log("no cross-workspace symlinks to heal", "ok")
+
+    note("Scripts")
+    sync_scripts(
+        mf,
+        yes_updates=getattr(args, "yes_updates", False),
+        remove_orphan_scripts=getattr(args, "remove_orphan_scripts", False),
+    )
+    note("Shared library")
+    sync_shared_library(mf)
+    note("State files")
+    sync_state_files(mf)
+    # Heal any cross-workspace symlinks (e.g. a historical
+    # token.json → ../other-workspace/token.json) that would
+    # silently break under P1.2 bwrap isolation.
+    note("Cross-workspace symlink heal")
+    healed = heal_cross_workspace_symlinks(mf)
+    if healed:
+        log(f"healed {len(healed)} cross-workspace symlink(s)", "ok")
+    else:
+        log("no cross-workspace symlinks to heal", "ok")
 
     # Safeguard 6: smoke test. Post-Phase-5: runs the manifest's smoke_test
     # script as a host subprocess and asserts exit 0 + non-empty stdout.
