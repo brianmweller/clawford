@@ -326,6 +326,57 @@ class TestRefreshSession:
         assert "family-calendar" in joined
         assert "meetings-coach" in joined
 
+    def test_propose_then_confirm_pending_runs_executor(self, refresh_env, monkeypatch):
+        """End-to-end: propose_refresh_session stages an action; the LLM-side
+        confirm_pending tool routes the operator's natural-language approval to the
+        same confirm_refresh_session executor that the inline-button path
+        uses. No daemon, no Telegram — just the in-process plumbing."""
+        tools = refresh_env
+
+        recorded = {}
+
+        def _fake_run(argv, **kwargs):
+            recorded["argv"] = argv
+            recorded["kwargs"] = kwargs
+            class R:
+                returncode = 0
+                stdout = "ok"
+                stderr = ""
+            return R()
+
+        monkeypatch.setattr(tools.subprocess, "run", _fake_run)
+
+        # 1) Stage like a propose_* tool would.
+        staged = tools.propose_refresh_session(source="costco")
+        action_id = staged["action_id"]
+        assert "__pending_action__" in staged
+
+        # 2) LLM sees the operator's "do it" and calls confirm_pending(action_id).
+        result = tools.confirm_pending(
+            action_id=action_id,
+            reason='the operator replied "do it" to the costco refresh prompt',
+        )
+
+        # 3) The executor (confirm_refresh_session) ran — same one the
+        #    button-tap path would have invoked.
+        assert result["status"] == "ok"
+        assert result["action_id"] == action_id
+        joined = " ".join(str(a) for a in recorded["argv"])
+        assert "costco_refresh_headless" in joined
+
+        # 4) Pending action was consumed.
+        import pending_actions
+        assert pending_actions.load_by_id("fix-it", action_id) is None
+
+    def test_confirm_pending_unknown_id_returns_error(self, refresh_env):
+        tools = refresh_env
+        result = tools.confirm_pending(
+            action_id="act_nope",
+            reason="testing",
+        )
+        assert result["status"] == "error"
+        assert "act_nope" in result["error"]
+
 
 # ───────────────────────── propose/confirm_rerun_cron ─────────────────────────
 

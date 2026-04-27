@@ -165,6 +165,67 @@ def assign_batch(agent_id: str, action_ids: list[str], batch_id: str) -> int:
     return count
 
 
+def load_latest(agent_id: str, kind: str | None = None) -> dict | None:
+    """Most recent unexpired pending action, optionally filtered by kind.
+
+    Used by the LLM-side `confirm_pending` flow to disambiguate when
+    the operator gives natural-language approval ("yes", "do it") and a
+    single pending action is the obvious target.
+    """
+    actions = load(agent_id)
+    if kind is not None:
+        actions = [a for a in actions if a.get("kind") == kind]
+    if not actions:
+        return None
+    return max(actions, key=lambda a: a.get("staged_at", ""))
+
+
+def execute(
+    agent_id: str, action: dict, executors: dict,
+) -> dict:
+    """Run the executor for action['kind'] from `executors`, then remove
+    the action from the queue on success.
+
+    Used by both the dispatcher's button-tap path (`_handle_confirm`)
+    and the LLM-side `confirm_pending` tool — sharing this helper keeps
+    semantics identical regardless of how the operator approves.
+
+    Return shape:
+      - success: the executor's dict (with `status: 'ok'` defaulted in)
+        OR `{"status": "ok", "result": <non-dict-return>}`.
+      - missing executor: `{"status": "error", "error": "no handler for
+        action kind 'X'", "action_id": ...}`. Action is preserved so
+        callers can decide (the original `_handle_confirm` removed in
+        this case; new callers may want to surface a clearer error).
+      - executor raised: `{"status": "error", "error": str(exc),
+        "action_id": ...}`. Action is preserved so retries are possible.
+    """
+    action_id = action.get("id")
+    kind = action.get("kind", "")
+    executor = executors.get(f"confirm_{kind}")
+    if executor is None:
+        return {
+            "status": "error",
+            "error": f"no handler for action kind '{kind}'",
+            "action_id": action_id,
+        }
+    try:
+        result = executor(**action.get("payload", {}))
+    except Exception as exc:  # noqa: BLE001 — surface the error, keep action
+        return {
+            "status": "error",
+            "error": str(exc),
+            "action_id": action_id,
+        }
+    if action_id is not None:
+        remove(agent_id, action_id)
+    if isinstance(result, dict):
+        if "status" not in result:
+            return {**result, "status": "ok"}
+        return result
+    return {"status": "ok", "result": result, "action_id": action_id}
+
+
 def prune_expired(agent_id: str) -> int:
     lock = _get_lock(agent_id)
     with lock:

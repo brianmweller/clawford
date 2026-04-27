@@ -16,6 +16,10 @@ import memory_writer  # type: ignore
 import pending_actions  # type: ignore
 import state_introspection  # type: ignore
 import subprocess_helpers  # type: ignore
+from confirm_pending_tool import (  # type: ignore
+    TOOL_SCHEMA as _CONFIRM_PENDING_SCHEMA,
+    confirm_pending as _confirm_pending_impl,
+)
 from fuzzy_resolver import (  # type: ignore
     Candidate as _FuzzyCandidate,
     resolve_fuzzy_descriptor as _shared_resolve,
@@ -780,11 +784,19 @@ TOOLS: list[dict] = [
             "required": [],
         },
     },
+    _CONFIRM_PENDING_SCHEMA,
 ]
 
 
 def get_recent_runs(since_hours: int = 24) -> dict:
     return state_introspection.recent_runs(AGENT_ID, since_hours=since_hours)
+
+
+def confirm_pending(action_id: str, reason: str) -> dict:
+    return _confirm_pending_impl(
+        action_id=action_id, reason=reason,
+        agent_id=AGENT_ID, executors=EXECUTORS,
+    )
 
 
 def handle_nudge_action(slug: str, action: str) -> dict:
@@ -1218,6 +1230,7 @@ def reply_to_message(message_ref: str, hint: str | None = None) -> dict:
 
 
 EXECUTORS: dict = {
+    "confirm_pending": confirm_pending,
     "get_morning_nudge": get_morning_nudge,
     "get_upcoming_meetings": get_upcoming_meetings,
     "get_pending_triage": get_pending_triage,

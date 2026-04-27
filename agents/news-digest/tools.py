@@ -20,6 +20,10 @@ from pathlib import Path
 import memory_writer  # type: ignore
 import state_introspection  # type: ignore
 import subprocess_helpers  # type: ignore
+from confirm_pending_tool import (  # type: ignore
+    TOOL_SCHEMA as _CONFIRM_PENDING_SCHEMA,
+    confirm_pending as _confirm_pending_impl,
+)
 
 AGENT_ID = "news-digest"
 
@@ -313,11 +317,19 @@ TOOLS: list[dict] = [
             "required": [],
         },
     },
+    _CONFIRM_PENDING_SCHEMA,
 ]
 
 
 def get_recent_runs(since_hours: int = 24) -> dict:
     return state_introspection.recent_runs(AGENT_ID, since_hours=since_hours)
+
+
+def confirm_pending(action_id: str, reason: str) -> dict:
+    return _confirm_pending_impl(
+        action_id=action_id, reason=reason,
+        agent_id=AGENT_ID, executors=EXECUTORS,
+    )
 
 
 EXECUTORS: dict = {
@@ -329,4 +341,5 @@ EXECUTORS: dict = {
     "confirm_remember": confirm_remember,
     "ask_topic": ask_topic,
     "get_recent_runs": get_recent_runs,
+    "confirm_pending": confirm_pending,
 }

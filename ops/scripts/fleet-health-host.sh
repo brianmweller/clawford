@@ -69,6 +69,16 @@ if [[ -n "$MESSAGE" ]] && [[ -f "$ENV_FILE" ]]; then
   source "$ENV_FILE"
   set +a
 
+  # Log the alert text to fix-it's conversation window so the LLM can
+  # see its own outbound when the operator replies later. Best-effort —
+  # failure here must not break the Telegram delivery below.
+  /usr/bin/python3 -c "
+import sys
+sys.path.insert(0, '/home/openclaw/repo')
+from agents.shared import conversation
+conversation.append('fix-it', {'role': 'assistant', 'content': sys.argv[1]})
+" "$MESSAGE" 2>>"$LOG_FILE" || true
+
   BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
   if [[ -n "$BOT_TOKEN" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
     HTTP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' \

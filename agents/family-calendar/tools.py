@@ -15,6 +15,10 @@ from zoneinfo import ZoneInfo
 import pending_actions  # type: ignore
 import memory_writer  # type: ignore
 import state_introspection  # type: ignore
+from confirm_pending_tool import (  # type: ignore
+    TOOL_SCHEMA as _CONFIRM_PENDING_SCHEMA,
+    confirm_pending as _confirm_pending_impl,
+)
 from subprocess_helpers import run_json_script, is_subprocess_error  # type: ignore
 from fuzzy_resolver import (  # type: ignore
     Candidate as _FuzzyCandidate,
@@ -619,6 +623,7 @@ TOOLS: list[dict] = [
             "required": [],
         },
     },
+    _CONFIRM_PENDING_SCHEMA,
 ]
 
 
@@ -626,7 +631,15 @@ def get_recent_runs(since_hours: int = 24) -> dict:
     return state_introspection.recent_runs(AGENT_ID, since_hours=since_hours)
 
 
+def confirm_pending(action_id: str, reason: str) -> dict:
+    return _confirm_pending_impl(
+        action_id=action_id, reason=reason,
+        agent_id=AGENT_ID, executors=EXECUTORS,
+    )
+
+
 EXECUTORS: dict = {
+    "confirm_pending": confirm_pending,
     "get_events_for_day": get_events_for_day,
     "get_week": get_week,
     "get_configured_calendars": get_configured_calendars,

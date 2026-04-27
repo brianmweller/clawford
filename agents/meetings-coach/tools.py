@@ -19,6 +19,10 @@ import memory_writer  # type: ignore
 import pending_actions  # type: ignore
 import state_introspection  # type: ignore
 import subprocess_helpers  # type: ignore
+from confirm_pending_tool import (  # type: ignore
+    TOOL_SCHEMA as _CONFIRM_PENDING_SCHEMA,
+    confirm_pending as _confirm_pending_impl,
+)
 from fuzzy_resolver import (  # type: ignore
     Candidate as _FuzzyCandidate,
     resolve_fuzzy_descriptor as _shared_resolve,
@@ -1419,6 +1423,7 @@ TOOLS: list[dict] = [
             "required": [],
         },
     },
+    _CONFIRM_PENDING_SCHEMA,
 ]
 
 
@@ -1426,7 +1431,15 @@ def get_recent_runs(since_hours: int = 24) -> dict:
     return state_introspection.recent_runs(AGENT_ID, since_hours=since_hours)
 
 
+def confirm_pending(action_id: str, reason: str) -> dict:
+    return _confirm_pending_impl(
+        action_id=action_id, reason=reason,
+        agent_id=AGENT_ID, executors=EXECUTORS,
+    )
+
+
 EXECUTORS: dict = {
+    "confirm_pending": confirm_pending,
     "get_meetings_for_day": get_meetings_for_day,
     "get_week_meetings": get_week_meetings,
     "get_commitment_status": get_commitment_status,

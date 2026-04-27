@@ -201,6 +201,33 @@ def _build_system_prompt(agent_id: str, tools: list[dict]) -> str:
         "the user to tap buttons, type /confirm, or use any affordance "
         "that isn't already wired up."
     )
+
+    parts.append(
+        "# Referring to your own recent messages\n\n"
+        "When the operator references \"this alert\", \"that message\", or "
+        "similar without quoting verbatim, first check your "
+        "conversation window for recent outbound (proactive alerts, "
+        "confirm/cancel outcomes, prior replies). If you sent it, "
+        "identify it and answer in one terse line — e.g. \"Yes — the "
+        "fleet-health alert I sent at 7:02 PM. Costco JWT exp claim "
+        "was past now.\" Demand verbatim text only when the "
+        "referenced message is genuinely outside your context."
+    )
+
+    tool_names = {t.get("name") for t in (tools or [])}
+    if "confirm_pending" in tool_names:
+        parts.append(
+            "# Approval contract\n\n"
+            "Inline buttons are the primary approval path. Call "
+            "`confirm_pending` only when (a) the operator has clearly "
+            "approved in natural language (\"yes\", \"do it\", "
+            "\"I approve\", \"go ahead\", \"try it\"), AND (b) "
+            "exactly one pending action is unambiguous in your "
+            "recent context. If multiple pending actions exist, "
+            "ask which one. Never call `confirm_pending` for an "
+            "action the operator didn't explicitly approve."
+        )
+
     return "\n\n".join(parts)
 
 
@@ -343,6 +370,34 @@ def _extract_callback_query(update: dict) -> tuple[str, str] | None:
     return cbq_id, data
 
 
+def _send_and_log(
+    cfg: AgentConfig, agent_id: str, chat_id: str, msg: str,
+) -> None:
+    """Append the dispatcher-emitted message to the agent's conversation
+    window before sending to Telegram. Without this, _handle_confirm /
+    _handle_cancel outcomes ("Done: ...", "Cancelled: ...", "Failed: ...")
+    are invisible to the LLM on the next turn — the operator asks "did it work?"
+    and the agent has no record of having executed anything."""
+    try:
+        conversation.append(agent_id, {"role": "assistant", "content": msg})
+    except Exception as exc:  # noqa: BLE001 — logging failure must not block delivery
+        log.warning("conversation.append failed (%s) — sending anyway", exc)
+    telegram_api.send_message(cfg.token, chat_id, msg, skip_review=True)
+
+
+def _format_execute_result(action: dict, result: dict) -> str:
+    """Telegram-side message text for a pending_actions.execute() result."""
+    action_id = action.get("id", "?")
+    summary = action.get("summary", action_id)
+    if result.get("status") == "error":
+        err = result.get("error") or result.get("message") or "unknown"
+        return f"Failed: {err}"
+    if "result" in result and not isinstance(result.get("result"), dict):
+        # non-dict executor return — surface it
+        return str(result["result"]) if result["result"] else f"Done: {summary}"
+    return f"Done: {summary}"
+
+
 def _handle_confirm(
     cfg: AgentConfig, agent_id: str, chat_id: str,
     action_id: str, cbq_id: str,
@@ -351,45 +406,30 @@ def _handle_confirm(
 
     action = pending_actions.load_by_id(agent_id, action_id)
     if action is None:
-        telegram_api.send_message(
-            cfg.token, chat_id,
+        _send_and_log(
+            cfg, agent_id, chat_id,
             "That action has expired or was already handled.",
-            skip_review=True,
         )
         return
 
-    kind = action.get("kind", "")
-    executor_name = f"confirm_{kind}"
-    executor = cfg.executors.get(executor_name)
-    if executor is None:
+    result = pending_actions.execute(agent_id, action, cfg.executors)
+    # Preserve historical _handle_confirm behavior on missing-executor:
+    # remove the action so the queue doesn't keep entries for kinds
+    # that will never have a handler. (The shared `execute` helper
+    # leaves the action in place by default for the LLM-side caller.)
+    if (
+        result.get("status") == "error"
+        and "no handler" in (result.get("error") or "")
+    ):
         pending_actions.remove(agent_id, action_id)
-        telegram_api.send_message(
-            cfg.token, chat_id,
-            f"No handler for action kind '{kind}'.",
-            skip_review=True,
-        )
-        return
 
-    try:
-        result = executor(**action.get("payload", {}))
-        pending_actions.remove(agent_id, action_id)
-        if isinstance(result, dict):
-            status = result.get("status", "ok")
-            if status == "error":
-                msg = f"Failed: {result.get('error', result.get('message', 'unknown'))}"
-            else:
-                summary = action.get("summary", action_id)
-                msg = f"Done: {summary}"
-        else:
-            msg = str(result) if result else f"Done: {action.get('summary', action_id)}"
-        telegram_api.send_message(cfg.token, chat_id, msg, skip_review=True)
-    except Exception as exc:
-        log.error("confirm executor %s failed: %s", executor_name, exc)
-        telegram_api.send_message(
-            cfg.token, chat_id,
-            f"Failed: {exc}",
-            skip_review=True,
+    if result.get("status") == "error" and "no handler" not in (result.get("error") or ""):
+        log.error(
+            "confirm executor failed (kind=%s): %s",
+            action.get("kind"), result.get("error"),
         )
+
+    _send_and_log(cfg, agent_id, chat_id, _format_execute_result(action, result))
 
 
 def _handle_cancel(
@@ -400,17 +440,13 @@ def _handle_cancel(
 
     action = pending_actions.remove(agent_id, action_id)
     if action is None:
-        telegram_api.send_message(
-            cfg.token, chat_id,
-            "Already handled or expired.",
-            skip_review=True,
+        _send_and_log(
+            cfg, agent_id, chat_id, "Already handled or expired.",
         )
         return
 
     summary = action.get("summary", action_id)
-    telegram_api.send_message(
-        cfg.token, chat_id, f"Cancelled: {summary}", skip_review=True,
-    )
+    _send_and_log(cfg, agent_id, chat_id, f"Cancelled: {summary}")
 
 
 def _handle_confirm_all(
@@ -421,10 +457,9 @@ def _handle_confirm_all(
 
     actions = pending_actions.load_by_batch(agent_id, batch_id)
     if not actions:
-        telegram_api.send_message(
-            cfg.token, chat_id,
+        _send_and_log(
+            cfg, agent_id, chat_id,
             "No pending actions in that batch (expired or already handled).",
-            skip_review=True,
         )
         return
 
@@ -443,10 +478,9 @@ def _handle_confirm_all(
         except Exception as exc:
             results.append(f"- {action.get('summary', '?')}: failed ({exc})")
 
-    telegram_api.send_message(
-        cfg.token, chat_id,
+    _send_and_log(
+        cfg, agent_id, chat_id,
         f"Batch confirmed ({len(results)} items):\n" + "\n".join(results),
-        skip_review=True,
     )
 
 
@@ -458,20 +492,16 @@ def _handle_cancel_all(
 
     actions = pending_actions.load_by_batch(agent_id, batch_id)
     if not actions:
-        telegram_api.send_message(
-            cfg.token, chat_id,
-            "No pending actions in that batch.",
-            skip_review=True,
+        _send_and_log(
+            cfg, agent_id, chat_id, "No pending actions in that batch.",
         )
         return
 
     for action in actions:
         pending_actions.remove(agent_id, action["id"])
 
-    telegram_api.send_message(
-        cfg.token, chat_id,
-        f"Cancelled all {len(actions)} items.",
-        skip_review=True,
+    _send_and_log(
+        cfg, agent_id, chat_id, f"Cancelled all {len(actions)} items.",
     )
 
 

@@ -332,3 +332,159 @@ def test_concurrent_remove_only_one_wins(pa, workspace):
     losses = [r for r in results if r is None]
     assert len(wins) == 1
     assert len(losses) == 1
+
+
+# ── load_latest ──────────────────────────────────────────────────
+
+
+def test_load_latest_returns_none_when_empty(pa):
+    assert pa.load_latest("nonexistent") is None
+
+
+def test_load_latest_returns_most_recent(pa, workspace):
+    pa.stage("shopping", "reorder", {"item": "a"}, "First",
+             confirm_label="OK", cancel_label="No")
+    time.sleep(0.01)  # ensure staged_at differs
+    pa.stage("shopping", "reorder", {"item": "b"}, "Second",
+             confirm_label="OK", cancel_label="No")
+    time.sleep(0.01)
+    r3 = pa.stage("shopping", "skip_sns", {"sub": "abc"}, "Third",
+                  confirm_label="OK", cancel_label="No")
+
+    latest = pa.load_latest("shopping")
+    assert latest is not None
+    assert latest["id"] == r3["action_id"]
+    assert latest["summary"] == "Third"
+
+
+def test_load_latest_filters_by_kind(pa, workspace):
+    r1 = pa.stage("shopping", "reorder", {"item": "a"}, "Reorder A",
+                  confirm_label="OK", cancel_label="No")
+    time.sleep(0.01)
+    r2 = pa.stage("shopping", "skip_sns", {"sub": "x"}, "Skip X",
+                  confirm_label="OK", cancel_label="No")
+    time.sleep(0.01)
+    r3 = pa.stage("shopping", "reorder", {"item": "b"}, "Reorder B",
+                  confirm_label="OK", cancel_label="No")
+
+    # latest overall is Reorder B
+    assert pa.load_latest("shopping")["id"] == r3["action_id"]
+    # latest of kind=skip_sns is Skip X
+    latest_skip = pa.load_latest("shopping", kind="skip_sns")
+    assert latest_skip is not None
+    assert latest_skip["id"] == r2["action_id"]
+    # latest of kind=reorder is Reorder B
+    assert pa.load_latest("shopping", kind="reorder")["id"] == r3["action_id"]
+
+
+def test_load_latest_skips_expired(pa, workspace):
+    r1 = pa.stage("shopping", "reorder", {"item": "fresh"}, "Fresh",
+                  confirm_label="OK", cancel_label="No")
+    # Inject an expired action that would otherwise be "newer" by staged_at
+    file_path = pa._pending_path("shopping")
+    with open(file_path, encoding="utf-8") as f:
+        data = json.load(f)
+    data["actions"].append({
+        "id": "act_expired_recent",
+        "kind": "reorder",
+        "agent_id": "shopping",
+        "batch_id": None,
+        "staged_at": "2099-01-01T00:00:00+00:00",  # would beat r1
+        "expires_at": "2020-01-01T04:00:00+00:00",  # but expired
+        "summary": "Stale-but-future-staged",
+        "confirm_label": "OK",
+        "cancel_label": "No",
+        "payload": {},
+    })
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+    latest = pa.load_latest("shopping")
+    assert latest["id"] == r1["action_id"]
+
+
+# ── execute ──────────────────────────────────────────────────────
+
+
+def test_execute_runs_executor_and_removes_action(pa, workspace):
+    result = pa.stage("shopping", "reorder", {"source": "costco"},
+                      "Reorder X", confirm_label="OK", cancel_label="No")
+    action = pa.load_by_id("shopping", result["action_id"])
+
+    captured = {}
+    def fake_executor(**kw):
+        captured["kw"] = kw
+        return {"status": "ok", "item": "X"}
+
+    out = pa.execute("shopping", action, {"confirm_reorder": fake_executor})
+
+    assert out["status"] == "ok"
+    assert out["item"] == "X"
+    assert captured["kw"] == {"source": "costco"}
+    # removed
+    assert pa.load_by_id("shopping", result["action_id"]) is None
+
+
+def test_execute_missing_executor_returns_error_and_keeps_action(pa, workspace):
+    result = pa.stage("shopping", "weird_kind", {"a": 1}, "Weird",
+                      confirm_label="OK", cancel_label="No")
+    action = pa.load_by_id("shopping", result["action_id"])
+
+    out = pa.execute("shopping", action, {})
+
+    assert out["status"] == "error"
+    assert "weird_kind" in out["error"]
+    # action should NOT be removed when no executor exists; the dispatcher
+    # may want to surface a clearer error path before deciding what to do.
+    # (existing _handle_confirm DOES remove in this case; the shared
+    # helper preserves the action so the new confirm_pending tool
+    # surface can let the LLM ask the operator what to do. Dispatcher-side
+    # callers can remove explicitly if they prefer.)
+    assert pa.load_by_id("shopping", result["action_id"]) is not None
+
+
+def test_execute_executor_raises_returns_error_and_keeps_action(pa, workspace):
+    result = pa.stage("shopping", "reorder", {"a": 1}, "Boom",
+                      confirm_label="OK", cancel_label="No")
+    action = pa.load_by_id("shopping", result["action_id"])
+
+    def fake_executor(**kw):
+        raise RuntimeError("kaboom")
+
+    out = pa.execute("shopping", action, {"confirm_reorder": fake_executor})
+
+    assert out["status"] == "error"
+    assert "kaboom" in out["error"]
+    # On exception, action stays — caller may want to retry.
+    assert pa.load_by_id("shopping", result["action_id"]) is not None
+
+
+def test_execute_non_dict_result_wraps_as_ok(pa, workspace):
+    result = pa.stage("shopping", "reorder", {"a": 1}, "Plain",
+                      confirm_label="OK", cancel_label="No")
+    action = pa.load_by_id("shopping", result["action_id"])
+
+    def fake_executor(**kw):
+        return "all good"
+
+    out = pa.execute("shopping", action, {"confirm_reorder": fake_executor})
+
+    assert out["status"] == "ok"
+    assert out["result"] == "all good"
+    # removed on success
+    assert pa.load_by_id("shopping", result["action_id"]) is None
+
+
+def test_execute_dict_without_status_defaults_to_ok(pa, workspace):
+    result = pa.stage("shopping", "reorder", {"a": 1}, "No status key",
+                      confirm_label="OK", cancel_label="No")
+    action = pa.load_by_id("shopping", result["action_id"])
+
+    def fake_executor(**kw):
+        return {"item": "Y"}
+
+    out = pa.execute("shopping", action, {"confirm_reorder": fake_executor})
+
+    assert out["status"] == "ok"
+    assert out["item"] == "Y"
+    assert pa.load_by_id("shopping", result["action_id"]) is None
