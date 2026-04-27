@@ -1225,6 +1225,7 @@ SHARED_RUNTIME_MODULES: tuple[str, ...] = (
     "memory_writer.py",
     "operator.py",            # 2026-04-20 — operator identity loader (~/.clawford/operator.json)
     "pending_actions.py",
+    "confirm_pending_tool.py",  # 2026-04-26 — text-based approval shared tool (every agent imports from its tools.py)
     "pending_queue.py",       # 2026-04-21 — brain-maintenance review queue JSONL
     "pending_review_resolve.py",  # 2026-04-21 — approve/reject helpers for pending facts
     "embed.py",               # 2026-04-21 — fastembed wrapper for cross-run semantic dedupe
