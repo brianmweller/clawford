@@ -423,6 +423,39 @@ def test_bwrap_command_includes_user_local_bin(tmp_path: Path) -> None:
     assert _has_triple(cmd, "--ro-bind", user_local, user_local)
 
 
+def test_bwrap_command_binds_camoufox_cache_readonly(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """``~/.cache/camoufox/`` (~1.3 GB browser binary) must be RO-bound
+    so bwrap'd Camoufox launches read the cached binary instead of
+    forcing the GitHub fetch path on every run.
+
+    Regression target: 2026-04-27 — connector-gmessages-mine alerted
+    with ``🐛 gmessages scrape: No matching release found for lin
+    x86_64 in the supported range: (>=beta.19, <1)``. The cached
+    binary on the host satisfied the range, but the bwrap profile
+    didn't expose ``~/.cache/`` so Camoufox's pkgman fell through to
+    a GitHub Releases fetch that hit a transient empty/rate-limited
+    response and surfaced as 'no matching release.' Binding the
+    cache RO removes the fetch path from the hot path entirely.
+    Using ``--ro-bind-try`` so CI/dev hosts without a populated
+    cache don't crash."""
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    cache_dir = fake_home / ".cache" / "camoufox"
+    cache_dir.mkdir(parents=True)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+    cmd = isolation.bwrap_command(
+        agent_id="connector", workspace=workspace,
+    )
+    assert _has_triple(
+        cmd, "--ro-bind-try", str(cache_dir), str(cache_dir)
+    )
+
+
 def test_bwrap_command_repo_root_is_read_only(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()

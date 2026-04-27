@@ -101,3 +101,31 @@ if missing:
 
 print("[host-deps] ok — all imports resolved")
 PY
+
+echo "[host-deps] verifying Camoufox launch (cache + lib version coupling)..."
+# Camoufox's pip release tightly couples the Python library to a specific
+# upstream Firefox-fork release range. When the library's range stops
+# matching what's in ~/.cache/camoufox/ (or what GitHub still publishes),
+# every browser cron silently fails with "No matching release found for
+# lin x86_64 in the supported range". Fail the install here so version
+# drift surfaces at deploy time, not 6 hours later in a cron alert.
+# Regression target: 2026-04-27 connector-gmessages-mine alert.
+/usr/bin/python3 - <<'PY'
+import sys
+try:
+    from camoufox.sync_api import Camoufox
+    # headless="virtual" mirrors gmessages-mine, costco-token-daemon,
+    # amazon-auth, etc. — they spawn Xvfb (installed by
+    # install-host-system-deps.sh) so the smoke check exercises the
+    # exact launch path the fleet uses.
+    with Camoufox(headless="virtual") as browser:
+        page = browser.new_page()
+        page.goto("about:blank")
+    print("[host-deps] Camoufox launch ok")
+except Exception as e:
+    print(f"[host-deps] FAILED — Camoufox launch broken: {e}")
+    print("[host-deps] hint: pin camoufox in requirements-host.txt to a")
+    print("[host-deps] version compatible with the cached browser at")
+    print("[host-deps] ~/.cache/camoufox/, or rerun '/usr/bin/python3 -m camoufox fetch'")
+    sys.exit(1)
+PY

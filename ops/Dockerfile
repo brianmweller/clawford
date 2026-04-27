@@ -48,7 +48,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     amazon-orders \
     openai \
     curl_cffi \
-    "camoufox[geoip]" \
+    "camoufox[geoip]==0.4.11" \
     rebrowser-playwright \
     google-api-python-client \
     google-auth-httplib2 \

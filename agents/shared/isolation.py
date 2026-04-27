@@ -185,6 +185,20 @@ def bwrap_command(
     if user_local.is_dir():
         cmd += ["--ro-bind", str(user_local), str(user_local)]
 
+    # Camoufox browser-binary cache (~/.cache/camoufox/, ~1.3 GB) —
+    # RO-bound so bwrap'd Camoufox launches read the on-disk binary
+    # instead of falling through to the GitHub Releases fetch path.
+    # Added 2026-04-27 after connector-gmessages-mine alerted with
+    # "No matching release found for lin x86_64 in the supported
+    # range: (>=beta.19, <1)" — the cached binary satisfied the range,
+    # but the namespace didn't see ~/.cache/ at all so pkgman fell
+    # through to a network fetch that hit a transient empty response
+    # from GitHub. Binding the cache RO eliminates the fetch hot path
+    # entirely. --ro-bind-try so CI/dev hosts without a populated
+    # cache don't crash the namespace setup.
+    camoufox_cache = Path.home() / ".cache" / "camoufox"
+    cmd += ["--ro-bind-try", str(camoufox_cache), str(camoufox_cache)]
+
     # Repo (shared-lib code, prompts, fixtures). RO so a runaway agent
     # can't accidentally mutate source.
     if repo_root is not None:
