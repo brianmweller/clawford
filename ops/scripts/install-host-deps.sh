@@ -50,9 +50,22 @@ echo "[host-deps] installing Playwright chromium browser..."
 /usr/bin/python3 -m playwright install chromium
 
 echo "[host-deps] fetching Camoufox browser..."
-# camoufox fetch writes under ~/.cache/camoufox/. Safe to rerun — it
-# short-circuits when the browser is already on disk.
-/usr/bin/python3 -m camoufox fetch
+# camoufox fetch writes under ~/.cache/camoufox/. Skip if a cached
+# binary already exists — as of 2026-04-27 upstream Camoufox moved
+# past the beta-N tag scheme (latest tag is v146-*) and the GitHub
+# Releases JSON API returns [] for the daijro/camoufox repo, so
+# `camoufox fetch` always raises MissingRelease against the pinned
+# lib's `(>=beta.19, <1)` range. The runtime launch path doesn't
+# invoke pkgman when the cache is populated, so this is a deploy-
+# time concern only. Re-running fetch on a fresh host without a
+# cached binary will surface the upstream issue and fail loudly,
+# which is the correct behavior.
+CAMOUFOX_BIN="$HOME/.cache/camoufox/camoufox-bin"
+if [[ -x "$CAMOUFOX_BIN" ]]; then
+  echo "[host-deps] camoufox cache populated at $CAMOUFOX_BIN — skipping fetch"
+else
+  /usr/bin/python3 -m camoufox fetch
+fi
 
 echo "[host-deps] verifying imports..."
 /usr/bin/python3 - <<'PY'
