@@ -100,19 +100,14 @@ except Exception:
 " "$LAST_LINE" 2>/dev/null || echo "")
 
 if [[ "$STATUS" != "ok" ]] && [[ -n "$STATUS" ]]; then
-  # Prefer the 'alert' field (SCRIPT_CONTRACT v2 shape, used by
-  # heartbeat.py). Fall back to 'message' (v1 shape, used by
-  # linkedin-keepalive.py etc.) so older scripts that predate the
-  # contract still relay a useful Telegram body.
-  ALERT=$(/usr/bin/python3 -c "
-import json, sys
-try:
-    d = json.loads(sys.argv[1])
-    msg = d.get('alert') or d.get('message') or ''
-    print(msg)
-except Exception:
-    print('')
-" "$LAST_LINE" 2>/dev/null || echo "")
+  # Resolve alert text via synthesize_alert.py — single source of
+  # truth for precedence (alert > message > synthesized auth-failure
+  # alert). The synthesis path closes the silent-fail gap that hid
+  # Huckle's invalid_grant for 16 hours: scripts whose RefreshError
+  # ended up in `wrapped.stderr_tail` without a top-level `alert`
+  # field used to log silently — now they page.
+  SYNTH="/home/openclaw/repo/ops/scripts/synthesize_alert.py"
+  ALERT=$(/usr/bin/python3 "$SYNTH" "$LAST_LINE" "$LOGNAME" 2>/dev/null || echo "")
 
   if [[ -n "$ALERT" ]] && [[ -f "$ENV_FILE" ]]; then
     # Source the host .env to get all bot tokens + TELEGRAM_CHAT_ID.

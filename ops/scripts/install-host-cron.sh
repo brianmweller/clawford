@@ -199,6 +199,13 @@ CONTRACT_ENTRIES=(
   # Default mode --report-only (no Telegram); flip the script's
   # main() default to --alert after the warn-stream stabilizes.
   "*/30 * * * *|fix-it-doctor-audit|/home/openclaw/.clawford/fix-it-workspace/scripts/doctor-audit.py|TELEGRAM_BOT_TOKEN|240"
+  # Daily OAuth refresh-token aging check. The 7-day expiry on
+  # unverified-production apps using restricted/sensitive scopes
+  # (gmail.readonly, gmail.compose, calendar) applies to the whole
+  # fleet — verification isn't feasible, so we accept the chore and
+  # nag at the 5-day mark before the cliff. 09:15 UTC = 02:15 PT,
+  # so an alert lands before the morning brief sweep at 12 UTC.
+  "15 9 * * *|token-age-check|/home/openclaw/repo/ops/scripts/token-age-check.py|TELEGRAM_BOT_TOKEN|60"
 )
 
 # Markers for old entries to REMOVE on next install run. Used by the
