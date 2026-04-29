@@ -23,6 +23,7 @@
     "scripts/draft-compose.py",
     "scripts/inbox_triage_lib.py",
     "scripts/inbox-triage.py",
+    "scripts/people_promote_lib.py",
     "scripts/recruiter_detector_lib.py",
     "scripts/recruiter_callback_lib.py",
     "scripts/auto-compose.py",
