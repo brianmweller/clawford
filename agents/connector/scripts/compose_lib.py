@@ -296,6 +296,14 @@ def _excerpt_profile_md(profile_md: str, max_chars: int = 1200) -> str:
     return profile_md[start:end].strip()[:max_chars]
 
 
+EXPLICIT_ASK_RESPONSE_TYPES = {
+    "approval_needed",
+    "decision_required",
+    "action_requested",
+    "info_requested",
+}
+
+
 def build_compose_prompt(
     context: RecipientContext,
     voice: dict,
@@ -306,6 +314,7 @@ def build_compose_prompt(
     self_profile: dict | None = None,
     operator_hint: str | None = None,
     company_brief: dict | None = None,
+    inbound_act: dict | None = None,
 ) -> str:
     person = context.recipient_person
     name = person.get("full_name") or person.get("slug", "them")
@@ -411,7 +420,48 @@ def build_compose_prompt(
             "don't just append a cosmetic pass at the end.\n\n"
         )
 
-    return f"""{operator_hint_block}You are drafting an email reply on the operator's behalf. Do NOT send it — the operator will review.
+    # Classifier signals — inbound_act runs as a structured pre-pass and
+    # produces ground-truth reads of the inbound (intent, expected
+    # response shape, imposition, time pressure, etc.). Surface them so
+    # the LLM weighs them in step 0 (reply_needed). Today's bug: the
+    # signal was computed but dropped; the LLM defaulted to silence on
+    # threads where the classifier had already detected an explicit ask.
+    inbound_act_block = ""
+    if inbound_act:
+        expected = inbound_act.get("expected_response", "")
+        signals = []
+        for k in ("intent", "expected_response", "imposition", "audience_shape",
+                  "thread_position", "sensitivity", "emotional_valence", "time_pressure"):
+            if inbound_act.get(k) not in (None, ""):
+                signals.append(f"  {k}: {inbound_act[k]}")
+        if signals:
+            inbound_act_block = (
+                "CLASSIFIER SIGNALS (pre-computed by inbound_act — these are\n"
+                "structured reads of the inbound; treat as load-bearing inputs\n"
+                "to step 0 reply_needed below):\n"
+                + "\n".join(signals)
+                + "\n\n"
+            )
+            if expected in EXPLICIT_ASK_RESPONSE_TYPES:
+                inbound_act_block += (
+                    f"  ⚠ expected_response={expected} means the classifier\n"
+                    "  has detected an explicit ask (an explicit question,\n"
+                    "  approval request, scheduling confirmation, or\n"
+                    "  information request) in the latest inbound. STRONG\n"
+                    "  bias toward reply_needed=true: silence over an\n"
+                    "  explicit ask reads as ignoring a direct question and\n"
+                    "  damages the relationship. The 'STRONG default to\n"
+                    "  silence' patterns in step 0 (closeouts, self-resolving\n"
+                    "  stalls, etc.) DO NOT override this signal — they\n"
+                    "  apply only when expected_response is something like\n"
+                    "  none / fyi / acknowledgment. Override only if the\n"
+                    "  ask is genuinely vacuous (e.g., a perfunctory 'let\n"
+                    "  me know if you have any questions' tacked onto a\n"
+                    "  closeout that contains no actionable element AND no\n"
+                    "  pending decision from the operator).\n\n"
+                )
+
+    return f"""{operator_hint_block}{inbound_act_block}You are drafting an email reply on the operator's behalf. Do NOT send it — the operator will review.
 
 Not every inbound deserves a reply, and a draft without an explicit
 objective is a pleasantry, not a reply. A draft without identified

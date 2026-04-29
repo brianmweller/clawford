@@ -339,6 +339,7 @@ def main() -> int:
         self_profile=self_profile_dict,
         operator_hint=args.operator_hint,
         company_brief=company_brief_dict,
+        inbound_act=inbound_act,
     )
 
     print("=" * 72)

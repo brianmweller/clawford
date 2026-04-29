@@ -1028,3 +1028,58 @@ def test_open_slots_single_tz_when_recipient_matches():
     slots_section_end = prompt.find("\n\n", slots_idx + 50)
     slots_section = prompt[slots_idx:slots_section_end]
     assert slots_section.count("11:00") == 1
+
+
+# --- inbound_act signal threading (the bug that caused the LLM to
+# silently drop classifier verdicts on the floor) ---
+
+
+def test_prompt_surfaces_inbound_act_when_provided():
+    """The inbound_act classifier produces structured signals like
+    expected_response='approval_needed' which are explicit asks. The
+    compose prompt MUST surface these so the LLM weighs them in the
+    reply_needed step. Today's bug: classifier output is dropped on
+    the floor, so the LLM defaults to silence on threads that clearly
+    contain an explicit ask."""
+    inbound_act = {
+        "intent": "follow_up",
+        "expected_response": "approval_needed",
+        "imposition": 0.2,
+        "audience_shape": "one_to_one",
+        "thread_position": "replying",
+        "sensitivity": "internal",
+        "emotional_valence": "positive",
+        "time_pressure": "on_time",
+    }
+    prompt = build_compose_prompt(
+        _ctx(), _voice(), _inbound(), inbound_act=inbound_act,
+    )
+    # Block must surface the classifier verdict in a form the LLM sees
+    assert "expected_response" in prompt
+    assert "approval_needed" in prompt
+
+
+def test_prompt_flags_explicit_ask_responses_as_strong_reply_signal():
+    """When inbound_act.expected_response is approval_needed,
+    decision_required, action_requested, or info_requested, the
+    classifier has detected an explicit ask. The prompt must tell the
+    LLM that these override the 'STRONG default to silence' patterns —
+    silence over an explicit ask reads as ignoring a direct question."""
+    for resp in ("approval_needed", "decision_required",
+                 "action_requested", "info_requested"):
+        inbound_act = {"expected_response": resp, "intent": "follow_up"}
+        prompt = build_compose_prompt(
+            _ctx(), _voice(), _inbound(), inbound_act=inbound_act,
+        )
+        # Prompt must explicitly tell the LLM that an explicit-ask
+        # classifier verdict tilts toward reply_needed=true
+        assert "explicit ask" in prompt.lower() or "explicit question" in prompt.lower()
+        assert resp in prompt
+
+
+def test_prompt_omits_inbound_act_block_when_none():
+    """Backwards compatibility: omitting inbound_act must not change
+    the existing prompt for callers that haven't been updated yet."""
+    prompt = build_compose_prompt(_ctx(), _voice(), _inbound(), inbound_act=None)
+    # Don't render an empty/dangling block when no signal is supplied
+    assert "expected_response" not in prompt
