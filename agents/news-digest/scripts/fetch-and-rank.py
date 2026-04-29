@@ -415,16 +415,32 @@ def _build_profile_view_summary(notifications: list[dict]) -> dict | None:
             t = t[: -len(" ago")].rstrip()
         return t
 
-    def _is_aria_label_title(name: str, title: str) -> bool:
-        # Cards on /me/profile-views/ render an <a aria-label="View X's
-        # profile"> adjacent to the viewer name; the extractor picks
-        # that up as the line after the name. Filter titles matching
-        # 'View ... profile' so we don't render aria-label garbage in
-        # the bullet.
-        t = (title or "").strip().lower()
+    def _is_decorative_title(name: str, title: str) -> bool:
+        # The title field on a detail_names entry is supposed to be a
+        # job/role descriptor, but linkedin-viewers-extract.js can pick
+        # up two flavours of UI chrome:
+        #   1. aria-label leakage from the <a aria-label="View X's
+        #      profile"> link adjacent to the viewer's name.
+        #   2. Connection-degree markers — '· 1st', '· 2nd', '· 3rd',
+        #      '· 3rd+' — bullet U+00B7 followed by U+00A0 NBSP and
+        #      the degree text. Real-world example from
+        #      linkedin-2026-04-27.json: '·\xa01st' on Phil Hebda.
+        # Either form rendered as the title produces a confusing line
+        # like '• Phil Hebda — · 1st — 1d'; drop both.
+        t = (title or "").strip()
         if not t:
             return False
-        return t.startswith("view ") and t.endswith("profile")
+        low = t.lower()
+        if low.startswith("view ") and low.endswith("profile"):
+            return True
+        # Strip leading bullet chars + NBSP/whitespace, then test for
+        # '1st', '2nd', '3rd', '3rd+'. The lstrip charset includes
+        # the regular space, U+00A0 non-breaking space, tab, and the
+        # bullet itself.
+        stripped = t.lstrip("·  \t").strip()
+        if stripped.lower() in ("1st", "2nd", "3rd", "3rd+"):
+            return True
+        return False
 
     def _add(name: str, time_ago: str, title: str) -> None:
         name = (name or "").strip()
@@ -432,7 +448,7 @@ def _build_profile_view_summary(notifications: list[dict]) -> dict | None:
             return
         time_ago = _normalize_time_ago(time_ago)
         title = (title or "").strip()
-        if _is_aria_label_title(name, title):
+        if _is_decorative_title(name, title):
             title = ""
         cur = viewer_data.get(name)
         if cur is None:
