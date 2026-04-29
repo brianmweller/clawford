@@ -11,6 +11,7 @@
       "expected_probes": [
         "costco_session",
         "amazon_session",
+        "tunnel",
         "pending_actions",
         "stale_actions"
       ]
