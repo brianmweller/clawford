@@ -288,6 +288,16 @@ def run() -> dict:
         if person_filter and slug != person_filter:
             continue
 
+        # Auto-created stubs (triage_recruiter, sent_recipient,
+        # thread_continuity) stay quiet in relationship nudges until
+        # the operator elevates them — usually by removing the auto_created
+        # field once he wants the contact in the check-in rotation.
+        # The triage pipeline still uses these stubs as recognition for
+        # email_to_slug; they're invisible only to nudges.
+        if person.get("auto_created"):
+            skipped += 1
+            continue
+
         # Snooze filter — hide people with active snooze/done/ignore.
         # the operator's nudge buttons write into SNOOZES_FILE; expired
         # entries automatically resurface the person in the next scan.

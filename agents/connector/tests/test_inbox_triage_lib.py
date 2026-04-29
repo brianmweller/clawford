@@ -16,7 +16,10 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from inbox_triage_lib import (  # type: ignore
+    auto_promote_cold_recruiter,
+    auto_promote_thread_continuity,
     build_queue_from_results,
+    build_skipped_samples,
     classify_thread_for_triage,
     extract_email_from_header,
     latest_message,
@@ -254,6 +257,76 @@ def test_linkedin_inmail_with_exec_role_subject_routes_cold_not_service():
     assert result["status"] == "queued_cold_recruiter"
 
 
+def test_thread_continuity_overrides_unknown_sender():
+    """When the operator has previously sent a message in this thread, a new
+    inbound from an unknown sender is treated as queued (not
+    skipped_unknown_sender). The slug is synthesized from the
+    sender's display name. The result carries thread_continuity=True
+    so the driver can auto-promote into the people brain."""
+    thread = _thread("t1", [
+        _message("Alyssa Statile <alyssa.statile@coinbase.com>",
+                 "Mon, 27 Apr 2026 10:00:00 -0700",
+                 subject="Meeting with Siwei"),
+        _message("sam.smith@example.com",
+                 "Mon, 27 Apr 2026 11:00:00 -0700",
+                 subject="Re: Meeting with Siwei"),
+        _message("Alyssa Statile <alyssa.statile@coinbase.com>",
+                 "Tue, 28 Apr 2026 09:00:00 -0700",
+                 subject="Re: Meeting with Siwei"),
+    ])
+    result = classify_thread_for_triage(
+        thread, operator_emails=BRIAN_ADDRESSES, email_to_slug={},
+    )
+    assert result["status"] == "queued"
+    assert result["slug"] == "alyssa-statile"
+    assert result.get("thread_continuity") is True
+    assert result["from_email"] == "alyssa.statile@coinbase.com"
+
+
+def test_thread_continuity_uses_local_domain_slug_when_no_display_name():
+    thread = _thread("t1", [
+        _message("alyssa@coinbase.com", "Mon, 27 Apr 2026 10:00:00 -0700"),
+        _message("sam.smith@example.com", "Mon, 27 Apr 2026 11:00:00 -0700"),
+        _message("alyssa@coinbase.com", "Tue, 28 Apr 2026 09:00:00 -0700"),
+    ])
+    result = classify_thread_for_triage(
+        thread, operator_emails=BRIAN_ADDRESSES, email_to_slug={},
+    )
+    assert result["status"] == "queued"
+    assert result["slug"] == "alyssa-coinbase-com"
+    assert result.get("thread_continuity") is True
+
+
+def test_thread_continuity_does_not_fire_without_brian_history():
+    """If the operator never sent on the thread, thread-continuity must not
+    fire — fall through to the recruiter detector / unknown_sender."""
+    thread = _thread("t1", [
+        _message("strange@nowhere.com", "Tue, 15 Apr 2026 10:00:00 -0700",
+                 subject="hi", body_snippet="want to chat?"),
+    ])
+    result = classify_thread_for_triage(
+        thread, operator_emails=BRIAN_ADDRESSES, email_to_slug={},
+    )
+    assert result["status"] == "skipped_unknown_sender"
+    assert result.get("thread_continuity") is not True
+
+
+def test_thread_continuity_skipped_when_known_slug_already_resolves():
+    """When sender is in email_to_slug, the existing 'queued' path wins
+    — no thread_continuity flag (avoid stomping on a curated slug)."""
+    thread = _thread("t1", [
+        _message("sam.smith@example.com", "Mon, 27 Apr 2026 10:00:00 -0700"),
+        _message("Cherry <cherry@anthropic.com>", "Tue, 28 Apr 2026 09:00:00 -0700"),
+    ])
+    result = classify_thread_for_triage(
+        thread, operator_emails=BRIAN_ADDRESSES,
+        email_to_slug={"cherry@anthropic.com": "josh-cherry"},
+    )
+    assert result["status"] == "queued"
+    assert result["slug"] == "josh-cherry"
+    assert result.get("thread_continuity") is not True
+
+
 def test_thread_with_empty_messages_is_skipped():
     result = classify_thread_for_triage(
         _thread("t1", []),
@@ -423,6 +496,157 @@ def test_build_queue_persists_both_queued_and_cold_recruiter():
 def test_build_queue_from_empty_results_returns_empty_queued():
     queue = build_queue_from_results([])
     assert queue == {"queued": []}
+
+
+def test_auto_promote_cold_recruiter_writes_stub(tmp_path, monkeypatch):
+    """When classification returns queued_cold_recruiter, the helper
+    creates a minimal people/<slug>.md so the next message in the
+    thread is recognized as a known sender on subsequent triage runs."""
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(tmp_path))
+    classified = {
+        "thread_id": "t1",
+        "from_email": "v.taylor.meagher@reddit.com",
+        "from_header": "V Taylor Meagher <v.taylor.meagher@reddit.com>",
+        "subject": "Reddit Executive Interview",
+        "snippet": "Reaching out about an executive role...",
+        "status": "queued_cold_recruiter",
+        "recruiter_signal_confidence": 0.95,
+        "recruiter_matched_domain": "reddit.com",
+    }
+    result = auto_promote_cold_recruiter(
+        classified, operator_emails=BRIAN_ADDRESSES,
+    )
+    assert result["status"] == "created"
+    assert result["slug"] == "v-taylor-meagher"
+    fp = tmp_path / "people" / "v-taylor-meagher.md"
+    assert fp.exists()
+    text = fp.read_text(encoding="utf-8")
+    assert "auto_created" in text
+    assert "triage_recruiter" in text
+    assert "v.taylor.meagher@reddit.com" in text
+
+
+def test_auto_promote_noop_for_non_cold_recruiter_status(tmp_path, monkeypatch):
+    """Other statuses (queued, skipped_*) must not trigger promotion."""
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(tmp_path))
+    queued = _classified_queued("t1")
+    result = auto_promote_cold_recruiter(
+        queued, operator_emails=BRIAN_ADDRESSES,
+    )
+    assert result["status"] == "skipped_not_cold_recruiter"
+    assert not (tmp_path / "people").exists() or not list((tmp_path / "people").iterdir())
+
+
+def test_auto_promote_thread_continuity_writes_stub(tmp_path, monkeypatch):
+    """When classification returns queued + thread_continuity=True, the
+    helper writes a stub so draft-compose can load the slug."""
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(tmp_path))
+    classified = {
+        "thread_id": "t1",
+        "from_email": "alyssa.statile@coinbase.com",
+        "from_header": "Alyssa Statile <alyssa.statile@coinbase.com>",
+        "subject": "Meeting with Siwei",
+        "snippet": "...",
+        "slug": "alyssa-statile",
+        "status": "queued",
+        "thread_continuity": True,
+    }
+    result = auto_promote_thread_continuity(
+        classified, operator_emails=BRIAN_ADDRESSES,
+    )
+    assert result["status"] == "created"
+    assert result["slug"] == "alyssa-statile"
+    fp = tmp_path / "people" / "alyssa-statile.md"
+    assert fp.exists()
+    text = fp.read_text(encoding="utf-8")
+    assert "thread_continuity" in text
+
+
+def test_auto_promote_thread_continuity_noop_for_unrelated_status(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(tmp_path))
+    classified = _classified_queued("t1")  # plain queued, no continuity flag
+    result = auto_promote_thread_continuity(
+        classified, operator_emails=BRIAN_ADDRESSES,
+    )
+    assert result["status"] == "skipped_not_thread_continuity"
+
+
+def test_auto_promote_idempotent_when_slug_exists(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(tmp_path))
+    classified = {
+        "thread_id": "t1",
+        "from_email": "jane@greenhouse-mail.io",
+        "from_header": "Jane Recruiter <jane@greenhouse-mail.io>",
+        "subject": "Director role",
+        "snippet": "...",
+        "status": "queued_cold_recruiter",
+    }
+    first = auto_promote_cold_recruiter(classified, operator_emails=BRIAN_ADDRESSES)
+    second = auto_promote_cold_recruiter(classified, operator_emails=BRIAN_ADDRESSES)
+    assert first["status"] == "created"
+    assert second["status"] == "already_exists"
+
+
+def test_build_skipped_samples_returns_unknown_senders_only():
+    """Samples surface skipped_unknown_sender items so the operator can spot
+    missed actionable threads. Service skips are pure noise — covered
+    by the count bucket alone, not the samples."""
+    results = [
+        _classified_queued("t1"),
+        {
+            "thread_id": "t2",
+            "from_email": "noisy@stripe.com",
+            "subject": "Receipt",
+            "status": "skipped_service",
+        },
+        {
+            "thread_id": "t3",
+            "from_email": "alyssa.statile@coinbase.com",
+            "subject": "Meeting follow-up",
+            "status": "skipped_unknown_sender",
+        },
+        {
+            "thread_id": "t4",
+            "from_email": "ergaut@usfca.edu",
+            "subject": "Tech Econ Seminar",
+            "status": "skipped_unknown_sender",
+        },
+    ]
+    samples = build_skipped_samples(results, max_samples=10)
+    statuses = {s["status"] for s in samples}
+    assert "skipped_unknown_sender" in statuses
+    assert "skipped_service" not in statuses
+    assert len(samples) == 2
+    by_email = {s["from_email"] for s in samples}
+    assert "alyssa.statile@coinbase.com" in by_email
+    assert "ergaut@usfca.edu" in by_email
+
+
+def test_build_skipped_samples_caps_at_max():
+    results = [
+        {
+            "thread_id": f"t{i}",
+            "from_email": f"u{i}@x.com",
+            "subject": f"Subject {i}",
+            "status": "skipped_unknown_sender",
+        } for i in range(15)
+    ]
+    samples = build_skipped_samples(results, max_samples=10)
+    assert len(samples) == 10
+
+
+def test_build_skipped_samples_truncates_long_subjects():
+    """Keep payload small so the morning brief stays under Telegram's
+    4096-char limit when listed."""
+    long_subject = "x" * 500
+    results = [{
+        "thread_id": "t1",
+        "from_email": "u@x.com",
+        "subject": long_subject,
+        "status": "skipped_unknown_sender",
+    }]
+    samples = build_skipped_samples(results, max_samples=10)
+    assert len(samples[0]["subject"]) <= 100
 
 
 def test_build_queue_idempotent_on_duplicate_thread_ids():

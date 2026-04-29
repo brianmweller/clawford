@@ -22,7 +22,10 @@ from __future__ import annotations
 
 from email.utils import parseaddr
 
+from datetime import datetime, timezone
+
 from flux_import_lib import is_likely_service_account
+from people_promote_lib import _derive_name_and_slug, promote_to_people_brain
 from recruiter_detector_lib import AMBIGUOUS_DOMAINS, RECRUITER_DOMAINS, is_likely_recruiter
 
 
@@ -69,6 +72,26 @@ def latest_message(thread: dict) -> dict | None:
     if not msgs:
         return None
     return msgs[-1]
+
+
+def _brian_in_prior_thread_history(thread: dict, operator_emails: set[str]) -> bool:
+    """True if any message in the thread BEFORE the latest has a From
+    header matching the operator's addresses.
+
+    The thread-continuity backstop: once the operator engages on a thread,
+    future inbounds from any sender on it should draft regardless of
+    people-brain membership. Excludes the latest message because that's
+    the one being classified (and an outbound-from-the operator latest is
+    already caught by skipped_brian_last upstream)."""
+    msgs = thread.get("messages") or []
+    if len(msgs) < 2:
+        return False
+    brian_lower = {a.lower() for a in operator_emails}
+    for m in msgs[:-1]:
+        from_email = extract_email_from_header(_header(m, "From")).lower()
+        if from_email and from_email in brian_lower:
+            return True
+    return False
 
 
 def classify_thread_for_triage(
@@ -123,6 +146,20 @@ def classify_thread_for_triage(
 
     slug = email_to_slug.get(from_email)
     if not slug:
+        # Thread-continuity backstop: if the operator has previously sent on
+        # this thread, the sender is engaged regardless of people-brain
+        # membership. This covers the gap between "the operator replies to a
+        # new contact" and "gmail-sent-mine creates a stub on its next
+        # 2-hour cycle". Driver auto-promotes to a real slug.
+        if _brian_in_prior_thread_history(thread, operator_emails):
+            _name, derived_slug = _derive_name_and_slug(from_email, from_raw)
+            return {
+                **base,
+                "slug": derived_slug,
+                "status": "queued",
+                "thread_continuity": True,
+            }
+
         # Unknown sender: check recruiter detector before skipping. Cold
         # recruiter inbounds route into drafting (queued_cold_recruiter)
         # so Huckle can evaluate fit against the operator's target_company list
@@ -193,6 +230,106 @@ def upsert_thread_in_queue(queue: dict | None, classified: dict) -> dict:
         filtered.append(entry)
 
     return {**base, "queued": filtered}
+
+
+RECRUITER_CIRCLES = "recruiter, professional-outer"
+
+
+def auto_promote_thread_continuity(
+    classified: dict,
+    *,
+    operator_emails: set[str],
+) -> dict:
+    """When classification returned queued + thread_continuity=True,
+    write a minimal people/<slug>.md so downstream draft-compose can
+    load it. The slug already matches what _derive_name_and_slug
+    produced inside the classifier, so promote is idempotent on the
+    same thread re-classified across triage cycles.
+
+    Returns status=skipped_not_thread_continuity for any other
+    classification, so callers can call unconditionally."""
+    if not classified.get("thread_continuity"):
+        return {"status": "skipped_not_thread_continuity"}
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return promote_to_people_brain(
+        from_email=classified.get("from_email", ""),
+        from_header=classified.get("from_header", ""),
+        circles="professional-outer",
+        source="thread_continuity",
+        last_interaction=today,
+        skip_emails=operator_emails,
+        extra_fields={
+            "source_thread_id": classified.get("thread_id", ""),
+        },
+    )
+
+
+def auto_promote_cold_recruiter(
+    classified: dict,
+    *,
+    operator_emails: set[str],
+) -> dict:
+    """When a thread classifies as queued_cold_recruiter, write a minimal
+    people/<slug>.md so the next message in the same thread (or a future
+    inbound from the same sender) is recognized as `queued` via the
+    email_to_slug map — no second recruiter-detector pass needed.
+
+    Idempotent: a second call for the same sender returns
+    status=already_exists; the operator's manual edits are preserved. Returns
+    status=skipped_not_cold_recruiter for any other classification, so
+    callers can call this unconditionally inside a result loop without
+    branching.
+    """
+    if classified.get("status") != "queued_cold_recruiter":
+        return {"status": "skipped_not_cold_recruiter"}
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return promote_to_people_brain(
+        from_email=classified.get("from_email", ""),
+        from_header=classified.get("from_header", ""),
+        circles=RECRUITER_CIRCLES,
+        source="triage_recruiter",
+        relationship_type="recruiter",
+        last_interaction=today,
+        skip_emails=operator_emails,
+        extra_fields={
+            "recruiter_signal_domain": classified.get("recruiter_matched_domain", ""),
+            "source_thread_id": classified.get("thread_id", ""),
+        },
+    )
+
+
+def build_skipped_samples(
+    results: list[dict],
+    *,
+    max_samples: int = 10,
+    subject_cap: int = 100,
+) -> list[dict]:
+    """Return up to `max_samples` skipped_unknown_sender items so the
+    morning brief's Triage Health section can show the operator what got
+    silently filtered. Skipped service items are excluded — they're
+    pure noise, summarized by the bucket count alone.
+
+    Subjects are truncated to `subject_cap` chars to keep the morning
+    Telegram message under the 4096-char limit when several samples
+    are listed."""
+    out: list[dict] = []
+    for r in results:
+        if r.get("status") != "skipped_unknown_sender":
+            continue
+        subject = r.get("subject", "") or ""
+        if len(subject) > subject_cap:
+            subject = subject[:subject_cap]
+        out.append({
+            "thread_id": r.get("thread_id", ""),
+            "from_email": r.get("from_email", ""),
+            "subject": subject,
+            "status": r["status"],
+        })
+        if len(out) >= max_samples:
+            break
+    return out
 
 
 def build_queue_from_results(results: list[dict]) -> dict:

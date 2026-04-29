@@ -273,6 +273,93 @@ def test_format_nudge_empty_still_shows_tracked_count(
 # ─── format_nudge: overdue_total > displayed overdue ─────────────────
 
 
+def test_load_latest_triage_envelope_returns_most_recent(mrn, tmp_path):
+    """The helper parses connector-inbox-triage-host.log and returns
+    the envelope from the latest successful run. Earlier runs ignored."""
+    log = tmp_path / "log.log"
+    log.write_text(
+        '[2026-04-29T01:00:01Z] connector-inbox-triage exit=0\n'
+        '{"status": "ok", "queued": 1, "skipped_unknown_sender": 5, "skipped_service": 30}\n'
+        '[2026-04-29T01:30:01Z] connector-inbox-triage exit=0\n'
+        '{"status": "ok", "queued": 5, "skipped_unknown_sender": 2, "skipped_service": 35, '
+        '"skipped_samples": [{"from_email": "alyssa@coinbase.com", "subject": "Meeting"}]}\n',
+        encoding="utf-8",
+    )
+    env = mrn._load_latest_triage_envelope(log)
+    assert env is not None
+    assert env["queued"] == 5
+    assert env["skipped_unknown_sender"] == 2
+    assert len(env["skipped_samples"]) == 1
+
+
+def test_load_latest_triage_envelope_skips_error_runs(mrn, tmp_path):
+    """If the most recent run errored, fall back to the prior ok envelope."""
+    log = tmp_path / "log.log"
+    log.write_text(
+        '[2026-04-29T01:00:01Z] connector-inbox-triage exit=0\n'
+        '{"status": "ok", "queued": 5, "skipped_unknown_sender": 2}\n'
+        '[2026-04-29T01:30:01Z] connector-inbox-triage exit=0\n'
+        '{"status": "error", "error": "OAuth refresh failed"}\n',
+        encoding="utf-8",
+    )
+    env = mrn._load_latest_triage_envelope(log)
+    assert env is not None
+    assert env["queued"] == 5
+
+
+def test_load_latest_triage_envelope_no_log(mrn, tmp_path):
+    env = mrn._load_latest_triage_envelope(tmp_path / "missing.log")
+    assert env is None
+
+
+def test_format_triage_health_line_minimal(mrn):
+    env = {"queued": 5, "skipped_unknown_sender": 0, "skipped_service": 32}
+    line = mrn._format_triage_health_lines(env)
+    assert any("5" in s and "drafted" in s for s in line)
+    # No unknown samples — no expansion lines.
+    assert all("•" not in s for s in line)
+
+
+def test_format_triage_health_line_lists_unknowns(mrn):
+    env = {
+        "queued": 3,
+        "skipped_unknown_sender": 2,
+        "skipped_service": 30,
+        "skipped_samples": [
+            {"from_email": "alyssa@coinbase.com", "subject": "Meeting follow-up"},
+            {"from_email": "ergaut@usfca.edu", "subject": "Tech Econ Seminar"},
+        ],
+    }
+    lines = mrn._format_triage_health_lines(env)
+    text = "\n".join(lines)
+    assert "alyssa@coinbase.com" in text
+    assert "ergaut@usfca.edu" in text
+    assert "Meeting follow-up" in text
+
+
+def test_format_nudge_appends_triage_health_when_provided(
+    mrn, scan_mixed, tuesday_pacific,
+):
+    env = {
+        "queued": 4,
+        "skipped_unknown_sender": 1,
+        "skipped_service": 30,
+        "skipped_samples": [
+            {"from_email": "alyssa@coinbase.com", "subject": "Meeting"},
+        ],
+    }
+    body = mrn.format_nudge(scan_mixed, tuesday_pacific, triage_health=env)
+    assert "Triage" in body  # one of the rendered lines
+    assert "alyssa@coinbase.com" in body
+
+
+def test_format_nudge_omits_triage_when_health_is_none(
+    mrn, scan_mixed, tuesday_pacific,
+):
+    body = mrn.format_nudge(scan_mixed, tuesday_pacific, triage_health=None)
+    assert "Triage" not in body
+
+
 def test_format_nudge_truncated_footer_shows_full_total(
     mrn, scan_truncated, tuesday_pacific
 ):

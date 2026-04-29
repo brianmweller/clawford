@@ -56,6 +56,7 @@ from flux_import_lib import build_email_to_slug_map             # noqa: E402
 from gmail_sent_mine_lib import (                               # noqa: E402
     build_gmail_query,
     extract_recipient_emails,
+    extract_recipient_pairs,
     internal_date_to_iso_date,
     load_cursor,
     save_cursor,
@@ -187,10 +188,18 @@ def run(
         "recipients_skipped": 0,   # noreply etc.
         "stamps_written": 0,
         "stamps_declined_max_merge": 0,
+        "auto_promoted": 0,
     }
 
     unmatched_samples: list[str] = []
     max_internal_date = str(cursor.get("last_internalDate") or "0")
+
+    # Lazy-import the promote helper so dry-run paths and tests that
+    # don't touch the brain don't import the brain module.
+    promote_fn = None
+    if commit:
+        from people_promote_lib import promote_to_people_brain
+        promote_fn = promote_to_people_brain
 
     for msg in messages:
         stats["messages_scanned"] += 1
@@ -201,17 +210,33 @@ def run(
         if internal_date > max_internal_date:
             max_internal_date = internal_date
 
-        recipients = extract_recipient_emails(
+        recipient_pairs = extract_recipient_pairs(
             msg, operator_emails=operator_emails,
         )
-        stats["recipients_total"] += len(recipients)
+        stats["recipients_total"] += len(recipient_pairs)
 
-        for addr in recipients:
+        for addr, raw_header in recipient_pairs:
             slug = email_to_slug.get(addr)
             if not slug:
                 stats["recipients_unmatched"] += 1
                 if len(unmatched_samples) < 20:
                     unmatched_samples.append(addr)
+                # Auto-promote so future inbounds from this address
+                # triage as `queued` instead of skipped_unknown_sender.
+                # The newly-created stub is also stamped with
+                # last_interaction so the relationship-check-in
+                # filtering downstream behaves correctly.
+                if promote_fn is not None:
+                    promo = promote_fn(
+                        from_email=addr,
+                        from_header=raw_header,
+                        circles="professional-outer",
+                        source="sent_recipient",
+                        last_interaction=date_iso,
+                        skip_emails=operator_emails,
+                    )
+                    if promo["status"] == "created":
+                        stats["auto_promoted"] += 1
                 continue
             stats["recipients_matched"] += 1
             if commit:

@@ -118,6 +118,22 @@ def _split_addrs(header_value: str) -> list[str]:
     return out
 
 
+def _split_addr_pairs(header_value: str) -> list[tuple[str, str]]:
+    """Like _split_addrs but preserves the raw `Display Name <email>`
+    form for each address, so callers can pass it to
+    promote_to_people_brain for richer slug derivation. Returns
+    [(email_lower, raw_part_stripped), ...]."""
+    if not header_value:
+        return []
+    out: list[tuple[str, str]] = []
+    for part in header_value.split(","):
+        raw = part.strip()
+        _, addr = parseaddr(part)
+        if addr:
+            out.append((addr.lower(), raw))
+    return out
+
+
 def is_skippable_recipient(addr: str) -> bool:
     """True for automated / no-reply / bounce addresses. Case-insensitive
     match on local-part prefix and domain suffix."""
@@ -155,6 +171,31 @@ def extract_recipient_emails(
             if is_skippable_recipient(addr):
                 continue
             out.add(addr)
+    return out
+
+
+def extract_recipient_pairs(
+    msg: dict,
+    *,
+    operator_emails: set[str],
+) -> list[tuple[str, str]]:
+    """Like extract_recipient_emails but yields (email, raw_header)
+    tuples so auto-promote can derive a clean slug from the display
+    name. Same filtering semantics. Order: To addresses first, then
+    Cc, deduped on email (first occurrence wins)."""
+    operator = {a.lower() for a in operator_emails}
+    seen: set[str] = set()
+    out: list[tuple[str, str]] = []
+    for hdr in ("To", "Cc"):
+        for addr, raw in _split_addr_pairs(_header(msg, hdr)):
+            if addr in operator:
+                continue
+            if is_skippable_recipient(addr):
+                continue
+            if addr in seen:
+                continue
+            seen.add(addr)
+            out.append((addr, raw))
     return out
 
 

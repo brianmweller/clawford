@@ -42,7 +42,10 @@ from agents.shared.brain import dropbox_brain_root                  # noqa: E402
 from agents.shared.operator import load_operator                    # noqa: E402
 from flux_import_lib import build_email_to_slug_map                 # noqa: E402
 from inbox_triage_lib import (                                      # noqa: E402
+    auto_promote_cold_recruiter,
+    auto_promote_thread_continuity,
     build_queue_from_results,
+    build_skipped_samples,
     classify_thread_for_triage,
     upsert_thread_in_queue,
 )
@@ -133,9 +136,10 @@ def main() -> int:
     if args.thread_id:
         print(f"Single-thread mode: fetching {args.thread_id}")
         thread = _fetch_thread_metadata(service, args.thread_id)
+        brian_addrs = load_operator().emails
         result = classify_thread_for_triage(
             thread,
-            operator_emails=load_operator().emails,
+            operator_emails=brian_addrs,
             email_to_slug=email_to_slug,
             rejected_recruiters=rejected_recruiters,
         )
@@ -143,6 +147,18 @@ def main() -> int:
         if result["status"] == "queued":
             print(f"    slug={result['slug']}  from={result['from_email']}")
             print(f"    subject={result.get('subject','')[:80]}")
+        elif result["status"] == "queued_cold_recruiter":
+            promo = auto_promote_cold_recruiter(result, operator_emails=brian_addrs)
+            if promo["status"] == "created":
+                print(f"    auto-promoted: {promo['slug']} (next inbound queues as known)")
+            elif promo["status"] == "already_exists":
+                print(f"    auto-promote: slug {promo['slug']} already exists (no-op)")
+        elif result.get("thread_continuity"):
+            # Backstop: the operator engaged on this thread but sender wasn't
+            # in people brain yet. Promote so draft-compose can load.
+            promo = auto_promote_thread_continuity(result, operator_emails=brian_addrs)
+            if promo["status"] == "created":
+                print(f"    thread-continuity promoted: {promo['slug']}")
 
         if not args.dry_run:
             existing_queue: dict = {}
@@ -178,15 +194,31 @@ def main() -> int:
 
     buckets: dict[str, int] = {}
     classified_results: list[dict] = []
+    brian_addrs = load_operator().emails
+    promoted_count = 0
     for t in threads:
         result = classify_thread_for_triage(
             t,
-            operator_emails=load_operator().emails,
+            operator_emails=brian_addrs,
             email_to_slug=email_to_slug,
             rejected_recruiters=rejected_recruiters,
         )
         buckets[result["status"]] = buckets.get(result["status"], 0) + 1
         classified_results.append(result)
+        # Auto-promote cold recruiters into the people brain so the next
+        # message in the same thread is recognized as `queued` without
+        # re-running the recruiter detector. Idempotent on re-classify.
+        if not args.dry_run:
+            if result["status"] == "queued_cold_recruiter":
+                promo = auto_promote_cold_recruiter(result, operator_emails=brian_addrs)
+                if promo["status"] == "created":
+                    promoted_count += 1
+            elif result.get("thread_continuity"):
+                # Backstop for senders the operator engaged with before
+                # gmail-sent-mine got around to creating the stub.
+                promo = auto_promote_thread_continuity(result, operator_emails=brian_addrs)
+                if promo["status"] == "created":
+                    promoted_count += 1
         # Verbose-print non-persisted statuses so the operator can see
         # what got filtered. queued + queued_cold_recruiter are persisted
         # and listed in the QUEUED block below.
@@ -196,6 +228,8 @@ def main() -> int:
 
     queue_dict = build_queue_from_results(classified_results)
     queued = queue_dict["queued"]
+    if promoted_count:
+        print(f"Auto-promoted {promoted_count} cold-recruiter sender(s) to people brain")
 
     print("=" * 72)
     print("TRIAGE SUMMARY")
@@ -226,13 +260,19 @@ def main() -> int:
         print(f"Wrote queue to {args.queue_json}")
 
     print()
-    print(json.dumps({
+    envelope = {
         "status": "ok",
         "window_days": args.window_days,
         "threads_scanned": len(threads),
         "queued": len(queued),
         **buckets,
-    }))
+    }
+    if promoted_count:
+        envelope["auto_promoted"] = promoted_count
+    samples = build_skipped_samples(classified_results, max_samples=10)
+    if samples:
+        envelope["skipped_samples"] = samples
+    print(json.dumps(envelope))
     return 0
 
 

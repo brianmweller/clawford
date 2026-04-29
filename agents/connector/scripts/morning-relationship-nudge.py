@@ -193,7 +193,63 @@ def build_nudge_items(scan: dict, now_pacific: datetime) -> list[dict]:
     return items
 
 
-def format_nudge(scan: dict, now_pacific: datetime) -> str:
+DEFAULT_TRIAGE_LOG = Path(os.path.expanduser(
+    "~/.clawford/logs/connector-inbox-triage-host.log"
+))
+
+
+def _load_latest_triage_envelope(log_path: Path) -> dict | None:
+    """Parse connector-inbox-triage-host.log and return the most recent
+    envelope where status == 'ok'. Lines alternate between bracketed
+    timestamps and JSON envelope payloads.
+
+    Returns None when the file is missing or no ok envelope is found.
+    Used by the morning brief's Triage Health section to give the operator
+    visibility into what the triage cron did overnight.
+    """
+    try:
+        text = Path(log_path).read_text(encoding="utf-8")
+    except (OSError, FileNotFoundError):
+        return None
+
+    latest_ok: dict | None = None
+    for line in text.splitlines():
+        s = line.strip()
+        if not s.startswith("{"):
+            continue
+        try:
+            env = json.loads(s)
+        except json.JSONDecodeError:
+            continue
+        if env.get("status") == "ok":
+            latest_ok = env
+    return latest_ok
+
+
+def _format_triage_health_lines(env: dict) -> list[str]:
+    """Render a Triage Health section for the morning brief: a one-line
+    summary (drafted / service / unknown) plus up to 3 unknown-sender
+    samples to surface threads the operator's people brain doesn't recognize."""
+    queued = env.get("queued", 0)
+    unknown = env.get("skipped_unknown_sender", 0)
+    service = env.get("skipped_service", 0)
+    promoted = env.get("auto_promoted", 0)
+
+    parts = [f"{queued} drafted", f"{service} service", f"{unknown} unknown"]
+    if promoted:
+        parts.append(f"{promoted} auto-promoted")
+    summary = "\U0001f4ec Triage health — " + " · ".join(parts)
+
+    out = [summary]
+    samples = env.get("skipped_samples") or []
+    for s in samples[:3]:
+        from_email = s.get("from_email", "")
+        subject = s.get("subject", "")
+        out.append(f"   • {subject} — {from_email}")
+    return out
+
+
+def format_nudge(scan: dict, now_pacific: datetime, *, triage_health: dict | None = None) -> str:
     """Render the full morning nudge.
 
     `scan` is the people-scan.py JSON output. `now_pacific` is the
@@ -237,6 +293,14 @@ def format_nudge(scan: dict, now_pacific: datetime) -> str:
         lines.append(f"  {tracked_total} people tracked across all circles")
         if overdue_total:
             lines.append(f"  {overdue_total} overdue going into the week")
+        lines.append("")
+
+    # Triage Health: visibility into what the inbox-triage cron is
+    # doing. Sits above the relationship footer so the operator sees both
+    # signals (people-side + email-side) in one brief.
+    if triage_health:
+        for hline in _format_triage_health_lines(triage_health):
+            lines.append(hline)
         lines.append("")
 
     # Footer: total overdue across all circles + tracked total. The
@@ -315,7 +379,8 @@ def run() -> dict:
             "alert": "\U0001f431\U0001f91d people-scan.py returned no usable output",
         }
 
-    body = format_nudge(scan, now_pacific)
+    triage_health = _load_latest_triage_envelope(DEFAULT_TRIAGE_LOG)
+    body = format_nudge(scan, now_pacific, triage_health=triage_health)
     _write_atomic(BRIEF_FILE, body)
 
     # Also emit the structured items file for morning-fleet-deliver.py.

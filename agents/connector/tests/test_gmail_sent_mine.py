@@ -101,6 +101,32 @@ def test_extract_recipient_emails_drops_noreply(lib):
     assert out == {"thomas@example.com"}
 
 
+def test_extract_recipient_pairs_returns_email_with_raw_header(lib):
+    """extract_recipient_pairs preserves the raw `Display Name <email>`
+    form so callers can pass it to promote_to_people_brain for richer
+    slug derivation. Bare emails return empty raw_header."""
+    msg = {"payload": {"headers": [
+        {"name": "To", "value": "Alice Smith <alice@example.com>, bob@example.com"},
+    ]}}
+    out = lib.extract_recipient_pairs(msg, operator_emails=set())
+    out_dict = {email: raw for email, raw in out}
+    assert "alice@example.com" in out_dict
+    assert out_dict["alice@example.com"] == "Alice Smith <alice@example.com>"
+    assert "bob@example.com" in out_dict
+    assert out_dict["bob@example.com"] == "bob@example.com"
+
+
+def test_extract_recipient_pairs_filters_brian_and_noreply(lib):
+    msg = {"payload": {"headers": [
+        {"name": "To", "value": "the operator <operator@example.com>, noreply@x.com, Alice <alice@example.com>"},
+    ]}}
+    out = lib.extract_recipient_pairs(
+        msg, operator_emails={"operator@example.com"},
+    )
+    emails = [e for e, _ in out]
+    assert emails == ["alice@example.com"]
+
+
 def test_internal_date_to_iso_date(lib):
     # Compute the expected epoch from the datetime itself rather than
     # hard-coding — avoids off-by-N drift when computing by hand.
@@ -353,7 +379,8 @@ def test_run_multi_recipient_stamps_both_matched_slugs(sent_mine, sandbox):
         assert "- **last_interaction:** 2026-04-21" in text
 
 
-def test_run_unmatched_recipient_no_exception(sent_mine, sandbox):
+def test_run_unmatched_recipient_no_exception(sent_mine, sandbox, monkeypatch):
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(sandbox.people.parent))
     # No person file for unknown@x.com
     svc = _FakeGmailService([
         _sent_msg(mid="m1", to="unknown@x.com",
@@ -369,8 +396,67 @@ def test_run_unmatched_recipient_no_exception(sent_mine, sandbox):
         operator_emails={"operator@example.com"},
     )
     assert stats["status"] == "ok"
+    # After Phase 2.3, unmatched recipients are auto-promoted instead
+    # of silently lost. A stub now exists for unknown@x.com and counts
+    # as auto_promoted (recipients_unmatched still tracks the
+    # pre-promote count for audit purposes).
     assert stats["recipients_unmatched"] == 1
+    assert stats["auto_promoted"] == 1
     assert stats["stamps_written"] == 0
+    assert (sandbox.people / "unknown-x-com.md").exists()
+
+
+def test_run_unmatched_recipient_creates_stub_with_display_name(
+    sent_mine, sandbox, monkeypatch,
+):
+    """Auto-promotion uses the To header's display name to build a
+    cleaner slug than the local-domain fallback."""
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(sandbox.people.parent))
+    svc = _FakeGmailService([
+        _sent_msg(
+            mid="m1",
+            to="Alyssa Statile <alyssa.statile@coinbase.com>",
+            internal_date_ms=_apr21_ms(1),
+        ),
+    ])
+    stats = sent_mine.run(
+        service=svc,
+        people_dir=sandbox.people,
+        cursor_path=sandbox.cursor,
+        summary_path=sandbox.summary,
+        window_days=90, max_messages=100, commit=True,
+        now_iso="2026-04-21T10:00:00Z",
+        operator_emails={"operator@example.com"},
+    )
+    assert stats["auto_promoted"] == 1
+    fp = sandbox.people / "alyssa-statile.md"
+    assert fp.exists()
+    text = fp.read_text(encoding="utf-8")
+    assert "auto_created" in text
+    assert "sent_recipient" in text
+    assert "alyssa.statile@coinbase.com" in text
+
+
+def test_run_dry_run_does_not_promote_unmatched(
+    sent_mine, sandbox, monkeypatch,
+):
+    """Dry-run must not write stubs (matches existing dry-run cursor
+    behavior)."""
+    monkeypatch.setenv("CLAWFORD_BRAIN_DROPBOX_ROOT", str(sandbox.people.parent))
+    svc = _FakeGmailService([
+        _sent_msg(mid="m1", to="newperson@example.com",
+                  internal_date_ms=_apr21_ms(1)),
+    ])
+    sent_mine.run(
+        service=svc,
+        people_dir=sandbox.people,
+        cursor_path=sandbox.cursor,
+        summary_path=sandbox.summary,
+        window_days=90, max_messages=100, commit=False,
+        now_iso="2026-04-21T10:00:00Z",
+        operator_emails={"operator@example.com"},
+    )
+    assert not (sandbox.people / "newperson-example-com.md").exists()
 
 
 def test_run_dry_run_does_not_stamp_or_persist_cursor(sent_mine, sandbox):

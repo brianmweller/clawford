@@ -37,7 +37,8 @@ def _load_script(name: str):
     return m
 
 
-def _write_person(people_dir: Path, slug: str, *, email: str, last_interaction: str, circles: str = "friends-close"):
+def _write_person(people_dir: Path, slug: str, *, email: str, last_interaction: str, circles: str = "friends-close", auto_created: str | None = None):
+    extra = f"- **auto_created:** {auto_created}\n" if auto_created else ""
     (people_dir / f"{slug}.md").write_text(
         f"# {slug.replace('-', ' ').title()}\n"
         f"- **slug:** {slug}\n"
@@ -51,7 +52,8 @@ def _write_person(people_dir: Path, slug: str, *, email: str, last_interaction: 
         f"- **platforms:** email\n"
         f"- **last_interaction:** {last_interaction}\n"
         f"- **context_notes:** test person\n"
-        f"- **notes:** seeded for test\n",
+        f"- **notes:** seeded for test\n"
+        + extra,
         encoding="utf-8",
     )
 
@@ -513,3 +515,43 @@ def test_run_no_last_shown_file_is_fine(stub_brain):
     result = stub_brain.ps.run()
     assert result["status"] == "ok"
     # No crash; no snoozes.json was created because no slugs to snooze.
+
+
+# ── auto_created filter ──────────────────────────────────────────
+
+
+def test_run_filters_auto_created_stubs_from_overdue(stub_brain):
+    """Auto-promoted stubs (cold recruiters the operator hasn't engaged with,
+    sent_recipient stubs from one-off outbounds) must NOT show up in
+    the relationship-nudge queue. They're pure triage scaffolding —
+    the operator elevates them by removing the auto_created tag once he wants
+    them in the check-in rotation."""
+    _write_person(stub_brain.people, "real-friend", email="rf@ex.com",
+                  last_interaction=_days_ago_iso(50),
+                  circles="friends-close")
+    # Same circle as real-friend so cadence math is identical — only
+    # the auto_created tag should differentiate them.
+    _write_person(stub_brain.people, "auto-recruiter", email="ar@ex.com",
+                  last_interaction=_days_ago_iso(50),
+                  circles="friends-close",
+                  auto_created="triage_recruiter")
+    _write_person(stub_brain.people, "auto-sent-recipient", email="asr@ex.com",
+                  last_interaction=_days_ago_iso(120),
+                  circles="professional-outer",
+                  auto_created="sent_recipient")
+    result = stub_brain.ps.run()
+    overdue_slugs = {p["slug"] for p in result["overdue"]}
+    assert "real-friend" in overdue_slugs
+    assert "auto-recruiter" not in overdue_slugs
+    assert "auto-sent-recipient" not in overdue_slugs
+
+
+def test_run_includes_auto_created_when_brian_clears_field(stub_brain):
+    """Once the operator removes the auto_created field (signaling 'this is a
+    real relationship now'), the contact rejoins the nudge queue."""
+    _write_person(stub_brain.people, "elevated", email="e@ex.com",
+                  last_interaction=_days_ago_iso(50),
+                  circles="friends-close")  # no auto_created
+    result = stub_brain.ps.run()
+    overdue_slugs = {p["slug"] for p in result["overdue"]}
+    assert "elevated" in overdue_slugs
