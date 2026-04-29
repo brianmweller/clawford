@@ -16,6 +16,7 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from inbox_triage_lib import (  # type: ignore
+    build_queue_from_results,
     classify_thread_for_triage,
     extract_email_from_header,
     latest_message,
@@ -359,3 +360,78 @@ def test_upsert_preserves_non_queued_fields_in_queue_dict():
     queue = {"queued": [], "generated_at": "2026-04-20T00:00:00Z"}
     result = upsert_thread_in_queue(queue, _classified_queued("t1"))
     assert result["generated_at"] == "2026-04-20T00:00:00Z"
+
+
+def test_upsert_appends_cold_recruiter_with_status_field():
+    """Cold-recruiter entries must persist with status=queued_cold_recruiter
+    and recruiter signal fields, so auto-compose can dispatch them in
+    cold-inbound mode."""
+    cold = {
+        "thread_id": "t1",
+        "from_email": "no-reply@greenhouse-mail.io",
+        "from_header": "Recruiter via Greenhouse <no-reply@greenhouse-mail.io>",
+        "subject": "Senior Director role at Stripe",
+        "date": "Tue, 15 Apr 2026 10:00:00 -0700",
+        "snippet": "Reaching out about a senior role...",
+        "in_reply_to_message_id": "<x@m>",
+        "status": "queued_cold_recruiter",
+        "recruiter_signal_confidence": 0.95,
+        "recruiter_signal_reason": "ats_domain",
+        "recruiter_matched_domain": "greenhouse-mail.io",
+    }
+    result = upsert_thread_in_queue(None, cold)
+    assert len(result["queued"]) == 1
+    entry = result["queued"][0]
+    assert entry["status"] == "queued_cold_recruiter"
+    assert entry["recruiter_signal_confidence"] == 0.95
+    assert entry["recruiter_matched_domain"] == "greenhouse-mail.io"
+    assert "slug" not in entry  # cold recruiters have no slug yet
+
+
+# --- build_queue_from_results ---
+
+
+def test_build_queue_persists_both_queued_and_cold_recruiter():
+    """Full-scan persistence must keep regular queued items AND cold
+    recruiters. Skipped statuses must be absent."""
+    results = [
+        _classified_queued("t1", slug="known-person"),
+        {
+            "thread_id": "t2",
+            "from_email": "no-reply@greenhouse-mail.io",
+            "from_header": "Recruiter via Greenhouse <no-reply@greenhouse-mail.io>",
+            "subject": "Director role at Stripe",
+            "date": "Tue, 15 Apr 2026 10:00:00 -0700",
+            "snippet": "Reaching out...",
+            "in_reply_to_message_id": "<m@x>",
+            "status": "queued_cold_recruiter",
+            "recruiter_signal_confidence": 0.9,
+            "recruiter_signal_reason": "ats_domain",
+            "recruiter_matched_domain": "greenhouse-mail.io",
+        },
+        {"thread_id": "t3", "status": "skipped_service"},
+        {"thread_id": "t4", "status": "skipped_unknown_sender"},
+    ]
+    queue = build_queue_from_results(results)
+    tids = [e["thread_id"] for e in queue["queued"]]
+    assert "t1" in tids
+    assert "t2" in tids
+    assert "t3" not in tids
+    assert "t4" not in tids
+
+
+def test_build_queue_from_empty_results_returns_empty_queued():
+    queue = build_queue_from_results([])
+    assert queue == {"queued": []}
+
+
+def test_build_queue_idempotent_on_duplicate_thread_ids():
+    """A push-listener can re-classify a thread that the full-scan also
+    saw; the second classification should replace the first."""
+    results = [
+        _classified_queued("t1", slug="old-slug"),
+        _classified_queued("t1", slug="new-slug"),
+    ]
+    queue = build_queue_from_results(results)
+    assert len(queue["queued"]) == 1
+    assert queue["queued"][0]["slug"] == "new-slug"

@@ -193,3 +193,15 @@ def upsert_thread_in_queue(queue: dict | None, classified: dict) -> dict:
         filtered.append(entry)
 
     return {**base, "queued": filtered}
+
+
+def build_queue_from_results(results: list[dict]) -> dict:
+    """Apply upsert_thread_in_queue across a list of classified results
+    and return the final queue dict. Used by inbox-triage.py's full-scan
+    path so it shares persistence semantics with the push-listener
+    (single-thread) path — including correct handling of
+    queued_cold_recruiter, which the prior inline append loop dropped."""
+    queue: dict = {"queued": []}
+    for r in results:
+        queue = upsert_thread_in_queue(queue, r)
+    return queue

@@ -42,6 +42,7 @@ from agents.shared.brain import dropbox_brain_root                  # noqa: E402
 from agents.shared.operator import load_operator                    # noqa: E402
 from flux_import_lib import build_email_to_slug_map                 # noqa: E402
 from inbox_triage_lib import (                                      # noqa: E402
+    build_queue_from_results,
     classify_thread_for_triage,
     upsert_thread_in_queue,
 )
@@ -176,7 +177,7 @@ def main() -> int:
     print()
 
     buckets: dict[str, int] = {}
-    queued: list[dict] = []
+    classified_results: list[dict] = []
     for t in threads:
         result = classify_thread_for_triage(
             t,
@@ -185,11 +186,16 @@ def main() -> int:
             rejected_recruiters=rejected_recruiters,
         )
         buckets[result["status"]] = buckets.get(result["status"], 0) + 1
-        if result["status"] == "queued":
-            queued.append(result)
-        elif args.verbose:
+        classified_results.append(result)
+        # Verbose-print non-persisted statuses so the operator can see
+        # what got filtered. queued + queued_cold_recruiter are persisted
+        # and listed in the QUEUED block below.
+        if result["status"] not in ("queued", "queued_cold_recruiter") and args.verbose:
             print(f"  {result['status']:26s} {result.get('from_email','?'):40s}  "
                   f"{result.get('subject','')[:50]}")
+
+    queue_dict = build_queue_from_results(classified_results)
+    queued = queue_dict["queued"]
 
     print("=" * 72)
     print("TRIAGE SUMMARY")
@@ -201,9 +207,11 @@ def main() -> int:
     if queued:
         print(f"QUEUED ({len(queued)}):")
         for q in queued:
-            print(f"  [{q['thread_id']}] {q['slug']:25s} <{q['from_email']}>")
-            print(f"      subject:  {q['subject']}")
-            print(f"      date:     {q['date']}")
+            is_cold = q.get("status") == "queued_cold_recruiter"
+            label = q.get("slug") or ("(cold-recruiter)" if is_cold else "?")
+            print(f"  [{q['thread_id']}] {label:25s} <{q.get('from_email','?')}>")
+            print(f"      subject:  {q.get('subject','')}")
+            print(f"      date:     {q.get('date','')}")
             print(f"      snippet:  {q.get('snippet','')[:140]}")
             print()
     else:
