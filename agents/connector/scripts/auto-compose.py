@@ -419,7 +419,9 @@ def main() -> int:
     if args.dry_run:
         print("DRY RUN — would process:")
         for item in to_process:
-            print(f"  [{item['thread_id']}] {item['slug']:25s} {item.get('subject','')[:60]}")
+            is_cold = item.get("status") == "queued_cold_recruiter"
+            label = item.get("slug") or ("(cold-recruiter)" if is_cold else "?")
+            print(f"  [{item['thread_id']}] {label:25s} {item.get('subject','')[:60]}")
         print()
         print(json.dumps({"status": "ok", "dry_run": True, "would_process": len(to_process)}))
         return 0
