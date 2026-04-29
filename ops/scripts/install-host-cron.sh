@@ -206,12 +206,6 @@ CONTRACT_ENTRIES=(
   # nag at the 5-day mark before the cliff. 09:15 UTC = 02:15 PT,
   # so an alert lands before the morning brief sweep at 12 UTC.
   "15 9 * * *|token-age-check|/home/openclaw/repo/ops/scripts/token-age-check.py|TELEGRAM_BOT_TOKEN|60"
-  # Costco SOCKS5 tunnel watchdog (2026-04-29). Probes 127.0.0.1:1080
-  # every 5 min; restarts costco-socks-tunnel.service after 3
-  # consecutive failures, throttled to one restart per 5 min. Auto-
-  # heals the autossh-stuck-after-Tailscale-flap mode that surfaces
-  # only as the misleading "JWT expired" alert from fleet-health.
-  "*/5 * * * *|costco-tunnel-watchdog|/home/openclaw/repo/ops/scripts/costco-tunnel-watchdog.py|SHOPPING_BOT_TOKEN|30"
 )
 
 # Markers for old entries to REMOVE on next install run. Used by the
@@ -233,6 +227,11 @@ STALE_MARKERS=(
   # to DIRECT (host wrapper) because it needs `crontab -l` and the host
   # repo, both unreachable from inside the openclaw gateway container.
   "# script-contract-fix-it-cron-self-check"
+  # 2026-04-29: tunnel watchdog retired. The SOCKS tunnel is now
+  # break-glass for ~once/65h scheduled reauth — daemon brings it
+  # up/down on demand. Continuous probing-and-restarting is no longer
+  # the right shape. See plans/this-is-still-incredibly-precious-manatee.md.
+  "# script-contract-costco-tunnel-watchdog"
 )
 
 NEW_LINES=()
