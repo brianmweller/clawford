@@ -212,7 +212,15 @@ def probe() -> dict:
     if missing_files:
         errors.append(f"missing: {', '.join(missing_files)}")
 
-    degraded = any(v == "missing" for v in auth.values()) or bool(missing_files)
+    # Any non-"ok" auth state is alert-worthy, not just "missing".
+    # check_auth() returns 'ok' / 'missing' / 'revoked' / 'error'
+    # (google) and 'ok' / 'missing' / 'expired' (krisp). The previous
+    # `v == "missing"` gate only caught the first state — a revoked
+    # Google refresh_token would have returned status=ok for the
+    # entire fleet, the same silent-outage shape that bit the */15
+    # heartbeat probe pre-2026-04-15.
+    auth_failures = [(k, v) for k, v in auth.items() if v != "ok"]
+    degraded = bool(auth_failures) or bool(missing_files)
     status = "degraded" if degraded else "ok"
     error_log = "; ".join(errors) if errors else "none"
 
@@ -226,7 +234,7 @@ def probe() -> dict:
         "error_log": error_log,
     }
     if degraded:
-        details = [f"{k}={v}" for k, v in auth.items() if v == "missing"]
+        details = [f"{k}={v}" for k, v in auth_failures]
         result["alert"] = (
             f"⚠️ meetings-coach degraded: {', '.join(details + errors) or 'missing files'}"
         )

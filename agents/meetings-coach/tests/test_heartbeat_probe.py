@@ -110,3 +110,75 @@ def test_google_auth_missing_when_token_file_absent(fake_workspace):
     (ws / "token.json").unlink()
     result = mod.check_auth()
     assert result["google_auth"] == "missing"
+
+
+# ─── probe() must degrade on every non-ok auth state, not just "missing" ─
+#
+# 2026-04-30: check_auth() can return 'missing' / 'revoked' / 'error' /
+# 'expired' (krisp) — but the previous probe() only flipped degraded on
+# 'missing'. A revoked Google refresh_token returned status=ok for the
+# entire fleet. Same shape of bug as the 2026-04-15 silent outage that
+# motivated the get_credentials round-trip in the first place.
+
+
+def _patch_auth(mod, monkeypatch, **overrides):
+    """Stub check_auth() to return a controlled dict so probe() tests
+    don't need to mock get_credentials + krisp + workflowy at once."""
+    base = {"google_auth": "ok", "workflowy_auth": "ok", "krisp_auth": "ok"}
+    base.update(overrides)
+    monkeypatch.setattr(mod, "check_auth", lambda: base)
+
+
+def test_probe_degrades_on_revoked_google_auth(fake_workspace, monkeypatch):
+    mod, _ws = fake_workspace
+    _patch_auth(mod, monkeypatch, google_auth="revoked")
+    result = mod.probe()
+    assert result["status"] == "degraded"
+    assert "alert" in result
+    assert "google_auth" in result["alert"] and "revoked" in result["alert"]
+
+
+def test_probe_degrades_on_error_google_auth(fake_workspace, monkeypatch):
+    """A transient `error` (network blip during refresh) should still
+    surface — the agent's auth round-trip didn't succeed, fleet-health
+    shouldn't paint over that."""
+    mod, _ws = fake_workspace
+    _patch_auth(mod, monkeypatch, google_auth="error")
+    result = mod.probe()
+    assert result["status"] == "degraded"
+    assert "google_auth" in result["alert"] and "error" in result["alert"]
+
+
+def test_probe_degrades_on_expired_krisp_auth(fake_workspace, monkeypatch):
+    """Krisp returns 'expired' when a 401 marker is fresh. Same alert
+    shape as missing — the operator needs to know the agent's transcript
+    fetches will keep failing until he refreshes the cookies."""
+    mod, _ws = fake_workspace
+    _patch_auth(mod, monkeypatch, krisp_auth="expired")
+    result = mod.probe()
+    assert result["status"] == "degraded"
+    assert "krisp_auth" in result["alert"] and "expired" in result["alert"]
+
+
+def test_probe_still_ok_when_all_auth_ok(fake_workspace, monkeypatch):
+    mod, _ws = fake_workspace
+    _patch_auth(mod, monkeypatch)  # all ok
+    result = mod.probe()
+    assert result["status"] == "ok"
+    assert "alert" not in result
+
+
+def test_probe_alert_lists_every_failing_auth_field(fake_workspace, monkeypatch):
+    """Multiple auth fields failing → all surface in one alert. Avoids
+    the whack-a-mole pattern where the operator fixes one and the next tick
+    reveals the second."""
+    mod, _ws = fake_workspace
+    _patch_auth(
+        mod, monkeypatch,
+        google_auth="revoked",
+        krisp_auth="expired",
+    )
+    result = mod.probe()
+    assert result["status"] == "degraded"
+    assert "google_auth" in result["alert"]
+    assert "krisp_auth" in result["alert"]
