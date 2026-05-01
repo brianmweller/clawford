@@ -24,3 +24,14 @@ fi
 echo "[post-merge] syncing workspace scripts via deploy.py --all ..."
 python3 "$DEPLOY" --all --yes-updates --skip-files --skip-pip-audit \
   || echo "[post-merge] deploy.py exited non-zero — workspace may be stale, review output above"
+
+# 2026-05-01: drift check for ops/systemd/*.service vs the live copies
+# at /etc/systemd/system/ and ~/.config/systemd/user/. Warn-only; don't
+# auto-overwrite, since manual edits to live unit files have happened
+# (the costco-socks-tunnel `-i` fix that bit us today). To reconcile,
+# run `python3 ops/scripts/install-systemd-units.py --install [--yes]`.
+SYSTEMD_DRIFT_CHECK="$REPO_ROOT/ops/scripts/install-systemd-units.py"
+if [ -f "$SYSTEMD_DRIFT_CHECK" ]; then
+  python3 "$SYSTEMD_DRIFT_CHECK" --check \
+    || echo "[post-merge] systemd unit drift detected above — investigate before assuming live = repo"
+fi
