@@ -106,6 +106,13 @@ is_disabled_entry() {
 DIRECT_ENTRIES=(
   "*/5 * * * *|costco-token-refresh-host.sh|# costco-token-refresh-host"
   "0 */12 * * *|costco-keepalive-warmup-host.sh|# costco-keepalive-warmup-host"
+  # Twice-daily (6h+18h UTC) to stay safely under the public-client
+  # RT chain's ~24h absolute TTL. Runs costco-token-daemon.py
+  # --chain-refresh which brings up the SOCKS tunnel, runs residential
+  # silent + PKCE bootstrap, tears tunnel down. Staggered against the
+  # 0/12-UTC Akamai keepalive so they don't step on each other. See
+  # ops/scripts/costco-chain-refresh-host.sh + 2026-05-02 investigation.
+  "0 6,18 * * *|costco-chain-refresh-host.sh|# costco-chain-refresh-host"
   "0 12 * * *|morning-fleet-deliver-host.sh|# morning-fleet-deliver-host"
   "2,17,32,47 * * * *|fleet-health-host.sh|# fleet-health-host"
   "30 10 * * *|morning-status-host.sh|# morning-status-host"
