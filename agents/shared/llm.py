@@ -45,6 +45,7 @@ Example:
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
@@ -440,54 +441,109 @@ def _parse_sse_response(response) -> InferResult:
     )
 
 
+@contextlib.contextmanager
+def _exclusive_lock(lock_path: Path):
+    """Inter-process exclusive lock on a sidecar file. POSIX uses
+    fcntl.flock; Windows is a no-op (the fleet doesn't run there).
+
+    Used to serialize the read-refresh-write critical section in
+    _refresh_access_token. Without this, two agents that both hit a
+    401 in the same minute will both POST to auth.openai.com with the
+    same refresh_token, OpenAI marks the family as reused and revokes
+    every issued token, and the entire fleet is bricked until the
+    operator re-authenticates interactively. (Observed 2026-05-03.)
+    """
+    try:
+        import fcntl  # POSIX-only
+    except ImportError:
+        yield
+        return
+
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = open(lock_path, "a+")
+    try:
+        fcntl.flock(fd.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        fd.close()
+
+
 def _refresh_access_token(auth: dict, auth_path: Path) -> dict:
     """Post to https://auth.openai.com/oauth/token with the refresh_token
     and get a new access_token. Persist the rotated tokens to auth.json
     atomically. Return the updated auth dict.
 
+    Race protection: holds an exclusive file lock on a sidecar across
+    the entire critical section, then re-reads auth.json after acquiring
+    the lock. If a sibling process already rotated the tokens (the
+    on-disk access_token differs from our stale one), use the on-disk
+    auth and skip the network call entirely. Only the first arriver
+    actually posts to auth.openai.com — preventing refresh_token_reused
+    revocation when the fleet's morning crons overlap.
+
     Raises the underlying HTTPError/URLError on failure so the caller
     can decide what to do.
     """
-    refresh_token = auth["tokens"]["refresh_token"]
-    req_body = {
-        "client_id": OAUTH_CLIENT_ID,
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token,
-    }
-    req = urllib.request.Request(
-        OAUTH_TOKEN_URL,
-        data=json.dumps(req_body).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": CLAWFORD_USER_AGENT,
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        raw = resp.read()
-    new_tokens = json.loads(raw)
+    stale_access_token = auth["tokens"].get("access_token", "")
+    lock_path = auth_path.with_name(auth_path.name + ".lock")
 
-    # Merge the rotated fields into the existing auth dict. We keep
-    # everything else (auth_mode, account_id, etc.) intact.
-    auth["tokens"]["access_token"] = new_tokens["access_token"]
-    if "id_token" in new_tokens:
-        auth["tokens"]["id_token"] = new_tokens["id_token"]
-    if "refresh_token" in new_tokens:
-        auth["tokens"]["refresh_token"] = new_tokens["refresh_token"]
-    auth["last_refresh"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    with _exclusive_lock(lock_path):
+        # Re-read after acquiring the lock — a sibling may have already
+        # refreshed while we were waiting (or while we were assembling
+        # the request that just got 401'd).
+        try:
+            current = _load_auth(auth_path)
+        except (FileNotFoundError, json.JSONDecodeError, KeyError):
+            current = auth
 
-    # Atomic write: write to a sibling tmp file, then rename.
-    tmp_path = auth_path.with_name(auth_path.name + ".tmp")
-    tmp_path.write_text(json.dumps(auth, indent=2), encoding="utf-8")
-    tmp_path.replace(auth_path)
-    try:
-        os.chmod(auth_path, 0o600)
-    except OSError:
-        # Windows filesystems may reject chmod — ignore, the posix
-        # semantic isn't meaningful there anyway.
-        pass
+        if current["tokens"].get("access_token", "") != stale_access_token:
+            # Someone else already rotated. Use their tokens; do not
+            # spend our (now-stale) refresh_token a second time.
+            return current
 
-    return auth
+        refresh_token = current["tokens"]["refresh_token"]
+        req_body = {
+            "client_id": OAUTH_CLIENT_ID,
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        }
+        req = urllib.request.Request(
+            OAUTH_TOKEN_URL,
+            data=json.dumps(req_body).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": CLAWFORD_USER_AGENT,
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read()
+        new_tokens = json.loads(raw)
+
+        # Merge the rotated fields. Keep auth_mode, account_id, etc. intact.
+        current["tokens"]["access_token"] = new_tokens["access_token"]
+        if "id_token" in new_tokens:
+            current["tokens"]["id_token"] = new_tokens["id_token"]
+        if "refresh_token" in new_tokens:
+            current["tokens"]["refresh_token"] = new_tokens["refresh_token"]
+        current["last_refresh"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+        # Atomic write: write to a sibling tmp file, then rename.
+        tmp_path = auth_path.with_name(auth_path.name + ".tmp")
+        tmp_path.write_text(json.dumps(current, indent=2), encoding="utf-8")
+        tmp_path.replace(auth_path)
+        try:
+            os.chmod(auth_path, 0o600)
+        except OSError:
+            # Windows filesystems may reject chmod — ignore, the posix
+            # semantic isn't meaningful there anyway.
+            pass
+
+        return current
 
 
 def _format_http_error(e: urllib.error.HTTPError) -> str:

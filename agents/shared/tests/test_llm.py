@@ -463,6 +463,248 @@ def test_infer_refresh_failure_returns_error(fake_auth, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Tests — concurrent-refresh race protection
+#
+# When N agents fire at the same minute and all hit a 401 against the
+# same access_token, only ONE should call auth.openai.com/oauth/token.
+# OpenAI's refresh-token rotation revokes the family if the same
+# refresh_token is presented twice ("refresh_token_reused"), so a naive
+# unlocked refresh path means a single overlap takes the whole fleet
+# offline until the operator re-authenticates interactively. (Observed
+# 2026-05-03 — Lowly Worm.)
+#
+# Defense: an exclusive file lock around the read-refresh-write critical
+# section, plus a double-check after acquiring the lock. If another
+# process already rotated the tokens (different access_token on disk
+# than the stale one we got 401 with), use the on-disk tokens and skip
+# the network refresh.
+# ---------------------------------------------------------------------------
+
+
+def test_refresh_skips_network_when_disk_token_already_rotated(fake_auth, monkeypatch):
+    """Direct test of _refresh_access_token: if the on-disk access_token
+    differs from the stale one we hold, return the on-disk auth without
+    posting to oauth/token. This is the second arrival of a concurrent
+    refresh — the first one already rotated the token-family."""
+    llm = _reload_llm()
+
+    # Simulate another process having already rotated the tokens on disk.
+    new_auth_on_disk = json.loads(fake_auth.read_text())
+    new_auth_on_disk["tokens"]["access_token"] = "rotated_by_other_proc"
+    new_auth_on_disk["tokens"]["refresh_token"] = "rotated_refresh_xyz"
+    fake_auth.write_text(json.dumps(new_auth_on_disk))
+
+    # Our local (stale) auth — the one we got the 401 with.
+    stale_auth = {
+        "auth_mode": "ChatGPT",
+        "tokens": {
+            "access_token": "test_access_abc",
+            "refresh_token": "test_refresh_xyz",
+            "id_token": "test_id_token",
+            "account_id": "acct-123",
+        },
+        "last_refresh": "2026-04-14T10:00:00Z",
+    }
+
+    stub, captured = _make_urlopen_stub(sequence=[])
+    monkeypatch.setattr(llm.urllib.request, "urlopen", stub)
+
+    result = llm._refresh_access_token(stale_auth, fake_auth)
+
+    assert captured["count"] == 0, "no network call expected; disk already rotated"
+    assert result["tokens"]["access_token"] == "rotated_by_other_proc"
+    assert result["tokens"]["refresh_token"] == "rotated_refresh_xyz"
+
+
+def test_infer_401_uses_disk_tokens_if_already_rotated(fake_auth, monkeypatch):
+    """End-to-end: infer hits 401, but auth.json on disk has been updated
+    by a concurrent process between our load and our 401. We do NOT post
+    to oauth/token a second time; we read disk and retry with the new
+    access_token. Two HTTP calls total: original 401 → retry on responses.
+    """
+    llm = _reload_llm()
+
+    err_401 = urllib.error.HTTPError(
+        url="https://chatgpt.com/backend-api/codex/responses",
+        code=401,
+        msg="Unauthorized",
+        hdrs={},
+        fp=io.BytesIO(b'{"error": "expired_token"}'),
+    )
+    success_response = FakeHTTPResponse(_sse_body(_default_responses_events("pong-after-other-rotated")))
+
+    stub, captured = _make_urlopen_stub(sequence=[err_401, success_response])
+
+    def stub_with_disk_rotation(req, timeout=None):
+        # Between the initial codex/responses call (→ 401) and the
+        # refresh attempt, a sibling process rotates the tokens on disk.
+        if captured["count"] == 0:
+            new = json.loads(fake_auth.read_text())
+            new["tokens"]["access_token"] = "rotated_by_sibling"
+            new["tokens"]["refresh_token"] = "rotated_refresh_sibling"
+            fake_auth.write_text(json.dumps(new))
+        return stub(req, timeout=timeout)
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", stub_with_disk_rotation)
+
+    result = llm.infer("ping")
+    assert result.ok
+    assert result.text == "pong-after-other-rotated"
+
+    # Exactly two network calls — no oauth/token POST.
+    assert captured["count"] == 2
+    assert captured["requests"][0].full_url == "https://chatgpt.com/backend-api/codex/responses"
+    assert captured["requests"][1].full_url == "https://chatgpt.com/backend-api/codex/responses"
+    # Retry uses the rotated-by-sibling access_token, not our stale one.
+    assert captured["requests"][1].get_header("Authorization") == "Bearer rotated_by_sibling"
+
+
+def test_refresh_serializes_under_lock(fake_auth, monkeypatch, tmp_path):
+    """Two concurrent _refresh_access_token calls must serialize via the
+    file lock so only one POSTs to auth.openai.com. The second waits,
+    re-reads the freshly-rotated auth.json, and skips the network call.
+
+    POSIX-only: fcntl.flock is process-level, so we test serialization
+    via multiprocessing. Skip on Windows where the lock is a no-op
+    (test environments don't fire concurrent agents)."""
+    if sys.platform == "win32":
+        pytest.skip("fcntl.flock not available on Windows; lock is a no-op there")
+
+    import multiprocessing as mp
+
+    # Use a fresh auth.json to avoid env-var bleed between processes.
+    path = _make_fake_auth_file(tmp_path)
+    refresh_count_path = tmp_path / "refresh_count.txt"
+    refresh_count_path.write_text("0")
+
+    # Each subprocess installs its own urlopen stub that increments a
+    # shared file counter when the oauth/token endpoint is hit. After
+    # the network "call," it sleeps briefly to widen the race window,
+    # then writes new tokens — mimicking the real refresh path.
+    def worker(auth_path_str: str, counter_path_str: str) -> None:
+        import json
+        import os
+        import sys
+        import time
+        import urllib.request
+        from pathlib import Path
+
+        os.environ["CLAWFORD_CODEX_AUTH_PATH"] = auth_path_str
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "shared"))
+        # Force-reimport llm in this fresh process.
+        for mod in list(sys.modules):
+            if mod == "llm" or mod.startswith("llm."):
+                del sys.modules[mod]
+        import llm  # type: ignore
+
+        counter = Path(counter_path_str)
+
+        def fake_urlopen(req, timeout=None):
+            if "auth.openai.com" in req.full_url:
+                # Atomic-ish increment via read-modify-write; we only
+                # care that this fires at most once across processes.
+                n = int(counter.read_text()) + 1
+                counter.write_text(str(n))
+                # Slow the network call to widen the race window.
+                time.sleep(0.5)
+                body = json.dumps({
+                    "access_token": f"rotated_{n}",
+                    "id_token": f"id_{n}",
+                    "refresh_token": f"refresh_{n}",
+                }).encode()
+                return _MockResp(body)
+            raise AssertionError(f"unexpected url: {req.full_url}")
+
+        urllib.request.urlopen = fake_urlopen
+
+        stale = json.loads(Path(auth_path_str).read_text())
+        # Pretend we held this auth and got 401 with it.
+        llm._refresh_access_token(stale, Path(auth_path_str))
+
+    # Helper class for the subprocess (must be top-level pickleable —
+    # we'll inline it as a module-level fake below).
+    class _MockResp:
+        def __init__(self, body):
+            self._body = body
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def read(self, *a): return self._body
+
+    # Pickle limitation: nested classes/functions can't cross processes.
+    # Use multiprocessing's spawn context with a top-level helper instead.
+    helper = tmp_path / "race_worker.py"
+    helper.write_text(_RACE_WORKER_SOURCE)
+
+    procs = []
+    for _ in range(5):
+        p = mp.Process(
+            target=_run_helper,
+            args=(str(helper), str(path), str(refresh_count_path)),
+        )
+        p.start()
+        procs.append(p)
+    for p in procs:
+        p.join(timeout=10)
+        assert p.exitcode == 0, f"worker exited with {p.exitcode}"
+
+    n = int(refresh_count_path.read_text())
+    assert n == 1, f"expected exactly one network refresh, got {n}"
+
+
+_RACE_WORKER_SOURCE = '''
+import json, os, sys, time, urllib.request
+from pathlib import Path
+
+def main(auth_path_str, counter_path_str):
+    os.environ["CLAWFORD_CODEX_AUTH_PATH"] = auth_path_str
+    shared_dir = Path(__file__).resolve().parent.parent.parent / "shared"
+    sys.path.insert(0, str(shared_dir))
+    for mod in list(sys.modules):
+        if mod == "llm" or mod.startswith("llm."):
+            del sys.modules[mod]
+    import llm
+
+    counter = Path(counter_path_str)
+
+    class _Resp:
+        def __init__(self, body): self._body = body
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def read(self, *a): return self._body
+
+    def fake_urlopen(req, timeout=None):
+        if "auth.openai.com" in req.full_url:
+            n = int(counter.read_text()) + 1
+            counter.write_text(str(n))
+            time.sleep(0.5)
+            body = json.dumps({
+                "access_token": f"rotated_{n}",
+                "id_token": f"id_{n}",
+                "refresh_token": f"refresh_{n}",
+            }).encode()
+            return _Resp(body)
+        raise AssertionError(f"unexpected url: {req.full_url}")
+
+    urllib.request.urlopen = fake_urlopen
+
+    stale = json.loads(Path(auth_path_str).read_text())
+    llm._refresh_access_token(stale, Path(auth_path_str))
+
+if __name__ == "__main__":
+    main(sys.argv[1], sys.argv[2])
+'''
+
+
+def _run_helper(helper_path: str, auth_path: str, counter_path: str) -> None:
+    """Top-level (pickleable) wrapper that execs the helper script in
+    the subprocess. Avoids closure pickling issues with nested fns."""
+    import runpy
+    import sys
+    sys.argv = [helper_path, auth_path, counter_path]
+    runpy.run_path(helper_path, run_name="__main__")
+
+
+# ---------------------------------------------------------------------------
 # Tests — tool use (native Responses function calling)
 # ---------------------------------------------------------------------------
 
