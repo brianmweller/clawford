@@ -1,0 +1,19 @@
+[Unit]
+Description=Clawford fleet OAuth callback daemon (Tailscale Serve target)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=openclaw
+Group=openclaw
+EnvironmentFile=-/home/openclaw/clawford/.env
+ExecStart=/usr/bin/python3 /home/openclaw/repo/scripts/fleet-oauth-daemon.py --host 127.0.0.1 --port 8765
+WorkingDirectory=/home/openclaw/repo
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/home/openclaw/.clawford/logs/fleet-oauth-daemon.log
+StandardError=append:/home/openclaw/.clawford/logs/fleet-oauth-daemon.log
+
+[Install]
+WantedBy=default.target

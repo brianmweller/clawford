@@ -182,10 +182,12 @@ color-coded: <span class="d-tag d-easy">easy</span>
 
     ---
 
-    `hard` · ~15 min
+    `hard` · ~17 min
 
-    Six auth shapes across the fleet, plus three cross-cutting idioms:
-    local-then-SCP, gitignored credentials, no raw API keys in crons.
+    Six auth shapes across the fleet, three cross-cutting idioms
+    (local-then-SCP, gitignored creds, no raw API keys in crons), and
+    the mobile-tappable reauth daemon that turns Google's 7-day cliff
+    into a single phone tap.
     { .d-hard }
 
 -   __[18 — The inbox](18-the-inbox.md)__

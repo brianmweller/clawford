@@ -1,8 +1,8 @@
 # Auth architectures
 
-*Last updated: 2026-04-20 · Reading time: ~15 min · Difficulty: hard*
+*Last updated: 2026-05-05 · Reading time: ~17 min · Difficulty: hard*
 
-> **TL;DR.** Six distinct auth shapes show up across the six-agent Clawford fleet, and most new agents will reuse one of them rather than invent a seventh. This chapter names the shapes, lists which agents use which, documents the three cross-cutting idioms (local-then-SCP token distribution, gitignored credential files in the workspace `cache/`, and a hard ban on raw API keys in cron-invoked scripts), and collects the pitfalls that repeat across more than one agent. If you are deploying a brand-new agent and the question is *"what auth should this talk to?"* — start here, pick the shape, then read the agent chapter that most resembles the new agent.
+> **TL;DR.** Six distinct auth shapes show up across the six-agent Clawford fleet, and most new agents will reuse one of them rather than invent a seventh. This chapter names the shapes, lists which agents use which, documents the three cross-cutting idioms (local-then-SCP token distribution, gitignored credential files in the workspace `cache/`, and a hard ban on raw API keys in cron-invoked scripts), and collects the pitfalls that repeat across more than one agent. It also covers the one cross-cutting *operator chore* — the 7-day refresh-token cliff for unverified Shape 1 apps using restricted scopes — and the mobile-tappable reauth daemon that turns the chore into a single phone tap. If you are deploying a brand-new agent and the question is *"what auth should this talk to?"* — start here, pick the shape, then read the agent chapter that most resembles the new agent.
 
 ## The three cross-cutting idioms
 
@@ -20,7 +20,9 @@ These three rules apply to every auth shape in the fleet. They are not optional.
 
 **Used by:** [Mistress Mouse](12-mistress-mouse.md) (Google Calendar + Gmail), [Sergeant Murphy](13-sergeant-murphy.md) (Google Calendar + Gmail), [Huckle Cat](14-huckle-cat.md) (Google Calendar + Gmail + Google Contacts).
 
-**Token lifetime:** refresh tokens effectively never expire for personal Google accounts. The only things that invalidate them are explicit user revocation, project deletion, or removal from the Google Cloud OAuth consent screen test-users list. None of those happen by accident.
+**Token lifetime — happy path:** refresh tokens for *verified* apps using *unrestricted* scopes effectively never expire on personal Google accounts. The only things that invalidate them are explicit user revocation, project deletion, or removal from the Google Cloud OAuth consent screen test-users list. None of those happen by accident.
+
+**Token lifetime — the cliff (and what the fleet actually lives with):** every Shape 1 consumer above uses `gmail.readonly` (restricted) or `gmail.compose` (sensitive). For *unverified production apps using restricted or sensitive scopes,* Google issues refresh tokens with a hard 7-day expiry, regardless of whether the consent screen is in "Testing" or "In production". Verification requires Google's brand-verification review and (for restricted scopes) a CASA security assessment — six-figure cost, not feasible for a personal fleet. The fleet accepts the chore and automates around it; see [§ Reauth automation](#reauth-automation-the-7-day-cliff-and-the-mobile-reauth-daemon) below.
 
 **Setup flow:**
 1. Create a Google Cloud project, enable the relevant APIs (Calendar, Gmail, Contacts).
@@ -101,6 +103,40 @@ These three rules apply to every auth shape in the fleet. They are not optional.
 
 **The liability footnote.** Shape 6 is the most fragile of the six shapes. Vendor terms of service typically forbid reverse-engineered linked-device clients, and a ban on the bound account is a real risk. Deploy Shape 6 integrations only when the value clearly outweighs the ban risk, and never share a Shape 6 session across multiple agents.
 
+## Reauth automation: the 7-day cliff and the mobile-reauth daemon
+
+The chore: every five to seven days, every Shape 1 agent's `~/.clawford/{agent}-workspace/token.json` ages past Google's refresh-token cliff and the next cron tick gets `invalid_grant`. This is the same cliff for every agent in the fleet that touches a Google API, and it fires on a calendar — not on usage, not on inactivity. Travel doesn't pause it. Sick days don't pause it. Eventually the operator is going to be away from a laptop on the morning four agents go silent at 6 AM, and the right answer for that morning is *"tap a Telegram link from the bedside phone."*
+
+The fleet handles the cliff in three layers, ordered from most-automated to least:
+
+**Layer 1 — Mobile-tappable reauth via Tailscale Serve.** A small VPS-side daemon (`scripts/fleet-oauth-daemon.py`, run as `fleet-oauth-daemon.service`) serves an OAuth callback at `https://{vps-host}.{tailnet}.ts.net/oauth/callback`, exposed only to the operator's tailnet via `tailscale serve --bg 8765`. No public ports, no domain to register, no Cloudflare tunnel, no auth gate to maintain — Tailscale is the auth gate. The daily token-age cron (`ops/scripts/token-age-check.py`) scans every agent's `token.json` mtime, and the moment any token crosses the 5-day warn line, the cron mints a single-use HMAC-signed link and pages the operator on Telegram with the link in the alert text. Tap on phone → Google consent → all four Shape 1 workspaces' `token.json` files get the same refreshed token in one round-trip → confirmation Telegram fires on success. Total operator-time cost: one tap.
+
+**Layer 2 — Laptop one-shot via `--all`.** When the daemon isn't reachable (operator's phone off the tailnet, daemon crash-looping, VPS unreachable, link expired before the operator saw it), `python scripts/reauth-fleet-token.py --all` runs the equivalent flow against the laptop's Desktop OAuth client. One browser opens, the operator clicks Allow once, and all four workspaces' tokens get SCPed and verified on the VPS. Total operator-time cost: ~30 seconds. This was the *only* path before the daemon shipped; it remains the documented fallback.
+
+**Layer 3 — Per-agent ad-hoc.** `python scripts/reauth-fleet-token.py {agent}` re-runs a single agent's OAuth flow. Useful only when one workspace's token has been corrupted or revoked outside the fleet-wide cliff (which is rare — the cliff hits the whole fleet at once). Avoid for routine use; see the per-agent-scope-narrowing pitfall in the next section.
+
+### Why Tailscale Serve, not a Cloudflare worker or a public callback
+
+Two non-public alternatives were considered when the daemon was designed:
+
+1. **Cloudflare Worker as the OAuth landing,** with the worker proxying tokens back to the VPS via Cloudflare Tunnel + Cloudflare Access. Workable but expensive: a real domain, an Access policy to maintain, a public hostname (even if auth-gated), and a non-trivial cold-start path for the first tap of the day.
+2. **Tailscale Serve,** exposing a tailnet-only HTTPS URL on `{vps-host}.{tailnet}.ts.net`. Tailscale auto-provisions the TLS cert, the URL is unreachable from anywhere off the tailnet, and the operator's phone is already on the tailnet because that's how SSH to the VPS works.
+
+Option 2 won on a clean axis: zero public surface area, zero new domains, zero new auth policies, and the prerequisite (phone on tailnet) was already met. Google's OAuth client config accepts `*.ts.net` redirect URIs without complaint — verified empirically 2026-05-05; widely-deployed projects like Immich and Open-WebUI use the same pattern.
+
+### What the daemon does, end-to-end
+
+The daemon exposes two routes:
+
+- `GET /oauth/start?t=<HMAC>` — verifies the cron-minted HMAC link (15-min TTL, single-use), generates a fresh state token (10-min TTL), redirects the phone's browser to Google's consent screen with the [union scope set](#per-agent-reference-table) for the fleet.
+- `GET /oauth/callback?code=...&state=...` — verifies the state matches a pending file, POSTs to Google's token endpoint to exchange the code, fans out the resulting `token.json` to every Shape 1 workspace, and posts a Telegram confirmation.
+
+The HMAC gate exists because anyone on the operator's tailnet (in practice: just the operator's own devices, but defense-in-depth) could otherwise hit `/oauth/start` directly. The state token gates the callback against CSRF and replay. Both are single-use and short-TTL. Implementation notes are in `scripts/fleet-oauth-daemon.py`'s docstring; tests in `scripts/test_fleet_oauth_daemon.py` pin the HMAC, state-file lifecycle, scope-set, and end-to-end fan-out behaviors.
+
+### A note on shared OAuth clients
+
+All four Shape 1 agents share *one* OAuth client_id. Same client + same Google account = one refresh token at the Google side, regardless of how many `token.json` files exist on disk. This is why Layer 1 and Layer 2 both work: they consent once with the union scope set, fan out the same token to every workspace, and every agent's runtime uses the same refresh path. Per-agent reauth (Layer 3) appears to work for the calling agent but races the others — see the next section's pitfall.
+
 ## Per-agent reference table
 
 | Agent | Shape 1 | Shape 2 | Shape 3 | Shape 4 | Shape 5 | Shape 6 |
@@ -127,6 +163,10 @@ A few observations from the table:
 > 🧨 **Pitfall.** Using raw API keys for LLM calls. **Why:** raw OpenAI / Anthropic API keys in scripts mean a parallel billing surface the operator has to track separately from the main LLM subscription. For a personal Clawford fleet, the correct answer is to route every LLM call through `agents.shared.llm.infer`, which uses the operator's ChatGPT Plus subscription via the `codex` CLI — no API key, no parallel bill, no token to rotate. **How to avoid:** never add `OPENAI_API_KEY` or equivalent to any `.env` file. If a new script wants to call an LLM, the only sanctioned path is `from agents.shared import llm; llm.infer(...)`. The one-time mining pipeline for [Huckle Cat](14-huckle-cat.md#the-mining-pipeline) is an explicit exception because it runs locally, not as a VPS cron, and the cost is visible in the local bill during the run.
 
 > 🧨 **Pitfall.** Skipping test-user registration on the OAuth consent screen. **Why:** Shape 1 (Google OAuth) requires the operator's email to be on the consent screen's Test users list. Skipping this step returns `Access blocked: {app name} has not completed the Google verification process` on the first consent attempt, and the error looks like a permissions problem with the API scope rather than a "your email is not on the test-users list" problem. **How to avoid:** every new Shape 1 deploy has a pre-step: go to the Google Cloud OAuth consent screen, scroll to Test users, add the operator's email, save. Only then run the auth flow. If the error shows up anyway, the fix is the test-users list, not the API scopes.
+
+> 🧨 **Pitfall.** Treating Shape 1 as "set up once, forget forever." **Why:** Google's 7-day refresh-token cliff for unverified production apps using restricted/sensitive scopes is real and routine — every Gmail-touching agent in the fleet hits it on a calendar cadence, regardless of usage. Without proactive automation, the cliff fires as a 6-12 hour outage discovered when a digest goes silent or a calendar pull starts returning 401. Confirmed empirically 2026-04-28 when Huckle Cat's refresh token died exactly seven days after issuance, with the consent screen already in "Published". **How to avoid:** every Shape 1 deploy includes the `ops/scripts/token-age-check.py` cron (warns at 5 days, screams at 7) and the [mobile-reauth daemon path](#reauth-automation-the-7-day-cliff-and-the-mobile-reauth-daemon). The cliff is a predictable chore, not a surprise.
+
+> 🧨 **Pitfall.** Reauthing one Shape 1 agent at a time when the fleet shares one OAuth client. **Why:** Google issues one refresh token per `(client_id, account)` tuple. Per-agent reauths with different scope subsets race each other — whichever agent consents last wins, and any scope not in that consent silently disappears from the other workspaces' grants. Bit the fleet on 2026-05-05 when meetings-coach's auth script requested only `calendar.readonly` while Sergeant Murphy's live token actually held `[calendar, gmail.readonly]`; running the script as-shipped would have narrowed and silently broken Murphy's Gmail readers without raising an error. **How to avoid:** treat the four Shape 1 agents as one auth unit. Both the mobile-reauth daemon (Layer 1) and `reauth-fleet-token.py --all` (Layer 2) do this — one consent with the union scope set, fan out the same token to every workspace. Avoid Layer 3 (per-agent reauth) for routine use. The per-agent auth scripts (`gmail-auth.py`, `gcal-auth.py`) remain in the tree for ad-hoc surgery; their default scope lists must be kept as supersets of the live token's scopes so an accidental run doesn't narrow.
 
 > 🧨 **Pitfall.** Treating a 401 from a Shape 2 vendor as retryable. **Why:** Shape 2 vendors can invalidate refresh tokens outside the agent's control. A 401 means the refresh flow no longer works, period. Retrying on a hot loop burns alerts and cron budget and does not help. **How to avoid:** every Shape 2 integration has a rate-limited alert pattern (one alert per 90 minutes) and explicit manual-re-auth recovery. See [§ The MCP transcription integration in Ch 13](13-sergeant-murphy.md#the-mcp-transcription-integration) for the canonical pattern.
 

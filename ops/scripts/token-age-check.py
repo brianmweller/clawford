@@ -43,6 +43,7 @@ import traceback
 from pathlib import Path
 
 DEFAULT_MANIFEST = "/home/openclaw/repo/agents/shared/fleet-manifest.json"
+DAEMON_LINK_SCRIPT = "/home/openclaw/repo/scripts/fleet-oauth-daemon.py"
 
 WARN_AGE_DAYS = 5.0
 EXPIRED_AGE_DAYS = 7.0
@@ -108,6 +109,28 @@ def _format_row(row: dict) -> str:
     return f"{name} ({age:.1f}d)"
 
 
+def _mint_signed_link(daemon_script: str = DAEMON_LINK_SCRIPT) -> str | None:
+    """Ask fleet-oauth-daemon.py to print a fresh tailnet link.
+
+    Best-effort — if the daemon's credentials/secret aren't on this
+    host yet, fall back to the laptop-only hint so the alert still
+    fires. Never raises.
+    """
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ["python3", daemon_script, "--print-link"],
+            stderr=subprocess.STDOUT,
+            timeout=5,
+            text=True,
+        ).strip()
+        if out.startswith("https://"):
+            return out
+    except Exception:
+        pass
+    return None
+
+
 def build_envelope(rows: list[dict]) -> dict:
     """Build the SCRIPT_CONTRACT envelope from scan rows.
 
@@ -135,9 +158,11 @@ def build_envelope(rows: list[dict]) -> dict:
             + ", ".join(_format_row(r) for r in warn)
         )
 
-    helper_hint = (
-        "On laptop: python scripts/reauth-fleet-token.py <agent>"
-    )
+    link = _mint_signed_link()
+    if link:
+        helper_hint = f"Tap to re-auth (tailnet, mobile-friendly): {link}"
+    else:
+        helper_hint = "On laptop: python scripts/reauth-fleet-token.py --all"
     alert = "\U0001F511 OAuth aging — " + " | ".join(parts) + " — " + helper_hint
 
     return {

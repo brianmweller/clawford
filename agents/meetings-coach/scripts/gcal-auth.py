@@ -25,7 +25,10 @@ import json
 import os
 import sys
 
-SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+SCOPES = [
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/gmail.readonly",
+]
 
 DEFAULT_CREDS = os.path.expanduser(
     "~/.clawford/meetings-coach-workspace/credentials.json"

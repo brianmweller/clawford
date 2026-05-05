@@ -1,24 +1,34 @@
 #!/usr/bin/env python3
-"""reauth-fleet-token.py — one-command OAuth re-auth for any fleet agent.
+"""reauth-fleet-token.py — OAuth re-auth for fleet Google tokens.
 
-Bundles the three steps the operator had to run by hand whenever a refresh
-token hit Google's 7-day cliff:
+Two modes:
 
-  1. Run the agent's interactive OAuth flow locally (browser opens).
-  2. SCP the new token.json to the VPS.
-  3. Verify the new token refreshes against Google on the VPS.
+  --all (preferred)
+      One browser flow with the union of every agent's scopes; the
+      resulting token.json is written to every workspace and SCPed
+      to the VPS. One click per ~7-day cliff covers the whole fleet.
 
-Why a helper: the 7-day rule applies to the whole fleet (gmail/cal
-scopes are restricted/sensitive, and verification isn't feasible),
-so this is a recurring chore. Telegram nags from
-ops/scripts/token-age-check.py reference this script by name; tap
-the alert, run one command, done.
+  <agent>  (legacy / single-agent)
+      Run one agent's per-agent auth script. Kept for ad-hoc reauths
+      when only one workspace is implicated. Avoid for routine use:
+      all four agents share one OAuth client, and consenting with
+      different scope subsets across reauths silently narrows
+      whichever workspace consented last (the latest grant wins).
+
+Both modes:
+  1. Run interactive OAuth locally (browser opens).
+  2. SCP token.json to the VPS workspace(s).
+  3. Verify refresh against Google from the VPS.
+
+Why a helper: gmail/calendar scopes are restricted/sensitive, so
+unverified-app refresh tokens hit Google's 7-day cliff. Telegram
+nags from ops/scripts/token-age-check.py reference this script by
+name; tap the alert, run one command, done.
 
 Usage (PowerShell or any shell):
 
-  python scripts\\reauth-fleet-token.py huckle
-  python scripts\\reauth-fleet-token.py family-calendar
-  python scripts\\reauth-fleet-token.py murphy
+  python scripts\\reauth-fleet-token.py --all       # routine
+  python scripts\\reauth-fleet-token.py huckle      # ad-hoc
 
 Aliases: huckle = connector, mistress-mouse / mouse = family-calendar,
 murphy / sergeant-murphy = meetings-coach, hilda / hippo = shopping.
@@ -48,6 +58,20 @@ _AGENT_CONFIG: dict[str, tuple[str, str]] = {
     "meetings-coach":  ("gcal-auth.py",  "meetings-coach-workspace"),
     "shopping":        ("gmail-auth.py", "shopping-workspace"),
 }
+
+# Union scope set across the fleet. All four agents share one OAuth
+# client_id; running per-agent flows with different scope subsets
+# silently narrows whichever workspace re-auths last (Google issues
+# one refresh_token per (client, account), and the latest consent
+# wins). One flow with the union is the only way to keep every
+# workspace's grant intact. See memory: reference_fleet_oauth_client.md.
+UNION_SCOPES = [
+    "https://www.googleapis.com/auth/calendar",          # supersedes calendar.readonly
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.compose",     # connector only
+    "https://www.googleapis.com/auth/pubsub",            # connector only
+    "https://www.googleapis.com/auth/tasks",             # family-calendar only
+]
 
 # Friendly aliases. Keys must be lowercase; resolve_agent normalizes
 # the input before lookup.
@@ -172,12 +196,133 @@ def run_reauth(agent_name: str, *, remote_host: str = DEFAULT_REMOTE) -> int:
     return 0
 
 
+# ─── --all mode: one flow, fan out to every workspace ────────────────
+
+
+def _canonical_credentials_path() -> str:
+    """Return the path to a credentials.json usable for the fleet flow.
+
+    Any workspace's credentials.json works because all agents share the
+    same OAuth client. family-calendar's is the canonical pick because
+    it's the workspace that's been local-resident the longest.
+    """
+    return os.path.expanduser(
+        "~/.clawford/family-calendar-workspace/credentials.json"
+    )
+
+
+def _run_oauth_flow(creds_path: str, scopes: list[str]):
+    """Run the interactive browser OAuth flow and return Credentials.
+
+    Mockable seam — tests monkeypatch this module-level reference so
+    the suite never opens a real browser.
+    """
+    # Lazy import: the google_auth_oauthlib package is only needed on
+    # the operator's machine, not in CI / on the VPS.
+    sys.path.insert(0, str(REPO_ROOT))
+    from agents.shared.google_oauth import build_flow  # type: ignore
+    flow = build_flow(creds_path, scopes)
+    return flow.run_local_server(port=8765, open_browser=True)
+
+
+def _write_token(creds, token_path: Path, scopes: list[str]) -> None:
+    """Atomically write a Credentials object to token.json.
+
+    Mockable seam — tests substitute a fake that just touches the file.
+    """
+    sys.path.insert(0, str(REPO_ROOT))
+    from agents.shared.google_oauth import save_credentials  # type: ignore
+    os.makedirs(token_path.parent, exist_ok=True)
+    save_credentials(creds, str(token_path), scopes)
+
+
+def run_reauth_all(remote_host: str = DEFAULT_REMOTE) -> int:
+    """One browser flow → write token to every workspace → SCP/verify each.
+
+    Eliminates the per-agent reauth race that silently narrows scopes
+    when the fleet's shared OAuth client re-consents with a subset.
+    """
+    agents = list(_AGENT_CONFIG.keys())
+    creds_path = _canonical_credentials_path()
+
+    print(f"[reauth-all] {len(agents)} agents, union scopes:")
+    for s in UNION_SCOPES:
+        print(f"             {s}")
+    print(f"[reauth-all] credentials: {creds_path}")
+    print()
+
+    if not Path(creds_path).exists():
+        print(f"[reauth-all] credentials.json missing at {creds_path}",
+              file=sys.stderr)
+        return 1
+
+    print("[reauth-all] step 1/3: launching local OAuth flow…")
+    try:
+        creds = _run_oauth_flow(creds_path, UNION_SCOPES)
+    except Exception as e:  # noqa: BLE001
+        print(f"[reauth-all] OAuth flow failed: {type(e).__name__}: {e}",
+              file=sys.stderr)
+        return 2
+
+    print("[reauth-all] step 2/3: writing token to each workspace…")
+    for agent in agents:
+        info = agent_paths(agent)
+        try:
+            _write_token(creds, info["token_path"], UNION_SCOPES)
+            print(f"             {agent}: wrote {info['token_path']}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[reauth-all] {agent}: write failed: {e}", file=sys.stderr)
+            return 3
+
+    print("[reauth-all] step 3/3: SCP + verify each workspace on VPS…")
+    for agent in agents:
+        info = agent_paths(agent)
+        token_path = info["token_path"]
+        remote_path = info["remote_path"]
+
+        scp = subprocess.run(
+            ["scp", str(token_path), f"{remote_host}:{remote_path}"],
+        )
+        if scp.returncode != 0:
+            print(f"[reauth-all] {agent}: scp failed (rc={scp.returncode}).",
+                  file=sys.stderr)
+            return 4
+
+        verify = subprocess.run(
+            ["ssh", remote_host, _vps_verify_command(remote_path)],
+            capture_output=True,
+            text=True,
+        )
+        ok = (verify.returncode == 0
+              and "VPS refresh OK" in (verify.stdout or ""))
+        if not ok:
+            print(f"[reauth-all] {agent}: VPS verify FAILED.", file=sys.stderr)
+            print(f"  stdout: {verify.stdout!r}", file=sys.stderr)
+            print(f"  stderr: {verify.stderr!r}", file=sys.stderr)
+            return 5
+        print(f"             {agent}: ✅ verified")
+
+    print(f"\n[reauth-all] ✅ all {len(agents)} agents re-authed and verified.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Re-auth a fleet agent's Google OAuth.")
-    ap.add_argument("agent", help="Agent name or alias (huckle, mouse, murphy, hilda, …)")
+    ap.add_argument("agent", nargs="?",
+                    help="Agent name or alias (huckle, mouse, murphy, hilda, …)")
+    ap.add_argument("--all", action="store_true", dest="all_agents",
+                    help="Run one flow + fan out to every fleet agent (preferred).")
     ap.add_argument("--remote", default=DEFAULT_REMOTE,
                     help=f"SSH destination (default: {DEFAULT_REMOTE})")
     args = ap.parse_args(argv)
+
+    if args.all_agents:
+        if args.agent:
+            ap.error("pass either an agent or --all, not both")
+        return run_reauth_all(remote_host=args.remote)
+
+    if not args.agent:
+        ap.error("agent name required (or pass --all)")
 
     try:
         return run_reauth(args.agent, remote_host=args.remote)

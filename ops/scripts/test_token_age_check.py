@@ -205,6 +205,28 @@ def test_envelope_alert_includes_reauth_helper_path():
     assert "reauth" in env["alert"].lower() or "re-auth" in env["alert"].lower()
 
 
+def test_envelope_uses_signed_link_when_daemon_responds(monkeypatch):
+    """If the VPS-side daemon mints a tailnet link, the alert embeds it
+    so the operator can tap from his phone without leaving the page."""
+    m = _import_module()
+    fake_link = "https://<your-tailscale-host>.tail106e99.ts.net/oauth/start?t=fake.sig"
+    monkeypatch.setattr(m, "_mint_signed_link", lambda: fake_link)
+    rows = [{"id": "x", "display_name": "X", "category": "expired", "age_days": 9.0}]
+    env = m.build_envelope(rows)
+    assert fake_link in env["alert"]
+
+
+def test_envelope_falls_back_to_laptop_command_when_no_link(monkeypatch):
+    """If link generation fails (daemon down, no creds, etc.), the
+    alert still fires with the legacy laptop-side command."""
+    m = _import_module()
+    monkeypatch.setattr(m, "_mint_signed_link", lambda: None)
+    rows = [{"id": "x", "display_name": "X", "category": "expired", "age_days": 9.0}]
+    env = m.build_envelope(rows)
+    assert env["status"] == "error"
+    assert "reauth-fleet-token" in env["alert"] or "--all" in env["alert"]
+
+
 def test_envelope_skips_missing_tokens_silently():
     """An agent with no token.json hasn't been authed yet — that's
     not a re-auth situation, so don't page about it. (The first auth
